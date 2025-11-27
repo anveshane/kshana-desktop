@@ -6,5 +6,10 @@
   @include custom-scrollbar;
   overflow-y: auto;
   padding: $spacing-xs 0;
+  outline: none;
+
+  &:focus {
+    outline: none;
+  }
 }
 

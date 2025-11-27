@@ -60,6 +60,33 @@ const projectBridge = {
   readTree(dirPath: string): Promise<FileNode> {
     return ipcRenderer.invoke('project:read-tree', dirPath);
   },
+  readFile(filePath: string): Promise<string> {
+    return ipcRenderer.invoke('project:read-file', filePath);
+  },
+  writeFile(filePath: string, content: string): Promise<void> {
+    return ipcRenderer.invoke('project:write-file', filePath, content);
+  },
+  createFile(basePath: string, relativePath: string): Promise<string | null> {
+    return ipcRenderer.invoke('project:create-file', basePath, relativePath);
+  },
+  createFolder(basePath: string, relativePath: string): Promise<string | null> {
+    return ipcRenderer.invoke('project:create-folder', basePath, relativePath);
+  },
+  rename(oldPath: string, newName: string): Promise<string> {
+    return ipcRenderer.invoke('project:rename', oldPath, newName);
+  },
+  delete(targetPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:delete', targetPath);
+  },
+  move(sourcePath: string, destDir: string): Promise<string> {
+    return ipcRenderer.invoke('project:move', sourcePath, destDir);
+  },
+  copy(sourcePath: string, destDir: string): Promise<string> {
+    return ipcRenderer.invoke('project:copy', sourcePath, destDir);
+  },
+  revealInFinder(targetPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:reveal-in-finder', targetPath);
+  },
   watchDirectory(dirPath: string): Promise<void> {
     return ipcRenderer.invoke('project:watch-directory', dirPath);
   },

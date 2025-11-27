@@ -4,7 +4,6 @@
 .container {
   @include flex-center;
   height: 100%;
-  padding: $spacing-lg;
 }
 
 .image {
@@ -57,5 +56,17 @@
   font-family: $font-family-mono;
   font-size: $font-size-sm;
   color: $color-text-secondary;
+}
+
+.loading,
+.error {
+  @include flex-center;
+  height: 100%;
+  color: $color-text-muted;
+  font-size: $font-size-base;
+}
+
+.error {
+  color: $color-error;
 }
 

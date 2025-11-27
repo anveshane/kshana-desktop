@@ -13,16 +13,50 @@
   height: $header-height;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 $spacing-lg;
   background-color: $color-panel-background;
   border-bottom: 1px solid $color-panel-border;
   -webkit-app-region: drag;
 }
 
+.headerLeft,
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  -webkit-app-region: no-drag;
+}
+
 .title {
   font-size: $font-size-sm;
   font-weight: $font-weight-semibold;
   color: $color-text-secondary;
+}
+
+.toggleButton {
+  @include flex-center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: $radius-sm;
+  background-color: transparent;
+  color: $color-text-muted;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.08);
+    color: $color-text-secondary;
+  }
+
+  &.active {
+    color: $color-accent-green;
+
+    &:hover {
+      background-color: rgba($color-accent-green, 0.15);
+    }
+  }
 }
 
 .workspace {

@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
-import chokidar, { FSWatcher } from 'chokidar';
 import Store from 'electron-store';
 import type {
   FileNode,
@@ -25,7 +24,8 @@ interface FileSystemStore {
 }
 
 class FileSystemManager extends EventEmitter {
-  private watcher: FSWatcher | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private watcher: any = null;
 
   private store: Store<FileSystemStore>;
 
@@ -95,11 +95,12 @@ class FileSystemManager extends EventEmitter {
     };
   }
 
-  watchDirectory(dirPath: string): void {
+  async watchDirectory(dirPath: string): Promise<void> {
     if (this.watcher) {
       this.watcher.close();
     }
 
+    const chokidar = await import('chokidar');
     this.watcher = chokidar.watch(dirPath, {
       ignored: IGNORED_PATTERNS,
       persistent: true,
@@ -112,11 +113,11 @@ class FileSystemManager extends EventEmitter {
     };
 
     this.watcher
-      .on('add', (p) => emitChange('add', p))
-      .on('change', (p) => emitChange('change', p))
-      .on('unlink', (p) => emitChange('unlink', p))
-      .on('addDir', (p) => emitChange('addDir', p))
-      .on('unlinkDir', (p) => emitChange('unlinkDir', p));
+      .on('add', (p: string) => emitChange('add', p))
+      .on('change', (p: string) => emitChange('change', p))
+      .on('unlink', (p: string) => emitChange('unlink', p))
+      .on('addDir', (p: string) => emitChange('addDir', p))
+      .on('unlinkDir', (p: string) => emitChange('unlinkDir', p));
   }
 
   unwatchDirectory(): void {
@@ -145,6 +146,60 @@ class FileSystemManager extends EventEmitter {
     ].slice(0, MAX_RECENT_PROJECTS);
 
     this.store.set('recentProjects', updated);
+  }
+
+  async rename(oldPath: string, newName: string): Promise<string> {
+    const dir = path.dirname(oldPath);
+    const newPath = path.join(dir, newName);
+    await fs.promises.rename(oldPath, newPath);
+    return newPath;
+  }
+
+  async delete(targetPath: string): Promise<void> {
+    const stats = await fs.promises.stat(targetPath);
+    if (stats.isDirectory()) {
+      await fs.promises.rm(targetPath, { recursive: true });
+    } else {
+      await fs.promises.unlink(targetPath);
+    }
+  }
+
+  async move(sourcePath: string, destDir: string): Promise<string> {
+    const name = path.basename(sourcePath);
+    const destPath = path.join(destDir, name);
+    await fs.promises.rename(sourcePath, destPath);
+    return destPath;
+  }
+
+  async copy(sourcePath: string, destDir: string): Promise<string> {
+    const name = path.basename(sourcePath);
+    const destPath = path.join(destDir, name);
+    const stats = await fs.promises.stat(sourcePath);
+    if (stats.isDirectory()) {
+      await this.copyDir(sourcePath, destPath);
+    } else {
+      await fs.promises.copyFile(sourcePath, destPath);
+    }
+    return destPath;
+  }
+
+  private async copyDir(src: string, dest: string): Promise<void> {
+    await fs.promises.mkdir(dest, { recursive: true });
+    const entries = await fs.promises.readdir(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        await this.copyDir(srcPath, destPath);
+      } else {
+        await fs.promises.copyFile(srcPath, destPath);
+      }
+    }
+  }
+
+  async revealInFinder(targetPath: string): Promise<void> {
+    const { shell } = await import('electron');
+    shell.showItemInFolder(targetPath);
   }
 }
 

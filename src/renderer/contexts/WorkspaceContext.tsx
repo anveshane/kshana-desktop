@@ -161,6 +161,37 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     [],
   );
 
+  const openFolderDialog = useCallback(async () => {
+    const path = await window.electron.project.selectDirectory();
+    if (path) {
+      await openProject(path);
+    }
+  }, [openProject]);
+
+  const createNewFile = useCallback(async () => {
+    // Handled by FileExplorer inline input now
+  }, []);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const modifier = isMac ? e.metaKey : e.ctrlKey;
+
+      if (modifier && e.key.toLowerCase() === 'o' && !e.shiftKey) {
+        e.preventDefault();
+        openFolderDialog();
+      }
+      if (modifier && e.key.toLowerCase() === 'n' && !e.shiftKey) {
+        e.preventDefault();
+        createNewFile();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [openFolderDialog, createNewFile]);
+
   const value = useMemo<WorkspaceContextType>(
     () => ({
       ...state,

@@ -42,9 +42,19 @@
 .projectHeader {
   display: flex;
   align-items: center;
-  gap: $spacing-sm;
+  justify-content: space-between;
   padding: $spacing-sm $spacing-lg;
   border-bottom: 1px solid $color-panel-border;
+
+  &:hover .toolbar {
+    opacity: 1;
+  }
+}
+
+.projectInfo {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
 }
 
 .projectIcon {
@@ -56,6 +66,30 @@
   font-weight: $font-weight-semibold;
   color: $color-text-secondary;
   letter-spacing: 0.5px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  opacity: 0;
+  transition: opacity $transition-fast;
+}
+
+.toolbarButton {
+  @include flex-center;
+  background: none;
+  border: none;
+  padding: $spacing-xs;
+  color: $color-text-muted;
+  cursor: pointer;
+  border-radius: $radius-sm;
+  transition: all $transition-fast;
+
+  &:hover {
+    color: $color-text-primary;
+    background-color: rgba($color-text-primary, 0.1);
+  }
 }
 
 .treeContainer {

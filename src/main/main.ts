@@ -9,6 +9,7 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
+import fs from 'fs/promises';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
@@ -151,6 +152,72 @@ ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {
   fileSystemManager.addRecentProject(projectPath);
 });
 
+ipcMain.handle(
+  'project:read-file',
+  async (_event, filePath: string): Promise<string> => {
+    return fs.readFile(filePath, 'utf-8');
+  },
+);
+
+ipcMain.handle(
+  'project:write-file',
+  async (_event, filePath: string, content: string): Promise<void> => {
+    return fs.writeFile(filePath, content, 'utf-8');
+  },
+);
+
+ipcMain.handle(
+  'project:create-file',
+  async (_event, basePath: string, relativePath: string): Promise<string | null> => {
+    const filePath = path.join(basePath, relativePath);
+    const dirPath = path.dirname(filePath);
+    await fs.mkdir(dirPath, { recursive: true });
+    await fs.writeFile(filePath, '', 'utf-8');
+    return filePath;
+  },
+);
+
+ipcMain.handle(
+  'project:create-folder',
+  async (_event, basePath: string, relativePath: string): Promise<string | null> => {
+    const folderPath = path.join(basePath, relativePath);
+    await fs.mkdir(folderPath, { recursive: true });
+    return folderPath;
+  },
+);
+
+ipcMain.handle(
+  'project:rename',
+  async (_event, oldPath: string, newName: string): Promise<string> => {
+    return fileSystemManager.rename(oldPath, newName);
+  },
+);
+
+ipcMain.handle(
+  'project:delete',
+  async (_event, targetPath: string): Promise<void> => {
+    return fileSystemManager.delete(targetPath);
+  },
+);
+
+ipcMain.handle(
+  'project:move',
+  async (_event, sourcePath: string, destDir: string): Promise<string> => {
+    return fileSystemManager.move(sourcePath, destDir);
+  },
+);
+
+ipcMain.handle(
+  'project:copy',
+  async (_event, sourcePath: string, destDir: string): Promise<string> => {
+    return fileSystemManager.copy(sourcePath, destDir);
+  },
+);
+
+ipcMain.handle('project:reveal-in-finder', async (_event, targetPath: string) => {
+  return fileSystemManager.revealInFinder(targetPath);
+});
+
 // Forward file change events to renderer
 fileSystemManager.on('file-change', (event: FileChangeEvent) => {
   if (mainWindow) {
@@ -205,6 +272,7 @@ const createWindow = async () => {
       preload: app.isPackaged
         ? path.join(__dirname, 'preload.js')
         : path.join(__dirname, '../../.erb/dll/preload.js'),
+      webSecurity: false, // Allow file:// protocol for media preview
     },
   });
 

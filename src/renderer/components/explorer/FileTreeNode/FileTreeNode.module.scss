@@ -14,10 +14,12 @@
   padding-right: $spacing-md;
   background: none;
   border: none;
+  border: 1px solid transparent;
   text-align: left;
   cursor: pointer;
-  transition: background-color $transition-fast;
+  transition: background-color $transition-fast, border-color $transition-fast, opacity $transition-fast;
   color: $color-text-secondary;
+  user-select: none;
 
   &:hover {
     background-color: rgba($color-text-primary, 0.05);
@@ -26,6 +28,24 @@
   &.selected {
     background-color: rgba($color-accent-green, 0.1);
     color: $color-text-primary;
+  }
+
+  &.focused {
+    outline: none;
+    border-color: rgba($color-accent-cyan, 0.5);
+  }
+
+  &.cut {
+    opacity: 0.5;
+  }
+
+  &.dropTarget {
+    background-color: rgba($color-accent-cyan, 0.2);
+    border-color: $color-accent-cyan;
+  }
+
+  &:focus {
+    outline: none;
   }
 }
 
@@ -50,9 +70,9 @@
 .name {
   font-size: $font-size-sm;
   @include truncate;
+  flex: 1;
 }
 
 .children {
   @include flex-column;
 }
-
