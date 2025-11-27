@@ -1,0 +1,40 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  height: 100%;
+  @include flex-column;
+  background-color: $color-panel-background;
+  border-left: 1px solid $color-panel-border;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-lg;
+  border-bottom: 1px solid $color-panel-border;
+}
+
+.headerIcon {
+  color: $color-accent-green;
+}
+
+.headerTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  @include custom-scrollbar;
+  padding: $spacing-md;
+}
+
+.inputWrapper {
+  padding: $spacing-md $spacing-lg;
+  border-top: 1px solid $color-panel-border;
+}
+

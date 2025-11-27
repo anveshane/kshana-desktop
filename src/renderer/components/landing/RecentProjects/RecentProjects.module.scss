@@ -1,0 +1,61 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  width: 100%;
+  margin-top: $spacing-xl;
+}
+
+.title {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-secondary;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: $spacing-md;
+  text-align: center;
+}
+
+.list {
+  list-style: none;
+  @include flex-column;
+  gap: $spacing-xs;
+}
+
+.projectItem {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  width: 100%;
+  padding: $spacing-md $spacing-lg;
+  background: transparent;
+  border: none;
+  border-radius: $radius-md;
+  cursor: pointer;
+  transition: background-color $transition-fast;
+  text-align: left;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.05);
+  }
+}
+
+.icon {
+  color: $color-text-muted;
+  flex-shrink: 0;
+}
+
+.path {
+  flex: 1;
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  @include truncate;
+}
+
+.time {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  flex-shrink: 0;
+}
+

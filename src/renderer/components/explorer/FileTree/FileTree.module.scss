@@ -1,0 +1,15 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  @include flex-column;
+  @include custom-scrollbar;
+  overflow-y: auto;
+  padding: $spacing-xs 0;
+  outline: none;
+
+  &:focus {
+    outline: none;
+  }
+}
+

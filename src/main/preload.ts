@@ -1,11 +1,13 @@
 // Disable no-unused-vars, broken for spread args
 /* eslint no-unused-vars: off */
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
-import type {
-  BackendEnvOverrides,
-  BackendState,
-} from '../shared/backendTypes';
+import type { BackendEnvOverrides, BackendState } from '../shared/backendTypes';
 import type { AppSettings } from '../shared/settingsTypes';
+import type {
+  FileNode,
+  RecentProject,
+  FileChangeEvent,
+} from '../shared/fileSystemTypes';
 
 export type Channels = 'ipc-example';
 
@@ -51,6 +53,66 @@ const settingsBridge = {
   },
 };
 
+const projectBridge = {
+  selectDirectory(): Promise<string | null> {
+    return ipcRenderer.invoke('project:select-directory');
+  },
+  readTree(dirPath: string): Promise<FileNode> {
+    return ipcRenderer.invoke('project:read-tree', dirPath);
+  },
+  readFile(filePath: string): Promise<string> {
+    return ipcRenderer.invoke('project:read-file', filePath);
+  },
+  writeFile(filePath: string, content: string): Promise<void> {
+    return ipcRenderer.invoke('project:write-file', filePath, content);
+  },
+  createFile(basePath: string, relativePath: string): Promise<string | null> {
+    return ipcRenderer.invoke('project:create-file', basePath, relativePath);
+  },
+  createFolder(basePath: string, relativePath: string): Promise<string | null> {
+    return ipcRenderer.invoke('project:create-folder', basePath, relativePath);
+  },
+  rename(oldPath: string, newName: string): Promise<string> {
+    return ipcRenderer.invoke('project:rename', oldPath, newName);
+  },
+  delete(targetPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:delete', targetPath);
+  },
+  move(sourcePath: string, destDir: string): Promise<string> {
+    return ipcRenderer.invoke('project:move', sourcePath, destDir);
+  },
+  copy(sourcePath: string, destDir: string): Promise<string> {
+    return ipcRenderer.invoke('project:copy', sourcePath, destDir);
+  },
+  revealInFinder(targetPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:reveal-in-finder', targetPath);
+  },
+  watchDirectory(dirPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:watch-directory', dirPath);
+  },
+  unwatchDirectory(dirPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:unwatch-directory', dirPath);
+  },
+  getRecent(): Promise<RecentProject[]> {
+    return ipcRenderer.invoke('project:get-recent');
+  },
+  addRecent(projectPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:add-recent', projectPath);
+  },
+  onFileChange(callback: (event: FileChangeEvent) => void) {
+    const subscription = (
+      _event: IpcRendererEvent,
+      fileEvent: FileChangeEvent,
+    ) => {
+      callback(fileEvent);
+    };
+    ipcRenderer.on('project:file-changed', subscription);
+    return () => {
+      ipcRenderer.removeListener('project:file-changed', subscription);
+    };
+  },
+};
+
 const electronHandler = {
   ipcRenderer: {
     sendMessage(channel: Channels, ...args: unknown[]) {
@@ -71,6 +133,7 @@ const electronHandler = {
   },
   backend: backendBridge,
   settings: settingsBridge,
+  project: projectBridge,
 };
 
 contextBridge.exposeInMainWorld('electron', electronHandler);

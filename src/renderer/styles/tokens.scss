@@ -1,0 +1,79 @@
+// Design Tokens for Kshana Desktop
+
+// Colors
+$color-background-dark: #0f111a;
+$color-panel-background: #161b22;
+$color-panel-border: #21262d;
+$color-accent-green: #00E676;
+$color-accent-green-dim: rgba(0, 230, 118, 0.2);
+$color-accent-cyan: #00bcd4;
+$color-text-primary: #ffffff;
+$color-text-secondary: #8b949e;
+$color-text-muted: #6e7681;
+$color-error: #f85149;
+$color-warning: #d29922;
+
+// Status Colors
+$color-status-connected: $color-accent-green;
+$color-status-disconnected: $color-text-muted;
+$color-status-connecting: $color-warning;
+
+// Typography
+$font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+$font-family-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+
+$font-size-xs: 11px;
+$font-size-sm: 12px;
+$font-size-base: 14px;
+$font-size-lg: 16px;
+$font-size-xl: 20px;
+$font-size-2xl: 24px;
+
+$font-weight-normal: 400;
+$font-weight-medium: 500;
+$font-weight-semibold: 600;
+$font-weight-bold: 700;
+
+$line-height-tight: 1.25;
+$line-height-normal: 1.5;
+$line-height-relaxed: 1.75;
+
+// Spacing
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 12px;
+$spacing-lg: 16px;
+$spacing-xl: 24px;
+$spacing-2xl: 32px;
+$spacing-3xl: 48px;
+
+// Border Radius
+$radius-sm: 4px;
+$radius-md: 6px;
+$radius-lg: 8px;
+$radius-xl: 12px;
+$radius-full: 9999px;
+
+// Shadows
+$shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+$shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+$shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+$shadow-glow-green: 0 0 20px rgba(0, 230, 118, 0.3);
+
+// Transitions
+$transition-fast: 150ms ease;
+$transition-normal: 200ms ease;
+$transition-slow: 300ms ease;
+
+// Z-index
+$z-index-dropdown: 100;
+$z-index-modal: 200;
+$z-index-tooltip: 300;
+
+// Layout
+$header-height: 40px;
+$status-bar-height: 28px;
+$panel-min-width: 200px;
+$explorer-default-width: 260px;
+$chat-default-width: 340px;
+

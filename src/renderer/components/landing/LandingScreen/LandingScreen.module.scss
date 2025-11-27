@@ -1,0 +1,135 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  background-color: $color-background-dark;
+}
+
+.sidebar {
+  width: $explorer-default-width;
+  @include panel-base;
+  border-right: 1px solid $color-panel-border;
+  @include flex-column;
+}
+
+.sidebarHeader {
+  padding: $spacing-md $spacing-lg;
+  border-bottom: 1px solid $color-panel-border;
+}
+
+.sidebarTitle {
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: $color-text-secondary;
+  letter-spacing: 0.5px;
+}
+
+.sidebarContent {
+  flex: 1;
+  @include flex-center;
+  @include flex-column;
+  gap: $spacing-md;
+  color: $color-text-muted;
+}
+
+.folderIcon {
+  opacity: 0.3;
+}
+
+.noProjectText {
+  font-size: $font-size-sm;
+  color: $color-text-muted;
+}
+
+.main {
+  flex: 1;
+  @include flex-column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  @include grid-background;
+}
+
+.card {
+  @include panel-base;
+  border-radius: $radius-lg;
+  padding: $spacing-3xl $spacing-2xl;
+  max-width: 480px;
+  width: 90%;
+  @include flex-column;
+  align-items: center;
+  text-align: center;
+}
+
+.iconWrapper {
+  width: 80px;
+  height: 80px;
+  border-radius: $radius-xl;
+  background: linear-gradient(135deg, rgba($color-accent-green, 0.15), rgba($color-accent-cyan, 0.1));
+  @include flex-center;
+  margin-bottom: $spacing-xl;
+  @include glow-effect($color-accent-green, 30px);
+}
+
+.playIcon {
+  color: $color-accent-green;
+  fill: $color-accent-green;
+}
+
+.title {
+  font-size: $font-size-2xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.subtitle {
+  font-size: $font-size-base;
+  color: $color-text-secondary;
+  margin-bottom: $spacing-xl;
+}
+
+.openButton {
+  @include button-primary;
+  width: 100%;
+  padding: $spacing-md $spacing-xl;
+  font-size: $font-size-base;
+  gap: $spacing-md;
+}
+
+.error {
+  margin-top: $spacing-md;
+  font-size: $font-size-sm;
+  color: $color-error;
+}
+
+.footer {
+  position: absolute;
+  bottom: $spacing-xl;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-muted;
+}
+
+.footerDivider {
+  opacity: 0.5;
+}
+
+.footerLink {
+  background: none;
+  border: none;
+  color: $color-text-muted;
+  cursor: pointer;
+  font-size: $font-size-sm;
+  padding: 0;
+  
+  &:hover {
+    color: $color-text-secondary;
+  }
+}
+

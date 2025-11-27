@@ -69,7 +69,9 @@ export default function SettingsPanel({
             <input
               type="url"
               value={form.comfyuiUrl}
-              onChange={(event) => handleInput('comfyuiUrl', event.target.value)}
+              onChange={(event) =>
+                handleInput('comfyuiUrl', event.target.value)
+              }
               placeholder="http://localhost:8000"
               required
             />
@@ -80,7 +82,9 @@ export default function SettingsPanel({
             <input
               type="url"
               value={form.lmStudioUrl}
-              onChange={(event) => handleInput('lmStudioUrl', event.target.value)}
+              onChange={(event) =>
+                handleInput('lmStudioUrl', event.target.value)
+              }
               placeholder="http://127.0.0.1:1234"
               required
             />
@@ -180,4 +184,3 @@ export default function SettingsPanel({
     </div>
   );
 }
-

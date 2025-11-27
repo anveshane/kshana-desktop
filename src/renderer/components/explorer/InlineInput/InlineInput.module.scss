@@ -1,0 +1,31 @@
+@import '../../../styles/tokens';
+
+.container {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-xs $spacing-sm;
+  padding-left: $spacing-lg;
+}
+
+.icon {
+  color: $color-text-muted;
+  flex-shrink: 0;
+}
+
+.input {
+  flex: 1;
+  background-color: $color-background-dark;
+  border: 1px solid $color-accent-green;
+  border-radius: $radius-sm;
+  padding: $spacing-xs $spacing-sm;
+  font-size: $font-size-sm;
+  font-family: $font-family-base;
+  color: $color-text-primary;
+  outline: none;
+
+  &::placeholder {
+    color: $color-text-muted;
+  }
+}
+

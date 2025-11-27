@@ -1,11 +1,8 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-import type { BackendEnvOverrides, BackendState } from '../../shared/backendTypes';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  BackendEnvOverrides,
+  BackendState,
+} from '../../shared/backendTypes';
 import type { AppSettings } from '../../shared/settingsTypes';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
@@ -71,34 +68,31 @@ export default function ChatInterface() {
     [appendMessage],
   );
 
-  const appendAssistantChunk = useCallback(
-    (content: string, type: string) => {
-      if (!content) return;
-      setMessages((prev) => {
-        if (type === 'text_chunk' && lastAssistantIdRef.current) {
-          return prev.map((message) =>
-            message.id === lastAssistantIdRef.current
-              ? { ...message, content: `${message.content}${content}` }
-              : message,
-          );
-        }
+  const appendAssistantChunk = useCallback((content: string, type: string) => {
+    if (!content) return;
+    setMessages((prev) => {
+      if (type === 'text_chunk' && lastAssistantIdRef.current) {
+        return prev.map((message) =>
+          message.id === lastAssistantIdRef.current
+            ? { ...message, content: `${message.content}${content}` }
+            : message,
+        );
+      }
 
-        const id = makeId();
-        lastAssistantIdRef.current = id;
-        return [
-          ...prev,
-          {
-            id,
-            role: 'assistant',
-            type,
-            content,
-            timestamp: Date.now(),
-          },
-        ];
-      });
-    },
-    [],
-  );
+      const id = makeId();
+      lastAssistantIdRef.current = id;
+      return [
+        ...prev,
+        {
+          id,
+          role: 'assistant',
+          type,
+          content,
+          timestamp: Date.now(),
+        },
+      ];
+    });
+  }, []);
 
   const disconnectWebSocket = useCallback(() => {
     if (wsRef.current) {
@@ -230,7 +224,10 @@ export default function ChatInterface() {
 
           if (event.code !== 1000) {
             // Not a normal closure
-            appendSystemMessage('Connection lost. Reconnecting in 3s...', 'connection');
+            appendSystemMessage(
+              'Connection lost. Reconnecting in 3s...',
+              'connection',
+            );
             reconnectTimeoutRef.current = setTimeout(() => {
               connectWebSocket().catch((err) => {
                 console.error('Reconnect failed:', err);
@@ -326,7 +323,11 @@ export default function ChatInterface() {
     const unsubscribeBackend = window.electron.backend.onStateChange(
       (state) => {
         setBackendState(state);
-        if (state.status === 'ready' && !connectingRef.current && !wsRef.current) {
+        if (
+          state.status === 'ready' &&
+          !connectingRef.current &&
+          !wsRef.current
+        ) {
           connectingRef.current = true;
           connectWebSocket()
             .catch(() => undefined)
@@ -411,4 +412,3 @@ export default function ChatInterface() {
     </div>
   );
 }
-

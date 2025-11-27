@@ -1,0 +1,63 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  border-top: 1px solid $color-panel-border;
+  padding: $spacing-md 0;
+}
+
+.header {
+  padding: 0 $spacing-lg;
+  margin-bottom: $spacing-sm;
+}
+
+.title {
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: $color-text-muted;
+  letter-spacing: 0.5px;
+}
+
+.list {
+  list-style: none;
+  @include flex-column;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-xs $spacing-lg;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.03);
+
+    .removeButton {
+      opacity: 1;
+    }
+  }
+}
+
+.name {
+  flex: 1;
+  @include truncate;
+}
+
+.removeButton {
+  @include flex-center;
+  background: none;
+  border: none;
+  padding: $spacing-xs;
+  color: $color-text-muted;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity $transition-fast, color $transition-fast;
+  border-radius: $radius-sm;
+
+  &:hover {
+    color: $color-error;
+  }
+}
+

@@ -27,8 +27,9 @@ export default function MessageList({ messages }: Props) {
         <div className="chat-empty-state">
           <h3>Start your storyboard</h3>
           <p>
-            Describe your idea, mention characters, or paste a brief. I&apos;ll plan
-            scenes, generate prompts, and coordinate with LM Studio + ComfyUI.
+            Describe your idea, mention characters, or paste a brief. I&apos;ll
+            plan scenes, generate prompts, and coordinate with LM Studio +
+            ComfyUI.
           </p>
         </div>
       )}
@@ -47,4 +48,3 @@ export default function MessageList({ messages }: Props) {
     </div>
   );
 }
-

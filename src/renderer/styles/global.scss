@@ -1,0 +1,54 @@
+@import 'tokens';
+@import 'mixins';
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: $font-family-base;
+  font-size: $font-size-base;
+  line-height: $line-height-normal;
+  color: $color-text-primary;
+  background-color: $color-background-dark;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: $color-accent-green;
+  text-decoration: none;
+  
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+button {
+  font-family: inherit;
+}
+
+input, textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+// Selection styling
+::selection {
+  background-color: rgba($color-accent-green, 0.3);
+  color: $color-text-primary;
+}
+
+// Focus visible for accessibility
+:focus-visible {
+  @include focus-ring;
+}
+
