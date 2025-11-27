@@ -1,5 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  ImperativePanelHandle,
+} from 'react-resizable-panels';
 import { FolderOpen, MessageSquare } from 'lucide-react';
 import FileExplorer from '../../explorer/FileExplorer/FileExplorer';
 import PreviewPanel from '../../preview/PreviewPanel/PreviewPanel';
@@ -8,15 +13,32 @@ import StatusBar from '../StatusBar/StatusBar';
 import styles from './WorkspaceLayout.module.scss';
 
 export default function WorkspaceLayout() {
-  const [showExplorer, setShowExplorer] = useState(true);
-  const [showChat, setShowChat] = useState(true);
+  const [explorerExpanded, setExplorerExpanded] = useState(true);
+  const [chatExpanded, setChatExpanded] = useState(true);
+
+  const explorerPanelRef = useRef<ImperativePanelHandle>(null);
+  const chatPanelRef = useRef<ImperativePanelHandle>(null);
 
   const toggleExplorer = useCallback(() => {
-    setShowExplorer((prev) => !prev);
+    const panel = explorerPanelRef.current;
+    if (panel) {
+      if (panel.isCollapsed()) {
+        panel.expand();
+      } else {
+        panel.collapse();
+      }
+    }
   }, []);
 
   const toggleChat = useCallback(() => {
-    setShowChat((prev) => !prev);
+    const panel = chatPanelRef.current;
+    if (panel) {
+      if (panel.isCollapsed()) {
+        panel.expand();
+      } else {
+        panel.collapse();
+      }
+    }
   }, []);
 
   // Keyboard shortcuts: Cmd+B for explorer, Cmd+I for chat
@@ -45,7 +67,7 @@ export default function WorkspaceLayout() {
         <div className={styles.headerLeft}>
           <button
             type="button"
-            className={`${styles.toggleButton} ${showExplorer ? styles.active : ''}`}
+            className={`${styles.toggleButton} ${explorerExpanded ? styles.active : ''}`}
             onClick={toggleExplorer}
             title="Toggle Explorer (⌘B)"
           >
@@ -56,7 +78,7 @@ export default function WorkspaceLayout() {
         <div className={styles.headerRight}>
           <button
             type="button"
-            className={`${styles.toggleButton} ${showChat ? styles.active : ''}`}
+            className={`${styles.toggleButton} ${chatExpanded ? styles.active : ''}`}
             onClick={toggleChat}
             title="Toggle Chat (⌘I)"
           >
@@ -67,27 +89,37 @@ export default function WorkspaceLayout() {
 
       <div className={styles.workspace}>
         <PanelGroup direction="horizontal" autoSaveId="workspace-panels">
-          {showExplorer && (
-            <>
-              <Panel defaultSize={20} minSize={15} maxSize={35}>
-                <FileExplorer />
-              </Panel>
-              <PanelResizeHandle className={styles.resizeHandle} />
-            </>
-          )}
+          <Panel
+            ref={explorerPanelRef}
+            defaultSize={20}
+            minSize={15}
+            maxSize={35}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => setExplorerExpanded(false)}
+            onExpand={() => setExplorerExpanded(true)}
+          >
+            <FileExplorer />
+          </Panel>
+          <PanelResizeHandle className={styles.resizeHandle} />
 
-          <Panel defaultSize={showExplorer && showChat ? 50 : 70} minSize={30}>
+          <Panel defaultSize={50} minSize={30}>
             <PreviewPanel />
           </Panel>
 
-          {showChat && (
-            <>
-              <PanelResizeHandle className={styles.resizeHandle} />
-              <Panel defaultSize={30} minSize={20} maxSize={45}>
-                <ChatPanel />
-              </Panel>
-            </>
-          )}
+          <PanelResizeHandle className={styles.resizeHandle} />
+          <Panel
+            ref={chatPanelRef}
+            defaultSize={30}
+            minSize={20}
+            maxSize={45}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => setChatExpanded(false)}
+            onExpand={() => setChatExpanded(true)}
+          >
+            <ChatPanel />
+          </Panel>
         </PanelGroup>
       </div>
 
