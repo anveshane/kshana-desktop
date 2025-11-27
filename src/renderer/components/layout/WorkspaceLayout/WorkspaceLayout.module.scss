@@ -1,0 +1,65 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: $color-background-dark;
+}
+
+.header {
+  height: $header-height;
+  display: flex;
+  align-items: center;
+  padding: 0 $spacing-lg;
+  background-color: $color-panel-background;
+  border-bottom: 1px solid $color-panel-border;
+  -webkit-app-region: drag;
+}
+
+.title {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-text-secondary;
+}
+
+.workspace {
+  flex: 1;
+  overflow: hidden;
+}
+
+.resizeHandle {
+  width: 4px;
+  background-color: transparent;
+  transition: background-color $transition-fast;
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 1px;
+    width: 1px;
+    background-color: $color-panel-border;
+  }
+
+  &:hover {
+    background-color: rgba($color-accent-green, 0.3);
+    
+    &::after {
+      background-color: $color-accent-green;
+    }
+  }
+
+  &[data-resize-handle-active] {
+    background-color: rgba($color-accent-green, 0.5);
+    
+    &::after {
+      background-color: $color-accent-green;
+    }
+  }
+}
+

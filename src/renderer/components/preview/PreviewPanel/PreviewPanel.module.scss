@@ -1,0 +1,96 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  height: 100%;
+  @include flex-column;
+  background-color: $color-background-dark;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 $spacing-lg;
+  height: $header-height;
+  border-bottom: 1px solid $color-panel-border;
+  background-color: $color-panel-background;
+}
+
+.tabs {
+  display: flex;
+  gap: $spacing-xs;
+}
+
+.tab {
+  @include button-base;
+  background: none;
+  color: $color-text-muted;
+  padding: $spacing-sm $spacing-lg;
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+
+  &:hover {
+    color: $color-text-secondary;
+    background-color: rgba($color-text-primary, 0.05);
+  }
+
+  &.active {
+    color: $color-text-primary;
+    background-color: rgba($color-text-primary, 0.1);
+  }
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: $spacing-lg;
+}
+
+.statusIndicators {
+  display: flex;
+  align-items: center;
+  gap: $spacing-lg;
+}
+
+.statusItem {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.statusDot {
+  @include status-disconnected;
+  
+  &.connected {
+    @include status-connected;
+  }
+}
+
+.statusLabel {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+}
+
+.settingsButton {
+  @include flex-center;
+  background: none;
+  border: none;
+  padding: $spacing-sm;
+  color: $color-text-muted;
+  cursor: pointer;
+  border-radius: $radius-sm;
+  transition: all $transition-fast;
+
+  &:hover {
+    color: $color-text-secondary;
+    background-color: rgba($color-text-primary, 0.05);
+  }
+}
+
+.content {
+  flex: 1;
+  overflow: hidden;
+  @include grid-background;
+}
+

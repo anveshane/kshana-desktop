@@ -14,7 +14,6 @@ import {
 const DEFAULT_PORT = 8001;
 const HEALTH_ENDPOINT = '/health';
 
-
 function comfyWsUrl(httpUrl: string): string {
   try {
     const parsed = new URL(httpUrl);
@@ -24,7 +23,9 @@ function comfyWsUrl(httpUrl: string): string {
     }
     return parsed.toString();
   } catch (error) {
-    log.warn(`Failed to parse ComfyUI URL "${httpUrl}": ${(error as Error).message}`);
+    log.warn(
+      `Failed to parse ComfyUI URL "${httpUrl}": ${(error as Error).message}`,
+    );
     return 'ws://localhost:8000/ws';
   }
 }
@@ -36,7 +37,11 @@ function executableName(): string {
 function resolveExecutablePath(): string | null {
   const binaryName = executableName();
   if (app.isPackaged) {
-    const packagedPath = path.join(process.resourcesPath, 'backend', binaryName);
+    const packagedPath = path.join(
+      process.resourcesPath,
+      'backend',
+      binaryName,
+    );
     return packagedPath;
   }
 
@@ -57,12 +62,11 @@ function resolveExecutablePath(): string | null {
 
 async function portIsFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const tester = net.createServer()
+    const tester = net
+      .createServer()
       .once('error', () => resolve(false))
       .once('listening', () => {
-        tester
-          .once('close', () => resolve(true))
-          .close();
+        tester.once('close', () => resolve(true)).close();
       })
       .listen(port, '127.0.0.1');
   });
@@ -111,7 +115,9 @@ async function waitForHealth(url: string, timeoutMs = 60_000): Promise<void> {
 
     // Log progress every 10 seconds
     if (elapsed % 10_000 < 1000) {
-      log.info(`Waiting for backend health check... (${Math.round(elapsed / 1000)}s)`);
+      log.info(
+        `Waiting for backend health check... (${Math.round(elapsed / 1000)}s)`,
+      );
     }
 
     // eslint-disable-next-line no-await-in-loop
@@ -189,7 +195,10 @@ class BackendManager extends EventEmitter {
       const output = data.toString();
       log.info(`[kshana-backend] ${output}`);
       // Check if backend is ready by looking for Uvicorn startup message
-      if (output.includes('Uvicorn running on') || output.includes('Application startup complete')) {
+      if (
+        output.includes('Uvicorn running on') ||
+        output.includes('Application startup complete')
+      ) {
         log.info('Backend startup detected in logs');
       }
     });
@@ -263,4 +272,3 @@ export type {
   BackendState,
   BackendStatus,
 } from '../shared/backendTypes';
-

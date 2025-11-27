@@ -1,0 +1,144 @@
+@use 'sass:color';
+@import 'tokens';
+
+// Glassmorphism effect
+@mixin glassmorphism($opacity: 0.8) {
+  background: rgba($color-panel-background, $opacity);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+// Glow effect for accent elements
+@mixin glow-effect($color: $color-accent-green, $size: 20px) {
+  box-shadow: 0 0 $size rgba($color, 0.3);
+}
+
+// Status indicator dot
+@mixin status-dot($size: 8px) {
+  width: $size;
+  height: $size;
+  border-radius: $radius-full;
+  display: inline-block;
+}
+
+// Connected status with glow
+@mixin status-connected {
+  @include status-dot;
+  background-color: $color-status-connected;
+  box-shadow: 0 0 6px rgba($color-status-connected, 0.6);
+}
+
+// Disconnected status
+@mixin status-disconnected {
+  @include status-dot;
+  background-color: $color-status-disconnected;
+}
+
+// Scrollbar styling
+@mixin custom-scrollbar {
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: $color-panel-border;
+    border-radius: $radius-sm;
+    
+    &:hover {
+      background: $color-text-muted;
+    }
+  }
+}
+
+// Grid background pattern
+@mixin grid-background($size: 40px, $color: rgba(255, 255, 255, 0.03)) {
+  background-image: 
+    linear-gradient($color 1px, transparent 1px),
+    linear-gradient(90deg, $color 1px, transparent 1px);
+  background-size: $size $size;
+}
+
+// Panel styling
+@mixin panel-base {
+  background-color: $color-panel-background;
+  border: 1px solid $color-panel-border;
+}
+
+// Button base
+@mixin button-base {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-lg;
+  border-radius: $radius-sm;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-fast;
+  border: none;
+  outline: none;
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// Primary button
+@mixin button-primary {
+  @include button-base;
+  background-color: $color-accent-green;
+  color: $color-background-dark;
+  
+  &:hover:not(:disabled) {
+    @include glow-effect($color-accent-green, 15px);
+    background-color: color.adjust($color-accent-green, $lightness: 5%);
+  }
+}
+
+// Ghost button
+@mixin button-ghost {
+  @include button-base;
+  background-color: transparent;
+  color: $color-text-secondary;
+  border: 1px solid $color-panel-border;
+  
+  &:hover:not(:disabled) {
+    background-color: rgba($color-text-primary, 0.05);
+    color: $color-text-primary;
+    border-color: $color-text-muted;
+  }
+}
+
+// Truncate text with ellipsis
+@mixin truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Focus ring
+@mixin focus-ring {
+  outline: 2px solid $color-accent-green;
+  outline-offset: 2px;
+}
+
+// Flex center
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+// Flex column
+@mixin flex-column {
+  display: flex;
+  flex-direction: column;
+}
+

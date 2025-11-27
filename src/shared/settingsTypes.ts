@@ -9,4 +9,3 @@ export interface AppSettings {
   projectDir?: string;
   preferredPort?: number;
 }
-

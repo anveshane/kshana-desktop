@@ -1,0 +1,58 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  @include flex-column;
+}
+
+.node {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  width: 100%;
+  padding: $spacing-xs $spacing-sm;
+  padding-right: $spacing-md;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color $transition-fast;
+  color: $color-text-secondary;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.05);
+  }
+
+  &.selected {
+    background-color: rgba($color-accent-green, 0.1);
+    color: $color-text-primary;
+  }
+}
+
+.chevron {
+  @include flex-center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: $color-text-muted;
+}
+
+.folderIcon {
+  color: $color-accent-cyan;
+  flex-shrink: 0;
+}
+
+.fileIcon {
+  color: $color-text-muted;
+  flex-shrink: 0;
+}
+
+.name {
+  font-size: $font-size-sm;
+  @include truncate;
+}
+
+.children {
+  @include flex-column;
+}
+

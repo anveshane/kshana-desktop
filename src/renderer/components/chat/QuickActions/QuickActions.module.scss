@@ -1,0 +1,19 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  display: flex;
+  gap: $spacing-sm;
+  padding: $spacing-md $spacing-lg;
+  border-top: 1px solid $color-panel-border;
+}
+
+.action {
+  @include button-ghost;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-xs;
+  gap: $spacing-xs;
+  flex: 1;
+  justify-content: center;
+}
+

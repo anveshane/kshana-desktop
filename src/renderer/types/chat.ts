@@ -8,4 +8,3 @@ export interface ChatMessage {
   timestamp: number;
   meta?: Record<string, unknown>;
 }
-

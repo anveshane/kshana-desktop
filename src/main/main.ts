@@ -9,7 +9,7 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
-import { app, BrowserWindow, shell, ipcMain } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
@@ -24,6 +24,9 @@ import {
   toBackendEnv,
   updateSettings,
 } from './settingsManager';
+import fileSystemManager from './fileSystemManager';
+import type { FileChangeEvent } from '../shared/fileSystemTypes';
+
 const buildBackendEnv = (
   overrides: BackendEnvOverrides = {},
 ): BackendEnvOverrides => {
@@ -79,18 +82,21 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle('backend:restart', async (_event, overrides: BackendEnvOverrides = {}) => {
-  try {
-    await backendManager.restart(buildBackendEnv(overrides));
-    return backendManager.status;
-  } catch (error) {
-    log.error(`Failed to restart backend: ${(error as Error).message}`);
-    return {
-      status: 'error',
-      message: (error as Error).message,
-    };
-  }
-});
+ipcMain.handle(
+  'backend:restart',
+  async (_event, overrides: BackendEnvOverrides = {}) => {
+    try {
+      await backendManager.restart(buildBackendEnv(overrides));
+      return backendManager.status;
+    } catch (error) {
+      log.error(`Failed to restart backend: ${(error as Error).message}`);
+      return {
+        status: 'error',
+        message: (error as Error).message,
+      };
+    }
+  },
+);
 
 ipcMain.handle('backend:stop', async () => {
   await backendManager.stop();
@@ -111,6 +117,46 @@ ipcMain.handle(
     return updated;
   },
 );
+
+// Project / File System IPC handlers
+ipcMain.handle('project:select-directory', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'Select Project Directory',
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
+ipcMain.handle('project:read-tree', async (_event, dirPath: string) => {
+  return fileSystemManager.readDirectory(dirPath);
+});
+
+ipcMain.handle('project:watch-directory', async (_event, dirPath: string) => {
+  fileSystemManager.watchDirectory(dirPath);
+});
+
+ipcMain.handle('project:unwatch-directory', async () => {
+  fileSystemManager.unwatchDirectory();
+});
+
+ipcMain.handle('project:get-recent', async () => {
+  return fileSystemManager.getRecentProjects();
+});
+
+ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {
+  fileSystemManager.addRecentProject(projectPath);
+});
+
+// Forward file change events to renderer
+fileSystemManager.on('file-change', (event: FileChangeEvent) => {
+  if (mainWindow) {
+    mainWindow.webContents.send('project:file-changed', event);
+  }
+});
 
 if (process.env.NODE_ENV === 'production') {
   const sourceMapSupport = require('source-map-support');

@@ -1,27 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  BackendEnvOverrides,
-  BackendState,
-} from '../../shared/backendTypes';
-import type { AppSettings } from '../../shared/settingsTypes';
-import MessageList from './MessageList';
-import ChatInput from './ChatInput';
-import SettingsPanel from './SettingsPanel';
-import type { ChatMessage } from '../types/chat';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Bot } from 'lucide-react';
+import type { BackendState } from '../../../../shared/backendTypes';
+import type { ChatMessage } from '../../../types/chat';
+import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import MessageList from '../../MessageList';
+import ChatInput from '../../ChatInput';
+import QuickActions from '../QuickActions/QuickActions';
+import styles from './ChatPanel.module.scss';
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 
 const DEFAULT_WS_PATH = '/api/v1/ws/chat';
-
-const mapSettingsToEnv = (settings: AppSettings): BackendEnvOverrides => ({
-  port: settings.preferredPort,
-  comfyuiUrl: settings.comfyuiUrl,
-  lmStudioUrl: settings.lmStudioUrl,
-  lmStudioModel: settings.lmStudioModel,
-  llmProvider: settings.llmProvider,
-  googleApiKey: settings.googleApiKey,
-  projectDir: settings.projectDir,
-});
 
 const makeId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -30,22 +19,19 @@ const makeId = () => {
   return `msg-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
 };
 
-export default function ChatInterface() {
+export default function ChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [backendState, setBackendState] = useState<BackendState>({
-    status: 'idle',
-  });
-  const [settings, setSettings] = useState<AppSettings | null>(null);
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('disconnected');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [isRestartingBackend, setIsRestartingBackend] = useState(false);
+
+  const { setConnectionStatus } = useWorkspace();
 
   const wsRef = useRef<WebSocket | null>(null);
   const lastAssistantIdRef = useRef<string | null>(null);
   const connectingRef = useRef(false);
-
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
@@ -106,10 +92,10 @@ export default function ChatInterface() {
   }, []);
 
   const handleServerPayload = useCallback(
-    (payload: Record<string, any>) => {
+    (payload: Record<string, unknown>) => {
       switch (payload.type) {
         case 'status':
-          appendSystemMessage(payload.message ?? 'Status update');
+          appendSystemMessage((payload.message as string) ?? 'Status update');
           break;
         case 'progress': {
           const { phase, percent, current, total } = payload;
@@ -130,40 +116,46 @@ export default function ChatInterface() {
         }
         case 'tool_call':
           appendSystemMessage(
-            `Calling ${payload.tool_name || 'tool'}…`,
+            `Calling ${(payload.tool_name as string) || 'tool'}…`,
             'tool_call',
           );
           break;
         case 'text_chunk':
-          appendAssistantChunk(payload.content ?? '', 'text_chunk');
+          appendAssistantChunk((payload.content as string) ?? '', 'text_chunk');
           break;
         case 'coordinator_response':
-          appendAssistantChunk(payload.content ?? '', 'coordinator_response');
+          appendAssistantChunk(
+            (payload.content as string) ?? '',
+            'coordinator_response',
+          );
           break;
         case 'final_response':
           lastAssistantIdRef.current = null;
-          appendAssistantChunk(payload.response ?? '', 'final_response');
+          appendAssistantChunk(
+            (payload.response as string) ?? '',
+            'final_response',
+          );
           break;
         case 'greeting': {
           const suggestions = payload.suggested_actions
-            ? `\n• ${payload.suggested_actions.join('\n• ')}`
+            ? `\n• ${(payload.suggested_actions as string[]).join('\n• ')}`
             : '';
           appendSystemMessage(
-            `${payload.greeting_message ?? 'Hello!'}${suggestions}`,
+            `${(payload.greeting_message as string) ?? 'Hello!'}${suggestions}`,
             'greeting',
           );
           break;
         }
         case 'error':
           appendSystemMessage(
-            `${payload.error}: ${payload.details ?? ''}`,
+            `${payload.error}: ${(payload.details as string) ?? ''}`,
             'error',
           );
           break;
         default:
           appendSystemMessage(
-            `Event: ${payload.type ?? 'unknown'}`,
-            payload.type ?? 'event',
+            `Event: ${(payload.type as string) ?? 'unknown'}`,
+            (payload.type as string) ?? 'event',
           );
       }
     },
@@ -175,7 +167,6 @@ export default function ChatInterface() {
       return wsRef.current;
     }
 
-    // Clear any pending reconnects
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -183,12 +174,10 @@ export default function ChatInterface() {
 
     setConnectionState('connecting');
     try {
-      // Always get the latest state to ensure we have the correct port
       const currentState = await window.electron.backend.getState();
       if (currentState.status !== 'ready') {
         throw new Error(`Backend not ready (status: ${currentState.status})`);
       }
-      setBackendState(currentState);
 
       const port = currentState.port ?? 8001;
       const url = new URL(DEFAULT_WS_PATH, `http://127.0.0.1:${port}`);
@@ -203,38 +192,31 @@ export default function ChatInterface() {
             socket.close();
             reject(new Error('WebSocket connection timeout'));
           }
-        }, 10000); // 10 second timeout
+        }, 10000);
 
         socket.onopen = () => {
           clearTimeout(timeout);
           setConnectionState('connected');
-          appendSystemMessage('Connected to backend', 'connection');
+          setConnectionStatus('lmStudio', 'connected');
+          setConnectionStatus('comfyUI', 'connected');
           resolve(socket);
         };
 
         socket.onerror = () => {
           clearTimeout(timeout);
-          // Don't reject here, let onclose handle it
         };
 
         socket.onclose = (event) => {
           clearTimeout(timeout);
           setConnectionState('disconnected');
+          setConnectionStatus('lmStudio', 'disconnected');
+          setConnectionStatus('comfyUI', 'disconnected');
           wsRef.current = null;
 
           if (event.code !== 1000) {
-            // Not a normal closure
-            appendSystemMessage(
-              'Connection lost. Reconnecting in 3s...',
-              'connection',
-            );
             reconnectTimeoutRef.current = setTimeout(() => {
-              connectWebSocket().catch((err) => {
-                console.error('Reconnect failed:', err);
-              });
+              connectWebSocket().catch(() => {});
             }, 3000);
-          } else {
-            appendSystemMessage('Connection closed', 'connection');
           }
         };
 
@@ -252,13 +234,9 @@ export default function ChatInterface() {
       });
     } catch (error) {
       setConnectionState('disconnected');
-      appendSystemMessage(
-        `Backend not ready: ${(error as Error).message}`,
-        'error',
-      );
       throw error;
     }
-  }, [appendSystemMessage, handleServerPayload]);
+  }, [appendSystemMessage, handleServerPayload, setConnectionStatus]);
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -281,48 +259,34 @@ export default function ChatInterface() {
     [appendMessage, connectWebSocket, appendSystemMessage],
   );
 
-  const handleSaveSettings = useCallback(
-    async (next: AppSettings) => {
-      setIsRestartingBackend(true);
-      try {
-        const updated = await window.electron.settings.update(next);
-        setSettings(updated);
-        await window.electron.backend.restart(mapSettingsToEnv(updated));
-        appendSystemMessage('Backend restarted with new settings', 'settings');
-        await connectWebSocket();
-        setSettingsOpen(false);
-      } catch (error) {
-        appendSystemMessage(
-          `Failed to restart backend: ${(error as Error).message}`,
-          'error',
-        );
-      } finally {
-        setIsRestartingBackend(false);
+  const handleQuickAction = useCallback(
+    (action: string) => {
+      const actionMessages: Record<string, string> = {
+        generate_concept: 'Generate a creative concept for my video project',
+        analyze_script: 'Analyze the current script and provide suggestions',
+        new_task: 'Start a new task',
+      };
+      const message = actionMessages[action];
+      if (message) {
+        sendMessage(message);
       }
     },
-    [appendSystemMessage, connectWebSocket],
+    [sendMessage],
   );
 
   useEffect(() => {
     const bootstrap = async () => {
-      const [state, storedSettings] = await Promise.all([
-        window.electron.backend.getState(),
-        window.electron.settings.get(),
-      ]);
-      setBackendState(state);
-      setSettings(storedSettings);
+      const state = await window.electron.backend.getState();
 
-      // Auto-connect if ready
       if (state.status === 'ready' && !wsRef.current) {
         connectWebSocket().catch(() => undefined);
       }
     };
 
-    bootstrap();
+    bootstrap().catch(() => {});
 
     const unsubscribeBackend = window.electron.backend.onStateChange(
-      (state) => {
-        setBackendState(state);
+      (state: BackendState) => {
         if (
           state.status === 'ready' &&
           !connectingRef.current &&
@@ -338,77 +302,47 @@ export default function ChatInterface() {
       },
     );
 
-    const unsubscribeSettings = window.electron.settings.onChange((next) => {
-      setSettings(next);
-    });
-
     return () => {
       unsubscribeBackend();
-      unsubscribeSettings();
       disconnectWebSocket();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run once on mount
+  }, []);
 
-  const statusBadge = useMemo(() => {
-    switch (backendState.status) {
-      case 'ready':
-        return 'online';
-      case 'starting':
-        return 'booting';
-      case 'error':
-        return 'error';
-      default:
-        return 'offline';
+  // Show initial greeting if no messages
+  useEffect(() => {
+    if (messages.length === 0) {
+      appendMessage({
+        role: 'assistant',
+        type: 'greeting',
+        content:
+          'Hello! I am Kshana. How can I assist you with your project today?',
+      });
     }
-  }, [backendState.status]);
+  }, [messages.length, appendMessage]);
 
   return (
-    <div className="chat-app">
-      <header className="chat-header">
-        <div>
-          <h1>Kshana Studio</h1>
-          <p>
-            Local multi-agent backend with LM Studio + ComfyUI orchestration.
-            Status:{' '}
-            <span className={`status-pill ${statusBadge}`}>
-              {backendState.status}
-            </span>
-          </p>
-        </div>
-        <div className="chat-header-actions">
-          <button
-            type="button"
-            onClick={() => connectWebSocket().catch(() => undefined)}
-          >
-            {connectionState === 'connected' ? 'Reconnect' : 'Connect'}
-          </button>
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => setSettingsOpen(true)}
-          >
-            Settings
-          </button>
-        </div>
-      </header>
+    <div className={styles.container}>
+      <div className={styles.header}>
+        <Bot size={18} className={styles.headerIcon} />
+        <span className={styles.headerTitle}>Kshana Assistant</span>
+      </div>
 
-      <main>
+      <div className={styles.messages}>
         <MessageList messages={messages} />
-      </main>
+      </div>
 
-      <ChatInput
+      <QuickActions
+        onAction={handleQuickAction}
         disabled={connectionState === 'connecting'}
-        onSend={sendMessage}
       />
 
-      <SettingsPanel
-        isOpen={settingsOpen}
-        settings={settings}
-        onClose={() => setSettingsOpen(false)}
-        onSave={handleSaveSettings}
-        isRestarting={isRestartingBackend}
-      />
+      <div className={styles.inputWrapper}>
+        <ChatInput
+          disabled={connectionState === 'connecting'}
+          onSend={sendMessage}
+        />
+      </div>
     </div>
   );
 }

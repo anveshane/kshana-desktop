@@ -36,4 +36,3 @@ export const toBackendEnv = (settings: AppSettings): BackendEnvOverrides => ({
 });
 
 export type { AppSettings } from '../shared/settingsTypes';
-
