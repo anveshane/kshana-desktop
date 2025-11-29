@@ -1,0 +1,104 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  background-color: $color-panel-background;
+  border-top: 1px solid $color-panel-border;
+  padding: $spacing-md $spacing-lg;
+}
+
+.inputWrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: $spacing-sm;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-lg;
+  padding: $spacing-sm;
+  transition: border-color $transition-fast;
+
+  &:focus-within {
+    border-color: $color-accent-green;
+  }
+}
+
+.textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  resize: none;
+  font-family: $font-family-base;
+  font-size: $font-size-base;
+  line-height: $line-height-normal;
+  color: $color-text-primary;
+  padding: $spacing-sm;
+  min-height: 24px;
+  max-height: 144px; // MAX_ROWS * LINE_HEIGHT
+  overflow-y: auto;
+  @include custom-scrollbar;
+  transition: height $transition-fast;
+  box-sizing: border-box;
+
+  &::placeholder {
+    color: $color-text-muted;
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.sendButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  color: $color-text-secondary;
+  cursor: pointer;
+  transition: all $transition-fast;
+  flex-shrink: 0;
+
+  &:hover:not(:disabled) {
+    background: $color-accent-green;
+    border-color: $color-accent-green;
+    color: $color-background-dark;
+    @include glow-effect($color-accent-green, 10px);
+  }
+
+  &:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+}
+
+.hint {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  text-align: center;
+
+  kbd {
+    padding: 2px $spacing-xs;
+    background: rgba($color-text-primary, 0.1);
+    border: 1px solid $color-panel-border;
+    border-radius: $radius-sm;
+    font-family: $font-family-mono;
+    font-size: $font-size-xs;
+    color: $color-text-secondary;
+  }
+}
+

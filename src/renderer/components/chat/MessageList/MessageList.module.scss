@@ -1,0 +1,44 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  height: 100%;
+  @include flex-column;
+  overflow: hidden;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  @include custom-scrollbar;
+  padding: $spacing-md;
+  scroll-behavior: smooth;
+}
+
+.emptyState {
+  @include flex-center;
+  @include flex-column;
+  flex: 1;
+  text-align: center;
+  padding: $spacing-3xl $spacing-xl;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.emptyTitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-md;
+}
+
+.emptyDescription {
+  font-size: $font-size-base;
+  color: $color-text-secondary;
+  line-height: $line-height-relaxed;
+}
+
+.typingWrapper {
+  padding: $spacing-md $spacing-lg;
+}
+

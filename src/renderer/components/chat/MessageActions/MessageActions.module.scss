@@ -1,0 +1,44 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  opacity: 0;
+  transition: opacity $transition-fast;
+}
+
+.container:hover,
+.container:focus-within {
+  opacity: 1;
+}
+
+.actionButton {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background: rgba($color-panel-background, 0.9);
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: rgba($color-accent-green, 0.1);
+    border-color: $color-accent-green;
+    color: $color-accent-green;
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+
+  span {
+    font-weight: $font-weight-medium;
+  }
+}
+

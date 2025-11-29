@@ -2,7 +2,7 @@
   "project_id": "b6ce74c3-4b0d-4058-a435-b51efb7b920e",
   "project_name": "Project b6ce74c3",
   "created_at": "2025-11-24T10:42:32.386734",
-  "updated_at": "2025-11-24T10:42:32.386882",
+  "updated_at": "2025-11-28T12:43:45.628576",
   "phase": "story_discovery",
   "current_scene": null,
   "current_shot": null,
@@ -12,6 +12,9 @@
   "characters": {},
   "locations": {},
   "artifacts": [],
+  "character_assets": {},
+  "setting_assets": {},
+  "base_asset_generation_progress": {},
   "todos": [],
   "preferences": {
     "typical_edit_style": null,

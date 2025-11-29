@@ -1,0 +1,106 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  margin-bottom: $spacing-sm;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-md;
+  background: rgba($color-panel-background, 0.5);
+  overflow: hidden;
+  transition: all $transition-normal;
+
+  &.active {
+    border-color: $color-accent-green;
+    background: rgba($color-accent-green, 0.05);
+  }
+
+  &.error {
+    border-color: $color-error;
+    background: rgba($color-error, 0.05);
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  width: 100%;
+  padding: $spacing-sm $spacing-md;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: $color-text-primary;
+  font-size: $font-size-xs;
+  transition: background-color $transition-fast;
+
+  &:hover {
+    background: rgba($color-text-primary, 0.05);
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
+}
+
+.chevron {
+  color: $color-text-secondary;
+  transition: transform $transition-fast;
+  transform: scale(0.8);
+}
+
+.icon {
+  color: $color-text-secondary;
+  transform: scale(0.8);
+}
+
+.loadingIcon {
+  color: $color-accent-green;
+  animation: spin 1s linear infinite;
+  transform: scale(0.8);
+}
+
+.successIcon {
+  color: $color-accent-green;
+  transform: scale(0.8);
+}
+
+.errorIcon {
+  color: $color-error;
+  transform: scale(0.8);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg) scale(0.8);
+  }
+
+  to {
+    transform: rotate(360deg) scale(0.8);
+  }
+}
+
+.toolName {
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  flex: 1;
+}
+
+.status {
+  color: $color-text-secondary;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.count {
+  color: $color-text-muted;
+  font-size: 10px;
+  margin-left: $spacing-xs;
+}
+
+.content {
+  padding: $spacing-xs $spacing-md $spacing-sm;
+  border-top: 1px solid $color-panel-border;
+  background: rgba(0, 0, 0, 0.2);
+}

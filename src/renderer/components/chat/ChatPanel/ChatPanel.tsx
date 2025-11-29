@@ -3,8 +3,8 @@ import { Bot } from 'lucide-react';
 import type { BackendState } from '../../../../shared/backendTypes';
 import type { ChatMessage } from '../../../types/chat';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
-import MessageList from '../../MessageList';
-import ChatInput from '../../ChatInput';
+import MessageList from '../MessageList';
+import ChatInput from '../ChatInput';
 import QuickActions from '../QuickActions/QuickActions';
 import styles from './ChatPanel.module.scss';
 
@@ -23,6 +23,7 @@ export default function ChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('disconnected');
+  const [isStreaming, setIsStreaming] = useState(false);
 
   const { setConnectionStatus } = useWorkspace();
 
@@ -57,7 +58,10 @@ export default function ChatPanel() {
   const appendAssistantChunk = useCallback((content: string, type: string) => {
     if (!content) return;
     setMessages((prev) => {
-      if (type === 'text_chunk' && lastAssistantIdRef.current) {
+      // Stream chunks into existing message if available
+      const streamingTypes = ['text_chunk', 'agent_text', 'coordinator_response'];
+      if (streamingTypes.includes(type) && lastAssistantIdRef.current) {
+        setIsStreaming(true);
         return prev.map((message) =>
           message.id === lastAssistantIdRef.current
             ? { ...message, content: `${message.content}${content}` }
@@ -67,6 +71,7 @@ export default function ChatPanel() {
 
       const id = makeId();
       lastAssistantIdRef.current = id;
+      setIsStreaming(streamingTypes.includes(type));
       return [
         ...prev,
         {
@@ -115,10 +120,14 @@ export default function ChatPanel() {
           break;
         }
         case 'tool_call':
-          appendSystemMessage(
-            `Calling ${(payload.tool_name as string) || 'tool'}…`,
-            'tool_call',
-          );
+          appendMessage({
+            role: 'system',
+            type: 'tool_call',
+            content: `Calling ${(payload.tool_name as string) || 'tool'}…`,
+            meta: {
+              tool_name: (payload.tool_name as string) || 'tool',
+            },
+          });
           break;
         case 'text_chunk':
           appendAssistantChunk((payload.content as string) ?? '', 'text_chunk');
@@ -131,6 +140,7 @@ export default function ChatPanel() {
           break;
         case 'final_response':
           lastAssistantIdRef.current = null;
+          setIsStreaming(false);
           appendAssistantChunk(
             (payload.response as string) ?? '',
             'final_response',
@@ -152,6 +162,27 @@ export default function ChatPanel() {
             'error',
           );
           break;
+        case 'agent_response': {
+          // Agent response with content
+          const content = (payload.content as string) ?? '';
+          if (content) {
+            appendAssistantChunk(content, 'agent_response');
+          }
+          break;
+        }
+        case 'agent_text': {
+          // Streaming agent text chunks
+          const text = (payload.text as string) ?? '';
+          const isFinal = (payload.is_final as boolean) ?? false;
+          if (text) {
+            appendAssistantChunk(text, 'agent_text');
+          }
+          if (isFinal) {
+            lastAssistantIdRef.current = null;
+            setIsStreaming(false);
+          }
+          break;
+        }
         default:
           appendSystemMessage(
             `Event: ${(payload.type as string) ?? 'unknown'}`,
@@ -329,7 +360,7 @@ export default function ChatPanel() {
       </div>
 
       <div className={styles.messages}>
-        <MessageList messages={messages} />
+        <MessageList messages={messages} isStreaming={isStreaming} />
       </div>
 
       <QuickActions
@@ -337,12 +368,10 @@ export default function ChatPanel() {
         disabled={connectionState === 'connecting'}
       />
 
-      <div className={styles.inputWrapper}>
         <ChatInput
           disabled={connectionState === 'connecting'}
           onSend={sendMessage}
         />
-      </div>
     </div>
   );
 }

@@ -4,8 +4,8 @@ import type {
   BackendState,
 } from '../../shared/backendTypes';
 import type { AppSettings } from '../../shared/settingsTypes';
-import MessageList from './MessageList';
-import ChatInput from './ChatInput';
+import MessageList from './chat/MessageList';
+import ChatInput from './chat/ChatInput';
 import SettingsPanel from './SettingsPanel';
 import type { ChatMessage } from '../types/chat';
 
@@ -41,11 +41,15 @@ export default function ChatInterface() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isRestartingBackend, setIsRestartingBackend] = useState(false);
 
+  const [isStreaming, setIsStreaming] = useState(false);
+
   const wsRef = useRef<WebSocket | null>(null);
   const lastAssistantIdRef = useRef<string | null>(null);
   const connectingRef = useRef(false);
 
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
@@ -71,14 +75,20 @@ export default function ChatInterface() {
   const appendAssistantChunk = useCallback((content: string, type: string) => {
     if (!content) return;
     setMessages((prev) => {
-      if (type === 'text_chunk' && lastAssistantIdRef.current) {
-        return prev.map((message) =>
-          message.id === lastAssistantIdRef.current
-            ? { ...message, content: `${message.content}${content}` }
-            : message,
-        );
+      // If we have an active assistant message, update it
+      if (lastAssistantIdRef.current) {
+        return prev.map((message) => {
+          if (message.id === lastAssistantIdRef.current) {
+            // For text chunks, append. For full replacements (like agent_text), replace.
+            const newContent =
+              type === 'text_chunk' ? `${message.content}${content}` : content;
+            return { ...message, content: newContent, type };
+          }
+          return message;
+        });
       }
 
+      // Otherwise create a new one
       const id = makeId();
       lastAssistantIdRef.current = id;
       return [
@@ -135,13 +145,29 @@ export default function ChatInterface() {
           );
           break;
         case 'text_chunk':
+          setIsStreaming(true);
           appendAssistantChunk(payload.content ?? '', 'text_chunk');
           break;
         case 'coordinator_response':
+          setIsStreaming(true);
           appendAssistantChunk(payload.content ?? '', 'coordinator_response');
+          break;
+        case 'agent_response':
+          setIsStreaming(true);
+          // Start a new message or update existing
+          appendAssistantChunk(payload.content ?? '', 'agent_response');
+          break;
+        case 'agent_text':
+          // Final text update
+          appendAssistantChunk(payload.text ?? '', 'agent_text');
+          if (payload.is_final) {
+            lastAssistantIdRef.current = null;
+            setIsStreaming(false);
+          }
           break;
         case 'final_response':
           lastAssistantIdRef.current = null;
+          setIsStreaming(false);
           appendAssistantChunk(payload.response ?? '', 'final_response');
           break;
         case 'greeting': {
@@ -155,6 +181,7 @@ export default function ChatInterface() {
           break;
         }
         case 'error':
+          setIsStreaming(false);
           appendSystemMessage(
             `${payload.error}: ${payload.details ?? ''}`,
             'error',
@@ -221,6 +248,7 @@ export default function ChatInterface() {
           clearTimeout(timeout);
           setConnectionState('disconnected');
           wsRef.current = null;
+          setIsStreaming(false); // Ensure streaming stops on disconnect
 
           if (event.code !== 1000) {
             // Not a normal closure
@@ -267,11 +295,13 @@ export default function ChatInterface() {
         type: 'message',
         content,
       });
+      setIsStreaming(true);
 
       try {
         const socket = await connectWebSocket();
         socket.send(JSON.stringify({ message: content }));
       } catch (error) {
+        setIsStreaming(false);
         appendSystemMessage(
           `Unable to send message: ${(error as Error).message}`,
           'error',
@@ -330,10 +360,10 @@ export default function ChatInterface() {
         ) {
           connectingRef.current = true;
           connectWebSocket()
-            .catch(() => undefined)
             .finally(() => {
               connectingRef.current = false;
-            });
+            })
+            .catch(() => undefined);
         }
       },
     );
@@ -394,7 +424,7 @@ export default function ChatInterface() {
       </header>
 
       <main>
-        <MessageList messages={messages} />
+        <MessageList messages={messages} isStreaming={isStreaming} />
       </main>
 
       <ChatInput
