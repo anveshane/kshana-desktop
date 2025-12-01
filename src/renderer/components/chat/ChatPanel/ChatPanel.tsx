@@ -228,8 +228,8 @@ export default function ChatPanel() {
         socket.onopen = () => {
           clearTimeout(timeout);
           setConnectionState('connected');
-          setConnectionStatus('lmStudio', 'connected');
-          setConnectionStatus('comfyUI', 'connected');
+          // Connection status is now managed by useBackendHealth hook
+          // Don't set it here to avoid overriding actual health checks
           resolve(socket);
         };
 
@@ -240,8 +240,8 @@ export default function ChatPanel() {
         socket.onclose = (event) => {
           clearTimeout(timeout);
           setConnectionState('disconnected');
-          setConnectionStatus('lmStudio', 'disconnected');
-          setConnectionStatus('comfyUI', 'disconnected');
+          // Connection status is now managed by useBackendHealth hook
+          // Don't set it here to avoid overriding actual health checks
           wsRef.current = null;
 
           if (event.code !== 1000) {
