@@ -1,23 +1,26 @@
 import { useState } from 'react';
-import { Copy, Check, RotateCw } from 'lucide-react';
+import { Copy, Check, RotateCw, Trash2 } from 'lucide-react';
+import type { ChatMessage } from '../../../types/chat';
 import styles from './MessageActions.module.scss';
 
 interface MessageActionsProps {
-  content: string;
+  message: ChatMessage;
   onRegenerate?: () => void;
+  onDelete?: () => void;
   showRegenerate?: boolean;
 }
 
 export default function MessageActions({
-  content,
+  message,
   onRegenerate,
+  onDelete,
   showRegenerate = false,
 }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(content);
+      await navigator.clipboard.writeText(message.content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (error) {
@@ -57,6 +60,18 @@ export default function MessageActions({
         >
           <RotateCw size={14} />
           <span>Regenerate</span>
+        </button>
+      )}
+      {onDelete && (
+        <button
+          type="button"
+          className={styles.actionButton}
+          onClick={onDelete}
+          aria-label="Delete message"
+          title="Delete message"
+        >
+          <Trash2 size={14} />
+          <span>Delete</span>
         </button>
       )}
     </div>

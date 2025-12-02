@@ -24,6 +24,30 @@
   font-size: $font-size-sm;
   font-weight: $font-weight-medium;
   color: $color-text-primary;
+  flex: 1;
+}
+
+.clearButton {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: $radius-sm;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: rgba($color-text-secondary, 0.1);
+    color: $color-text-primary;
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
 }
 
 .messages {
@@ -32,5 +56,3 @@
   @include custom-scrollbar;
   padding: $spacing-md;
 }
-
-
