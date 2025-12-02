@@ -4,16 +4,20 @@ import MessageBubble from '../MessageBubble';
 import TypingIndicator from '../TypingIndicator';
 import styles from './MessageList.module.scss';
 
+/* eslint-disable react/require-default-props */
 interface MessageListProps {
   messages: ChatMessage[];
   isStreaming?: boolean;
   onRegenerate?: (messageId: string) => void;
+  onDelete?: (messageId: string) => void;
 }
+/* eslint-enable react/require-default-props */
 
 export default function MessageList({
   messages,
   isStreaming = false,
-  onRegenerate,
+  onRegenerate = undefined,
+  onDelete = undefined,
 }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -31,7 +35,7 @@ export default function MessageList({
   // Check if user has scrolled up
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container) return undefined;
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
@@ -70,6 +74,7 @@ export default function MessageList({
             onRegenerate={
               onRegenerate ? () => onRegenerate(message.id) : undefined
             }
+            onDelete={onDelete ? () => onDelete(message.id) : undefined}
           />
         ))}
         {isStreaming && (
