@@ -9,6 +9,7 @@ interface MessageBubbleProps {
   message: ChatMessage;
   isStreaming?: boolean;
   onRegenerate?: () => void;
+  onDelete?: () => void;
 }
 
 const roleLabels: Record<ChatMessage['role'], string> = {
@@ -64,6 +65,7 @@ export default function MessageBubble({
   message,
   isStreaming = false,
   onRegenerate,
+  onDelete,
 }: MessageBubbleProps) {
   const [remarkGfm, setRemarkGfm] = useState<any>(null);
 
@@ -86,11 +88,9 @@ export default function MessageBubble({
 
   return (
     <div
-      className={`${styles.container} ${styles[message.role]} ${
-        isStreaming ? styles.streaming : ''
-      } ${isIntermediate ? styles.intermediate : ''} ${
-        isError ? styles.error : ''
-      }`}
+      className={`${styles.container} ${styles[message.role]} ${isStreaming ? styles.streaming : ''
+        } ${isIntermediate ? styles.intermediate : ''} ${isError ? styles.error : ''
+        }`}
     >
       <div className={styles.header}>
         <span className={styles.role}>{roleLabels[message.role]}</span>
@@ -103,8 +103,9 @@ export default function MessageBubble({
         {!isSystem && (
           <div className={styles.actions}>
             <MessageActions
-              content={message.content}
+              message={message}
               onRegenerate={onRegenerate}
+              onDelete={onDelete}
               showRegenerate={message.role === 'assistant' && !isIntermediate}
             />
           </div>

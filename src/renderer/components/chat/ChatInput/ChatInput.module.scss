@@ -11,14 +11,17 @@
   display: flex;
   align-items: flex-end;
   gap: $spacing-sm;
-  background: rgba(0, 0, 0, 0.2);
+  background: $color-background-dark;
   border: 1px solid $color-panel-border;
   border-radius: $radius-lg;
   padding: $spacing-sm;
-  transition: border-color $transition-fast;
+  transition: all $transition-fast;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 
   &:focus-within {
     border-color: $color-accent-green;
+    background: rgba($color-background-dark, 0.8);
+    box-shadow: 0 0 0 1px rgba($color-accent-green, 0.2);
   }
 }
 
@@ -31,7 +34,7 @@
   font-size: $font-size-base;
   line-height: $line-height-normal;
   color: $color-text-primary;
-  padding: $spacing-sm;
+  padding: $spacing-xs $spacing-sm;
   min-height: 24px;
   max-height: 144px; // MAX_ROWS * LINE_HEIGHT
   overflow-y: auto;
@@ -61,18 +64,18 @@
   height: 32px;
   padding: 0;
   background: transparent;
-  border: 1px solid $color-panel-border;
-  border-radius: $radius-sm;
+  border: 1px solid transparent;
+  border-radius: $radius-md;
   color: $color-text-secondary;
   cursor: pointer;
   transition: all $transition-fast;
   flex-shrink: 0;
+  margin-bottom: 2px; // Align with text baseline
 
   &:hover:not(:disabled) {
     background: $color-accent-green;
-    border-color: $color-accent-green;
     color: $color-background-dark;
-    @include glow-effect($color-accent-green, 10px);
+    @include glow-effect($color-accent-green, 8px);
   }
 
   &:disabled {
@@ -87,18 +90,18 @@
 
 .hint {
   margin-top: $spacing-xs;
-  font-size: $font-size-xs;
+  font-size: 11px;
   color: $color-text-muted;
-  text-align: center;
+  text-align: right;
+  opacity: 0.7;
 
   kbd {
-    padding: 2px $spacing-xs;
-    background: rgba($color-text-primary, 0.1);
-    border: 1px solid $color-panel-border;
-    border-radius: $radius-sm;
+    padding: 1px 4px;
+    background: rgba($color-text-primary, 0.05);
+    border: 1px solid rgba($color-panel-border, 0.5);
+    border-radius: 3px;
     font-family: $font-family-mono;
-    font-size: $font-size-xs;
+    font-size: 10px;
     color: $color-text-secondary;
   }
 }
-
