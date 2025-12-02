@@ -1,0 +1,178 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.card {
+  @include panel-base;
+  border-radius: $radius-lg;
+  overflow: hidden;
+  transition: all $transition-normal;
+  background-color: $color-panel-background;
+
+  &:hover {
+    border-color: $color-text-muted;
+    transform: translateY(-2px);
+    box-shadow: $shadow-md;
+  }
+}
+
+.imageContainer {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background-color: $color-background-dark;
+  overflow: hidden;
+}
+
+.image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.placeholder {
+  @include flex-center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    rgba($color-panel-background, 0.8) 0%,
+    rgba($color-background-dark, 0.9) 100%
+  );
+
+  &.cyan {
+    background: linear-gradient(
+      135deg,
+      rgba($color-accent-cyan, 0.1) 0%,
+      rgba($color-background-dark, 0.9) 100%
+    );
+  }
+
+  &.green {
+    background: linear-gradient(
+      135deg,
+      rgba($color-accent-green, 0.1) 0%,
+      rgba($color-background-dark, 0.9) 100%
+    );
+  }
+
+  &.orange {
+    background: linear-gradient(
+      135deg,
+      rgba($color-warning, 0.1) 0%,
+      rgba($color-background-dark, 0.9) 100%
+    );
+  }
+}
+
+.placeholderIcon {
+  color: $color-text-muted;
+  opacity: 0.5;
+}
+
+.typeBadge {
+  position: absolute;
+  top: $spacing-sm;
+  left: $spacing-sm;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  text-transform: capitalize;
+  border-radius: $radius-sm;
+  background-color: rgba($color-background-dark, 0.8);
+  color: $color-text-secondary;
+
+  &.cyan {
+    background-color: rgba($color-accent-cyan, 0.9);
+    color: $color-background-dark;
+  }
+
+  &.green {
+    background-color: rgba($color-accent-green, 0.9);
+    color: $color-background-dark;
+  }
+
+  &.orange {
+    background-color: rgba($color-warning, 0.9);
+    color: $color-background-dark;
+  }
+}
+
+.content {
+  padding: $spacing-md;
+}
+
+.name {
+  margin: 0 0 $spacing-xs 0;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.description {
+  margin: 0 0 $spacing-sm 0;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: $line-height-normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+}
+
+.metaItem {
+  display: flex;
+  gap: $spacing-xs;
+  font-size: $font-size-xs;
+  padding: $spacing-xs $spacing-sm;
+  background-color: rgba($color-text-primary, 0.05);
+  border-radius: $radius-sm;
+}
+
+.metaKey {
+  color: $color-text-muted;
+}
+
+.metaValue {
+  color: $color-text-secondary;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  padding-top: $spacing-sm;
+  border-top: 1px solid $color-panel-border;
+}
+
+.statusGenerated {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-accent-green;
+
+  .statusDot {
+    width: 6px;
+    height: 6px;
+    border-radius: $radius-full;
+    background-color: $color-accent-green;
+    box-shadow: 0 0 6px rgba($color-accent-green, 0.6);
+  }
+}
+
+.statusPending {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+}
+

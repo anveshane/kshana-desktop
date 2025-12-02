@@ -154,8 +154,19 @@ ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {
 
 ipcMain.handle(
   'project:read-file',
-  async (_event, filePath: string): Promise<string> => {
-    return fs.readFile(filePath, 'utf-8');
+  async (_event, filePath: string): Promise<string | null> => {
+    try {
+      // Check if file exists first to avoid noisy ENOENT errors
+      await fs.access(filePath);
+      return await fs.readFile(filePath, 'utf-8');
+    } catch (error: unknown) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ENOENT') {
+        // Return null for missing files - frontend handles this gracefully
+        return null;
+      }
+      throw error;
+    }
   },
 );
 

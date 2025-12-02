@@ -1,0 +1,97 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  @include flex-column;
+  height: 100%;
+  background-color: $color-background-dark;
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: $spacing-lg;
+  @include custom-scrollbar;
+}
+
+.section {
+  margin-bottom: $spacing-2xl;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-lg;
+  padding-bottom: $spacing-sm;
+  border-bottom: 1px solid $color-panel-border;
+  color: $color-text-primary;
+
+  h3 {
+    margin: 0;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+  }
+
+  svg {
+    color: $color-text-secondary;
+  }
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 $spacing-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  background-color: rgba($color-text-primary, 0.1);
+  border-radius: $radius-full;
+  color: $color-text-secondary;
+  margin-left: auto;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: $spacing-lg;
+}
+
+.loading {
+  @include flex-center;
+  flex: 1;
+  color: $color-text-muted;
+  font-size: $font-size-sm;
+}
+
+.emptyState {
+  @include flex-center;
+  @include flex-column;
+  flex: 1;
+  gap: $spacing-md;
+  color: $color-text-muted;
+  text-align: center;
+  padding: $spacing-3xl;
+
+  h3 {
+    margin: 0;
+    font-size: $font-size-lg;
+    color: $color-text-secondary;
+  }
+
+  p {
+    margin: 0;
+    font-size: $font-size-sm;
+  }
+}
+
+.emptyIcon {
+  opacity: 0.5;
+}
+

@@ -28,7 +28,7 @@ export default function ChatPanel() {
     useState<ConnectionState>('disconnected');
   const [isStreaming, setIsStreaming] = useState(false);
 
-  const { setConnectionStatus } = useWorkspace();
+  const { setConnectionStatus, projectDirectory } = useWorkspace();
 
   const wsRef = useRef<WebSocket | null>(null);
   const lastAssistantIdRef = useRef<string | null>(null);
@@ -355,6 +355,11 @@ export default function ChatPanel() {
       const port = currentState.port ?? 8001;
       const url = new URL(DEFAULT_WS_PATH, `http://127.0.0.1:${port}`);
       url.protocol = 'ws:';
+      
+      // Pass user's workspace directory to backend so it creates .kshana/ there
+      if (projectDirectory) {
+        url.searchParams.set('project_dir', projectDirectory);
+      }
 
       return await new Promise((resolve, reject) => {
         const socket = new WebSocket(url.toString());
@@ -409,7 +414,7 @@ export default function ChatPanel() {
       setConnectionState('disconnected');
       throw error;
     }
-  }, [appendSystemMessage, handleServerPayload, setConnectionStatus]);
+  }, [appendSystemMessage, handleServerPayload, setConnectionStatus, projectDirectory]);
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -481,6 +486,42 @@ export default function ChatPanel() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Clear chat and reconnect when workspace changes
+  useEffect(() => {
+    if (!projectDirectory) return;
+
+    // Clear existing chat messages
+    setMessages([]);
+    lastAssistantIdRef.current = null;
+    setIsStreaming(false);
+
+    // Disconnect existing WebSocket connection
+    if (wsRef.current) {
+      wsRef.current.close(1000, 'Workspace changed');
+      wsRef.current = null;
+    }
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    setConnectionState('disconnected');
+
+    // Reconnect with new project directory to get fresh greeting
+    const reconnect = async () => {
+      try {
+        const state = await window.electron.backend.getState();
+        if (state.status === 'ready') {
+          await connectWebSocket();
+        }
+      } catch {
+        // Connection will be retried when backend becomes ready
+      }
+    };
+
+    reconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectDirectory]);
 
   // Show initial greeting if no messages
   useEffect(() => {
