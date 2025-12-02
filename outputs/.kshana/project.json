@@ -1,8 +1,8 @@
 {
-  "project_id": "85ae3cd6-a74d-4542-ac3c-d729c35b7c25",
-  "project_name": "Project 85ae3cd6",
-  "created_at": "2025-12-02T18:27:56.186703",
-  "updated_at": "2025-12-02T18:28:19.833572",
+  "project_id": "b6ce74c3-4b0d-4058-a435-b51efb7b920e",
+  "project_name": "Project b6ce74c3",
+  "created_at": "2025-11-24T10:42:32.386734",
+  "updated_at": "2025-12-01T11:29:18.551528",
   "phase": "story_discovery",
   "current_scene": null,
   "current_shot": null,
@@ -36,14 +36,5 @@
   "plot_details": {},
   "information_completeness": 0.0,
   "information_gathering_iterations": 0,
-  "user_feedback": [
-    {
-      "timestamp": "2025-12-02T18:28:17.470775",
-      "phase": "story_discovery",
-      "type": "qa_interaction",
-      "question": "It looks like there might be a typo in your request. Could you please clarify what you'd like to do?",
-      "response": "a",
-      "summary": "It looks like there might be a typo in your request. Could you please clarify what you'd like to do? → a"
-    }
-  ]
+  "user_feedback": []
 }
