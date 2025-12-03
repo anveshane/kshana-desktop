@@ -8,6 +8,8 @@ on:
 jobs:
   release-mac:
     runs-on: macos-14
+    permissions:
+      contents: write  # Required to create releases and upload artifacts
     
     steps:
       - name: Set branch names
