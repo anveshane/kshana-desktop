@@ -48,7 +48,8 @@ jobs:
           repository: anveshane/kshana
           path: kshana-backend
           ref: ${{ steps.parse_tag.outputs.BACKEND_BRANCH }}
-          token: ${{ secrets.BACKEND_REPO_TOKEN }}  # PAT needed for private repo
+          token: ${{ secrets.BACKEND_REPO_TOKEN }}
+        continue-on-error: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -66,9 +67,26 @@ jobs:
         working-directory: kshana-desktop
         run: npm ci
 
+      - name: Verify backend checkout and set path
+        id: backend_path
+        run: |
+          cd kshana-desktop
+          BACKEND_PATH=$(realpath ../kshana-backend)
+          echo "Backend path: $BACKEND_PATH"
+          if [ ! -d "$BACKEND_PATH" ]; then
+            echo "Error: Backend repo not found at $BACKEND_PATH"
+            echo "Current directory: $(pwd)"
+            echo "Contents of parent:"
+            ls -la ../
+            exit 1
+          fi
+          echo "BACKEND_ABS_PATH=$BACKEND_PATH" >> $GITHUB_OUTPUT
+          echo "✓ Backend repo verified at $BACKEND_PATH"
+
       - name: Build backend
         working-directory: kshana-desktop
-        run: python3.13 backend-build/build.py --clean --source-path ../kshana-backend
+        run: |
+          python3.13 backend-build/build.py --clean --source-path ${{ steps.backend_path.outputs.BACKEND_ABS_PATH }}
 
       - name: Build Electron app
         working-directory: kshana-desktop
