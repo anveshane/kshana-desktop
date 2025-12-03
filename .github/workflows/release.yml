@@ -7,28 +7,31 @@ on:
 
 jobs:
   release-mac:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Get tag name
+        id: tag
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: List DMG files
+        run: |
+          echo "Found DMG files:"
+          ls -lh release/build/*.dmg || echo "No DMG files found"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          python-version: '3.13'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build and publish
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: |
+            release/build/Kshana-1.0.0-arm64.dmg
+            release/build/Kshana-1.0.0.dmg
+          draft: false
+          prerelease: false
 
