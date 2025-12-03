@@ -116,7 +116,7 @@ jobs:
       - name: Build Electron app
         working-directory: kshana-desktop
         run: |
-          ts-node ./.erb/scripts/clean.js dist
+          npx ts-node ./.erb/scripts/clean.js dist
           npm run build
           electron-builder build --publish always
         env:
