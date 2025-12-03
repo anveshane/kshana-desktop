@@ -51,6 +51,20 @@ jobs:
           token: ${{ secrets.BACKEND_REPO_TOKEN }}
         continue-on-error: false
 
+      - name: Verify backend checkout succeeded
+        run: |
+          echo "Checking if backend repo was checked out..."
+          if [ ! -d "kshana-backend" ]; then
+            echo "Error: Backend repo directory not found!"
+            echo "Current directory: $(pwd)"
+            echo "Contents:"
+            ls -la
+            exit 1
+          fi
+          echo "✓ Backend repo directory exists"
+          echo "Backend repo contents:"
+          ls -la kshana-backend/ | head -10
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -67,21 +81,14 @@ jobs:
         working-directory: kshana-desktop
         run: npm ci
 
-      - name: Verify backend checkout and set path
+      - name: Set backend absolute path
         id: backend_path
         run: |
-          cd kshana-desktop
-          BACKEND_PATH=$(realpath ../kshana-backend)
-          echo "Backend path: $BACKEND_PATH"
-          if [ ! -d "$BACKEND_PATH" ]; then
-            echo "Error: Backend repo not found at $BACKEND_PATH"
-            echo "Current directory: $(pwd)"
-            echo "Contents of parent:"
-            ls -la ../
-            exit 1
-          fi
+          # Get absolute path of backend repo (works from any directory)
+          BACKEND_PATH=$(cd kshana-backend && pwd)
+          echo "Backend absolute path: $BACKEND_PATH"
           echo "BACKEND_ABS_PATH=$BACKEND_PATH" >> $GITHUB_OUTPUT
-          echo "✓ Backend repo verified at $BACKEND_PATH"
+          echo "✓ Backend path set to $BACKEND_PATH"
 
       - name: Build backend
         working-directory: kshana-desktop
