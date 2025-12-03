@@ -29,7 +29,7 @@ jobs:
       - name: Verify backend repo access
         run: |
           echo "Attempting to access backend repo..."
-          echo "Branch: ${{ steps.parse_tag.outputs.BACKEND_BRANCH }}"
+          echo "Branch: ${{ steps.set_branches.outputs.BACKEND_BRANCH }}"
           if [ -z "${{ secrets.BACKEND_REPO_TOKEN }}" ]; then
             echo "Error: BACKEND_REPO_TOKEN secret is not set!"
             exit 1
@@ -54,7 +54,7 @@ jobs:
           echo "Attempted branch: ${{ steps.set_branches.outputs.BACKEND_BRANCH }}"
           echo ""
           echo "Possible issues:"
-          echo "1. Branch '${{ steps.parse_tag.outputs.BACKEND_BRANCH }}' doesn't exist"
+          echo "1. Branch '${{ steps.set_branches.outputs.BACKEND_BRANCH }}' doesn't exist"
           echo "2. BACKEND_REPO_TOKEN doesn't have access"
           echo "3. Token is invalid or expired"
           echo ""
