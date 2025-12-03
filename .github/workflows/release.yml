@@ -42,14 +42,48 @@ jobs:
           path: kshana-desktop
           ref: ${{ steps.parse_tag.outputs.FRONTEND_BRANCH }}
 
+      - name: Verify backend repo access
+        run: |
+          echo "Attempting to access backend repo..."
+          echo "Branch: ${{ steps.parse_tag.outputs.BACKEND_BRANCH }}"
+          if [ -z "${{ secrets.BACKEND_REPO_TOKEN }}" ]; then
+            echo "Error: BACKEND_REPO_TOKEN secret is not set!"
+            exit 1
+          fi
+          echo "✓ Token is set (checking access...)"
+          
       - name: Checkout kshana backend
+        id: checkout_backend
         uses: actions/checkout@v4
         with:
           repository: anveshane/kshana
           path: kshana-backend
           ref: ${{ steps.parse_tag.outputs.BACKEND_BRANCH }}
           token: ${{ secrets.BACKEND_REPO_TOKEN }}
-        continue-on-error: false
+          fetch-depth: 1
+        continue-on-error: true
+
+      - name: Handle backend checkout failure
+        if: steps.checkout_backend.outcome == 'failure'
+        run: |
+          echo "Backend checkout failed. Trying default branch..."
+          echo "Attempted branch: ${{ steps.parse_tag.outputs.BACKEND_BRANCH }}"
+          echo ""
+          echo "Possible issues:"
+          echo "1. Branch '${{ steps.parse_tag.outputs.BACKEND_BRANCH }}' doesn't exist"
+          echo "2. BACKEND_REPO_TOKEN doesn't have access"
+          echo "3. Token is invalid or expired"
+          echo ""
+          echo "Trying to checkout without specifying branch (uses default)..."
+          
+      - name: Checkout kshana backend (fallback to default)
+        if: steps.checkout_backend.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          repository: anveshane/kshana
+          path: kshana-backend
+          token: ${{ secrets.BACKEND_REPO_TOKEN }}
+          fetch-depth: 1
 
       - name: Verify backend checkout succeeded
         run: |
