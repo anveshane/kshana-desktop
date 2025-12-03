@@ -20,12 +20,18 @@ jobs:
           TAG_NAME=${GITHUB_REF#refs/tags/}
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
           
-          # Extract branches from tag name if format is: v1.0.0-frontend-branch-backend-branch
-          # Example: v1.0.0-feature-branch-main
-          if [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(.+)-(.+)$ ]]; then
+          # Extract branches from tag name if format is: v1.0.0-frontend-branch__backend-branch
+          # Example: v1.0.0-feature-branch__main
+          # Or: v1.0.0-feature/github-releases-setup__fix/httpx-proxies-compatibility
+          if [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(.+)__(.+)$ ]]; then
             FRONTEND_BRANCH="${BASH_REMATCH[1]}"
             BACKEND_BRANCH="${BASH_REMATCH[2]}"
             echo "✓ Extracted from tag: frontend=$FRONTEND_BRANCH, backend=$BACKEND_BRANCH"
+          elif [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(.+)-(.+)$ ]]; then
+            # Fallback: try with single dash (for simple branch names without slashes)
+            FRONTEND_BRANCH="${BASH_REMATCH[1]}"
+            BACKEND_BRANCH="${BASH_REMATCH[2]}"
+            echo "✓ Extracted from tag (single dash): frontend=$FRONTEND_BRANCH, backend=$BACKEND_BRANCH"
           else
             # Use default branches
             FRONTEND_BRANCH="$DEFAULT_FRONTEND_BRANCH"
