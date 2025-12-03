@@ -3,9 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'  # Matches: v1.0.0, v1.0.1, etc.
-      - 'v*.*.*-*'  # Matches: v1.0.0-branch-name, v1.0.0-feature__backend
-      - 'v*.*.*__*'  # Matches: v1.0.0-feature/branch__backend/branch
+      - 'v*'  # Matches all tags starting with 'v'
 
 jobs:
   release-mac:
