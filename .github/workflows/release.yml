@@ -118,7 +118,7 @@ jobs:
         run: |
           npx ts-node ./.erb/scripts/clean.js dist
           npm run build
-          electron-builder build --publish always
+          npx electron-builder build --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
