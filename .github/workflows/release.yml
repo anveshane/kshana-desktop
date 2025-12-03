@@ -15,7 +15,7 @@ jobs:
         env:
           # Set default branches here - change these to your preferred branches
           DEFAULT_FRONTEND_BRANCH: main
-          DEFAULT_BACKEND_BRANCH: main
+          DEFAULT_BACKEND_BRANCH: master
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
           echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
