@@ -7,31 +7,47 @@ on:
 
 jobs:
   release-mac:
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     
     steps:
-      - name: Checkout code
+      - name: Checkout kshana-desktop
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          path: kshana-desktop
 
-      - name: Get tag name
-        id: tag
-        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-      - name: List DMG files
-        run: |
-          echo "Found DMG files:"
-          ls -lh release/build/*.dmg || echo "No DMG files found"
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Checkout kshana backend
+        uses: actions/checkout@v4
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          files: |
-            release/build/Kshana-1.0.0-arm64.dmg
-            release/build/Kshana-1.0.0.dmg
-          draft: false
-          prerelease: false
+          repository: anveshane/kshana
+          path: kshana-backend
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: kshana-desktop/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        working-directory: kshana-desktop
+        run: npm ci
+
+      - name: Build backend
+        working-directory: kshana-desktop
+        run: python3.13 backend-build/build.py --clean --source-path ../kshana-backend
+
+      - name: Build Electron app
+        working-directory: kshana-desktop
+        run: |
+          ts-node ./.erb/scripts/clean.js dist
+          npm run build
+          electron-builder build --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
