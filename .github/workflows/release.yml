@@ -10,17 +10,45 @@ jobs:
     runs-on: macos-14
     
     steps:
-      - name: Checkout kshana-desktop
+      - name: Parse tag for branches
+        id: parse_tag
+        env:
+          # Set default branches here - change these to your preferred branches
+          DEFAULT_FRONTEND_BRANCH: main
+          DEFAULT_BACKEND_BRANCH: main
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+          
+          # Extract branches from tag name if format is: v1.0.0-frontend-branch-backend-branch
+          # Example: v1.0.0-feature-branch-main
+          if [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(.+)-(.+)$ ]]; then
+            FRONTEND_BRANCH="${BASH_REMATCH[1]}"
+            BACKEND_BRANCH="${BASH_REMATCH[2]}"
+            echo "✓ Extracted from tag: frontend=$FRONTEND_BRANCH, backend=$BACKEND_BRANCH"
+          else
+            # Use default branches
+            FRONTEND_BRANCH="$DEFAULT_FRONTEND_BRANCH"
+            BACKEND_BRANCH="$DEFAULT_BACKEND_BRANCH"
+            echo "✓ Using default branches: frontend=$FRONTEND_BRANCH, backend=$BACKEND_BRANCH"
+          fi
+          
+          echo "FRONTEND_BRANCH=$FRONTEND_BRANCH" >> $GITHUB_OUTPUT
+          echo "BACKEND_BRANCH=$BACKEND_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Checkout kshana-desktop (frontend)
         uses: actions/checkout@v4
         with:
           path: kshana-desktop
+          ref: ${{ steps.parse_tag.outputs.FRONTEND_BRANCH }}
 
       - name: Checkout kshana backend
         uses: actions/checkout@v4
         with:
           repository: anveshane/kshana
           path: kshana-backend
-          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ steps.parse_tag.outputs.BACKEND_BRANCH }}
+          token: ${{ secrets.BACKEND_REPO_TOKEN }}  # PAT needed for private repo
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
