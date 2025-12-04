@@ -1,0 +1,66 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  margin: $spacing-md 0;
+  border-radius: $radius-lg;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid $color-panel-border;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-sm $spacing-md;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid $color-panel-border;
+}
+
+.language {
+  font-size: $font-size-xs;
+  font-family: $font-family-mono;
+  color: $color-text-secondary;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.copyButton {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background: transparent;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: rgba($color-accent-green, 0.1);
+    border-color: $color-accent-green;
+    color: $color-accent-green;
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+.codeWrapper {
+  overflow-x: auto;
+  @include custom-scrollbar;
+  padding: $spacing-md;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+// Override syntax highlighter styles
+:global(.codeWrapper pre) {
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+

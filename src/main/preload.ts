@@ -60,7 +60,7 @@ const projectBridge = {
   readTree(dirPath: string): Promise<FileNode> {
     return ipcRenderer.invoke('project:read-tree', dirPath);
   },
-  readFile(filePath: string): Promise<string> {
+  readFile(filePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:read-file', filePath);
   },
   writeFile(filePath: string, content: string): Promise<void> {

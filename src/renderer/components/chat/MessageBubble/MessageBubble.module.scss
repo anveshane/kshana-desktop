@@ -1,0 +1,166 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  padding: $spacing-md $spacing-lg;
+  border-radius: $radius-lg;
+  margin-bottom: $spacing-xl;
+  transition: all $transition-normal;
+  position: relative;
+
+  &.user {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid $color-panel-border;
+  }
+
+  &.assistant {
+    background: transparent;
+    border-left: 2px solid transparent;
+    padding-left: $spacing-lg;
+
+    &.streaming {
+      border-left-color: $color-accent-green;
+    }
+  }
+
+  &.system {
+    border: 1px dashed $color-panel-border;
+    background: rgba($color-panel-background, 0.5);
+    color: $color-text-secondary;
+  }
+
+  &.intermediate {
+    opacity: 0.8;
+    border-left: 2px solid $color-text-muted;
+  }
+
+  &.error {
+    border-left-color: $color-error;
+    background: rgba($color-error, 0.1);
+  }
+
+  &:hover {
+    .actions {
+      opacity: 1;
+    }
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  position: relative;
+}
+
+.role {
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.type {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: $font-size-xs;
+  padding: 2px $spacing-sm;
+  border-radius: $radius-full;
+  background: rgba($color-accent-green, 0.1);
+  color: $color-accent-green;
+}
+
+.time {
+  margin-left: auto;
+  font-size: $font-size-xs;
+}
+
+.actions {
+  position: absolute;
+  right: 0;
+  top: 0;
+  opacity: 0;
+  transition: opacity $transition-fast;
+}
+
+.body {
+  color: $color-text-primary;
+  line-height: $line-height-relaxed;
+  font-size: $font-size-base;
+
+  p {
+    margin: 0 0 $spacing-md 0;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+}
+
+.systemContent {
+  white-space: pre-wrap;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+// Markdown styling
+.heading1,
+.heading2,
+.heading3 {
+  margin: $spacing-lg 0 $spacing-md 0;
+  color: $color-text-primary;
+  font-weight: $font-weight-semibold;
+}
+
+.heading1 {
+  font-size: $font-size-xl;
+}
+
+.heading2 {
+  font-size: $font-size-lg;
+}
+
+.heading3 {
+  font-size: $font-size-base;
+}
+
+.list {
+  margin: $spacing-md 0;
+  padding-left: $spacing-xl;
+  color: $color-text-primary;
+
+  li {
+    margin: $spacing-xs 0;
+  }
+}
+
+.blockquote {
+  margin: $spacing-md 0;
+  padding: $spacing-md $spacing-lg;
+  border-left: 3px solid $color-accent-green;
+  background: rgba($color-accent-green, 0.05);
+  color: $color-text-secondary;
+  font-style: italic;
+}
+
+.inlineCode {
+  padding: 2px $spacing-xs;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: $radius-sm;
+  font-family: $font-family-mono;
+  font-size: 0.9em;
+  color: $color-accent-green;
+}
+
+.link {
+  color: $color-accent-green;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color $transition-fast;
+
+  &:hover {
+    border-bottom-color: $color-accent-green;
+  }
+}
+

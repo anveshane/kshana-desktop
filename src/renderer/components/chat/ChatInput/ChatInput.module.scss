@@ -1,0 +1,107 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  background-color: $color-panel-background;
+  border-top: 1px solid $color-panel-border;
+  padding: $spacing-md $spacing-lg;
+}
+
+.inputWrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: $spacing-sm;
+  background: $color-background-dark;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-lg;
+  padding: $spacing-sm;
+  transition: all $transition-fast;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+
+  &:focus-within {
+    border-color: $color-accent-green;
+    background: rgba($color-background-dark, 0.8);
+    box-shadow: 0 0 0 1px rgba($color-accent-green, 0.2);
+  }
+}
+
+.textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  resize: none;
+  font-family: $font-family-base;
+  font-size: $font-size-base;
+  line-height: $line-height-normal;
+  color: $color-text-primary;
+  padding: $spacing-xs $spacing-sm;
+  min-height: 24px;
+  max-height: 144px; // MAX_ROWS * LINE_HEIGHT
+  overflow-y: auto;
+  @include custom-scrollbar;
+  transition: height $transition-fast;
+  box-sizing: border-box;
+
+  &::placeholder {
+    color: $color-text-muted;
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.sendButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: $radius-md;
+  color: $color-text-secondary;
+  cursor: pointer;
+  transition: all $transition-fast;
+  flex-shrink: 0;
+  margin-bottom: 2px; // Align with text baseline
+
+  &:hover:not(:disabled) {
+    background: $color-accent-green;
+    color: $color-background-dark;
+    @include glow-effect($color-accent-green, 8px);
+  }
+
+  &:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+}
+
+.hint {
+  margin-top: $spacing-xs;
+  font-size: 11px;
+  color: $color-text-muted;
+  text-align: right;
+  opacity: 0.7;
+
+  kbd {
+    padding: 1px 4px;
+    background: rgba($color-text-primary, 0.05);
+    border: 1px solid rgba($color-panel-border, 0.5);
+    border-radius: 3px;
+    font-family: $font-family-mono;
+    font-size: 10px;
+    color: $color-text-secondary;
+  }
+}

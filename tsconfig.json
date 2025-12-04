@@ -1,8 +1,9 @@
 {
   "compilerOptions": {
+    "skipLibCheck": true,
     "incremental": true,
     "target": "es2022",
-    "module": "node16",
+    "module": "NodeNext",
     "lib": ["dom", "es2022"],
     "jsx": "react-jsx",
     "strict": true,

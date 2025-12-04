@@ -29,7 +29,11 @@ export default function MediaPreview({ file }: MediaPreviewProps) {
       window.electron.project
         .readFile(file.path)
         .then((content) => {
-          setFileContent(content);
+          if (content !== null) {
+            setFileContent(content);
+          } else {
+            setError('File not found');
+          }
           setIsLoading(false);
         })
         .catch((err) => {

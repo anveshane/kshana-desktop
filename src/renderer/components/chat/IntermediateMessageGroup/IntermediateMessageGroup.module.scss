@@ -1,0 +1,110 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  margin-bottom: 4px;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  background: rgba($color-panel-background, 0.5);
+  overflow: hidden;
+  transition: all $transition-normal;
+
+  &.active {
+    border-color: $color-accent-green;
+    background: rgba($color-accent-green, 0.05);
+  }
+
+  &.error {
+    border-color: $color-error;
+    background: rgba($color-error, 0.05);
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: $color-text-primary;
+  font-size: 11px;
+  transition: background-color $transition-fast;
+  height: 28px;
+
+  &:hover {
+    background: rgba($color-text-primary, 0.05);
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
+}
+
+.chevron {
+  color: $color-text-secondary;
+  transition: transform $transition-fast;
+  transform: scale(0.7);
+}
+
+.icon {
+  color: $color-text-secondary;
+  transform: scale(0.7);
+}
+
+.loadingIcon {
+  color: $color-accent-green;
+  animation: spin 1s linear infinite;
+  transform: scale(0.7);
+}
+
+.successIcon {
+  color: $color-accent-green;
+  transform: scale(0.7);
+}
+
+.errorIcon {
+  color: $color-error;
+  transform: scale(0.7);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg) scale(0.7);
+  }
+
+  to {
+    transform: rotate(360deg) scale(0.7);
+  }
+}
+
+.toolName {
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status {
+  color: $color-text-secondary;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.count {
+  color: $color-text-muted;
+  font-size: 9px;
+  margin-left: 4px;
+}
+
+.content {
+  padding: 4px 8px;
+  border-top: 1px solid $color-panel-border;
+  background: rgba(0, 0, 0, 0.2);
+}
