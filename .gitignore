@@ -140,7 +140,7 @@ $RECYCLE.BIN/
 .nfs*
 
 # Electron Build Artifacts
-release/
+# release/  # Removed - will be committed for releases
 .erb/dll
 dist/
 build/
