@@ -1,0 +1,89 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.markerFlag {
+  position: absolute;
+  top: 30px;
+  left: -6px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 12px solid;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: all $transition-fast;
+}
+
+.marker.pending .markerFlag {
+  border-bottom-color: $color-timeline-marker-pending;
+}
+
+.marker.processing .markerFlag {
+  border-bottom-color: $color-timeline-marker-processing;
+}
+
+.marker.complete .markerFlag {
+  border-bottom-color: $color-timeline-marker-complete;
+}
+
+.marker.error .markerFlag {
+  border-bottom-color: $color-timeline-marker-error;
+}
+
+.marker.pulsing .markerFlag {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+}
+
+.markerTooltip {
+  position: absolute;
+  top: 45px;
+  left: -100px;
+  width: 200px;
+  padding: $spacing-sm;
+  background-color: $color-panel-background;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  box-shadow: $shadow-md;
+  z-index: 100;
+  pointer-events: auto;
+}
+
+.tooltipStatus {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  margin-bottom: $spacing-xs;
+}
+
+.statusText {
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+  text-transform: capitalize;
+}
+
+.tooltipPrompt {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  line-height: $line-height-normal;
+}
+

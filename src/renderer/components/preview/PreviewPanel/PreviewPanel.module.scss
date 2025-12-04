@@ -88,9 +88,30 @@
   }
 }
 
+.contentWrapper {
+  flex: 1;
+  @include flex-column;
+  overflow: hidden;
+  position: relative;
+}
+
 .content {
   flex: 1;
   overflow: hidden;
   background-color: $color-background-dark;
+  transition: flex $transition-normal;
+}
+
+.timelineContainer {
+  height: 28px;
+  overflow: hidden;
+  transition: height $transition-normal;
+  background-color: $color-timeline-background;
+  border-top: 1px solid $color-panel-border;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  flex-shrink: 0;
+  min-height: 28px;
 }
 
