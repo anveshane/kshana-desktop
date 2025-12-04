@@ -154,8 +154,19 @@ ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {
 
 ipcMain.handle(
   'project:read-file',
-  async (_event, filePath: string): Promise<string> => {
-    return fs.readFile(filePath, 'utf-8');
+  async (_event, filePath: string): Promise<string | null> => {
+    try {
+      // Check if file exists first to avoid noisy ENOENT errors
+      await fs.access(filePath);
+      return await fs.readFile(filePath, 'utf-8');
+    } catch (error: unknown) {
+      const err = error as { code?: string };
+      if (err.code === 'ENOENT') {
+        // Return null for missing files - frontend handles this gracefully
+        return null;
+      }
+      throw error;
+    }
   },
 );
 
@@ -168,7 +179,11 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:create-file',
-  async (_event, basePath: string, relativePath: string): Promise<string | null> => {
+  async (
+    _event,
+    basePath: string,
+    relativePath: string,
+  ): Promise<string | null> => {
     const filePath = path.join(basePath, relativePath);
     const dirPath = path.dirname(filePath);
     await fs.mkdir(dirPath, { recursive: true });
@@ -179,7 +194,11 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:create-folder',
-  async (_event, basePath: string, relativePath: string): Promise<string | null> => {
+  async (
+    _event,
+    basePath: string,
+    relativePath: string,
+  ): Promise<string | null> => {
     const folderPath = path.join(basePath, relativePath);
     await fs.mkdir(folderPath, { recursive: true });
     return folderPath;
@@ -214,9 +233,12 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle('project:reveal-in-finder', async (_event, targetPath: string) => {
-  return fileSystemManager.revealInFinder(targetPath);
-});
+ipcMain.handle(
+  'project:reveal-in-finder',
+  async (_event, targetPath: string) => {
+    return fileSystemManager.revealInFinder(targetPath);
+  },
+);
 
 // Forward file change events to renderer
 fileSystemManager.on('file-change', (event: FileChangeEvent) => {
@@ -276,12 +298,66 @@ const createWindow = async () => {
     },
   });
 
-  mainWindow.loadURL(resolveHtmlPath('index.html'));
+  // Open DevTools to debug black screen
+  mainWindow.webContents.openDevTools();
+
+  const htmlPath = resolveHtmlPath('index.html');
+  log.info(`Loading HTML from: ${htmlPath}`);
+  log.info(`App is packaged: ${app.isPackaged}`);
+  log.info(`Main process __dirname: ${__dirname}`);
+
+  // In development, wait for dev server to be ready
+  if (isDebug && htmlPath.startsWith('http://')) {
+    const checkDevServer = async () => {
+      const maxAttempts = 30;
+      // eslint-disable-next-line no-plusplus
+      for (let i = 0; i < maxAttempts; i += 1) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const response = await fetch(htmlPath, { method: 'HEAD' });
+          if (response.ok) {
+            log.info('Dev server is ready');
+            mainWindow?.loadURL(htmlPath);
+            return;
+          }
+        } catch {
+          // Dev server not ready yet
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise<void>((resolve) => {
+          setTimeout(() => resolve(), 1000);
+        });
+      }
+      log.warn('Dev server not ready after 30 seconds, loading anyway');
+      mainWindow?.loadURL(htmlPath);
+    };
+    checkDevServer();
+  } else {
+    mainWindow.loadURL(htmlPath);
+  }
+
+  // Add error handlers for debugging
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (event, errorCode, errorDescription, validatedURL) => {
+      log.error(`Failed to load: ${errorCode} - ${errorDescription}`);
+      log.error(`URL: ${validatedURL || htmlPath}`);
+    },
+  );
+
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    log.error(`Renderer process gone: ${details.reason}`);
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    log.info('Page finished loading');
+  });
 
   mainWindow.on('ready-to-show', () => {
     if (!mainWindow) {
       throw new Error('"mainWindow" is not defined');
     }
+    log.info('Window ready to show');
     if (process.env.START_MINIMIZED) {
       mainWindow.minimize();
     } else {
@@ -304,7 +380,7 @@ const createWindow = async () => {
 
   // Remove this if your app does not use auto updates
   // eslint-disable-next-line
-  new AppUpdater();
+  // new AppUpdater();
 };
 
 /**
@@ -333,11 +409,25 @@ const bootstrapBackend = async () => {
   }
 };
 
+const handleBackendStartup = (error: Error) => {
+  log.error(`Background backend startup failed: ${error.message}`);
+};
+
+const startBackendInBackground = () => {
+  const backendPromise = bootstrapBackend();
+  backendPromise.catch(handleBackendStartup);
+};
+
 app
   .whenReady()
   .then(async () => {
-    await bootstrapBackend();
+    // Create window first so UI appears immediately
     await createWindow();
+
+    // Start backend in background (non-blocking)
+    // UI will show loading state while backend starts
+    startBackendInBackground();
+
     app.on('activate', () => {
       // On macOS it's common to re-create a window in the app when the
       // dock icon is clicked and there are no other windows open.

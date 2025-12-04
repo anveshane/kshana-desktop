@@ -7,10 +7,12 @@ import { useBackendHealth } from '../../../hooks/useBackendHealth';
 import PreviewPlaceholder from '../PreviewPlaceholder/PreviewPlaceholder';
 import MediaPreview from '../MediaPreview/MediaPreview';
 import TimelineView from '../TimelineView/TimelineView';
+import StoryboardView from '../StoryboardView/StoryboardView';
+import AssetsView from '../AssetsView/AssetsView';
 import SettingsPanel from '../../SettingsPanel';
 import styles from './PreviewPanel.module.scss';
 
-type Tab = 'preview' | 'timeline';
+type Tab = 'timeline' | 'storyboard' | 'assets' | 'preview';
 
 const mapSettingsToEnv = (settings: AppSettings): BackendEnvOverrides => ({
   port: settings.preferredPort,
@@ -23,7 +25,7 @@ const mapSettingsToEnv = (settings: AppSettings): BackendEnvOverrides => ({
 });
 
 export default function PreviewPanel() {
-  const [activeTab, setActiveTab] = useState<Tab>('preview');
+  const [activeTab, setActiveTab] = useState<Tab>('storyboard');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [isRestartingBackend, setIsRestartingBackend] = useState(false);
@@ -76,17 +78,31 @@ export default function PreviewPanel() {
         <div className={styles.tabs}>
           <button
             type="button"
-            className={`${styles.tab} ${activeTab === 'preview' ? styles.active : ''}`}
-            onClick={() => setActiveTab('preview')}
-          >
-            Preview
-          </button>
-          <button
-            type="button"
             className={`${styles.tab} ${activeTab === 'timeline' ? styles.active : ''}`}
             onClick={() => setActiveTab('timeline')}
           >
             Timeline
+          </button>
+          <button
+            type="button"
+            className={`${styles.tab} ${activeTab === 'storyboard' ? styles.active : ''}`}
+            onClick={() => setActiveTab('storyboard')}
+          >
+            Storyboard
+          </button>
+          <button
+            type="button"
+            className={`${styles.tab} ${activeTab === 'assets' ? styles.active : ''}`}
+            onClick={() => setActiveTab('assets')}
+          >
+            Assets
+          </button>
+          <button
+            type="button"
+            className={`${styles.tab} ${activeTab === 'preview' ? styles.active : ''}`}
+            onClick={() => setActiveTab('preview')}
+          >
+            Preview
           </button>
         </div>
 
@@ -139,11 +155,13 @@ export default function PreviewPanel() {
       </div>
 
       <div className={styles.content}>
+        {activeTab === 'timeline' && <TimelineView />}
+        {activeTab === 'storyboard' && <StoryboardView />}
+        {activeTab === 'assets' && <AssetsView />}
         {activeTab === 'preview' && selectedFile && (
           <MediaPreview file={selectedFile} />
         )}
         {activeTab === 'preview' && !selectedFile && <PreviewPlaceholder />}
-        {activeTab === 'timeline' && <TimelineView />}
       </div>
 
       <SettingsPanel
