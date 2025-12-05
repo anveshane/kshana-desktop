@@ -90,19 +90,7 @@ export default function ChatPanel() {
   const clearChat = useCallback(() => {
     setMessages([]);
     lastAssistantIdRef.current = null;
-    // Re-add greeting
-    setTimeout(() => {
-      setMessages([
-        {
-          id: makeId(),
-          role: 'assistant',
-          type: 'greeting',
-          content:
-            'Hello! I am Kshana. How can I assist you with your project today?',
-          timestamp: Date.now(),
-        },
-      ]);
-    }, 0);
+    // Backend will send greeting via WebSocket when connection is re-established
   }, []);
 
   const deleteMessage = useCallback((messageId: string) => {
@@ -205,13 +193,29 @@ export default function ChatPanel() {
           );
           break;
         case 'greeting': {
-          const suggestions = payload.suggested_actions
-            ? `\n• ${(payload.suggested_actions as string[]).join('\n• ')}`
-            : '';
-          appendSystemMessage(
-            `${(payload.greeting_message as string) ?? 'Hello!'}${suggestions}`,
-            'greeting',
-          );
+          // Check if greeting already exists to avoid duplicates
+          setMessages((prev) => {
+            const hasGreeting = prev.some(
+              (msg) => msg.type === 'greeting' || (msg.role === 'assistant' && msg.type === 'greeting'),
+            );
+            if (hasGreeting) {
+              return prev; // Don't add duplicate greeting
+            }
+            const suggestions = payload.suggested_actions
+              ? `\n• ${(payload.suggested_actions as string[]).join('\n• ')}`
+              : '';
+            const greetingContent = `${(payload.greeting_message as string) ?? 'Hello!'}${suggestions}`;
+            return [
+              ...prev,
+              {
+                id: makeId(),
+                role: 'system',
+                type: 'greeting',
+                content: greetingContent,
+                timestamp: Date.now(),
+              },
+            ];
+          });
           break;
         }
         case 'error':
@@ -536,17 +540,8 @@ export default function ChatPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectDirectory]);
 
-  // Show initial greeting if no messages
-  useEffect(() => {
-    if (messages.length === 0) {
-      appendMessage({
-        role: 'assistant',
-        type: 'greeting',
-        content:
-          'Hello! I am Kshana. How can I assist you with your project today?',
-      });
-    }
-  }, [messages.length, appendMessage]);
+  // Backend will send greeting via WebSocket when connection is established
+  // No need to add client-side greeting to avoid duplicates
 
   return (
     <div className={styles.container}>

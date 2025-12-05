@@ -14,6 +14,7 @@ import {
   ChevronUp,
   Upload,
   Scissors,
+  Edit2,
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useTimeline } from '../../../contexts/TimelineContext';
@@ -162,6 +163,10 @@ export default function TimelinePanel({
     x: number;
     y: number;
   } | null>(null);
+  const [editingSceneNumber, setEditingSceneNumber] = useState<number | null>(
+    null,
+  );
+  const [editedSceneName, setEditedSceneName] = useState<string>('');
   const [importedVideos, setImportedVideos] = useState<
     Array<{ path: string; duration: number; startTime: number }>
   >([]);
@@ -192,6 +197,7 @@ export default function TimelinePanel({
   const dragStartXRef = useRef(0);
   const dragStartPositionRef = useRef(0);
   const isClickRef = useRef(true);
+  const scrollPositionBeforeEditRef = useRef<number | null>(null);
 
   // WebSocket integration for timeline markers
   const handleMarkerUpdate = useCallback(
@@ -237,6 +243,80 @@ export default function TimelinePanel({
   useEffect(() => {
     loadProjectState();
   }, [loadProjectState]);
+
+  // Restore scroll position when exiting edit mode
+  useEffect(() => {
+    if (
+      editingSceneNumber === null &&
+      scrollPositionBeforeEditRef.current !== null &&
+      tracksRef.current
+    ) {
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        if (tracksRef.current && scrollPositionBeforeEditRef.current !== null) {
+          tracksRef.current.scrollLeft = scrollPositionBeforeEditRef.current;
+          scrollPositionBeforeEditRef.current = null;
+        }
+      });
+    }
+  }, [editingSceneNumber]);
+
+  // Handle scene name change
+  const handleNameChange = useCallback(
+    async (sceneNumber: number, name: string) => {
+      if (!projectDirectory || !projectState) return;
+
+      // Update local state immediately (optimistic update)
+      const updatedScenes = (projectState.storyboard_outline?.scenes || []).map(
+        (scene) =>
+          scene.scene_number === sceneNumber
+            ? { ...scene, name: name || undefined }
+            : scene,
+      );
+
+      const updatedState: ProjectState = {
+        ...projectState,
+        storyboard_outline: projectState.storyboard_outline
+          ? {
+              ...projectState.storyboard_outline,
+              scenes: updatedScenes,
+            }
+          : {
+              scenes: updatedScenes,
+            },
+      };
+
+      // Update local state immediately to avoid flickering
+      setProjectState(updatedState);
+
+      // Restore scroll position after state update
+      if (scrollPositionBeforeEditRef.current !== null && tracksRef.current) {
+        // Use requestAnimationFrame to ensure DOM has updated
+        requestAnimationFrame(() => {
+          if (
+            tracksRef.current &&
+            scrollPositionBeforeEditRef.current !== null
+          ) {
+            tracksRef.current.scrollLeft = scrollPositionBeforeEditRef.current;
+            scrollPositionBeforeEditRef.current = null;
+          }
+        });
+      }
+
+      // Save to project.json in the background
+      try {
+        const stateFilePath = `${projectDirectory}/.kshana/project.json`;
+        await window.electron.project.writeFile(
+          stateFilePath,
+          JSON.stringify(updatedState, null, 2),
+        );
+      } catch {
+        // If save fails, reload from disk to restore previous state
+        await loadProjectState();
+      }
+    },
+    [projectDirectory, projectState, loadProjectState],
+  );
 
   // Get scenes and artifacts - memoized to prevent infinite loops
   // Use mock scenes if no project state exists (same as StoryboardView)
@@ -320,6 +400,8 @@ export default function TimelinePanel({
 
     // Add ALL scene blocks from storyboard - every scene appears on timeline
     sceneBlocks.forEach((block) => {
+      const sceneLabel =
+        block.scene.name || `Scene ${block.scene.scene_number}`;
       if (block.artifact && block.artifact.artifact_type === 'video') {
         // Scene has video - add as video item
         items.push({
@@ -330,7 +412,7 @@ export default function TimelinePanel({
           artifact: block.artifact,
           scene: block.scene,
           path: block.artifact.file_path,
-          label: `SCN_${String(block.scene.scene_number).padStart(2, '0')}`,
+          label: sceneLabel,
         });
       } else {
         // Scene without video - add as scene item (will show placeholder or image)
@@ -341,7 +423,7 @@ export default function TimelinePanel({
           duration: block.duration,
           scene: block.scene,
           artifact: block.artifact,
-          label: `SCN_${String(block.scene.scene_number).padStart(2, '0')}`,
+          label: sceneLabel,
         });
       }
     });
@@ -1354,6 +1436,7 @@ export default function TimelinePanel({
                           draggedSceneNumber === item.scene.scene_number;
 
                         return (
+                          // eslint-disable-next-line jsx-a11y/click-events-have-key-events
                           <div
                             key={item.id}
                             className={`${styles.sceneBlock} ${isSelected ? styles.selected : ''} ${isSceneDragging ? styles.dragging : ''}`}
@@ -1379,24 +1462,109 @@ export default function TimelinePanel({
                                 );
                               }
                             }}
-                            onKeyDown={(e) => {
-                              if (
-                                item.scene &&
-                                (e.key === 'Enter' || e.key === ' ')
-                              ) {
-                                e.preventDefault();
-                                handleSceneBlockClick(
-                                  e as unknown as React.MouseEvent<HTMLDivElement>,
-                                  item.scene.scene_number,
-                                );
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            aria-label={`Select scene ${item.label}`}
                           >
                             {thumbnailElement}
-                            <div className={styles.sceneId}>{item.label}</div>
+                            {item.scene &&
+                            editingSceneNumber === item.scene.scene_number ? (
+                              <div className={styles.sceneNameEdit}>
+                                <input
+                                  type="text"
+                                  value={editedSceneName}
+                                  onChange={(e) =>
+                                    setEditedSceneName(e.target.value)
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      handleNameChange(
+                                        item.scene!.scene_number,
+                                        editedSceneName,
+                                      );
+                                      setEditingSceneNumber(null);
+                                    } else if (e.key === 'Escape') {
+                                      // Restore scroll position on cancel
+                                      if (
+                                        scrollPositionBeforeEditRef.current !==
+                                          null &&
+                                        tracksRef.current
+                                      ) {
+                                        tracksRef.current.scrollLeft =
+                                          scrollPositionBeforeEditRef.current;
+                                        scrollPositionBeforeEditRef.current =
+                                          null;
+                                      }
+                                      setEditingSceneNumber(null);
+                                      setEditedSceneName(
+                                        item.scene!.name || '',
+                                      );
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    handleNameChange(
+                                      item.scene!.scene_number,
+                                      editedSceneName,
+                                    );
+                                    setEditingSceneNumber(null);
+                                  }}
+                                  onFocus={(e) => {
+                                    // Prevent browser from scrolling to input
+                                    e.target.scrollIntoView({
+                                      behavior: 'instant',
+                                      block: 'nearest',
+                                      inline: 'nearest',
+                                    });
+                                  }}
+                                  className={styles.sceneNameInput}
+                                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                                  autoFocus
+                                  onClick={(e) => e.stopPropagation()}
+                                  placeholder={`Scene ${item.scene.scene_number}`}
+                                />
+                              </div>
+                            ) : (
+                              <div
+                                className={styles.sceneId}
+                                onDoubleClick={(e) => {
+                                  if (item.scene) {
+                                    e.stopPropagation();
+                                    // Save scroll position before editing
+                                    if (tracksRef.current) {
+                                      scrollPositionBeforeEditRef.current =
+                                        tracksRef.current.scrollLeft;
+                                    }
+                                    setEditingSceneNumber(
+                                      item.scene.scene_number,
+                                    );
+                                    setEditedSceneName(item.scene.name || '');
+                                  }
+                                }}
+                                title="Double-click to edit name"
+                              >
+                                {item.label}
+                                {item.scene && (
+                                  <button
+                                    type="button"
+                                    className={styles.sceneNameEditButton}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      // Save scroll position before editing
+                                      if (tracksRef.current) {
+                                        scrollPositionBeforeEditRef.current =
+                                          tracksRef.current.scrollLeft;
+                                      }
+                                      setEditingSceneNumber(
+                                        item.scene!.scene_number,
+                                      );
+                                      setEditedSceneName(
+                                        item.scene!.name || '',
+                                      );
+                                    }}
+                                    title="Edit scene name"
+                                  >
+                                    <Edit2 size={10} />
+                                  </button>
+                                )}
+                              </div>
+                            )}
                             {item.scene && (
                               <div className={styles.sceneDescription}>
                                 {item.scene.description}
