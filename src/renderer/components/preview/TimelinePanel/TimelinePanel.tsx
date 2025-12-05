@@ -16,6 +16,7 @@ import {
   Scissors,
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import { useTimeline } from '../../../contexts/TimelineContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
 import type {
   ProjectState,
@@ -25,6 +26,8 @@ import type {
 } from '../../../types/projectState';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
+import SceneActionPopover from './SceneActionPopover';
+import VersionSelector from '../VersionSelector';
 import styles from './TimelinePanel.module.scss';
 
 // Mock scenes for when no project state exists (same as StoryboardView)
@@ -152,9 +155,30 @@ export default function TimelinePanel({
   const [markerPromptPosition, setMarkerPromptPosition] = useState<
     number | null
   >(null);
+  const [popoverSceneNumber, setPopoverSceneNumber] = useState<number | null>(
+    null,
+  );
+  const [popoverPosition, setPopoverPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [importedVideos, setImportedVideos] = useState<
     Array<{ path: string; duration: number; startTime: number }>
   >([]);
+  const [activeVersions, setActiveVersions] = useState<Record<number, number>>(
+    {},
+  );
+  const {
+    selectedScenes,
+    selectScene,
+    clearSelection,
+    draggedSceneNumber,
+    dropInsertIndex,
+    startDrag,
+    endDrag,
+    setDropIndex,
+    reorderScenes,
+  } = useTimeline();
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const tracksRef = useRef<HTMLDivElement>(null);
@@ -603,13 +627,10 @@ export default function TimelinePanel({
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUpGlobal);
 
-        // If it was a click (not drag), open marker prompt
+        // If it was a click (not drag), just seek to position
         if (wasClick) {
           const position = calculatePositionFromMouse(mouseUpEvent.clientX);
-          if (position >= 0 && position <= totalDuration) {
-            setMarkerPromptPosition(position);
-            setMarkerPromptOpen(true);
-          }
+          setCurrentPosition(position);
         } else if (wasPlayingBeforeDragRef.current) {
           // Resume playback if it was playing before drag
           setIsPlaying(true);
@@ -626,8 +647,151 @@ export default function TimelinePanel({
       setIsPlaying,
       setCurrentPosition,
       onDragStateChange,
-      totalDuration,
     ],
+  );
+
+  // Handle scene drag start
+  const handleSceneDragStart = useCallback(
+    (e: React.DragEvent<HTMLDivElement>, sceneNumber: number) => {
+      startDrag(sceneNumber);
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(sceneNumber));
+    },
+    [startDrag],
+  );
+
+  // Handle scene drag end
+  const handleSceneDragEnd = useCallback(() => {
+    endDrag();
+  }, [endDrag]);
+
+  // Calculate insertion index from mouse position
+  const calculateInsertIndex = useCallback(
+    (clientX: number): number | null => {
+      if (!tracksRef.current || !sceneBlocks.length) return null;
+
+      const rect = tracksRef.current.getBoundingClientRect();
+      const x = clientX - rect.left + scrollLeft;
+      const position = pixelsToSeconds(x, zoomLevel);
+
+      // Find which scene index to insert before/after
+      for (let i = 0; i < sceneBlocks.length; i += 1) {
+        const block = sceneBlocks[i];
+        const blockStart = block.startTime;
+        const blockCenter = blockStart + block.duration / 2;
+
+        // If position is before this block's center, insert before it
+        if (position < blockCenter) {
+          return i;
+        }
+      }
+
+      // If position is after all scenes, insert at the end
+      return sceneBlocks.length;
+    },
+    [sceneBlocks, scrollLeft, zoomLevel],
+  );
+
+  // Handle drag over on track content
+  const handleTrackDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (draggedSceneNumber === null) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+
+      const insertIndex = calculateInsertIndex(e.clientX);
+      setDropIndex(insertIndex);
+    },
+    [draggedSceneNumber, calculateInsertIndex, setDropIndex],
+  );
+
+  // Handle drop on track content
+  const handleTrackDrop = useCallback(
+    async (e: React.DragEvent<HTMLDivElement>) => {
+      if (draggedSceneNumber === null || dropInsertIndex === null) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Find the scene number at the target index
+      const targetScene = sceneBlocks[dropInsertIndex];
+      if (!targetScene) {
+        // Dropping at the end
+        const lastScene = sceneBlocks[sceneBlocks.length - 1];
+        if (lastScene) {
+          await reorderScenes(
+            draggedSceneNumber,
+            sceneBlocks.length,
+            projectState,
+            projectDirectory,
+            setProjectState,
+          );
+        }
+      } else {
+        // Find the index of the dragged scene in sceneBlocks
+        const draggedIndex = sceneBlocks.findIndex(
+          (block) => block.scene.scene_number === draggedSceneNumber,
+        );
+        if (draggedIndex !== -1) {
+          await reorderScenes(
+            draggedSceneNumber,
+            dropInsertIndex,
+            projectState,
+            projectDirectory,
+            setProjectState,
+          );
+        }
+      }
+
+      endDrag();
+    },
+    [
+      draggedSceneNumber,
+      dropInsertIndex,
+      sceneBlocks,
+      reorderScenes,
+      projectState,
+      projectDirectory,
+      setProjectState,
+      endDrag,
+    ],
+  );
+
+  // Handle scene block click to select scene
+  const handleSceneBlockClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, sceneNumber: number) => {
+      // Don't select if we're dragging
+      if (draggedSceneNumber !== null) {
+        return;
+      }
+
+      e.stopPropagation();
+      e.preventDefault();
+
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const multiKey = isMac ? e.metaKey : e.ctrlKey;
+      const rangeKey = e.shiftKey;
+
+      // If clicking on an already-selected scene (and not multi-select), show popover
+      if (selectedScenes.has(sceneNumber) && !multiKey && !rangeKey) {
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        setPopoverPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height,
+        });
+        setPopoverSceneNumber(sceneNumber);
+      } else {
+        selectScene(sceneNumber, multiKey, rangeKey);
+        // Close popover if selecting a different scene
+        if (popoverSceneNumber !== sceneNumber) {
+          setPopoverSceneNumber(null);
+          setPopoverPosition(null);
+        }
+      }
+    },
+    [draggedSceneNumber, selectedScenes, selectScene, popoverSceneNumber],
   );
 
   // Handle timeline area scrubbing (click and drag)
@@ -636,6 +800,11 @@ export default function TimelinePanel({
       // Don't start scrubbing if clicking on playhead (it has its own handler)
       const target = e.target as HTMLElement;
       if (target.closest(`.${styles.playhead}`)) {
+        return;
+      }
+
+      // Don't start scrubbing if clicking on a scene block (it has its own handler)
+      if (target.closest(`.${styles.sceneBlock}`)) {
         return;
       }
 
@@ -683,13 +852,11 @@ export default function TimelinePanel({
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUpGlobal);
 
-        // If it was a click (not drag), open marker prompt
+        // If it was a click (not drag), clear selection and seek
         if (wasClick) {
+          clearSelection();
           const position = calculatePositionFromMouse(mouseUpEvent.clientX);
-          if (position >= 0 && position <= totalDuration) {
-            setMarkerPromptPosition(position);
-            setMarkerPromptOpen(true);
-          }
+          setCurrentPosition(position);
         } else if (wasPlayingBeforeDragRef.current) {
           // Resume playback if it was playing before drag
           setIsPlaying(true);
@@ -708,7 +875,7 @@ export default function TimelinePanel({
       setIsPlaying,
       setCurrentPosition,
       onDragStateChange,
-      totalDuration,
+      clearSelection,
     ],
   );
 
@@ -1032,6 +1199,16 @@ export default function TimelinePanel({
           </div>
 
           <div className={styles.timelineContainer} ref={timelineRef}>
+            <VersionSelector
+              sceneBlocks={sceneBlocks}
+              activeVersions={activeVersions}
+              onVersionSelect={(sceneNumber, version) => {
+                setActiveVersions((prev) => ({
+                  ...prev,
+                  [sceneNumber]: version,
+                }));
+              }}
+            />
             {/* eslint-disable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
             <div
               className={styles.tracksArea}
@@ -1088,7 +1265,27 @@ export default function TimelinePanel({
                 {/* Unified Track */}
                 {timelineItems.length > 0 && (
                   <div className={styles.track}>
-                    <div className={styles.trackContent}>
+                    <div
+                      className={styles.trackContent}
+                      onDragOver={handleTrackDragOver}
+                      onDrop={handleTrackDrop}
+                      onDragLeave={(e) => {
+                        // Only clear if actually leaving the track area
+                        const rect = (
+                          e.currentTarget as HTMLElement
+                        ).getBoundingClientRect();
+                        const x = e.clientX;
+                        const y = e.clientY;
+                        if (
+                          x < rect.left ||
+                          x > rect.right ||
+                          y < rect.top ||
+                          y > rect.bottom
+                        ) {
+                          setDropIndex(null);
+                        }
+                      }}
+                    >
                       {timelineItems.map((item) => {
                         const left = secondsToPixels(item.startTime, zoomLevel);
                         const width = secondsToPixels(item.duration, zoomLevel);
@@ -1149,14 +1346,54 @@ export default function TimelinePanel({
                           );
                         }
 
+                        const isSelected =
+                          item.scene &&
+                          selectedScenes.has(item.scene.scene_number);
+                        const isSceneDragging =
+                          item.scene &&
+                          draggedSceneNumber === item.scene.scene_number;
+
                         return (
                           <div
                             key={item.id}
-                            className={styles.sceneBlock}
+                            className={`${styles.sceneBlock} ${isSelected ? styles.selected : ''} ${isSceneDragging ? styles.dragging : ''}`}
                             style={{
                               left: `${left}px`,
                               width: `${width}px`,
                             }}
+                            draggable={!!item.scene}
+                            onDragStart={(e) => {
+                              if (item.scene) {
+                                handleSceneDragStart(
+                                  e,
+                                  item.scene.scene_number,
+                                );
+                              }
+                            }}
+                            onDragEnd={handleSceneDragEnd}
+                            onClick={(e) => {
+                              if (item.scene) {
+                                handleSceneBlockClick(
+                                  e,
+                                  item.scene.scene_number,
+                                );
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (
+                                item.scene &&
+                                (e.key === 'Enter' || e.key === ' ')
+                              ) {
+                                e.preventDefault();
+                                handleSceneBlockClick(
+                                  e as unknown as React.MouseEvent<HTMLDivElement>,
+                                  item.scene.scene_number,
+                                );
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Select scene ${item.label}`}
                           >
                             {thumbnailElement}
                             <div className={styles.sceneId}>{item.label}</div>
@@ -1168,6 +1405,34 @@ export default function TimelinePanel({
                           </div>
                         );
                       })}
+
+                      {/* Drop Indicator Line */}
+                      {dropInsertIndex !== null &&
+                        draggedSceneNumber !== null &&
+                        (() => {
+                          let indicatorLeft = 0;
+                          if (dropInsertIndex < sceneBlocks.length) {
+                            indicatorLeft = secondsToPixels(
+                              sceneBlocks[dropInsertIndex].startTime,
+                              zoomLevel,
+                            );
+                          } else if (sceneBlocks.length > 0) {
+                            const lastBlock =
+                              sceneBlocks[sceneBlocks.length - 1];
+                            indicatorLeft = secondsToPixels(
+                              lastBlock.startTime + lastBlock.duration,
+                              zoomLevel,
+                            );
+                          }
+                          return (
+                            <div
+                              className={styles.dropIndicatorLine}
+                              style={{
+                                left: `${indicatorLeft}px`,
+                              }}
+                            />
+                          );
+                        })()}
                     </div>
                   </div>
                 )}
@@ -1196,6 +1461,33 @@ export default function TimelinePanel({
                 if (markerPromptPosition !== null) {
                   handleCreateMarker(markerPromptPosition, prompt);
                 }
+              }}
+            />
+          )}
+
+          {popoverSceneNumber !== null && popoverPosition && (
+            <SceneActionPopover
+              sceneNumber={popoverSceneNumber}
+              position={popoverPosition}
+              onClose={() => {
+                setPopoverSceneNumber(null);
+                setPopoverPosition(null);
+              }}
+              onRegenerate={(sceneNum, prompt) => {
+                // TODO: Implement regenerate scene logic with prompt
+                // This will call backend/agent to regenerate the scene with the given prompt
+                // Parameters: sceneNum (number), prompt (string)
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const unusedParams = { sceneNum, prompt };
+                return unusedParams;
+              }}
+              onGenerateNext={(sceneNum, prompt) => {
+                // TODO: Implement generate next scene logic with prompt
+                // This will call backend/agent to generate a new scene after sceneNum with the given prompt
+                // Parameters: sceneNum (number), prompt (string)
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const unusedParams = { sceneNum, prompt };
+                return unusedParams;
               }}
             />
           )}

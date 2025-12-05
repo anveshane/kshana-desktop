@@ -72,7 +72,9 @@ export function ExplorerProvider({ children }: ExplorerProviderProps) {
   const [cutPath, setCutPath] = useState<string | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [creatingInPath, setCreatingInPath] = useState<string | null>(null);
-  const [creatingType, setCreatingType] = useState<'file' | 'folder' | null>(null);
+  const [creatingType, setCreatingType] = useState<'file' | 'folder' | null>(
+    null,
+  );
   const [draggedNode, setDraggedNode] = useState<FileNode | null>(null);
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
@@ -83,10 +85,13 @@ export function ExplorerProvider({ children }: ExplorerProviderProps) {
       setSelectedPaths((prev) => {
         if (range && lastSelectedPath && flatNodes.length > 0) {
           // Range selection
-          const startIdx = flatNodes.findIndex((n) => n.path === lastSelectedPath);
+          const startIdx = flatNodes.findIndex(
+            (n) => n.path === lastSelectedPath,
+          );
           const endIdx = flatNodes.findIndex((n) => n.path === path);
           if (startIdx !== -1 && endIdx !== -1) {
-            const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+            const [from, to] =
+              startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
             const newSet = new Set(prev);
             for (let i = from; i <= to; i++) {
               newSet.add(flatNodes[i].path);
@@ -149,11 +154,14 @@ export function ExplorerProvider({ children }: ExplorerProviderProps) {
     setRenamingPath(null);
   }, []);
 
-  const startCreate = useCallback((parentPath: string, type: 'file' | 'folder') => {
-    setCreatingInPath(parentPath);
-    setCreatingType(type);
-    setExpandedPaths((prev) => new Set([...prev, parentPath]));
-  }, []);
+  const startCreate = useCallback(
+    (parentPath: string, type: 'file' | 'folder') => {
+      setCreatingInPath(parentPath);
+      setCreatingType(type);
+      setExpandedPaths((prev) => new Set([...prev, parentPath]));
+    },
+    [],
+  );
 
   const cancelCreate = useCallback(() => {
     setCreatingInPath(null);
@@ -247,4 +255,3 @@ export function useExplorer(): ExplorerContextType {
   }
   return context;
 }
-

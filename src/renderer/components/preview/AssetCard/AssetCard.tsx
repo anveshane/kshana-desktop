@@ -1,10 +1,11 @@
+/* eslint-disable react/require-default-props */
 import { useState } from 'react';
 import { User, MapPin, Package, Image as ImageIcon } from 'lucide-react';
 import styles from './AssetCard.module.scss';
 
 export type AssetType = 'character' | 'location' | 'prop';
 
-interface AssetCardProps {
+export interface AssetCardProps {
   type: AssetType;
   name: string;
   description?: string;
@@ -28,10 +29,10 @@ const TYPE_COLORS = {
 export default function AssetCard({
   type,
   name,
-  description,
-  imagePath,
-  projectDirectory,
-  metadata,
+  description = '',
+  imagePath = '',
+  projectDirectory = '',
+  metadata = {},
 }: AssetCardProps) {
   const [imageError, setImageError] = useState(false);
 
@@ -102,4 +103,3 @@ export default function AssetCard({
     </div>
   );
 }
-

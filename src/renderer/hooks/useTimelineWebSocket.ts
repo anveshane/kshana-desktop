@@ -23,7 +23,11 @@ interface TimelineMarkerResponse {
 }
 
 export function useTimelineWebSocket(
-  onMarkerUpdate: (markerId: string, status: TimelineMarkerStatus, artifactId?: string) => void,
+  onMarkerUpdate: (
+    markerId: string,
+    status: TimelineMarkerStatus,
+    artifactId?: string,
+  ) => void,
 ) {
   const { projectDirectory } = useWorkspace();
   const wsRef = useRef<WebSocket | null>(null);
@@ -100,7 +104,7 @@ export function useTimelineWebSocket(
     const handleMessage = (event: MessageEvent) => {
       try {
         const payload = JSON.parse(event.data);
-        
+
         // Check for timeline marker response
         if (payload.type === 'timeline_marker_response') {
           const response = payload as TimelineMarkerResponse;
@@ -112,11 +116,7 @@ export function useTimelineWebSocket(
         }
         // Also check for artifact creation that might be related to timeline markers
         else if (payload.type === 'artifact_created' && payload.marker_id) {
-          onMarkerUpdate(
-            payload.marker_id,
-            'complete',
-            payload.artifact_id,
-          );
+          onMarkerUpdate(payload.marker_id, 'complete', payload.artifact_id);
         }
       } catch (error) {
         // Not a JSON message or not a timeline marker response
@@ -141,4 +141,3 @@ export function useTimelineWebSocket(
 
   return { sendTimelineMarker };
 }
-

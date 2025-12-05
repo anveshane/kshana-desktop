@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from 'react';
 import { Film, Play, Calendar, Pause } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import type {
@@ -383,7 +389,13 @@ export default function VideoLibraryView({
         }
       }
     }
-  }, [isDragging, playbackTime, timelineVideos, currentVideoIndex, totalDuration]);
+  }, [
+    isDragging,
+    playbackTime,
+    timelineVideos,
+    currentVideoIndex,
+    totalDuration,
+  ]);
 
   // Initialize to first video when timeline loads
   useEffect(() => {

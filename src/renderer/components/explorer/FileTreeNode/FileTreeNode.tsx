@@ -41,7 +41,8 @@ function getFileIcon(node: FileNode) {
 }
 
 export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
-  const { projectDirectory, selectFile, addToActiveContext, refreshFileTree } = useWorkspace();
+  const { projectDirectory, selectFile, addToActiveContext, refreshFileTree } =
+    useWorkspace();
   const {
     selectedPaths,
     focusedPath,
@@ -67,7 +68,10 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
     expandPath,
   } = useExplorer();
 
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const nodeRef = useRef<HTMLDivElement>(null);
 
   const isDirectory = node.type === 'directory';
@@ -92,10 +96,21 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
       } else {
         const fileType = getFileType(node.extension);
         selectFile({ path: node.path, name: node.name, type: fileType });
-        addToActiveContext({ path: node.path, name: node.name, type: fileType });
+        addToActiveContext({
+          path: node.path,
+          name: node.name,
+          type: fileType,
+        });
       }
     },
-    [isDirectory, node, selectPath, toggleExpanded, selectFile, addToActiveContext],
+    [
+      isDirectory,
+      node,
+      selectPath,
+      toggleExpanded,
+      selectFile,
+      addToActiveContext,
+    ],
   );
 
   const handleDoubleClick = useCallback(
@@ -108,12 +123,15 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
     [isDirectory, node.path, startRename],
   );
 
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    selectPath(node.path);
-    setContextMenu({ x: e.clientX, y: e.clientY });
-  }, [node.path, selectPath]);
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      selectPath(node.path);
+      setContextMenu({ x: e.clientX, y: e.clientY });
+    },
+    [node.path, selectPath],
+  );
 
   const handleCloseContextMenu = useCallback(() => {
     setContextMenu(null);
@@ -138,8 +156,8 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
     (e: React.DragEvent) => {
       if (!isDirectory || draggedNode?.path === node.path) return;
       // Prevent dropping into itself or its children
-      if (draggedNode && node.path.startsWith(draggedNode.path + '/')) return;
-      
+      if (draggedNode && node.path.startsWith(`${draggedNode.path}/`)) return;
+
       e.preventDefault();
       e.stopPropagation();
       e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move';
@@ -166,7 +184,7 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
 
       if (!draggedNode || !isDirectory) return;
       if (draggedNode.path === node.path) return;
-      if (node.path.startsWith(draggedNode.path + '/')) return;
+      if (node.path.startsWith(`${draggedNode.path}/`)) return;
 
       try {
         if (e.altKey) {
@@ -181,7 +199,15 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
       }
       setDraggedNode(null);
     },
-    [draggedNode, isDirectory, node.path, refreshFileTree, expandPath, setDraggedNode, setDropTargetPath],
+    [
+      draggedNode,
+      isDirectory,
+      node.path,
+      refreshFileTree,
+      expandPath,
+      setDraggedNode,
+      setDropTargetPath,
+    ],
   );
 
   // Context menu actions
@@ -232,7 +258,14 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
     } catch (err) {
       console.error('Paste failed:', err);
     }
-  }, [clipboard, isDirectory, node.path, refreshFileTree, expandPath, clearClipboard]);
+  }, [
+    clipboard,
+    isDirectory,
+    node.path,
+    refreshFileTree,
+    expandPath,
+    clearClipboard,
+  ]);
 
   const handleCopyPath = useCallback(() => {
     navigator.clipboard.writeText(node.path);
@@ -240,7 +273,7 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
 
   const handleCopyRelativePath = useCallback(() => {
     if (projectDirectory) {
-      const relativePath = node.path.replace(projectDirectory + '/', '');
+      const relativePath = node.path.replace(`${projectDirectory}/`, '');
       navigator.clipboard.writeText(relativePath);
     }
   }, [node.path, projectDirectory]);
@@ -272,7 +305,14 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
         cancelCreate();
         return;
       }
-      console.log('Creating in:', node.path, 'name:', name, 'type:', creatingType);
+      console.log(
+        'Creating in:',
+        node.path,
+        'name:',
+        name,
+        'type:',
+        creatingType,
+      );
       try {
         if (creatingType === 'file') {
           await window.electron.project.createFile(node.path, name);
@@ -318,12 +358,20 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
       >
         {isDirectory && (
           <span className={styles.chevron}>
-            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            {isExpanded ? (
+              <ChevronDown size={14} />
+            ) : (
+              <ChevronRight size={14} />
+            )}
           </span>
         )}
 
-        {isDirectory && isExpanded && <FolderOpen size={16} className={styles.folderIcon} />}
-        {isDirectory && !isExpanded && <Folder size={16} className={styles.folderIcon} />}
+        {isDirectory && isExpanded && (
+          <FolderOpen size={16} className={styles.folderIcon} />
+        )}
+        {isDirectory && !isExpanded && (
+          <Folder size={16} className={styles.folderIcon} />
+        )}
         {!isDirectory && getFileIcon(node)}
 
         {isRenaming ? (
@@ -351,9 +399,10 @@ export default function FileTreeNode({ node, depth }: FileTreeNodeProps) {
               />
             </div>
           )}
-          {isExpanded && node.children?.map((child) => (
-            <FileTreeNode key={child.path} node={child} depth={depth + 1} />
-          ))}
+          {isExpanded &&
+            node.children?.map((child) => (
+              <FileTreeNode key={child.path} node={child} depth={depth + 1} />
+            ))}
         </div>
       )}
 

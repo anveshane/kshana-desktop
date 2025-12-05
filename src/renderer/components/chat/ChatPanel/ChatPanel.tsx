@@ -71,7 +71,10 @@ export default function ChatPanel() {
 
           // Create new message if no match found
           const id = makeId();
-          return [...prev, { id, role: 'system', type, content, timestamp: Date.now() }];
+          return [
+            ...prev,
+            { id, role: 'system', type, content, timestamp: Date.now() },
+          ];
         });
         return;
       }
@@ -94,7 +97,8 @@ export default function ChatPanel() {
           id: makeId(),
           role: 'assistant',
           type: 'greeting',
-          content: 'Hello! I am Kshana. How can I assist you with your project today?',
+          content:
+            'Hello! I am Kshana. How can I assist you with your project today?',
           timestamp: Date.now(),
         },
       ]);
@@ -109,7 +113,11 @@ export default function ChatPanel() {
     if (!content) return;
     setMessages((prev) => {
       // Stream chunks into existing message if available
-      const streamingTypes = ['text_chunk', 'agent_text', 'coordinator_response'];
+      const streamingTypes = [
+        'text_chunk',
+        'agent_text',
+        'coordinator_response',
+      ];
       if (streamingTypes.includes(type) && lastAssistantIdRef.current) {
         setIsStreaming(true);
         return prev.map((message) =>
@@ -355,7 +363,7 @@ export default function ChatPanel() {
       const port = currentState.port ?? 8001;
       const url = new URL(DEFAULT_WS_PATH, `http://127.0.0.1:${port}`);
       url.protocol = 'ws:';
-      
+
       // Pass user's workspace directory to backend so it creates .kshana/ there
       if (projectDirectory) {
         url.searchParams.set('project_dir', projectDirectory);
@@ -393,7 +401,7 @@ export default function ChatPanel() {
 
           if (event.code !== 1000) {
             reconnectTimeoutRef.current = setTimeout(() => {
-              connectWebSocket().catch(() => { });
+              connectWebSocket().catch(() => {});
             }, 3000);
           }
         };
@@ -414,7 +422,12 @@ export default function ChatPanel() {
       setConnectionState('disconnected');
       throw error;
     }
-  }, [appendSystemMessage, handleServerPayload, setConnectionStatus, projectDirectory]);
+  }, [
+    appendSystemMessage,
+    handleServerPayload,
+    setConnectionStatus,
+    projectDirectory,
+  ]);
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -461,7 +474,7 @@ export default function ChatPanel() {
       }
     };
 
-    bootstrap().catch(() => { });
+    bootstrap().catch(() => {});
 
     const unsubscribeBackend = window.electron.backend.onStateChange(
       (state: BackendState) => {

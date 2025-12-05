@@ -7,7 +7,10 @@ interface TimelineMarkerProps {
   position: number; // in pixels
 }
 
-export default function TimelineMarker({ marker, position }: TimelineMarkerProps) {
+export default function TimelineMarker({
+  marker,
+  position,
+}: TimelineMarkerProps) {
   const [isHovered, setIsHovered] = useState(false);
 
   const getStatusColor = () => {
@@ -46,4 +49,3 @@ export default function TimelineMarker({ marker, position }: TimelineMarkerProps
     </div>
   );
 }
-

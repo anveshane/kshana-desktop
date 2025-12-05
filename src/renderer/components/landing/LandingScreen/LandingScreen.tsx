@@ -36,16 +36,6 @@ export default function LandingScreen() {
 
   return (
     <div className={styles.container}>
-      <div className={styles.sidebar}>
-        <div className={styles.sidebarHeader}>
-          <span className={styles.sidebarTitle}>EXPLORER</span>
-        </div>
-        <div className={styles.sidebarContent}>
-          <FolderOpen size={48} className={styles.folderIcon} />
-          <p className={styles.noProjectText}>No Project Open</p>
-        </div>
-      </div>
-
       <div className={styles.main}>
         <div className={styles.card}>
           <div className={styles.iconWrapper}>

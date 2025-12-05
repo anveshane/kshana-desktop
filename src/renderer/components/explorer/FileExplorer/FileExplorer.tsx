@@ -6,14 +6,22 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
-import { ExplorerProvider, useExplorer } from '../../../contexts/ExplorerContext';
+import {
+  ExplorerProvider,
+  useExplorer,
+} from '../../../contexts/ExplorerContext';
 import FileTree from '../FileTree/FileTree';
 import ActiveContext from '../ActiveContext/ActiveContext';
 import styles from './FileExplorer.module.scss';
 
 function FileExplorerContent() {
-  const { projectName, projectDirectory, fileTree, isLoading, refreshFileTree } =
-    useWorkspace();
+  const {
+    projectName,
+    projectDirectory,
+    fileTree,
+    isLoading,
+    refreshFileTree,
+  } = useWorkspace();
   const { startCreate, focusedPath, flatNodes } = useExplorer();
 
   const getCreationTarget = () => {

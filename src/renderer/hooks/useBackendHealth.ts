@@ -9,13 +9,16 @@ const COMFYUI_CHECK_TIMEOUT = 3000; // 3 second timeout for ComfyUI check
 async function checkComfyUIHealth(comfyuiUrl: string): Promise<boolean> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), COMFYUI_CHECK_TIMEOUT);
-    
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      COMFYUI_CHECK_TIMEOUT,
+    );
+
     const response = await fetch(`${comfyuiUrl}/system_stats`, {
       signal: controller.signal,
       method: 'GET',
     });
-    
+
     clearTimeout(timeoutId);
     return response.ok;
   } catch {
@@ -32,19 +35,22 @@ async function checkLLMProviderHealth(
     // The backend will handle Gemini API errors
     return true;
   }
-  
+
   // For LM Studio, check if the server is accessible
   if (!lmStudioUrl) return false;
-  
+
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), COMFYUI_CHECK_TIMEOUT);
-    
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      COMFYUI_CHECK_TIMEOUT,
+    );
+
     const response = await fetch(`${lmStudioUrl}/v1/models`, {
       signal: controller.signal,
       method: 'GET',
     });
-    
+
     clearTimeout(timeoutId);
     return response.ok;
   } catch {
@@ -61,7 +67,7 @@ export function useBackendHealth(settings: AppSettings | null) {
     try {
       // Get backend state to check if it's ready
       const backendState = await window.electron.backend.getState();
-      
+
       if (backendState.status !== 'ready') {
         setConnectionStatus('lmStudio', 'disconnected');
         setConnectionStatus('comfyUI', 'disconnected');
@@ -73,7 +79,7 @@ export function useBackendHealth(settings: AppSettings | null) {
         settings.llmProvider,
         settings.lmStudioUrl,
       );
-      
+
       setConnectionStatus(
         'lmStudio',
         llmHealthy ? 'connected' : 'disconnected',
@@ -104,4 +110,3 @@ export function useBackendHealth(settings: AppSettings | null) {
     return () => clearInterval(interval);
   }, [settings, checkHealth]);
 }
-

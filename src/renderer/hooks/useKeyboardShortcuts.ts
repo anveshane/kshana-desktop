@@ -40,4 +40,3 @@ export function useKeyboardShortcuts(shortcuts: ShortcutConfig[]) {
 }
 
 export { isMac };
-
