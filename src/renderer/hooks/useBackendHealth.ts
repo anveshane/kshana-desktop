@@ -46,7 +46,11 @@ async function checkLLMProviderHealth(
       COMFYUI_CHECK_TIMEOUT,
     );
 
-    const response = await fetch(`${lmStudioUrl}/v1/models`, {
+    // Normalize URL: remove trailing /v1 if present, then append /v1/models
+    const baseUrl = lmStudioUrl.trim().replace(/\/v1\/?$/, '');
+    const modelsUrl = `${baseUrl}/v1/models`;
+
+    const response = await fetch(modelsUrl, {
       signal: controller.signal,
       method: 'GET',
     });

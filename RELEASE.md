@@ -5,8 +5,8 @@ This document explains how to create releases for Kshana Desktop using GitHub Ac
 ## Overview
 
 When you push a version tag, GitHub Actions automatically:
-1. Checks out the specified branches (frontend + backend)
-2. Builds the backend with PyInstaller
+1. Checks out the code
+2. Installs dependencies (including kshana-ink)
 3. Builds the Electron app
 4. Creates DMG installers for Mac (arm64 + x64)
 5. Publishes to GitHub Releases
@@ -28,30 +28,6 @@ git push origin v1.0.0
 # Check progress: https://github.com/anveshane/kshana-desktop/actions
 ```
 
-### Release from Specific Branches
-
-You can specify which branches to build from in the tag name:
-
-```bash
-# Format: v<VERSION>-<frontend-branch>-<backend-branch>
-git tag v1.0.0-feature-branch-main
-git push origin v1.0.0-feature-branch-main
-```
-
-**Examples:**
-- `v1.0.0-dev-staging` → frontend: `dev`, backend: `staging`
-- `v1.0.0-feature-preview-main` → frontend: `feature-preview`, backend: `main`
-- `v1.0.0` → uses default branches (see workflow file)
-
-## Default Branches
-
-The workflow uses default branches if not specified in the tag. To change defaults, edit `.github/workflows/release.yml`:
-
-```yaml
-DEFAULT_FRONTEND_BRANCH: main
-DEFAULT_BACKEND_BRANCH: main
-```
-
 ## Tag Format
 
 ### Standard Version Tag
@@ -60,15 +36,6 @@ v1.0.0
 v1.0.1
 v2.0.0
 ```
-Uses default branches configured in the workflow.
-
-### Tag with Branch Specification
-```
-v1.0.0-<frontend-branch>-<backend-branch>
-```
-Examples:
-- `v1.0.0-feature-main` → frontend from `feature`, backend from `main`
-- `v1.0.0-dev-staging` → frontend from `dev`, backend from `staging`
 
 ## Complete Release Process
 
@@ -101,16 +68,9 @@ git push origin main
 
 ### Step 3: Create and Push Tag
 
-**Option A: Simple tag (uses default branches)**
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
-```
-
-**Option B: Tag with branch specification**
-```bash
-git tag v1.0.0-feature-branch-main
-git push origin v1.0.0-feature-branch-main
 ```
 
 ### Step 4: Monitor Build
@@ -132,11 +92,11 @@ Download the DMG files:
 
 The workflow builds:
 
-1. **Backend** (`kshana` repo)
-   - Bundled with PyInstaller
-   - Output: `backend-build/dist/kshana-backend-mac/`
+1. **kshana-ink** (TypeScript backend)
+   - Built with tsup
+   - Bundled into the Electron app
 
-2. **Electron App** (`kshana-desktop` repo)
+2. **Electron App**
    - React renderer
    - Electron main process
    - Output: DMG files in `release/build/`
@@ -156,8 +116,8 @@ The workflow builds:
 ### Build Failing?
 
 Common issues:
-- **Missing dependencies**: Check if `npm ci` or Python setup fails
-- **Backend build errors**: Check PyInstaller logs
+- **Missing dependencies**: Check if `npm ci` fails
+- **kshana-ink build errors**: Check tsup logs
 - **Electron build errors**: Check electron-builder logs
 
 View detailed logs in the Actions tab.
@@ -167,12 +127,6 @@ View detailed logs in the Actions tab.
 - Check if `electron-builder` completed successfully
 - Verify `GH_TOKEN` has permissions to create releases
 - Check Actions logs for upload errors
-
-### Wrong Branch Checked Out?
-
-- Verify branch names in tag (if using branch specification)
-- Check default branches in workflow file
-- Ensure branches exist in both repositories
 
 ## Tag Management
 
@@ -205,8 +159,8 @@ Before creating a release:
 - [ ] Version updated in `package.json` (if needed)
 - [ ] Changes committed and pushed
 - [ ] Correct branch checked out
+- [ ] kshana-ink is building successfully
 - [ ] Tag name follows versioning scheme
-- [ ] Branch names correct (if specifying in tag)
 
 ## Workflow Configuration
 
@@ -216,7 +170,6 @@ The workflow file is located at:
 Key settings:
 - **Runner**: `macos-14` (Apple Silicon)
 - **Node.js**: Version 20
-- **Python**: Version 3.13
 - **Publish**: Automatic via electron-builder
 
 ## Support
@@ -228,25 +181,18 @@ For issues or questions:
 
 ## Examples
 
-### Release v1.0.0 from main branches
+### Release v1.0.0
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-### Release v1.1.0 from feature branch (frontend) and main (backend)
+### Release v1.1.0 beta
 ```bash
-git tag v1.1.0-feature-preview-main
-git push origin v1.1.0-feature-preview-main
-```
-
-### Release v2.0.0 from staging branches
-```bash
-git tag v2.0.0-staging-backend-staging
-git push origin v2.0.0-staging-backend-staging
+git tag v1.1.0-beta
+git push origin v1.1.0-beta
 ```
 
 ---
 
 **Last Updated**: December 2024
-

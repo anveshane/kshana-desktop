@@ -36,6 +36,7 @@ export default function ChatPanel() {
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const awaitingResponseRef = useRef(false);
 
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
@@ -90,6 +91,7 @@ export default function ChatPanel() {
   const clearChat = useCallback(() => {
     setMessages([]);
     lastAssistantIdRef.current = null;
+    awaitingResponseRef.current = false;
     // Backend will send greeting via WebSocket when connection is re-established
   }, []);
 
@@ -142,45 +144,167 @@ export default function ChatPanel() {
     }
   }, []);
 
+  /**
+   * Handle server payload from kshana-ink WebSocket.
+   * kshana-ink messages have the format: { type, sessionId, timestamp, data: {...} }
+   */
   const handleServerPayload = useCallback(
     (payload: Record<string, unknown>) => {
-      switch (payload.type) {
-        case 'status':
-          appendSystemMessage((payload.message as string) ?? 'Status update');
+      // Extract data from kshana-ink message format
+      const data = (payload.data as Record<string, unknown>) ?? payload;
+      const messageType = payload.type as string;
+
+      switch (messageType) {
+        case 'status': {
+          // kshana-ink status: { status: 'connected' | 'ready' | 'busy' | 'completed' | 'error', message?: string }
+          const statusMsg = (data.message as string) ?? (data.status as string) ?? 'Status update';
+          // Send greeting on first connection
+          if (data.status === 'connected') {
+            setMessages((prev) => {
+              const hasGreeting = prev.some(
+                (msg) => msg.type === 'greeting',
+              );
+              if (hasGreeting) return prev;
+              return [
+                ...prev,
+                {
+                  id: makeId(),
+                  role: 'system',
+                  type: 'greeting',
+                  content: 'Hello! I\'m your Kshana video generation assistant. Tell me about the video you\'d like to create!',
+                  timestamp: Date.now(),
+                },
+              ];
+            });
+          } else if (statusMsg && data.status !== 'busy') {
+            appendSystemMessage(statusMsg);
+          }
           break;
+        }
         case 'progress': {
-          const { phase, percent, current, total } = payload;
+          // kshana-ink progress: { iteration, maxIterations, status }
+          const { iteration, maxIterations, status: progressStatus } = data;
+          const percent = maxIterations ? Math.round(((iteration as number) / (maxIterations as number)) * 100) : 0;
           const details = [
-            phase ? `Phase: ${phase}` : null,
-            typeof percent === 'number' ? `Progress: ${percent}%` : null,
-            current && total ? `Scenes: ${current}/${total}` : null,
+            progressStatus ? `${progressStatus}` : null,
+            percent ? `Progress: ${percent}%` : null,
           ]
             .filter(Boolean)
             .join(' · ');
           appendSystemMessage(details || 'Progress update', 'progress');
           break;
         }
-        case 'scene_complete': {
-          const sceneMsg = `Scene ${payload.scene_number} completed`;
-          appendSystemMessage(sceneMsg, 'scene_complete');
+        case 'stream_chunk': {
+          // kshana-ink stream_chunk: { content, done }
+          const content = (data.content as string) ?? '';
+          const done = (data.done as boolean) ?? false;
+          if (content) {
+            appendAssistantChunk(content, 'stream_chunk');
+          }
+          if (done) {
+            lastAssistantIdRef.current = null;
+            setIsStreaming(false);
+          }
           break;
         }
-        case 'tool_call':
-          appendMessage({
-            role: 'system',
-            type: 'tool_call',
-            content: `Calling ${(payload.tool_name as string) || 'tool'}…`,
-            meta: {
-              tool_name: (payload.tool_name as string) || 'tool',
-            },
-          });
+        case 'stream_end': {
+          lastAssistantIdRef.current = null;
+          setIsStreaming(false);
           break;
+        }
+        case 'tool_call': {
+          // kshana-ink tool_call: { toolName, toolCallId, arguments, status, result?, error? }
+          const toolName = (data.toolName as string) ?? 'tool';
+          const toolStatus = (data.status as string) ?? 'started';
+          if (toolStatus === 'started') {
+            appendMessage({
+              role: 'system',
+              type: 'tool_call',
+              content: `Calling ${toolName}…`,
+              meta: {
+                tool_name: toolName,
+              },
+            });
+          } else if (toolStatus === 'completed') {
+            appendSystemMessage(`${toolName} completed`, 'tool_result');
+          } else if (toolStatus === 'error') {
+            appendSystemMessage(`${toolName} failed: ${data.error || 'Unknown error'}`, 'error');
+          }
+          break;
+        }
+        case 'agent_response': {
+          // kshana-ink agent_response: { output, status }
+          const output = (data.output as string) ?? '';
+          const responseStatus = data.status as string;
+          if (output) {
+            lastAssistantIdRef.current = null;
+            setIsStreaming(false);
+            appendAssistantChunk(output, 'agent_response');
+          }
+          // If completed, show completion message
+          if (responseStatus === 'completed') {
+            // Task completed - no need to show additional message
+          } else if (responseStatus === 'error') {
+            appendSystemMessage('An error occurred while processing your request.', 'error');
+          }
+          break;
+        }
+        case 'agent_question': {
+          // kshana-ink agent_question: { question, toolCallId }
+          const question = (data.question as string) ?? '';
+          if (question) {
+            lastAssistantIdRef.current = null;
+            setIsStreaming(false);
+            appendAssistantChunk(question, 'agent_question');
+            // Mark that we're awaiting a user response
+            awaitingResponseRef.current = true;
+          }
+          break;
+        }
+        case 'todo_update': {
+          // kshana-ink todo_update: { todos: [{ id, task, status, depth, hasSubtasks, parentId? }] }
+          const todos = data.todos as Array<{
+            id?: string;
+            task?: string;
+            status?: string;
+            depth?: number;
+          }>;
+          if (todos?.length) {
+            const todoText = todos
+              .map((t) => {
+                const icon =
+                  t.status === 'completed'
+                    ? '✓'
+                    : t.status === 'in_progress'
+                      ? '⏳'
+                      : t.status === 'cancelled'
+                        ? '✗'
+                        : '○';
+                const indent = '  '.repeat(t.depth ?? 0);
+                return `${indent}${icon} ${t.task || 'Task'}`;
+              })
+              .join('\n');
+            appendSystemMessage(todoText, 'todo_update');
+          }
+          break;
+        }
+        case 'error': {
+          // kshana-ink error: { code, message, details? }
+          const errorMsg = (data.message as string) ?? 'An error occurred';
+          const errorCode = (data.code as string) ?? '';
+          appendSystemMessage(
+            errorCode ? `Error (${errorCode}): ${errorMsg}` : errorMsg,
+            'error',
+          );
+          break;
+        }
+        // Legacy message types for backwards compatibility
         case 'text_chunk':
-          appendAssistantChunk((payload.content as string) ?? '', 'text_chunk');
+          appendAssistantChunk((data.content as string) ?? (payload.content as string) ?? '', 'text_chunk');
           break;
         case 'coordinator_response':
           appendAssistantChunk(
-            (payload.content as string) ?? '',
+            (data.content as string) ?? (payload.content as string) ?? '',
             'coordinator_response',
           );
           break;
@@ -188,23 +312,20 @@ export default function ChatPanel() {
           lastAssistantIdRef.current = null;
           setIsStreaming(false);
           appendAssistantChunk(
-            (payload.response as string) ?? '',
+            (data.response as string) ?? (payload.response as string) ?? '',
             'final_response',
           );
           break;
         case 'greeting': {
-          // Check if greeting already exists to avoid duplicates
           setMessages((prev) => {
             const hasGreeting = prev.some(
-              (msg) => msg.type === 'greeting' || (msg.role === 'assistant' && msg.type === 'greeting'),
+              (msg) => msg.type === 'greeting',
             );
-            if (hasGreeting) {
-              return prev; // Don't add duplicate greeting
-            }
-            const suggestions = payload.suggested_actions
-              ? `\n• ${(payload.suggested_actions as string[]).join('\n• ')}`
+            if (hasGreeting) return prev;
+            const suggestions = (data.suggested_actions || payload.suggested_actions)
+              ? `\n• ${((data.suggested_actions || payload.suggested_actions) as string[]).join('\n• ')}`
               : '';
-            const greetingContent = `${(payload.greeting_message as string) ?? 'Hello!'}${suggestions}`;
+            const greetingContent = `${(data.greeting_message as string) ?? (payload.greeting_message as string) ?? 'Hello!'}${suggestions}`;
             return [
               ...prev,
               {
@@ -218,24 +339,9 @@ export default function ChatPanel() {
           });
           break;
         }
-        case 'error':
-          appendSystemMessage(
-            `${payload.error}: ${(payload.details as string) ?? ''}`,
-            'error',
-          );
-          break;
-        case 'agent_response': {
-          // Agent response with content
-          const content = (payload.content as string) ?? '';
-          if (content) {
-            appendAssistantChunk(content, 'agent_response');
-          }
-          break;
-        }
         case 'agent_text': {
-          // Streaming agent text chunks
-          const text = (payload.text as string) ?? '';
-          const isFinal = (payload.is_final as boolean) ?? false;
+          const text = (data.text as string) ?? (payload.text as string) ?? '';
+          const isFinal = (data.is_final as boolean) ?? (payload.is_final as boolean) ?? false;
           if (text) {
             appendAssistantChunk(text, 'agent_text');
           }
@@ -245,28 +351,20 @@ export default function ChatPanel() {
           }
           break;
         }
-        case 'agent_question': {
-          // Agent is asking user a question (e.g., prompt approval)
-          const question =
-            (payload.question as string) || (payload.content as string) || '';
-          if (question) {
-            lastAssistantIdRef.current = null;
-            setIsStreaming(false);
-            appendAssistantChunk(question, 'agent_question');
-          }
-          break;
-        }
         case 'notification': {
-          // Notification from tool execution
-          const message = (payload.message as string) ?? '';
+          const message = (data.message as string) ?? (payload.message as string) ?? '';
           if (message) {
             appendSystemMessage(message, 'notification');
           }
           break;
         }
+        case 'scene_complete': {
+          const sceneMsg = `Scene ${data.scene_number ?? payload.scene_number} completed`;
+          appendSystemMessage(sceneMsg, 'scene_complete');
+          break;
+        }
         case 'clarifying_questions': {
-          // System asking for more information
-          const questions = payload.questions as string[];
+          const questions = (data.questions ?? payload.questions) as string[];
           if (questions?.length) {
             const questionText = questions
               .map((q, i) => `${i + 1}. ${q}`)
@@ -278,43 +376,15 @@ export default function ChatPanel() {
           }
           break;
         }
-        case 'todo_update': {
-          // Todo list update - show as status
-          const todos = payload.todos as Array<{
-            title?: string;
-            status?: string;
-            visible?: boolean;
-          }>;
-          if (todos?.length) {
-            const visibleTodos = todos.filter((t) => t.visible !== false);
-            if (visibleTodos.length) {
-              const todoText = visibleTodos
-                .map((t) => {
-                  const icon =
-                    t.status === 'completed'
-                      ? '✓'
-                      : t.status === 'in_progress'
-                        ? '⏳'
-                        : '○';
-                  return `${icon} ${t.title || 'Task'}`;
-                })
-                .join('\n');
-              appendSystemMessage(todoText, 'todo_update');
-            }
-          }
-          break;
-        }
         case 'agent_event': {
-          // Agent/tool event notification
-          const name = (payload.name as string) || 'Agent';
-          const status = (payload.status as string) || 'update';
-          appendSystemMessage(`${name}: ${status}`, 'agent_event');
+          const name = (data.name as string) ?? (payload.name as string) ?? 'Agent';
+          const eventStatus = (data.status as string) ?? (payload.status as string) ?? 'update';
+          appendSystemMessage(`${name}: ${eventStatus}`, 'agent_event');
           break;
         }
         case 'phase_transition': {
-          // Phase transition notification
-          const newPhase = payload.new_phase as string;
-          const description = payload.description as string;
+          const newPhase = (data.new_phase as string) ?? (payload.new_phase as string);
+          const description = (data.description as string) ?? (payload.description as string);
           if (newPhase) {
             appendSystemMessage(
               description || `Transitioning to ${newPhase}`,
@@ -324,9 +394,8 @@ export default function ChatPanel() {
           break;
         }
         case 'comfyui_progress': {
-          // ComfyUI generation progress
-          const sceneNum = payload.scene_number as number;
-          const progressStatus = payload.status as string;
+          const sceneNum = (data.scene_number as number) ?? (payload.scene_number as number);
+          const progressStatus = (data.status as string) ?? (payload.status as string);
           if (sceneNum && progressStatus) {
             appendSystemMessage(
               `Scene ${sceneNum}: ${progressStatus}`,
@@ -341,10 +410,10 @@ export default function ChatPanel() {
           break;
         default:
           // Log unknown events for debugging but don't clutter UI
-          console.log('Unhandled event:', payload.type, payload);
+          console.log('Unhandled event:', messageType, payload);
       }
     },
-    [appendAssistantChunk, appendSystemMessage],
+    [appendAssistantChunk, appendMessage, appendSystemMessage],
   );
 
   const connectWebSocket = useCallback(async (): Promise<WebSocket> => {
@@ -361,7 +430,10 @@ export default function ChatPanel() {
     try {
       const currentState = await window.electron.backend.getState();
       if (currentState.status !== 'ready') {
-        throw new Error(`Backend not ready (status: ${currentState.status})`);
+        const errorMsg = currentState.message 
+          ? `Backend not ready: ${currentState.message}`
+          : `Backend not ready (status: ${currentState.status})`;
+        throw new Error(errorMsg);
       }
 
       const port = currentState.port ?? 8001;
@@ -443,7 +515,22 @@ export default function ChatPanel() {
 
       try {
         const socket = await connectWebSocket();
-        socket.send(JSON.stringify({ message: content }));
+
+        // Use kshana-ink message format
+        // If we're responding to an agent question, use user_response type
+        // Otherwise, use start_task type for new tasks
+        if (awaitingResponseRef.current) {
+          socket.send(JSON.stringify({
+            type: 'user_response',
+            data: { response: content },
+          }));
+          awaitingResponseRef.current = false;
+        } else {
+          socket.send(JSON.stringify({
+            type: 'start_task',
+            data: { task: content },
+          }));
+        }
       } catch (error) {
         appendSystemMessage(
           `Unable to send message: ${(error as Error).message}`,
@@ -482,7 +569,13 @@ export default function ChatPanel() {
 
     const unsubscribeBackend = window.electron.backend.onStateChange(
       (state: BackendState) => {
-        if (
+        if (state.status === 'error' && state.message) {
+          // Show backend error message to user
+          appendSystemMessage(
+            `Backend error: ${state.message}`,
+            'error',
+          );
+        } else if (
           state.status === 'ready' &&
           !connectingRef.current &&
           !wsRef.current
@@ -511,6 +604,7 @@ export default function ChatPanel() {
     // Clear existing chat messages
     setMessages([]);
     lastAssistantIdRef.current = null;
+    awaitingResponseRef.current = false;
     setIsStreaming(false);
 
     // Disconnect existing WebSocket connection
