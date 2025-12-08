@@ -6,13 +6,14 @@ import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useBackendHealth } from '../../../hooks/useBackendHealth';
 import PreviewPlaceholder from '../PreviewPlaceholder/PreviewPlaceholder';
 import MediaPreview from '../MediaPreview/MediaPreview';
-import TimelineView from '../TimelineView/TimelineView';
 import StoryboardView from '../StoryboardView/StoryboardView';
 import AssetsView from '../AssetsView/AssetsView';
+import VideoLibraryView from '../VideoLibraryView/VideoLibraryView';
+import TimelinePanel from '../TimelinePanel/TimelinePanel';
 import SettingsPanel from '../../SettingsPanel';
 import styles from './PreviewPanel.module.scss';
 
-type Tab = 'timeline' | 'storyboard' | 'assets' | 'preview';
+type Tab = 'storyboard' | 'assets' | 'video-library' | 'preview';
 
 const mapSettingsToEnv = (settings: AppSettings): BackendEnvOverrides => ({
   port: settings.preferredPort,
@@ -25,11 +26,43 @@ const mapSettingsToEnv = (settings: AppSettings): BackendEnvOverrides => ({
 });
 
 export default function PreviewPanel() {
-  const [activeTab, setActiveTab] = useState<Tab>('storyboard');
+  const [activeTab, setActiveTab] = useState<Tab>('video-library');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [isRestartingBackend, setIsRestartingBackend] = useState(false);
-  const { selectedFile, connectionState } = useWorkspace();
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const [timelineHeight, setTimelineHeight] = useState(300);
+
+  // Shared playback state for timeline and video preview synchronization
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const { selectedFile, connectionState, projectDirectory } = useWorkspace();
+
+  // Handle timeline resize
+  const handleTimelineResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startHeight = timelineHeight;
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const deltaY = startY - moveEvent.clientY; // Inverted because we're dragging up
+        const newHeight = Math.max(200, Math.min(600, startHeight + deltaY));
+        setTimelineHeight(newHeight);
+      };
+
+      const handleMouseUp = () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    },
+    [timelineHeight],
+  );
 
   // Check backend health periodically
   useBackendHealth(settings);
@@ -54,23 +87,20 @@ export default function PreviewPanel() {
     return unsubscribe;
   }, []);
 
-  const handleSaveSettings = useCallback(
-    async (next: AppSettings) => {
-      setIsRestartingBackend(true);
-      try {
-        const updated = await window.electron.settings.update(next);
-        setSettings(updated);
-        await window.electron.backend.restart(mapSettingsToEnv(updated));
-        setSettingsOpen(false);
-      } catch (error) {
-        console.error('Failed to restart backend:', error);
-        // Keep modal open on error so user can try again
-      } finally {
-        setIsRestartingBackend(false);
-      }
-    },
-    [],
-  );
+  const handleSaveSettings = useCallback(async (next: AppSettings) => {
+    setIsRestartingBackend(true);
+    try {
+      const updated = await window.electron.settings.update(next);
+      setSettings(updated);
+      await window.electron.backend.restart(mapSettingsToEnv(updated));
+      setSettingsOpen(false);
+    } catch (error) {
+      console.error('Failed to restart backend:', error);
+      // Keep modal open on error so user can try again
+    } finally {
+      setIsRestartingBackend(false);
+    }
+  }, []);
 
   return (
     <div className={styles.container}>
@@ -78,10 +108,10 @@ export default function PreviewPanel() {
         <div className={styles.tabs}>
           <button
             type="button"
-            className={`${styles.tab} ${activeTab === 'timeline' ? styles.active : ''}`}
-            onClick={() => setActiveTab('timeline')}
+            className={`${styles.tab} ${activeTab === 'video-library' ? styles.active : ''}`}
+            onClick={() => setActiveTab('video-library')}
           >
-            Timeline
+            Video Library
           </button>
           <button
             type="button"
@@ -154,14 +184,46 @@ export default function PreviewPanel() {
         </div>
       </div>
 
-      <div className={styles.content}>
-        {activeTab === 'timeline' && <TimelineView />}
-        {activeTab === 'storyboard' && <StoryboardView />}
-        {activeTab === 'assets' && <AssetsView />}
-        {activeTab === 'preview' && selectedFile && (
-          <MediaPreview file={selectedFile} />
+      <div className={styles.contentWrapper}>
+        <div className={styles.content}>
+          {activeTab === 'storyboard' && <StoryboardView />}
+          {activeTab === 'assets' && <AssetsView />}
+          {activeTab === 'video-library' && (
+            <VideoLibraryView
+              playbackTime={playbackTime}
+              isPlaying={isPlaying}
+              isDragging={isDragging}
+              onPlaybackTimeChange={setPlaybackTime}
+              onPlaybackStateChange={setIsPlaying}
+            />
+          )}
+          {activeTab === 'preview' && selectedFile && (
+            <MediaPreview file={selectedFile} />
+          )}
+          {activeTab === 'preview' && !selectedFile && <PreviewPlaceholder />}
+        </div>
+
+        {projectDirectory && (
+          <div
+            className={styles.timelineContainer}
+            style={
+              timelineOpen
+                ? { height: `${timelineHeight}px` }
+                : { height: '28px' }
+            }
+          >
+            <TimelinePanel
+              isOpen={timelineOpen}
+              onToggle={() => setTimelineOpen(!timelineOpen)}
+              onResize={handleTimelineResize}
+              playbackTime={playbackTime}
+              isPlaying={isPlaying}
+              onSeek={setPlaybackTime}
+              onPlayPause={setIsPlaying}
+              onDragStateChange={setIsDragging}
+            />
+          </div>
         )}
-        {activeTab === 'preview' && !selectedFile && <PreviewPlaceholder />}
       </div>
 
       <SettingsPanel

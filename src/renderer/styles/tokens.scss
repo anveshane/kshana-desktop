@@ -77,3 +77,11 @@ $panel-min-width: 200px;
 $explorer-default-width: 260px;
 $chat-default-width: 340px;
 
+// Timeline specific colors
+$color-timeline-background: #0a0c12;
+$color-timeline-accent-cyan: #00bcd4;
+$color-timeline-marker-pending: rgba(0, 188, 212, 0.6);
+$color-timeline-marker-processing: rgba(0, 188, 212, 0.9);
+$color-timeline-marker-complete: rgba(0, 230, 118, 0.8);
+$color-timeline-marker-error: rgba(248, 81, 73, 0.8);
+

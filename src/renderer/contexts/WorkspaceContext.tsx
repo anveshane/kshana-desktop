@@ -168,10 +168,6 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     }
   }, [openProject]);
 
-  const createNewFile = useCallback(async () => {
-    // Handled by FileExplorer inline input now
-  }, []);
-
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -182,15 +178,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         e.preventDefault();
         openFolderDialog();
       }
-      if (modifier && e.key.toLowerCase() === 'n' && !e.shiftKey) {
-        e.preventDefault();
-        createNewFile();
-      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [openFolderDialog, createNewFile]);
+  }, [openFolderDialog]);
 
   const value = useMemo<WorkspaceContextType>(
     () => ({

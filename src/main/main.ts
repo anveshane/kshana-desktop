@@ -11,7 +11,6 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
-import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
@@ -37,14 +36,6 @@ const buildBackendEnv = (
     ...overrides,
   };
 };
-
-class AppUpdater {
-  constructor() {
-    log.transports.file.level = 'info';
-    autoUpdater.logger = log;
-    autoUpdater.checkForUpdatesAndNotify();
-  }
-}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -125,6 +116,25 @@ ipcMain.handle('project:select-directory', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory'],
     title: 'Select Project Directory',
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
+ipcMain.handle('project:select-video-file', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: 'Select Video File',
+    filters: [
+      {
+        name: 'Video Files',
+        extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'],
+      },
+      { name: 'All Files', extensions: ['*'] },
+    ],
   });
   if (result.canceled || result.filePaths.length === 0) {
     return null;
@@ -377,10 +387,6 @@ const createWindow = async () => {
     shell.openExternal(edata.url);
     return { action: 'deny' };
   });
-
-  // Remove this if your app does not use auto updates
-  // eslint-disable-next-line
-  // new AppUpdater();
 };
 
 /**

@@ -57,6 +57,9 @@ const projectBridge = {
   selectDirectory(): Promise<string | null> {
     return ipcRenderer.invoke('project:select-directory');
   },
+  selectVideoFile(): Promise<string | null> {
+    return ipcRenderer.invoke('project:select-video-file');
+  },
   readTree(dirPath: string): Promise<FileNode> {
     return ipcRenderer.invoke('project:read-tree', dirPath);
   },

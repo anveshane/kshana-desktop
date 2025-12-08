@@ -1,0 +1,423 @@
+@use 'sass:color';
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  height: 100%;
+  min-height: 0;
+  @include flex-column;
+  background-color: $color-timeline-background;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 $spacing-md;
+  height: 28px;
+  background-color: $color-panel-background;
+  border-bottom: 1px solid $color-panel-border;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.headerControl {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+}
+
+.toggleButton {
+  @include flex-center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: $radius-sm;
+  background-color: transparent;
+  color: $color-text-muted;
+  cursor: pointer;
+  transition: all $transition-fast;
+  padding: 0;
+
+  &:hover {
+    color: $color-text-secondary;
+    background-color: rgba($color-text-primary, 0.1);
+  }
+}
+
+.headerTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-secondary;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background-color: transparent;
+  cursor: row-resize;
+  transition: background-color $transition-fast;
+  z-index: 10;
+
+  &:hover {
+    background-color: rgba($color-accent-green, 0.3);
+  }
+
+  &::after {
+    content: '';
+    display: block;
+    height: 1px;
+    background-color: $color-panel-border;
+    margin: 1.5px 0;
+  }
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-sm $spacing-lg;
+  background-color: $color-panel-background;
+  border-bottom: 1px solid $color-panel-border;
+  min-height: 36px;
+}
+
+.toolbarLeft {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+}
+
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.playButton {
+  @include flex-center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: $radius-sm;
+  background-color: rgba($color-accent-green, 0.1);
+  color: $color-accent-green;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background-color: rgba($color-accent-green, 0.2);
+  }
+}
+
+.timeDisplay {
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  min-width: 100px;
+}
+
+.toolbarButton {
+  @include flex-center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  border: none;
+  border-radius: $radius-sm;
+  background-color: transparent;
+  color: $color-text-muted;
+  cursor: pointer;
+  transition: all $transition-fast;
+  font-size: $font-size-xs;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.1);
+    color: $color-text-secondary;
+  }
+
+  span {
+    font-size: $font-size-xs;
+  }
+}
+
+.zoomButton {
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: $radius-sm;
+  background-color: transparent;
+  color: $color-text-muted;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.1);
+    color: $color-text-secondary;
+  }
+}
+
+.zoomLevel {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  min-width: 40px;
+  text-align: center;
+}
+
+.timelineContainer {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: row;
+}
+
+.tracksArea {
+  flex: 1;
+  height: 100%;
+  overflow: auto;
+  position: relative;
+  cursor: crosshair;
+  user-select: none;
+  min-width: 0;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.timelineContent {
+  position: relative;
+  min-height: 100%;
+  padding-left: $spacing-sm;
+}
+
+.timeRuler {
+  position: sticky;
+  top: 0;
+  height: 30px;
+  background-color: $color-panel-background;
+  border-bottom: 1px solid $color-panel-border;
+  z-index: 10;
+}
+
+.timeMarker {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.timeMarkerLine {
+  width: 1px;
+  height: 20px;
+  background-color: $color-panel-border;
+  margin-top: 4px;
+}
+
+.timeMarkerLabel {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  font-family: $font-family-mono;
+  margin-top: 2px;
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: $color-accent-green;
+  z-index: 20;
+  cursor: ew-resize;
+  transition: width $transition-fast;
+  user-select: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -4px;
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 8px solid $color-accent-green;
+  }
+
+  &:hover {
+    width: 3px;
+    background-color: color.adjust($color-accent-green, $lightness: 10%);
+  }
+
+  &.dragging {
+    width: 3px;
+    cursor: grabbing;
+    background-color: color.adjust($color-accent-green, $lightness: 15%);
+    transition: none;
+
+    &::before {
+      border-top-color: color.adjust($color-accent-green, $lightness: 15%);
+    }
+  }
+}
+
+.track {
+  display: flex;
+  min-height: 120px;
+  border-bottom: 1px solid $color-panel-border;
+}
+
+.trackLabel {
+  width: 80px;
+  padding: $spacing-sm;
+  background-color: $color-panel-background;
+  border-right: 1px solid $color-panel-border;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  font-weight: $font-weight-medium;
+  display: flex;
+  align-items: center;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+}
+
+.trackContent {
+  flex: 1;
+  position: relative;
+  min-height: 120px;
+}
+
+.sceneBlock {
+  position: absolute;
+  top: $spacing-sm;
+  bottom: $spacing-sm;
+  background-color: $color-panel-background;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all $transition-fast;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+
+  &:hover {
+    border-color: $color-accent-green;
+    box-shadow: 0 0 8px rgba($color-accent-green, 0.3);
+  }
+
+  &.selected {
+    border-color: $color-accent-green;
+    border-width: 2px;
+    box-shadow: 0 0 12px rgba($color-accent-green, 0.5);
+    background-color: rgba($color-accent-green, 0.1);
+  }
+
+  &.dragging {
+    opacity: 0.5;
+    transform: scale(1.05);
+    z-index: 100;
+    cursor: grabbing;
+  }
+}
+
+.dropIndicatorLine {
+  position: absolute;
+  top: $spacing-sm;
+  bottom: $spacing-sm;
+  width: 3px;
+  background-color: $color-accent-green;
+  z-index: 50;
+  pointer-events: none;
+  box-shadow: 0 0 8px rgba($color-accent-green, 0.6);
+}
+
+.sceneThumbnail {
+  width: 100%;
+  height: 60px;
+  object-fit: cover;
+  background-color: $color-background-dark;
+}
+
+.scenePlaceholder {
+  width: 100%;
+  height: 60px;
+  background-color: $color-background-dark;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $color-text-muted;
+  font-size: $font-size-xs;
+}
+
+.sceneId {
+  padding: $spacing-xs $spacing-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  background-color: rgba($color-accent-green, 0.1);
+}
+
+.sceneDescription {
+  padding: $spacing-xs $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.videoBlock {
+  position: absolute;
+  top: $spacing-sm;
+  bottom: $spacing-sm;
+  background-color: $color-panel-background;
+  border: 1px solid $color-accent-cyan;
+  border-radius: $radius-sm;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all $transition-fast;
+  display: flex;
+  flex-direction: column;
+}
+
+.videoThumbnail {
+  width: 100%;
+  height: 60px;
+  object-fit: cover;
+  background-color: $color-background-dark;
+}
+
+.videoLabel {
+  padding: $spacing-xs $spacing-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: $color-accent-cyan;
+  background-color: rgba($color-accent-cyan, 0.1);
+}
+
+.emptyState {
+  @include flex-center;
+  height: 100%;
+  color: $color-text-muted;
+  font-size: $font-size-sm;
+}
+
+.loading {
+  @include flex-center;
+  height: 100%;
+  color: $color-text-muted;
+  font-size: $font-size-sm;
+}
+

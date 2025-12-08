@@ -88,9 +88,11 @@ export default function MessageBubble({
 
   return (
     <div
-      className={`${styles.container} ${styles[message.role]} ${isStreaming ? styles.streaming : ''
-        } ${isIntermediate ? styles.intermediate : ''} ${isError ? styles.error : ''
-        }`}
+      className={`${styles.container} ${styles[message.role]} ${
+        isStreaming ? styles.streaming : ''
+      } ${isIntermediate ? styles.intermediate : ''} ${
+        isError ? styles.error : ''
+      }`}
     >
       <div className={styles.header}>
         <span className={styles.role}>{roleLabels[message.role]}</span>

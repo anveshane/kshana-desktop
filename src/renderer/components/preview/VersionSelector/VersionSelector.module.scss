@@ -1,0 +1,97 @@
+@use 'sass:color';
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  width: 120px;
+  flex-shrink: 0;
+  background-color: $color-panel-background;
+  border-right: 1px solid $color-panel-border;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  height: 100%;
+}
+
+.header {
+  padding: $spacing-sm;
+  border-bottom: 1px solid $color-panel-border;
+  background-color: $color-panel-background;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 30px;
+  display: flex;
+  align-items: center;
+}
+
+.headerLabel {
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  color: $color-text-secondary;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.versionsList {
+  flex: 1;
+  overflow-y: auto;
+  @include custom-scrollbar;
+}
+
+.sceneVersions {
+  padding: $spacing-sm;
+  border-bottom: 1px solid $color-panel-border;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+}
+
+.sceneLabel {
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-xs;
+}
+
+.versionBadges {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+}
+
+.versionBadge {
+  padding: $spacing-xs $spacing-sm;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  background-color: transparent;
+  color: $color-text-muted;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-fast;
+  text-align: left;
+  width: 100%;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.1);
+    border-color: $color-text-muted;
+    color: $color-text-secondary;
+  }
+
+  &.active {
+    background-color: rgba($color-accent-green, 0.1);
+    border-color: $color-accent-green;
+    color: $color-accent-green;
+    font-weight: $font-weight-semibold;
+
+    &:hover {
+      background-color: rgba($color-accent-green, 0.15);
+      border-color: color.adjust($color-accent-green, $lightness: 10%);
+    }
+  }
+}
+

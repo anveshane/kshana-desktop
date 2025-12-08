@@ -31,6 +31,7 @@ export interface Artifact {
 
 export interface StoryboardScene {
   scene_number: number;
+  name?: string;
   description: string;
   characters?: string[];
   location?: string;
@@ -131,3 +132,18 @@ export const MOCK_PROPS: PropAsset[] = [
     category: 'item',
   },
 ];
+
+export interface TimelineMarker {
+  id: string;
+  position: number; // milliseconds or frame number
+  prompt: string;
+  status: 'pending' | 'processing' | 'complete' | 'error';
+  generatedArtifactId?: string;
+  createdAt: string;
+}
+
+export interface TimelineState {
+  markers: TimelineMarker[];
+  currentPosition: number;
+  zoomLevel: number;
+}

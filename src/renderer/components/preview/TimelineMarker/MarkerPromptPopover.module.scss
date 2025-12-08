@@ -1,0 +1,163 @@
+@use 'sass:color';
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  @include flex-center;
+  z-index: $z-index-modal;
+}
+
+.popover {
+  width: 500px;
+  max-width: 90vw;
+  background-color: $color-panel-background;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-lg;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-lg;
+  border-bottom: 1px solid $color-panel-border;
+}
+
+.title {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin: 0;
+}
+
+.closeButton {
+  @include flex-center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: $radius-sm;
+  background-color: transparent;
+  color: $color-text-muted;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.1);
+    color: $color-text-secondary;
+  }
+}
+
+.content {
+  padding: $spacing-lg;
+}
+
+.positionInfo {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  margin-bottom: $spacing-md;
+}
+
+.timeValue {
+  font-family: $font-family-mono;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.label {
+  display: block;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.textarea {
+  width: 100%;
+  padding: $spacing-md;
+  background-color: $color-background-dark;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  font-family: $font-family-base;
+  resize: vertical;
+  min-height: 100px;
+  transition: all $transition-fast;
+
+  &:focus {
+    outline: none;
+    border-color: $color-accent-green;
+    box-shadow: 0 0 0 2px rgba($color-accent-green, 0.2);
+  }
+
+  &::placeholder {
+    color: $color-text-muted;
+  }
+}
+
+.hint {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  margin-top: $spacing-sm;
+  margin-bottom: $spacing-md;
+
+  kbd {
+    padding: 2px 6px;
+    background-color: $color-background-dark;
+    border: 1px solid $color-panel-border;
+    border-radius: $radius-sm;
+    font-family: $font-family-mono;
+    font-size: $font-size-xs;
+  }
+}
+
+.actions {
+  display: flex;
+  gap: $spacing-sm;
+  justify-content: flex-end;
+  margin-top: $spacing-lg;
+}
+
+.cancelButton,
+.submitButton {
+  padding: $spacing-sm $spacing-lg;
+  border: none;
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-fast;
+}
+
+.cancelButton {
+  background-color: transparent;
+  color: $color-text-secondary;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.1);
+    color: $color-text-primary;
+  }
+}
+
+.submitButton {
+  background-color: $color-accent-green;
+  color: $color-background-dark;
+
+  &:hover:not(:disabled) {
+    background-color: color.adjust($color-accent-green, $lightness: 5%);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+

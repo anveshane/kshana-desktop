@@ -116,6 +116,41 @@ export default function StoryboardView() {
     console.log('Regenerate scene:', scene.scene_number);
   };
 
+  const handleNameChange = useCallback(
+    async (sceneNumber: number, name: string) => {
+      if (!projectDirectory || !projectState) return;
+
+      try {
+        // Update the scene in project state
+        const updatedState: ProjectState = {
+          ...projectState,
+          storyboard_outline: {
+            ...projectState.storyboard_outline,
+            scenes: (projectState.storyboard_outline?.scenes || []).map(
+              (scene) =>
+                scene.scene_number === sceneNumber
+                  ? { ...scene, name: name || undefined }
+                  : scene,
+            ),
+          },
+        };
+
+        // Save to project.json
+        const stateFilePath = `${projectDirectory}/.kshana/project.json`;
+        await window.electron.project.writeFile(
+          stateFilePath,
+          JSON.stringify(updatedState, null, 2),
+        );
+
+        // Reload project state to reflect changes
+        await loadProjectState();
+      } catch (error) {
+        console.error('Failed to save scene name:', error);
+      }
+    },
+    [projectDirectory, projectState, loadProjectState],
+  );
+
   if (!projectDirectory) {
     return (
       <div className={styles.container}>
@@ -199,6 +234,7 @@ export default function StoryboardView() {
                   projectDirectory={projectDirectory}
                   onExpand={handleExpand}
                   onRegenerate={handleRegenerate}
+                  onNameChange={handleNameChange}
                 />
               ))}
             </div>
@@ -208,4 +244,3 @@ export default function StoryboardView() {
     </div>
   );
 }
-

@@ -1,0 +1,122 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  position: relative;
+}
+
+.button {
+  @include flex-center;
+  gap: $spacing-xs;
+  min-width: auto;
+  height: 28px;
+  padding: 0 $spacing-md;
+  border: none;
+  border-radius: $radius-sm;
+  background-color: transparent;
+  color: $color-text-secondary;
+  cursor: pointer;
+  transition: all $transition-fast;
+  white-space: nowrap;
+  font-size: $font-size-sm;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.08);
+    color: $color-text-primary;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.projectName {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  font-weight: $font-weight-medium;
+  max-width: 200px;
+  @include truncate;
+}
+
+.chevron {
+  transition: transform $transition-fast;
+  flex-shrink: 0;
+  
+  .button:hover & {
+    transform: translateY(1px);
+  }
+}
+
+.dropdown {
+  position: absolute;
+  top: calc(100% + $spacing-xs);
+  left: 0;
+  min-width: 280px;
+  max-width: 400px;
+  max-height: 400px;
+  overflow-y: auto;
+  background-color: $color-panel-background;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-md;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  padding: $spacing-xs;
+  margin-top: $spacing-xs;
+}
+
+.dropdownItem {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  width: 100%;
+  padding: $spacing-md $spacing-lg;
+  background: transparent;
+  border: none;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  transition: background-color $transition-fast;
+  text-align: left;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.08);
+  }
+
+  &:first-child {
+    font-weight: $font-weight-medium;
+  }
+}
+
+.icon {
+  color: $color-text-muted;
+  flex-shrink: 0;
+}
+
+.projectInfo {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  flex: 1;
+  min-width: 0;
+}
+
+.path {
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  @include truncate;
+}
+
+.time {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+}
+
+.divider {
+  height: 1px;
+  background-color: $color-panel-border;
+  margin: $spacing-xs 0;
+}
+
