@@ -177,11 +177,7 @@ export default function ContextMenu({
   ];
 
   return (
-    <div
-      ref={menuRef}
-      className={styles.menu}
-      style={{ left: x, top: y }}
-    >
+    <div ref={menuRef} className={styles.menu} style={{ left: x, top: y }}>
       {actions.map((action) => (
         <div key={action.id}>
           <button
@@ -207,4 +203,3 @@ export default function ContextMenu({
     </div>
   );
 }
-

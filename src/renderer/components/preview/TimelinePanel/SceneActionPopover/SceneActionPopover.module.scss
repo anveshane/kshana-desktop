@@ -1,0 +1,212 @@
+@use 'sass:color';
+@import '../../../../styles/tokens';
+@import '../../../../styles/mixins';
+
+.popover {
+  position: fixed;
+  background-color: $color-panel-background;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-md;
+  box-shadow: $shadow-lg;
+  z-index: $z-index-modal;
+  min-width: 300px;
+  max-width: 500px;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-md;
+  border-bottom: 1px solid $color-panel-border;
+}
+
+.backButton,
+.closeButton {
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: $radius-sm;
+  background-color: transparent;
+  color: $color-text-muted;
+  cursor: pointer;
+  transition: all $transition-fast;
+  flex-shrink: 0;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.1);
+    color: $color-text-secondary;
+  }
+}
+
+.title {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  flex: 1;
+}
+
+.closeButton {
+  margin-left: auto;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  padding: $spacing-xs;
+}
+
+.actionButton {
+  @include flex-center;
+  gap: $spacing-sm;
+  width: 100%;
+  padding: $spacing-md;
+  border: none;
+  border-radius: $radius-sm;
+  background-color: transparent;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-fast;
+  text-align: left;
+
+  &:hover {
+    background-color: rgba($color-accent-green, 0.1);
+    color: $color-accent-green;
+  }
+
+  &:active {
+    background-color: rgba($color-accent-green, 0.2);
+  }
+
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+.promptContent {
+  padding: $spacing-md;
+}
+
+.label {
+  display: block;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  margin-bottom: $spacing-sm;
+}
+
+.textarea {
+  width: 100%;
+  padding: $spacing-md;
+  background-color: $color-background-dark;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  font-family: $font-family-base;
+  resize: vertical;
+  min-height: 100px;
+  transition: all $transition-fast;
+  box-sizing: border-box;
+
+  &:focus {
+    outline: none;
+    border-color: $color-accent-green;
+    box-shadow: 0 0 0 2px rgba($color-accent-green, 0.2);
+  }
+
+  &::placeholder {
+    color: $color-text-muted;
+  }
+}
+
+.hint {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  margin-top: $spacing-sm;
+  margin-bottom: $spacing-md;
+
+  kbd {
+    padding: 2px 6px;
+    background-color: $color-background-dark;
+    border: 1px solid $color-panel-border;
+    border-radius: $radius-sm;
+    font-family: $font-family-mono;
+    font-size: $font-size-xs;
+  }
+}
+
+.formActions {
+  display: flex;
+  gap: $spacing-sm;
+  justify-content: flex-end;
+}
+
+.cancelButton,
+.submitButton,
+.actionButton {
+  padding: $spacing-sm $spacing-lg;
+  border: none;
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-fast;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+}
+
+.cancelButton {
+  background-color: transparent;
+  color: $color-text-secondary;
+
+  &:hover {
+    background-color: rgba($color-text-primary, 0.1);
+    color: $color-text-primary;
+  }
+}
+
+.actionButton {
+  background-color: rgba($color-accent-green, 0.1);
+  color: $color-accent-green;
+
+  &:hover:not(:disabled) {
+    background-color: rgba($color-accent-green, 0.2);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+.submitButton {
+  background-color: $color-accent-green;
+  color: $color-background-dark;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+
+  &:hover:not(:disabled) {
+    background-color: color.adjust($color-accent-green, $lightness: 5%);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  svg {
+    flex-shrink: 0;
+  }
+}
+

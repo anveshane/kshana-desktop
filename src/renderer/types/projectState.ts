@@ -31,6 +31,7 @@ export interface Artifact {
 
 export interface StoryboardScene {
   scene_number: number;
+  name?: string;
   description: string;
   characters?: string[];
   location?: string;

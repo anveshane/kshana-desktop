@@ -13,9 +13,12 @@ window.addEventListener('unhandledrejection', (event) => {
 const container = document.getElementById('root');
 if (!container) {
   console.error('Root container not found!');
-  document.body.innerHTML = '<div style="padding: 20px; color: red;">Error: Root container not found</div>';
+  document.body.innerHTML =
+    '<div style="padding: 20px; color: red;">Error: Root container not found</div>';
 } else if (!window.electron) {
-  console.error('window.electron is not defined. Preload script might have failed.');
+  console.error(
+    'window.electron is not defined. Preload script might have failed.',
+  );
   container.innerHTML = `
     <div style="padding: 20px; color: white; background: #1a1a1a; height: 100vh; font-family: system-ui;">
       <h1>Startup Error</h1>

@@ -37,7 +37,10 @@ export default function FileTree({ root }: FileTreeProps) {
 
   // Build flat list of visible nodes for keyboard navigation
   useEffect(() => {
-    const buildFlatList = (node: FileNode, list: FileNode[] = []): FileNode[] => {
+    const buildFlatList = (
+      node: FileNode,
+      list: FileNode[] = [],
+    ): FileNode[] => {
       if (node.children) {
         for (const child of node.children) {
           list.push(child);
@@ -90,11 +93,17 @@ export default function FileTree({ root }: FileTreeProps) {
 
         case 'ArrowLeft':
           e.preventDefault();
-          if (currentNode?.type === 'directory' && expandedPaths.has(currentNode.path)) {
+          if (
+            currentNode?.type === 'directory' &&
+            expandedPaths.has(currentNode.path)
+          ) {
             toggleExpanded(currentNode.path);
           } else if (currentNode) {
             // Move to parent
-            const parentPath = currentNode.path.substring(0, currentNode.path.lastIndexOf('/'));
+            const parentPath = currentNode.path.substring(
+              0,
+              currentNode.path.lastIndexOf('/'),
+            );
             const parentNode = flatNodes.find((n) => n.path === parentPath);
             if (parentNode) {
               selectPath(parentNode.path);
@@ -109,8 +118,16 @@ export default function FileTree({ root }: FileTreeProps) {
               toggleExpanded(currentNode.path);
             } else {
               const fileType = getFileType(currentNode.extension);
-              selectFile({ path: currentNode.path, name: currentNode.name, type: fileType });
-              addToActiveContext({ path: currentNode.path, name: currentNode.name, type: fileType });
+              selectFile({
+                path: currentNode.path,
+                name: currentNode.name,
+                type: fileType,
+              });
+              addToActiveContext({
+                path: currentNode.path,
+                name: currentNode.name,
+                type: fileType,
+              });
             }
           }
           break;
@@ -150,9 +167,13 @@ export default function FileTree({ root }: FileTreeProps) {
         case 'v':
           if ((e.metaKey || e.ctrlKey) && clipboard && currentNode) {
             e.preventDefault();
-            const targetDir = currentNode.type === 'directory'
-              ? currentNode.path
-              : currentNode.path.substring(0, currentNode.path.lastIndexOf('/'));
+            const targetDir =
+              currentNode.type === 'directory'
+                ? currentNode.path
+                : currentNode.path.substring(
+                    0,
+                    currentNode.path.lastIndexOf('/'),
+                  );
 
             if (clipboard.operation === 'copy') {
               await window.electron.project.copy(clipboard.path, targetDir);
@@ -165,7 +186,7 @@ export default function FileTree({ root }: FileTreeProps) {
           break;
 
         case 'a':
-          if ((e.metaKey || e.ctrlKey)) {
+          if (e.metaKey || e.ctrlKey) {
             e.preventDefault();
             // Select all visible nodes
             flatNodes.forEach((n) => selectPath(n.path, true, false));
@@ -201,7 +222,14 @@ export default function FileTree({ root }: FileTreeProps) {
         return;
       }
 
-      console.log('Creating at ROOT:', root.path, 'name:', name, 'type:', creatingType);
+      console.log(
+        'Creating at ROOT:',
+        root.path,
+        'name:',
+        name,
+        'type:',
+        creatingType,
+      );
 
       try {
         if (creatingType === 'file') {
@@ -215,7 +243,7 @@ export default function FileTree({ root }: FileTreeProps) {
       }
       cancelCreate();
     },
-    [root.path, creatingType, refreshFileTree, cancelCreate]
+    [root.path, creatingType, refreshFileTree, cancelCreate],
   );
 
   const isCreatingAtRoot = creatingInPath === root.path;

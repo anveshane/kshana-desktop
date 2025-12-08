@@ -32,34 +32,37 @@ export default function PreviewPanel() {
   const [isRestartingBackend, setIsRestartingBackend] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [timelineHeight, setTimelineHeight] = useState(300);
-  
+
   // Shared playback state for timeline and video preview synchronization
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  
+
   const { selectedFile, connectionState, projectDirectory } = useWorkspace();
 
   // Handle timeline resize
-  const handleTimelineResize = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = timelineHeight;
+  const handleTimelineResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startHeight = timelineHeight;
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaY = startY - moveEvent.clientY; // Inverted because we're dragging up
-      const newHeight = Math.max(200, Math.min(600, startHeight + deltaY));
-      setTimelineHeight(newHeight);
-    };
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const deltaY = startY - moveEvent.clientY; // Inverted because we're dragging up
+        const newHeight = Math.max(200, Math.min(600, startHeight + deltaY));
+        setTimelineHeight(newHeight);
+      };
 
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
+      const handleMouseUp = () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }, [timelineHeight]);
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    },
+    [timelineHeight],
+  );
 
   // Check backend health periodically
   useBackendHealth(settings);
@@ -84,23 +87,20 @@ export default function PreviewPanel() {
     return unsubscribe;
   }, []);
 
-  const handleSaveSettings = useCallback(
-    async (next: AppSettings) => {
-      setIsRestartingBackend(true);
-      try {
-        const updated = await window.electron.settings.update(next);
-        setSettings(updated);
-        await window.electron.backend.restart(mapSettingsToEnv(updated));
-        setSettingsOpen(false);
-      } catch (error) {
-        console.error('Failed to restart backend:', error);
-        // Keep modal open on error so user can try again
-      } finally {
-        setIsRestartingBackend(false);
-      }
-    },
-    [],
-  );
+  const handleSaveSettings = useCallback(async (next: AppSettings) => {
+    setIsRestartingBackend(true);
+    try {
+      const updated = await window.electron.settings.update(next);
+      setSettings(updated);
+      await window.electron.backend.restart(mapSettingsToEnv(updated));
+      setSettingsOpen(false);
+    } catch (error) {
+      console.error('Failed to restart backend:', error);
+      // Keep modal open on error so user can try again
+    } finally {
+      setIsRestartingBackend(false);
+    }
+  }, []);
 
   return (
     <div className={styles.container}>
@@ -206,7 +206,11 @@ export default function PreviewPanel() {
         {projectDirectory && (
           <div
             className={styles.timelineContainer}
-            style={timelineOpen ? { height: `${timelineHeight}px` } : { height: '28px' }}
+            style={
+              timelineOpen
+                ? { height: `${timelineHeight}px` }
+                : { height: '28px' }
+            }
           >
             <TimelinePanel
               isOpen={timelineOpen}

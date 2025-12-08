@@ -64,7 +64,8 @@ export default function MarkerPromptPopover({
         </div>
         <div className={styles.content}>
           <div className={styles.positionInfo}>
-            Position: <span className={styles.timeValue}>{formatTime(position)}</span>
+            Position:{' '}
+            <span className={styles.timeValue}>{formatTime(position)}</span>
           </div>
           <form onSubmit={handleSubmit}>
             <label className={styles.label}>
@@ -80,7 +81,8 @@ export default function MarkerPromptPopover({
               />
             </label>
             <div className={styles.hint}>
-              Press <kbd>Cmd/Ctrl+Enter</kbd> to submit, <kbd>Esc</kbd> to cancel
+              Press <kbd>Cmd/Ctrl+Enter</kbd> to submit, <kbd>Esc</kbd> to
+              cancel
             </div>
             <div className={styles.actions}>
               <button
@@ -104,4 +106,3 @@ export default function MarkerPromptPopover({
     </div>
   );
 }
-

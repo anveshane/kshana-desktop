@@ -10,7 +10,7 @@ export function resolveHtmlPath(htmlFileName: string) {
     url.pathname = htmlFileName;
     return url.href;
   }
-  
+
   // In production, files are packaged in ASAR
   // When packaged: __dirname = app.asar/dist/main
   // Renderer files are at: app.asar/dist/renderer/index.html

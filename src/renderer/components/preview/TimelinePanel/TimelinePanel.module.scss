@@ -172,15 +172,18 @@
   flex: 1;
   overflow: hidden;
   position: relative;
+  display: flex;
+  flex-direction: row;
 }
 
 .tracksArea {
-  width: 100%;
+  flex: 1;
   height: 100%;
   overflow: auto;
   position: relative;
   cursor: crosshair;
   user-select: none;
+  min-width: 0;
 
   &:active {
     cursor: grabbing;
@@ -190,6 +193,7 @@
 .timelineContent {
   position: relative;
   min-height: 100%;
+  padding-left: $spacing-sm;
 }
 
 .timeRuler {
@@ -299,7 +303,7 @@
   border: 1px solid $color-panel-border;
   border-radius: $radius-sm;
   overflow: hidden;
-  cursor: move;
+  cursor: pointer;
   transition: all $transition-fast;
   display: flex;
   flex-direction: column;
@@ -310,11 +314,30 @@
     box-shadow: 0 0 8px rgba($color-accent-green, 0.3);
   }
 
+  &.selected {
+    border-color: $color-accent-green;
+    border-width: 2px;
+    box-shadow: 0 0 12px rgba($color-accent-green, 0.5);
+    background-color: rgba($color-accent-green, 0.1);
+  }
+
   &.dragging {
     opacity: 0.5;
     transform: scale(1.05);
     z-index: 100;
+    cursor: grabbing;
   }
+}
+
+.dropIndicatorLine {
+  position: absolute;
+  top: $spacing-sm;
+  bottom: $spacing-sm;
+  width: 3px;
+  background-color: $color-accent-green;
+  z-index: 50;
+  pointer-events: none;
+  box-shadow: 0 0 8px rgba($color-accent-green, 0.6);
 }
 
 .sceneThumbnail {
