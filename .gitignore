@@ -274,3 +274,10 @@ venv.bak/
 # IDEs
 .spyderproject
 .spyproject
+
+
+# All node_modules symlinks
+**/node_modules
+
+.erb/node_modules → release/app/node_modules
+src/node_modules  → release/app/node_modules
