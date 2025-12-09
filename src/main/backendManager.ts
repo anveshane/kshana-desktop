@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events';
 import net from 'net';
+import path from 'path';
+import { app } from 'electron';
 import log from 'electron-log';
 import {
   BackendEnvOverrides,
@@ -136,12 +138,49 @@ class BackendManager extends EventEmitter {
     this.updateState({ status: 'starting' });
 
     try {
+      // Set NODE_ENV to production for packaged apps to avoid dev-only dependencies like pino-pretty
+      if (app.isPackaged) {
+        // Use Reflect.set to avoid Terser issues with process.env.NODE_ENV assignment
+        Reflect.set(process.env, 'NODE_ENV', 'production');
+      }
+
       // Set up environment variables for kshana-ink
       setupEnvironment(overrides);
 
       log.info(
         `Starting kshana-ink backend on port ${this.port} with provider ${overrides.llmProvider || 'default'}`,
       );
+
+      // Log module resolution paths for debugging
+      const appPath = app.isPackaged ? app.getAppPath() : __dirname;
+      log.info(`App path: ${appPath}`);
+      log.info(`App is packaged: ${app.isPackaged}`);
+      
+      // In packaged apps, node_modules might be in app.asar or unpacked
+      // Try to resolve the module path for diagnostics
+      try {
+        const Module = require('module');
+        const nodeModulesPath = app.isPackaged
+          ? path.join(process.resourcesPath, 'app.asar', 'node_modules')
+          : path.join(appPath, '../../node_modules');
+        log.info(`Node modules path: ${nodeModulesPath}`);
+        
+        // Check if kshana-ink exists
+        const kshanaInkPath = path.join(nodeModulesPath, 'kshana-ink');
+        const fs = require('fs');
+        if (fs.existsSync(kshanaInkPath)) {
+          log.info(`Found kshana-ink at: ${kshanaInkPath}`);
+        } else {
+          log.warn(`kshana-ink not found at: ${kshanaInkPath}`);
+          // Try unpacked location
+          const unpackedPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'kshana-ink');
+          if (fs.existsSync(unpackedPath)) {
+            log.info(`Found kshana-ink at unpacked location: ${unpackedPath}`);
+          }
+        }
+      } catch (err) {
+        log.warn(`Could not check module paths: ${(err as Error).message}`);
+      }
 
       // Use dynamic import with package exports
       // Construct the import strings dynamically so webpack can't analyze them
