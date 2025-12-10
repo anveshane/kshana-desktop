@@ -3,6 +3,9 @@ import ReactMarkdown from 'react-markdown';
 import type { ChatMessage } from '../../../types/chat';
 import CodeBlock from '../CodeBlock';
 import MessageActions from '../MessageActions';
+import ToolCallCard from '../ToolCallCard';
+import TodoDisplay from '../TodoDisplay';
+import type { TodoItem } from '../TodoDisplay';
 import styles from './MessageBubble.module.scss';
 
 interface MessageBubbleProps {
@@ -85,6 +88,48 @@ export default function MessageBubble({
   );
   const isError = message.type === 'error';
   const isSystem = message.role === 'system';
+  const isToolCall = message.type === 'tool_call';
+  const isTodoUpdate = message.type === 'todo_update';
+
+  // Render tool call card
+  if (isToolCall && message.meta) {
+    const toolName = (message.meta.toolName as string) || 'tool';
+    // Hide certain tools that are rendered elsewhere (like todo_write)
+    const HIDDEN_TOOLS = new Set(['todo_write']);
+    if (HIDDEN_TOOLS.has(toolName)) {
+      return null; // Don't render hidden tools
+    }
+    const status = (message.meta.status as string) || 'executing';
+    const args = (message.meta.args as Record<string, unknown>) || {};
+    const result = message.meta.result;
+    const duration = message.meta.duration as number | undefined;
+
+    return (
+      <div className={`${styles.container} ${styles.system}`}>
+        <ToolCallCard
+          toolName={toolName}
+          args={args}
+          status={status as 'executing' | 'completed' | 'error' | 'needs_confirmation'}
+          result={result}
+          duration={duration}
+          toolCallId={message.meta.toolCallId as string | undefined}
+        />
+      </div>
+    );
+  }
+
+  // Render todo display
+  if (isTodoUpdate && message.meta?.todos) {
+    const todos = message.meta.todos as TodoItem[];
+    return (
+      <div className={`${styles.container} ${styles.system}`}>
+        <TodoDisplay todos={todos} />
+      </div>
+    );
+  }
+
+  // Handle dispatch_agent (plan) messages with markdown
+  const isDispatchAgent = message.meta?.toolName === 'dispatch_agent';
 
   return (
     <div
@@ -116,6 +161,14 @@ export default function MessageBubble({
       <div className={styles.body}>
         {isSystem ? (
           <div className={styles.systemContent}>{message.content}</div>
+        ) : isDispatchAgent && message.meta?.result ? (
+          // Render plan from dispatch_agent result
+          <ReactMarkdown
+            remarkPlugins={remarkGfm ? [remarkGfm] : []}
+            components={MarkdownComponents}
+          >
+            {(message.meta.result as Record<string, unknown>)?.plan as string || message.content}
+          </ReactMarkdown>
         ) : (
           <ReactMarkdown
             remarkPlugins={remarkGfm ? [remarkGfm] : []}

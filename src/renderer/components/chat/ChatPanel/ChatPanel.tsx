@@ -37,6 +37,12 @@ export default function ChatPanel() {
     null,
   );
   const awaitingResponseRef = useRef(false);
+  // Track active tool calls by toolCallId with start time
+  const activeToolCallsRef = useRef<Map<string, { messageId: string; startTime: number }>>(
+    new Map(),
+  );
+  // Track the last todo message ID for in-place updates
+  const lastTodoMessageIdRef = useRef<string | null>(null);
 
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
@@ -92,6 +98,8 @@ export default function ChatPanel() {
     setMessages([]);
     lastAssistantIdRef.current = null;
     awaitingResponseRef.current = false;
+    activeToolCallsRef.current.clear();
+    lastTodoMessageIdRef.current = null;
     // Backend will send greeting via WebSocket when connection is re-established
   }, []);
 
@@ -176,7 +184,8 @@ export default function ChatPanel() {
                 },
               ];
             });
-          } else if (statusMsg && data.status !== 'busy') {
+          } else if (statusMsg && data.status !== 'busy' && data.status !== 'completed') {
+            // Skip 'completed' status messages - agent_response already indicates completion
             appendSystemMessage(statusMsg);
           }
           break;
@@ -215,20 +224,65 @@ export default function ChatPanel() {
         case 'tool_call': {
           // kshana-ink tool_call: { toolName, toolCallId, arguments, status, result?, error? }
           const toolName = (data.toolName as string) ?? 'tool';
+          const toolCallId = (data.toolCallId as string) ?? makeId();
           const toolStatus = (data.status as string) ?? 'started';
+          const args = (data.arguments as Record<string, unknown>) ?? {};
+          const result = data.result;
+          const error = data.error;
+
           if (toolStatus === 'started') {
-            appendMessage({
+            const startTime = Date.now();
+            const messageId = appendMessage({
               role: 'system',
               type: 'tool_call',
-              content: `Calling ${toolName}…`,
+              content: '', // Empty content, ToolCallCard will render
               meta: {
-                tool_name: toolName,
+                toolCallId,
+                toolName,
+                args,
+                status: 'executing',
+                startTime,
               },
             });
-          } else if (toolStatus === 'completed') {
-            appendSystemMessage(`${toolName} completed`, 'tool_result');
-          } else if (toolStatus === 'error') {
-            appendSystemMessage(`${toolName} failed: ${data.error || 'Unknown error'}`, 'error');
+            activeToolCallsRef.current.set(toolCallId, { messageId, startTime });
+          } else if (toolStatus === 'completed' || toolStatus === 'error') {
+            const toolCall = activeToolCallsRef.current.get(toolCallId);
+            if (toolCall) {
+              const duration = Date.now() - toolCall.startTime;
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === toolCall.messageId
+                    ? {
+                        ...msg,
+                        meta: {
+                          ...msg.meta,
+                          toolCallId,
+                          toolName,
+                          args,
+                          status: toolStatus === 'error' ? 'error' : 'completed',
+                          result: result ?? error,
+                          duration,
+                        },
+                      }
+                    : msg,
+                ),
+              );
+              activeToolCallsRef.current.delete(toolCallId);
+            } else {
+              // Fallback: create new message if tool call wasn't tracked
+              appendMessage({
+                role: 'system',
+                type: 'tool_call',
+                content: '',
+                meta: {
+                  toolCallId,
+                  toolName,
+                  args,
+                  status: toolStatus === 'error' ? 'error' : 'completed',
+                  result: result ?? error,
+                },
+              });
+            }
           }
           break;
         }
@@ -237,9 +291,42 @@ export default function ChatPanel() {
           const output = (data.output as string) ?? '';
           const responseStatus = data.status as string;
           if (output) {
+            // Replace last stream_chunk message if it exists and matches, otherwise create new
+            setMessages((prev) => {
+              const lastMessage = prev[prev.length - 1];
+              if (
+                lastMessage &&
+                lastMessage.role === 'assistant' &&
+                (lastMessage.type === 'stream_chunk' || lastMessage.content === output)
+              ) {
+                // Replace the last message with agent_response
+                return prev.map((msg, idx) =>
+                  idx === prev.length - 1
+                    ? {
+                        ...msg,
+                        type: 'agent_response',
+                        content: output,
+                        timestamp: Date.now(),
+                      }
+                    : msg,
+                );
+              }
+              // Create new message if no matching stream_chunk
+              const id = makeId();
+              lastAssistantIdRef.current = id;
+              return [
+                ...prev,
+                {
+                  id,
+                  role: 'assistant',
+                  type: 'agent_response',
+                  content: output,
+                  timestamp: Date.now(),
+                },
+              ];
+            });
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
-            appendAssistantChunk(output, 'agent_response');
           }
           // If completed, show completion message
           if (responseStatus === 'completed') {
@@ -253,9 +340,50 @@ export default function ChatPanel() {
           // kshana-ink agent_question: { question, toolCallId }
           const question = (data.question as string) ?? '';
           if (question) {
+            // Replace last agent_question message if it exists and matches, otherwise create new
+            setMessages((prev) => {
+              const lastMessage = prev[prev.length - 1];
+              if (
+                lastMessage &&
+                lastMessage.role === 'assistant' &&
+                lastMessage.type === 'agent_question' &&
+                lastMessage.content === question
+              ) {
+                // Skip duplicate
+                return prev;
+              }
+              if (
+                lastMessage &&
+                lastMessage.role === 'assistant' &&
+                lastMessage.type === 'agent_question'
+              ) {
+                // Replace the last agent_question with new one
+                return prev.map((msg, idx) =>
+                  idx === prev.length - 1
+                    ? {
+                        ...msg,
+                        content: question,
+                        timestamp: Date.now(),
+                      }
+                    : msg,
+                );
+              }
+              // Create new message if no matching agent_question
+              const id = makeId();
+              lastAssistantIdRef.current = id;
+              return [
+                ...prev,
+                {
+                  id,
+                  role: 'assistant',
+                  type: 'agent_question',
+                  content: question,
+                  timestamp: Date.now(),
+                },
+              ];
+            });
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
-            appendAssistantChunk(question, 'agent_question');
             // Mark that we're awaiting a user response
             awaitingResponseRef.current = true;
           }
@@ -266,25 +394,40 @@ export default function ChatPanel() {
           const todos = data.todos as Array<{
             id?: string;
             task?: string;
+            content?: string;
             status?: string;
             depth?: number;
+            hasSubtasks?: boolean;
+            parentId?: string;
           }>;
           if (todos?.length) {
-            const todoText = todos
-              .map((t) => {
-                const icon =
-                  t.status === 'completed'
-                    ? '✓'
-                    : t.status === 'in_progress'
-                      ? '⏳'
-                      : t.status === 'cancelled'
-                        ? '✗'
-                        : '○';
-                const indent = '  '.repeat(t.depth ?? 0);
-                return `${indent}${icon} ${t.task || 'Task'}`;
-              })
-              .join('\n');
-            appendSystemMessage(todoText, 'todo_update');
+            // Update existing todo message in-place, or create new one
+            if (lastTodoMessageIdRef.current) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === lastTodoMessageIdRef.current
+                    ? {
+                        ...msg,
+                        meta: {
+                          ...msg.meta,
+                          todos,
+                        },
+                        timestamp: Date.now(), // Update timestamp for live updates
+                      }
+                    : msg,
+                ),
+              );
+            } else {
+              const messageId = appendMessage({
+                role: 'system',
+                type: 'todo_update',
+                content: '', // Empty content, TodoDisplay will render
+                meta: {
+                  todos,
+                },
+              });
+              lastTodoMessageIdRef.current = messageId;
+            }
           }
           break;
         }
@@ -606,6 +749,8 @@ export default function ChatPanel() {
     lastAssistantIdRef.current = null;
     awaitingResponseRef.current = false;
     setIsStreaming(false);
+    activeToolCallsRef.current.clear();
+    lastTodoMessageIdRef.current = null;
 
     // Disconnect existing WebSocket connection
     if (wsRef.current) {

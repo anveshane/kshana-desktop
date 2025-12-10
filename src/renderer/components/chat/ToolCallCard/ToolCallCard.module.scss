@@ -1,0 +1,317 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  border: 1px solid;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  margin-bottom: $spacing-md;
+  background: rgba($color-panel-background, 0.5);
+  transition: all $transition-normal;
+
+  &.borderExecuting {
+    border-color: $color-warning;
+    background: rgba($color-warning, 0.1);
+  }
+
+  &.borderCompleted {
+    border-color: $color-accent-green;
+    background: rgba($color-accent-green, 0.05);
+  }
+
+  &.borderError {
+    border-color: $color-error;
+    background: rgba($color-error, 0.1);
+  }
+
+  &.borderNeedsConfirmation {
+    border-color: $color-accent-cyan;
+    background: rgba($color-accent-cyan, 0.1);
+  }
+
+  &.borderDefault {
+    border-color: $color-panel-border;
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.expandButton {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  color: $color-text-secondary;
+  transition: color $transition-fast;
+
+  &:hover {
+    color: $color-text-primary;
+  }
+}
+
+.chevron {
+  width: 14px;
+  height: 14px;
+}
+
+.statusIconExecuting {
+  color: $color-warning;
+  animation: spin 1s linear infinite;
+}
+
+.statusIconCompleted {
+  color: $color-accent-green;
+}
+
+.statusIconError {
+  color: $color-error;
+}
+
+.statusIconNeedsConfirmation {
+  color: $color-accent-cyan;
+}
+
+.statusIconDefault {
+  color: $color-text-muted;
+  font-size: 14px;
+}
+
+.toolName {
+  font-weight: $font-weight-semibold;
+  flex: 1;
+}
+
+.duration {
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  font-family: $font-family-mono;
+}
+
+.content {
+  margin-top: $spacing-sm;
+  padding-left: $spacing-lg;
+  border-top: 1px solid rgba($color-panel-border, 0.5);
+  padding-top: $spacing-sm;
+}
+
+.toolCall {
+  margin-bottom: $spacing-sm;
+}
+
+.toolCallCode {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: rgba(0, 0, 0, 0.3);
+  padding: $spacing-xs $spacing-sm;
+  border-radius: $radius-sm;
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.errorResult {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  margin-top: $spacing-sm;
+}
+
+.errorLabel {
+  font-weight: $font-weight-semibold;
+  color: $color-error;
+  font-size: $font-size-xs;
+}
+
+.errorMessage {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: $color-error;
+  background: rgba($color-error, 0.1);
+  padding: $spacing-xs $spacing-sm;
+  border-radius: $radius-sm;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  margin-top: $spacing-sm;
+}
+
+.resultLabel {
+  font-weight: $font-weight-semibold;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+}
+
+.resultContent {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: rgba(0, 0, 0, 0.3);
+  padding: $spacing-xs $spacing-sm;
+  border-radius: $radius-sm;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+// Think tool styles
+.thinkTool {
+  padding: $spacing-sm;
+}
+
+.thinkHeader {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.thinkIcon {
+  font-size: $font-size-lg;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.thinkText {
+  font-style: italic;
+  color: $color-text-primary;
+}
+
+// Dispatch agent tool styles
+.dispatchAgentTool {
+  border: 1px solid $color-accent-cyan;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+  background: rgba($color-accent-cyan, 0.05);
+}
+
+.dispatchHeader {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  color: $color-accent-cyan;
+  font-weight: $font-weight-semibold;
+  margin-bottom: $spacing-sm;
+}
+
+.dispatchIcon {
+  font-size: $font-size-lg;
+}
+
+.dispatchText {
+  color: $color-accent-cyan;
+}
+
+.dispatchContent {
+  margin-left: $spacing-lg;
+  margin-top: $spacing-sm;
+}
+
+.dispatchSection {
+  margin-bottom: $spacing-md;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.dispatchLabel {
+  font-weight: $font-weight-semibold;
+  color: $color-warning;
+  margin-bottom: $spacing-xs;
+  font-size: $font-size-sm;
+}
+
+.dispatchValue {
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  white-space: pre-wrap;
+}
+
+.dispatchPlan {
+  margin-top: $spacing-xs;
+  margin-left: $spacing-sm;
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+
+  p {
+    margin: $spacing-xs 0;
+  }
+}
+
+// Project state tool styles
+.projectStateTool {
+  border: 1px solid $color-accent-cyan;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+  background: rgba($color-accent-cyan, 0.05);
+}
+
+.projectStateHeader {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  color: $color-accent-cyan;
+}
+
+.projectStateIcon {
+  font-size: $font-size-lg;
+}
+
+.projectStateText {
+  color: $color-accent-cyan;
+}
+
+.projectStateDataType {
+  color: $color-accent-green;
+  font-weight: $font-weight-semibold;
+}
+
+.projectStateData {
+  margin-left: $spacing-lg;
+  margin-top: $spacing-sm;
+}
+
+.projectStateKey {
+  margin-bottom: $spacing-xs;
+}
+
+.projectStateLabel {
+  color: $color-warning;
+  font-weight: $font-weight-semibold;
+}
+
+.projectStateValue {
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+}
+
+.projectStateItem {
+  margin-bottom: $spacing-xs;
+}
+
