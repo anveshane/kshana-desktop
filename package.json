@@ -26,15 +26,14 @@
   "main": "./.erb/dll/main.bundle.dev.js",
   "scripts": {
     "build": "concurrently \"npm run build:main\" \"npm run build:renderer\"",
-    "build:backend": "python3.13 backend-build/build.py --clean",
     "build:dll": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.renderer.dev.dll.ts",
     "build:main": "cross-env NODE_ENV=production TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.main.prod.ts",
     "build:renderer": "cross-env NODE_ENV=production TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.renderer.prod.ts",
     "postinstall": "ts-node .erb/scripts/check-native-dep.js && electron-builder install-app-deps && npm run build:dll",
     "lint": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx",
     "lint:fix": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx --fix",
-    "package": "npm run build:backend && ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --publish never && npm run build:dll",
-    "release": "npm run build:backend && ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --publish always",
+    "package": "ts-node ./.erb/scripts/clean.js dist && ts-node ./.erb/scripts/install-app-deps.ts && npm run build && electron-builder build --publish never && npm run build:dll",
+    "release": "ts-node ./.erb/scripts/clean.js dist && ts-node ./.erb/scripts/install-app-deps.ts && npm run build && electron-builder build --publish always",
     "rebuild": "electron-rebuild --parallel --types prod,dev,optional --module-dir release/app",
     "prestart": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.main.dev.ts",
     "start": "ts-node ./.erb/scripts/check-port-in-use.js && npm run prestart && npm run start:renderer",
@@ -106,6 +105,7 @@
     "electron-log": "^5.3.2",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.3.9",
+    "kshana-ink": "file:../kshana-ink",
     "lucide-react": "^0.555.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -186,7 +186,10 @@
     "appId": "com.kshana.desktop",
     "asar": true,
     "afterSign": ".erb/scripts/notarize.js",
-    "asarUnpack": "**\\*.{node,dll}",
+    "asarUnpack": [
+      "**\\*.{node,dll}",
+      "**/node_modules/**/*"
+    ],
     "files": [
       "dist",
       "node_modules",
@@ -205,13 +208,7 @@
       "hardenedRuntime": true,
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
-      "gatekeeperAssess": false,
-      "extraResources": [
-        {
-          "from": "backend-build/dist/kshana-backend-mac/",
-          "to": "backend"
-        }
-      ]
+      "gatekeeperAssess": false
     },
     "dmg": {
       "contents": [
@@ -230,25 +227,13 @@
     "win": {
       "target": [
         "nsis"
-      ],
-      "extraResources": [
-        {
-          "from": "backend-build/dist/kshana-backend-win/",
-          "to": "backend"
-        }
       ]
     },
     "linux": {
       "target": [
         "AppImage"
       ],
-      "category": "Development",
-      "extraResources": [
-        {
-          "from": "backend-build/dist/kshana-backend-linux/",
-          "to": "backend"
-        }
-      ]
+      "category": "Development"
     },
     "directories": {
       "app": "release/app",

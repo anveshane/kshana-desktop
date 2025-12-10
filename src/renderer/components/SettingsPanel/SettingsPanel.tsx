@@ -77,7 +77,7 @@ export default function SettingsPanel({
         <div className={styles.header}>
           <div>
             <h2>Runtime settings</h2>
-            <p>Values apply to the bundled backend at the next restart.</p>
+            <p>Values apply to the kshana-ink backend at the next restart.</p>
           </div>
           <button
             type="button"

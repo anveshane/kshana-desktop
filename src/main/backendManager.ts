@@ -1,10 +1,8 @@
 import { EventEmitter } from 'events';
-import path from 'path';
-import fs from 'fs';
 import net from 'net';
-import { ChildProcess, spawn } from 'child_process';
-import log from 'electron-log';
+import path from 'path';
 import { app } from 'electron';
+import log from 'electron-log';
 import {
   BackendEnvOverrides,
   BackendState,
@@ -12,53 +10,7 @@ import {
 } from '../shared/backendTypes';
 
 const DEFAULT_PORT = 8001;
-const HEALTH_ENDPOINT = '/health';
-
-function comfyWsUrl(httpUrl: string): string {
-  try {
-    const parsed = new URL(httpUrl);
-    parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
-    if (parsed.pathname === '/' || parsed.pathname === '') {
-      parsed.pathname = '/ws';
-    }
-    return parsed.toString();
-  } catch (error) {
-    log.warn(
-      `Failed to parse ComfyUI URL "${httpUrl}": ${(error as Error).message}`,
-    );
-    return 'ws://localhost:8000/ws';
-  }
-}
-
-function executableName(): string {
-  return process.platform === 'win32' ? 'kshana-backend.exe' : 'kshana-backend';
-}
-
-function resolveExecutablePath(): string | null {
-  const binaryName = executableName();
-  if (app.isPackaged) {
-    const packagedPath = path.join(
-      process.resourcesPath,
-      'backend',
-      binaryName,
-    );
-    return packagedPath;
-  }
-
-  const platformFolder =
-    process.platform === 'darwin'
-      ? 'kshana-backend-mac'
-      : process.platform === 'win32'
-        ? 'kshana-backend-win'
-        : 'kshana-backend-linux';
-  const devPath = path.join(
-    __dirname,
-    '../../backend-build/dist',
-    platformFolder,
-    binaryName,
-  );
-  return devPath;
-}
+const HEALTH_ENDPOINT = '/api/v1/health';
 
 async function portIsFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -125,8 +77,36 @@ async function waitForHealth(url: string, timeoutMs = 60_000): Promise<void> {
   }
 }
 
+/**
+ * Set up environment variables for kshana-ink based on backend overrides.
+ */
+function setupEnvironment(overrides: BackendEnvOverrides): void {
+  if (overrides.llmProvider) {
+    process.env['LLM_PROVIDER'] = overrides.llmProvider;
+  }
+  if (overrides.lmStudioUrl) {
+    // kshana-ink expects the /v1 suffix for LM Studio
+    process.env['LMSTUDIO_BASE_URL'] = overrides.lmStudioUrl.endsWith('/v1')
+      ? overrides.lmStudioUrl
+      : `${overrides.lmStudioUrl}/v1`;
+  }
+  if (overrides.lmStudioModel) {
+    process.env['LMSTUDIO_MODEL'] = overrides.lmStudioModel;
+  }
+  if (overrides.googleApiKey) {
+    process.env['GOOGLE_API_KEY'] = overrides.googleApiKey;
+  }
+  if (overrides.comfyuiUrl) {
+    process.env['COMFYUI_BASE_URL'] = overrides.comfyuiUrl;
+  }
+  if (overrides.projectDir) {
+    process.env['KSHANA_PROJECT_DIR'] = overrides.projectDir;
+  }
+}
+
 class BackendManager extends EventEmitter {
-  private child?: ChildProcess;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private server?: any;
 
   private state: BackendState = { status: 'idle', port: DEFAULT_PORT };
 
@@ -149,113 +129,162 @@ class BackendManager extends EventEmitter {
   }
 
   async start(overrides: BackendEnvOverrides = {}): Promise<number> {
-    if (this.child) {
+    if (this.server) {
       log.info('Backend already running');
       return this.port;
-    }
-
-    const binaryPath = resolveExecutablePath();
-    if (!binaryPath || !fs.existsSync(binaryPath)) {
-      throw new Error(
-        `Backend executable not found at ${binaryPath}. Run backend-build/build.py first.`,
-      );
     }
 
     this.port = overrides.port ?? (await findAvailablePort(DEFAULT_PORT));
     this.updateState({ status: 'starting' });
 
-    const comfyHttp = overrides.comfyuiUrl ?? 'http://localhost:8000';
-    const comfyWs = comfyWsUrl(comfyHttp);
-
-    const env = {
-      ...process.env,
-      KSHANA_HOST: '127.0.0.1',
-      KSHANA_PUBLIC_HOST: '127.0.0.1',
-      KSHANA_PORT: String(this.port),
-      COMFYUI_BASE_URL: comfyHttp,
-      COMFYUI_WS_URL: comfyWs,
-      LMSTUDIO_BASE_URL: overrides.lmStudioUrl ?? 'http://127.0.0.1:1234',
-      LMSTUDIO_MODEL: overrides.lmStudioModel ?? 'qwen3',
-      LLM_PROVIDER: overrides.llmProvider ?? 'lmstudio',
-      GOOGLE_API_KEY: overrides.googleApiKey ?? '',
-      KSHANA_PROJECT_DIR: overrides.projectDir ?? '',
-      KSHANA_NO_RELOAD: '1',
-    };
-
-    log.info(
-      `Starting backend on port ${this.port} with KSHANA_PORT=${env.KSHANA_PORT}`,
-    );
-
-    this.child = spawn(binaryPath, [], {
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    this.child.stdout?.on('data', (data: Buffer) => {
-      const output = data.toString();
-      log.info(`[kshana-backend] ${output}`);
-      // Check if backend is ready by looking for Uvicorn startup message
-      if (
-        output.includes('Uvicorn running on') ||
-        output.includes('Application startup complete')
-      ) {
-        log.info('Backend startup detected in logs');
-      }
-    });
-    this.child.stderr?.on('data', (data: Buffer) => {
-      log.error(`[kshana-backend] ${data.toString()}`);
-    });
-
-    this.child.on('error', (error) => {
-      log.error(`Kshana backend process error: ${error.message}`);
-      this.updateState({ status: 'error', message: error.message });
-    });
-
-    this.child.on('exit', (code, signal) => {
-      log.warn(`Kshana backend exited (code=${code}) signal=${signal}`);
-      this.child = undefined;
-      this.updateState({ status: 'stopped' });
-    });
-
     try {
+      // Set NODE_ENV to production for packaged apps to avoid dev-only dependencies like pino-pretty
+      if (app.isPackaged) {
+        // Use Reflect.set to avoid Terser issues with process.env.NODE_ENV assignment
+        Reflect.set(process.env, 'NODE_ENV', 'production');
+      }
+
+      // Set up environment variables for kshana-ink
+      setupEnvironment(overrides);
+
+      log.info(
+        `Starting kshana-ink backend on port ${this.port} with provider ${overrides.llmProvider || 'default'}`,
+      );
+
+      // Log module resolution paths for debugging
+      const appPath = app.isPackaged ? app.getAppPath() : __dirname;
+      log.info(`App path: ${appPath}`);
+      log.info(`App is packaged: ${app.isPackaged}`);
+      
+      // In packaged apps, node_modules might be in app.asar or unpacked
+      // Try to resolve the module path for diagnostics
+      try {
+        const Module = require('module');
+        const nodeModulesPath = app.isPackaged
+          ? path.join(process.resourcesPath, 'app.asar', 'node_modules')
+          : path.join(appPath, '../../node_modules');
+        log.info(`Node modules path: ${nodeModulesPath}`);
+        
+        // Check if kshana-ink exists
+        const kshanaInkPath = path.join(nodeModulesPath, 'kshana-ink');
+        const fs = require('fs');
+        if (fs.existsSync(kshanaInkPath)) {
+          log.info(`Found kshana-ink at: ${kshanaInkPath}`);
+        } else {
+          log.warn(`kshana-ink not found at: ${kshanaInkPath}`);
+          // Try unpacked location
+          const unpackedPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'kshana-ink');
+          if (fs.existsSync(unpackedPath)) {
+            log.info(`Found kshana-ink at unpacked location: ${unpackedPath}`);
+          }
+        }
+      } catch (err) {
+        log.warn(`Could not check module paths: ${(err as Error).message}`);
+      }
+
+      // Use dynamic import with package exports
+      // Construct the import strings dynamically so webpack can't analyze them
+      // kshana-ink has proper exports defined in package.json
+      const pkgName = 'kshana-ink';
+      const serverExport = `${pkgName}/server`;
+      const llmExport = `${pkgName}/core/llm`;
+
+      log.info(`Loading kshana-ink modules: ${serverExport}, ${llmExport}`);
+
+      // Use Function constructor to create dynamic import that webpack can't analyze
+      // This ensures the import happens at runtime, not build time
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+      const dynamicImport = new Function('specifier', 'return import(specifier)');
+
+      const serverModule = await dynamicImport(serverExport);
+      const llmModule = await dynamicImport(llmExport);
+
+      log.info('Successfully loaded kshana-ink modules');
+
+      const { createServer } = serverModule;
+      const { getLLMConfig, validateLLMConfig } = llmModule;
+
+      // Validate LLM configuration before proceeding
+      const validation = validateLLMConfig();
+      if (!validation.valid) {
+        const validationErrors = validation.errors.join(', ');
+        log.error(`LLM configuration validation failed: ${validationErrors}`);
+        throw new Error(`LLM configuration invalid: ${validationErrors}`);
+      }
+
+      // Get LLM configuration (reads from environment variables we just set)
+      const llmConfig = getLLMConfig();
+
+      log.info(`LLM Config: provider=${process.env['LLM_PROVIDER']}, model=${llmConfig.model}, baseUrl=${llmConfig.baseUrl}`);
+
+      // Create and start kshana-ink server
+      log.info('Creating kshana-ink server instance...');
+      this.server = await createServer(
+        {
+          llmConfig,
+          apiPrefix: '/api/v1',
+          taskType: 'video', // Use video task type for video generation features
+        },
+        {
+          host: '127.0.0.1',
+          port: this.port,
+          cors: {
+            origin: true,
+            methods: ['GET', 'POST', 'DELETE'],
+          },
+        },
+      );
+
+      log.info('Starting kshana-ink server...');
+      await this.server.start();
+      log.info(`Kshana-ink server started, waiting for health check...`);
+
+      // Verify health endpoint is responding
       const healthUrl = `http://127.0.0.1:${this.port}${HEALTH_ENDPOINT}`;
       await waitForHealth(healthUrl);
+
       this.updateState({ status: 'ready' });
-      log.info(`Kshana backend ready on ${healthUrl}`);
+      log.info(`Kshana-ink backend ready on ${healthUrl}`);
+
+      return this.port;
     } catch (error) {
-      this.updateState({ status: 'error', message: (error as Error).message });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      
+      log.error(`Failed to start kshana-ink backend: ${errorMessage}`);
+      if (errorStack) {
+        log.error(`Error stack: ${errorStack}`);
+      }
+      
+      this.updateState({ status: 'error', message: errorMessage });
+      // Clean up server if partially started
+      if (this.server) {
+        try {
+          await this.server.stop();
+        } catch (cleanupError) {
+          log.error(`Error during cleanup: ${(cleanupError as Error).message}`);
+        }
+        this.server = undefined;
+      }
       throw error;
     }
-
-    return this.port;
   }
 
   async stop(): Promise<void> {
-    if (!this.child) {
+    if (!this.server) {
       return;
     }
 
-    const proc = this.child;
-    this.child = undefined;
+    const serverInstance = this.server;
+    this.server = undefined;
     this.updateState({ status: 'stopped' });
 
-    const waitForExit = new Promise<void>((resolve) => {
-      proc.once('exit', () => resolve());
-    });
-
-    if (process.platform === 'win32') {
-      proc.kill();
-    } else {
-      proc.kill('SIGTERM');
+    try {
+      await serverInstance.stop();
+      log.info('Kshana-ink backend stopped');
+    } catch (error) {
+      log.error(`Error stopping backend: ${(error as Error).message}`);
     }
-
-    setTimeout(() => {
-      if (!proc.killed) {
-        proc.kill('SIGKILL');
-      }
-    }, 4000);
-
-    await waitForExit;
   }
 
   async restart(overrides: BackendEnvOverrides = {}): Promise<number> {

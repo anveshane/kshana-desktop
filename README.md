@@ -1,36 +1,38 @@
 # Kshana Desktop Application
 
-Electron-based desktop application for the Kshana video generation platform. This application bundles the Kshana Python backend and provides a native desktop interface.
+Electron-based desktop application for the Kshana video generation platform. This application uses the kshana-ink TypeScript backend and provides a native desktop interface.
 
 ## Features
 
 - 🖥️ **Native Desktop App**: Built with Electron for cross-platform support
-- 🔧 **Bundled Backend**: Includes the full Kshana Python backend (no separate installation needed)
+- 🔧 **TypeScript Backend**: Uses kshana-ink for AI-powered video generation (no Python needed!)
 - 💬 **Chat Interface**: Minimal chat UI for interacting with the video generation system
 - ⚙️ **Settings Management**: Configure LM Studio and ComfyUI URLs via app settings
 - 🚀 **Auto-start Backend**: Backend automatically starts when the app launches
 
 ## Prerequisites
 
-- Node.js 18+ and npm
-- Python 3.10+ (for building the backend bundle)
+- Node.js 20+ and npm
 - LM Studio (optional, for local LLM)
 - ComfyUI (optional, for image/video generation)
 
 ## Development Setup
 
-### 1. Install Dependencies
+### 1. Build kshana-ink
+
+First, ensure kshana-ink is built:
 
 ```bash
-npm install
+cd ../kshana-ink
+pnpm install
+pnpm build
 ```
 
-### 2. Build the Backend Bundle
-
-The backend is bundled using PyInstaller. Build it with:
+### 2. Install Dependencies
 
 ```bash
-npm run build:backend -- --python python3.13
+cd ../kshana-frontend
+npm install
 ```
 
 ### 3. Start Development Server
@@ -41,7 +43,7 @@ npm run start
 
 This will:
 - Start the Electron app in development mode
-- Automatically start the bundled backend
+- Automatically start the kshana-ink backend
 - Enable hot-reload for frontend changes
 
 ## Building for Production
@@ -54,16 +56,11 @@ npm run package
 
 This will:
 1. Build the frontend (main and renderer processes)
-2. Build the backend bundle for the current platform
-3. Package everything into installers
+2. Package everything into installers
 
-### Build Backend Only
+### Running the Built App
 
-```bash
-npm run build:backend -- --python python3.13
-```
-
-The backend executable will be in `backend-build/dist/kshana-backend-{platform}/kshana-backend`
+The packaged application includes the kshana-ink backend and runs entirely from the installer - no external dependencies required!
 
 ## Project Structure
 
@@ -71,18 +68,13 @@ The backend executable will be in `backend-build/dist/kshana-backend-{platform}/
 kshana-frontend/
 ├── src/
 │   ├── main/              # Electron main process
-│   │   ├── backendManager.ts    # Manages Python backend lifecycle
+│   │   ├── backendManager.ts    # Manages kshana-ink backend lifecycle
 │   │   ├── settingsManager.ts   # Persistent settings storage
 │   │   └── main.ts              # Main Electron entry point
 │   ├── renderer/          # React frontend
 │   │   ├── components/    # UI components
 │   │   └── styles/        # CSS styles
 │   └── shared/            # Shared TypeScript types
-├── backend-build/         # Backend bundling configuration
-│   ├── build.py          # PyInstaller build script
-│   ├── kshana.spec       # PyInstaller spec file
-│   ├── entry.py          # Backend entry point
-│   └── requirements.txt  # Python dependencies
 └── assets/               # App icons and resources
 ```
 
@@ -101,13 +93,79 @@ Settings are accessible via the Settings panel in the app UI.
 
 ### Environment Variables
 
-The backend uses environment variables passed from the Electron main process:
+The backend uses environment variables set by the Electron main process:
 
-- `KSHANA_HOST`: Backend host (default: `127.0.0.1`)
-- `KSHANA_PORT`: Backend port (auto-assigned, starts from 8001)
-- `COMFYUI_BASE_URL`: ComfyUI HTTP URL
-- `COMFYUI_WS_URL`: ComfyUI WebSocket URL
+- `LLM_PROVIDER`: `gemini` or `lmstudio`
 - `LMSTUDIO_BASE_URL`: LM Studio URL
 - `LMSTUDIO_MODEL`: Model name
-- `LLM_PROVIDER`: `gemini` or `lmstudio`
 - `GOOGLE_API_KEY`: Google API key (if using Gemini)
+- `COMFYUI_BASE_URL`: ComfyUI HTTP URL
+
+## WebSocket API
+
+The kshana-ink backend exposes a WebSocket API at `/api/v1/ws/chat`.
+
+### Client → Server Messages
+
+```typescript
+// Start a new task
+{ type: "start_task", data: { task: "Create a video about..." } }
+
+// Respond to agent question
+{ type: "user_response", data: { response: "Yes, proceed" } }
+
+// Cancel current task
+{ type: "cancel" }
+
+// Keep-alive
+{ type: "ping" }
+```
+
+### Server → Client Messages
+
+```typescript
+// Connection status
+{ type: "status", sessionId, timestamp, data: { status: "connected" | "ready" | "busy" | "completed" | "error", message? } }
+
+// Agent progress
+{ type: "progress", sessionId, timestamp, data: { iteration, maxIterations, status } }
+
+// Streaming text
+{ type: "stream_chunk", sessionId, timestamp, data: { content, done } }
+
+// Final response
+{ type: "agent_response", sessionId, timestamp, data: { output, status } }
+
+// Agent asking a question
+{ type: "agent_question", sessionId, timestamp, data: { question, toolCallId } }
+
+// Tool execution
+{ type: "tool_call", sessionId, timestamp, data: { toolName, status, arguments, result?, error? } }
+
+// Todo updates
+{ type: "todo_update", sessionId, timestamp, data: { todos: [...] } }
+
+// Error
+{ type: "error", sessionId, timestamp, data: { code, message, details? } }
+```
+
+## Architecture
+
+### Backend Integration
+
+The kshana-ink backend is imported directly into the Electron main process:
+
+1. On app start, `BackendManager` dynamically imports kshana-ink
+2. Creates a Fastify server with WebSocket support
+3. Server listens on port 8001 (or next available)
+4. Health check at `/api/v1/health` confirms server is ready
+
+### Communication Flow
+
+```
+[Renderer Process]
+       ↓ WebSocket
+[kshana-ink Server] (in Main Process)
+       ↓ HTTP/Tool Calls
+[ComfyUI / LLM Provider]
+```

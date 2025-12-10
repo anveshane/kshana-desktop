@@ -1,0 +1,97 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  border: 1px solid $color-accent-cyan;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+  background: rgba($color-accent-cyan, 0.05);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-accent-cyan;
+}
+
+.headerIcon {
+  font-size: $font-size-lg;
+}
+
+.headerText {
+  color: $color-accent-cyan;
+}
+
+.headerInProgress {
+  color: $color-warning;
+}
+
+.headerPending {
+  color: $color-text-secondary;
+}
+
+.currentTask {
+  margin-bottom: $spacing-sm;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+}
+
+.todoList {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+}
+
+.todoItem {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: $font-size-sm;
+  font-family: $font-family-mono;
+}
+
+.todoIndex {
+  color: $color-text-secondary;
+  min-width: 24px;
+}
+
+.todoIndent {
+  color: $color-text-secondary;
+  white-space: pre;
+}
+
+.statusPending {
+  color: $color-text-muted;
+}
+
+.statusInProgress {
+  color: $color-warning;
+}
+
+.statusCompleted {
+  color: $color-accent-green;
+}
+
+.statusCancelled {
+  color: $color-error;
+}
+
+.todoContent {
+  color: $color-text-primary;
+}
+
+.todoContentDimmed {
+  color: $color-text-secondary;
+}
+
+.emptyState {
+  color: $color-text-secondary;
+  font-style: italic;
+  text-align: center;
+  padding: $spacing-md;
+}
+

@@ -8,7 +8,18 @@ import webpackPaths from './webpack.paths';
 import { dependencies as externals } from '../../release/app/package.json';
 
 const configuration: webpack.Configuration = {
-  externals: [...Object.keys(externals || {})],
+  externals: [
+    ...Object.keys(externals || {}),
+    // Externalize kshana-ink and its subpaths to avoid bundling issues
+    // These will be loaded at runtime via dynamic import()
+    'kshana-ink',
+    /^kshana-ink\/.*/, // Match all kshana-ink subpaths
+    // Externalize kshana-ink's dependencies
+    'fastify',
+    '@fastify/websocket',
+    '@fastify/cors',
+    'dotenv',
+  ],
 
   stats: 'errors-only',
 
