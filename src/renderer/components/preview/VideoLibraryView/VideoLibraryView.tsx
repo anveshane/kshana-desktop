@@ -14,11 +14,50 @@ import type {
 } from '../../../types/projectState';
 import styles from './VideoLibraryView.module.scss';
 
-interface TimelineVideoItem {
+// Mock scenes for when no project state exists (same as TimelinePanel)
+const MOCK_SCENES: StoryboardScene[] = [
+  {
+    scene_number: 1,
+    description:
+      'A young boy is seen lying in the ground, looking up at the sky. The lighting suggests late afternoon golden hour.',
+    duration: 5,
+    shot_type: 'Mid Shot',
+    lighting: 'Golden Hour',
+  },
+  {
+    scene_number: 2,
+    description:
+      'The boy stands up abruptly and kicks the soccer ball with significant force towards the horizon. Dust particles float.',
+    duration: 3,
+    shot_type: 'Low Angle',
+    lighting: 'Action',
+  },
+  {
+    scene_number: 3,
+    description:
+      "The Exchange - A mysterious figure's hand, covered in a ragged glove, hands over a metallic data drive in the rain.",
+    duration: 8,
+    shot_type: 'Close Up',
+    lighting: 'Night',
+  },
+  {
+    scene_number: 4,
+    description:
+      'Escape sequence - The protagonist flees on a high-speed bike through neon-lit streets. Blurring lights create streaks.',
+    duration: 12,
+    shot_type: 'Tracking',
+    lighting: 'Speed',
+  },
+];
+
+interface TimelineItem {
   id: string;
-  path: string;
+  type: 'video' | 'scene';
   startTime: number;
   duration: number;
+  artifact?: Artifact;
+  scene?: StoryboardScene;
+  path?: string;
   label: string;
 }
 
@@ -40,7 +79,7 @@ export default function VideoLibraryView({
   const { projectDirectory } = useWorkspace();
   const [projectState, setProjectState] = useState<ProjectState | null>(null);
   const [loading, setLoading] = useState(false);
-  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const [currentItemIndex, setCurrentItemIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const currentVideoPathRef = useRef<string | null>(null);
   const isSeekingRef = useRef(false);
@@ -70,6 +109,20 @@ export default function VideoLibraryView({
     loadProjectState();
   }, [loadProjectState]);
 
+  // Subscribe to file changes to reload project state when videos are imported
+  useEffect(() => {
+    if (!projectDirectory) return undefined;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      // Reload project state when project.json changes (e.g., after video import)
+      if (event.path.endsWith('project.json') || event.path.includes('/videos/')) {
+        loadProjectState();
+      }
+    });
+
+    return unsubscribe;
+  }, [projectDirectory, loadProjectState]);
+
   // Get video artifacts
   const videoArtifacts: Artifact[] =
     projectState?.artifacts.filter(
@@ -77,8 +130,9 @@ export default function VideoLibraryView({
     ) || [];
 
   // Get scenes and artifacts for timeline
+  // Use mock scenes if no project state exists (same as TimelinePanel)
   const scenes: StoryboardScene[] =
-    projectState?.storyboard_outline?.scenes || [];
+    projectState?.storyboard_outline?.scenes || MOCK_SCENES;
 
   const { artifactsByScene, importedVideoArtifacts } = useMemo(() => {
     const artifactsBySceneMap: Record<number, Artifact> = {};
@@ -110,44 +164,85 @@ export default function VideoLibraryView({
     };
   }, [projectState?.artifacts]);
 
-  // Calculate timeline videos - same logic as TimelinePanel
-  const timelineVideos = useMemo(() => {
-    const videos: TimelineVideoItem[] = [];
+  // Calculate scene blocks (used for timeline items)
+  const sceneBlocks = useMemo(() => {
     let currentTime = 0;
+    return scenes.map((scene) => {
+      const startTime = currentTime;
+      const duration = scene.duration || 5;
+      currentTime += duration;
+      return {
+        scene,
+        startTime,
+        duration,
+        artifact: artifactsByScene[scene.scene_number],
+      };
+    });
+  }, [scenes, artifactsByScene]);
 
-    // Add scene videos
-    scenes.forEach((scene) => {
-      const artifact = artifactsByScene[scene.scene_number];
-      if (artifact && artifact.artifact_type === 'video') {
-        const duration = scene.duration || 5;
-        videos.push({
-          id: `scene-video-${scene.scene_number}`,
-          path: artifact.file_path,
-          startTime: currentTime,
-          duration,
-          label: `SCN_${String(scene.scene_number).padStart(2, '0')}`,
+  // Create unified timeline items - combine all videos and scenes (same logic as TimelinePanel)
+  // ALL scenes from storyboard are included, regardless of artifacts
+  const timelineItems: TimelineItem[] = useMemo(() => {
+    const items: TimelineItem[] = [];
+
+    // Add ALL scene blocks from storyboard - every scene appears on timeline
+    sceneBlocks.forEach((block) => {
+      const sceneLabel =
+        block.scene.name || `Scene ${block.scene.scene_number}`;
+      if (block.artifact && block.artifact.artifact_type === 'video') {
+        // Scene has video - add as video item
+        items.push({
+          id: `scene-video-${block.scene.scene_number}`,
+          type: 'video',
+          startTime: block.startTime,
+          duration: block.duration,
+          artifact: block.artifact,
+          scene: block.scene,
+          path: block.artifact.file_path,
+          label: sceneLabel,
         });
-        currentTime += duration;
       } else {
-        currentTime += scene.duration || 5;
+        // Scene without video - add as scene item (will show placeholder or image)
+        items.push({
+          id: `scene-${block.scene.scene_number}`,
+          type: 'scene',
+          startTime: block.startTime,
+          duration: block.duration,
+          scene: block.scene,
+          artifact: block.artifact,
+          label: sceneLabel,
+        });
       }
     });
 
-    // Add imported videos
+    // Calculate scene end time for positioning imported videos
+    const sceneEndTime =
+      sceneBlocks.length > 0
+        ? sceneBlocks[sceneBlocks.length - 1].startTime +
+          sceneBlocks[sceneBlocks.length - 1].duration
+        : 0;
+
+    // Add imported videos (they go after all scenes)
+    let importedVideoTime = sceneEndTime;
     importedVideoArtifacts.forEach((artifact, index) => {
       const duration = (artifact.metadata?.duration as number) || 5;
-      videos.push({
+      items.push({
         id: `imported-${index}`,
-        path: artifact.file_path,
-        startTime: currentTime,
+        type: 'video',
+        startTime: importedVideoTime,
         duration,
+        artifact,
+        path: artifact.file_path,
         label: 'Imported',
       });
-      currentTime += duration;
+      importedVideoTime += duration;
     });
 
-    return videos.sort((a, b) => a.startTime - b.startTime);
-  }, [scenes, artifactsByScene, importedVideoArtifacts]);
+    // Sort timeline items by startTime to ensure correct order
+    items.sort((a, b) => a.startTime - b.startTime);
+
+    return items;
+  }, [sceneBlocks, importedVideoArtifacts]);
 
   // Format date
   const formatDate = (dateString: string): string => {
@@ -173,15 +268,42 @@ export default function VideoLibraryView({
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  // Calculate total duration
+  // Calculate total duration from all timeline items
   const totalDuration = useMemo(() => {
-    if (timelineVideos.length === 0) return 0;
-    const lastVideo = timelineVideos[timelineVideos.length - 1];
-    return lastVideo.startTime + lastVideo.duration;
-  }, [timelineVideos]);
+    if (timelineItems.length === 0) return 0;
+    const lastItem = timelineItems[timelineItems.length - 1];
+    return lastItem.startTime + lastItem.duration;
+  }, [timelineItems]);
 
-  // Get current video from timeline
-  const currentVideo = timelineVideos[currentVideoIndex] || null;
+  // Get current item from timeline (can be video or scene)
+  const currentItem = timelineItems[currentItemIndex] || null;
+  const currentVideo = currentItem?.type === 'video' ? currentItem : null;
+
+  // Calculate current scene from currentItem or playbackTime
+  // Prefer scene from currentItem if it exists, otherwise calculate from playbackTime
+  const currentScene = useMemo(() => {
+    // If current item has a scene, use that
+    if (currentItem?.scene) {
+      return currentItem.scene;
+    }
+
+    // Otherwise, calculate scene from playbackTime (for scenes without videos)
+    if (scenes.length === 0) return null;
+
+    let accumulatedTime = 0;
+    for (const scene of scenes) {
+      const sceneDuration = scene.duration || 5;
+      if (
+        playbackTime >= accumulatedTime &&
+        playbackTime < accumulatedTime + sceneDuration
+      ) {
+        return scene;
+      }
+      accumulatedTime += sceneDuration;
+    }
+    // If past all scenes, return last scene
+    return scenes[scenes.length - 1] || null;
+  }, [playbackTime, scenes, currentItem]);
 
   // Handle video play/pause
   const handlePlayPause = useCallback(() => {
@@ -199,38 +321,38 @@ export default function VideoLibraryView({
     [currentVideo, onPlaybackTimeChange, isDragging],
   );
 
-  // Handle video end - move to next video
+  // Handle video end - move to next item
   const handleVideoEnd = useCallback(() => {
     if (isDragging) return; // Don't auto-advance during dragging
 
-    if (currentVideoIndex < timelineVideos.length - 1) {
-      const nextIndex = currentVideoIndex + 1;
-      setCurrentVideoIndex(nextIndex);
-      onPlaybackTimeChange(timelineVideos[nextIndex].startTime);
-      // Video will auto-play when source changes if was playing
+    if (currentItemIndex < timelineItems.length - 1) {
+      const nextIndex = currentItemIndex + 1;
+      setCurrentItemIndex(nextIndex);
+      onPlaybackTimeChange(timelineItems[nextIndex].startTime);
+      // Video will auto-play when source changes if was playing (only if next item is video)
     } else {
       onPlaybackStateChange(false);
-      setCurrentVideoIndex(0);
+      setCurrentItemIndex(0);
       onPlaybackTimeChange(0);
       if (videoRef.current) {
         videoRef.current.currentTime = 0;
       }
     }
   }, [
-    currentVideoIndex,
-    timelineVideos,
+    currentItemIndex,
+    timelineItems,
     onPlaybackTimeChange,
     onPlaybackStateChange,
     isDragging,
   ]);
 
-  // Handle video seek - find which video and position
+  // Handle seek - find which item and position
   const handleSeek = useCallback(
     (seekTime: number) => {
       isSeekingRef.current = true;
 
-      // During dragging, only update playback time, don't switch videos
-      // Video switching will happen when drag ends
+      // During dragging, only update playback time, don't switch items
+      // Item switching will happen when drag ends
       if (isDragging) {
         onPlaybackTimeChange(seekTime);
         // Still seek within current video if possible
@@ -246,36 +368,35 @@ export default function VideoLibraryView({
         return;
       }
 
-      // Normal seek (not dragging) - allow video switching
-      // Find which video contains this time
-      const videoIndex = timelineVideos.findIndex(
-        (video) =>
-          seekTime >= video.startTime &&
-          seekTime < video.startTime + video.duration,
+      // Normal seek (not dragging) - allow item switching
+      // Find which item contains this time
+      const itemIndex = timelineItems.findIndex(
+        (item) =>
+          seekTime >= item.startTime &&
+          seekTime < item.startTime + item.duration,
       );
 
-      if (videoIndex >= 0) {
-        const video = timelineVideos[videoIndex];
-        const videoTime = seekTime - video.startTime;
-
+      if (itemIndex >= 0) {
+        const item = timelineItems[itemIndex];
         onPlaybackTimeChange(seekTime);
 
-        if (videoIndex !== currentVideoIndex) {
-          setCurrentVideoIndex(videoIndex);
-          // Video source will change, and play state will be handled by useEffect
-        } else if (videoRef.current) {
-          // Same video, just seek within it
+        if (itemIndex !== currentItemIndex) {
+          setCurrentItemIndex(itemIndex);
+          // Video source will change if item is video, and play state will be handled by useEffect
+        } else if (videoRef.current && item.type === 'video') {
+          // Same video item, just seek within it
+          const videoTime = seekTime - item.startTime;
           videoRef.current.currentTime = videoTime;
         }
       } else if (seekTime >= totalDuration) {
-        // Seeked past end - go to last video
-        const lastIndex = timelineVideos.length - 1;
+        // Seeked past end - go to last item
+        const lastIndex = timelineItems.length - 1;
         if (lastIndex >= 0) {
-          const lastVideo = timelineVideos[lastIndex];
-          setCurrentVideoIndex(lastIndex);
-          onPlaybackTimeChange(lastVideo.startTime + lastVideo.duration);
-          if (videoRef.current) {
-            videoRef.current.currentTime = lastVideo.duration;
+          const lastItem = timelineItems[lastIndex];
+          setCurrentItemIndex(lastIndex);
+          onPlaybackTimeChange(lastItem.startTime + lastItem.duration);
+          if (videoRef.current && lastItem.type === 'video') {
+            videoRef.current.currentTime = lastItem.duration;
           }
         }
       }
@@ -286,8 +407,8 @@ export default function VideoLibraryView({
       }, 50);
     },
     [
-      timelineVideos,
-      currentVideoIndex,
+      timelineItems,
+      currentItemIndex,
       totalDuration,
       onPlaybackTimeChange,
       isDragging,
@@ -357,59 +478,66 @@ export default function VideoLibraryView({
     }
   }, [currentVideo, projectDirectory, isPlaying, isDragging]);
 
-  // When dragging ends, switch to the correct video based on final playback time
+  // Update current item index based on playbackTime - works for both videos and scenes
+  // This ensures scenes without videos are also tracked during playback
+  // Runs continuously during playback, and when dragging/seeking ends
   useEffect(() => {
-    if (!isDragging && timelineVideos.length > 0) {
-      // Find which video contains the current playback time
-      const videoIndex = timelineVideos.findIndex(
-        (video) =>
-          playbackTime >= video.startTime &&
-          playbackTime < video.startTime + video.duration,
-      );
+    if (timelineItems.length === 0) return;
 
-      if (videoIndex >= 0 && videoIndex !== currentVideoIndex) {
-        // Switch to the correct video
-        setCurrentVideoIndex(videoIndex);
-        const video = timelineVideos[videoIndex];
-        const videoTime = playbackTime - video.startTime;
+    // During dragging or seeking, we handle it differently
+    if (isDragging || isSeekingRef.current) {
+      return;
+    }
+
+    // Find which item contains the current playback time
+    const itemIndex = timelineItems.findIndex(
+      (item) =>
+        playbackTime >= item.startTime &&
+        playbackTime < item.startTime + item.duration,
+    );
+
+    if (itemIndex >= 0 && itemIndex !== currentItemIndex) {
+      // Switch to the correct item (scene or video)
+      setCurrentItemIndex(itemIndex);
+      const item = timelineItems[itemIndex];
+      // If item is video, seek to the right position
+      if (item.type === 'video' && videoRef.current) {
+        const videoTime = playbackTime - item.startTime;
         // Video source will update via useEffect, then we'll seek to the right position
-        if (videoRef.current) {
-          // Wait a bit for video source to update
-          setTimeout(() => {
-            if (videoRef.current) {
-              videoRef.current.currentTime = Math.max(0, videoTime);
-            }
-          }, 100);
-        }
-      } else if (videoIndex < 0 && playbackTime >= totalDuration) {
-        // Past end - go to last video
-        const lastIndex = timelineVideos.length - 1;
-        if (lastIndex >= 0 && lastIndex !== currentVideoIndex) {
-          setCurrentVideoIndex(lastIndex);
-        }
+        setTimeout(() => {
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.max(0, videoTime);
+          }
+        }, 100);
+      }
+    } else if (itemIndex < 0 && playbackTime >= totalDuration) {
+      // Past end - go to last item
+      const lastIndex = timelineItems.length - 1;
+      if (lastIndex >= 0 && lastIndex !== currentItemIndex) {
+        setCurrentItemIndex(lastIndex);
       }
     }
   }, [
-    isDragging,
     playbackTime,
-    timelineVideos,
-    currentVideoIndex,
+    timelineItems,
+    currentItemIndex,
     totalDuration,
+    isDragging,
   ]);
 
-  // Initialize to first video when timeline loads
+  // Initialize to first item when timeline loads
   useEffect(() => {
     if (
-      timelineVideos.length > 0 &&
-      currentVideoIndex >= timelineVideos.length
+      timelineItems.length > 0 &&
+      currentItemIndex >= timelineItems.length
     ) {
-      setCurrentVideoIndex(0);
+      setCurrentItemIndex(0);
       onPlaybackTimeChange(0);
-    } else if (timelineVideos.length > 0 && currentVideoIndex < 0) {
-      setCurrentVideoIndex(0);
+    } else if (timelineItems.length > 0 && currentItemIndex < 0) {
+      setCurrentItemIndex(0);
       onPlaybackTimeChange(0);
     }
-  }, [timelineVideos.length, currentVideoIndex, onPlaybackTimeChange]);
+  }, [timelineItems.length, currentItemIndex, onPlaybackTimeChange]);
 
   // Sync play state with video element
   useEffect(() => {
@@ -463,6 +591,36 @@ export default function VideoLibraryView({
       videoElement.currentTime = Math.max(0, expectedVideoTime);
     }
   }, [playbackTime, currentVideo, isDragging]);
+
+  // Handle auto-advance for scenes without videos
+  // When playing a scene item (not video), check if we've reached the end of the item
+  useEffect(() => {
+    if (!isPlaying || isDragging || isSeekingRef.current) return;
+    if (!currentItem || currentItem.type === 'video') return; // Only handle scene items
+
+    const itemEndTime = currentItem.startTime + currentItem.duration;
+    // If playbackTime has reached or passed the end of the current scene, move to next item
+    if (playbackTime >= itemEndTime && currentItemIndex < timelineItems.length - 1) {
+      const nextIndex = currentItemIndex + 1;
+      setCurrentItemIndex(nextIndex);
+      onPlaybackTimeChange(timelineItems[nextIndex].startTime);
+    } else if (playbackTime >= totalDuration) {
+      // Reached end of timeline
+      onPlaybackStateChange(false);
+      setCurrentItemIndex(0);
+      onPlaybackTimeChange(0);
+    }
+  }, [
+    isPlaying,
+    playbackTime,
+    currentItem,
+    currentItemIndex,
+    timelineItems,
+    totalDuration,
+    isDragging,
+    onPlaybackTimeChange,
+    onPlaybackStateChange,
+  ]);
 
   if (!projectDirectory) {
     return (
@@ -545,24 +703,24 @@ export default function VideoLibraryView({
         </div>
 
         {/* Right Side - Timeline Preview */}
-        {timelineVideos.length > 0 ? (
-          <div className={styles.playerSection}>
+        <div className={styles.playerSection}>
+          {/* Video player - only show if currentVideo exists */}
+          {currentVideo ? (
             <div className={styles.videoPlayer}>
-              {currentVideo && (
-                <>
-                  <video
-                    ref={videoRef}
-                    className={styles.playerVideo}
-                    onTimeUpdate={handleTimeUpdate}
-                    onEnded={handleVideoEnd}
-                    preload="auto"
-                    playsInline
-                  />
-                  <div className={styles.currentVideoLabel}>
-                    {currentVideo.label}
-                  </div>
-                </>
-              )}
+              <video
+                ref={videoRef}
+                className={styles.playerVideo}
+                onTimeUpdate={handleTimeUpdate}
+                onEnded={handleVideoEnd}
+                preload="auto"
+                playsInline
+              />
+              <div className={styles.currentVideoLabel}>
+                {currentVideo.label}
+                {(currentVideo.artifact?.metadata?.imported as boolean) && (
+                  <span className={styles.importedBadge}> (Imported)</span>
+                )}
+              </div>
               <div className={styles.playerControls}>
                 <button
                   type="button"
@@ -584,16 +742,105 @@ export default function VideoLibraryView({
                 />
               </div>
             </div>
-          </div>
-        ) : (
-          <div className={styles.emptyPlayer}>
-            <Film size={48} className={styles.emptyPlayerIcon} />
-            <p>No videos in timeline</p>
-            <p className={styles.emptySubtext}>
-              Add videos to the timeline to preview them here
-            </p>
-          </div>
-        )}
+          ) : timelineItems.length > 0 ? (
+            /* Show controls even when no video - for scene playback */
+            <div className={styles.videoPlayer}>
+              <div className={styles.scenePlaceholder}>
+                {currentItem && currentItem.type === 'scene' && (
+                  <div className={styles.scenePlaceholderContent}>
+                    <Film size={64} className={styles.scenePlaceholderIcon} />
+                    <h3>{currentItem.label}</h3>
+                    {currentItem.scene?.description && (
+                      <p className={styles.scenePlaceholderDescription}>
+                        {currentItem.scene.description}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className={styles.playerControls}>
+                <button
+                  type="button"
+                  className={styles.playPauseButton}
+                  onClick={handlePlayPause}
+                >
+                  {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+                </button>
+                <div className={styles.timeDisplay}>
+                  {formatTime(playbackTime)} / {formatTime(totalDuration)}
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max={totalDuration || 0}
+                  value={playbackTime}
+                  onChange={handleSeekBarChange}
+                  className={styles.seekBar}
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {/* Scene info panel - show when currentScene exists and NOT playing imported video */}
+          {currentScene && (!currentVideo || currentVideo.scene) ? (
+            <div className={styles.sceneInfoPanel}>
+              <div className={styles.sceneHeader}>
+                <h3 className={styles.sceneTitle}>
+                  Scene {currentScene.scene_number}
+                  {currentScene.name && (
+                    <span className={styles.sceneName}>: {currentScene.name}</span>
+                  )}
+                </h3>
+              </div>
+              {currentScene.description && (
+                <div className={styles.sceneDescription}>
+                  {currentScene.description}
+                </div>
+              )}
+              <div className={styles.sceneMetadata}>
+                {currentScene.shot_type && (
+                  <div className={styles.sceneMetaItem}>
+                    <strong>Shot Type:</strong> {currentScene.shot_type}
+                  </div>
+                )}
+                {currentScene.lighting && (
+                  <div className={styles.sceneMetaItem}>
+                    <strong>Lighting:</strong> {currentScene.lighting}
+                  </div>
+                )}
+                {currentScene.duration && (
+                  <div className={styles.sceneMetaItem}>
+                    <strong>Duration:</strong> {currentScene.duration}s
+                  </div>
+                )}
+                {currentScene.location && (
+                  <div className={styles.sceneMetaItem}>
+                    <strong>Location:</strong> {currentScene.location}
+                  </div>
+                )}
+                {currentScene.mood && (
+                  <div className={styles.sceneMetaItem}>
+                    <strong>Mood:</strong> {currentScene.mood}
+                  </div>
+                )}
+                {currentScene.characters && currentScene.characters.length > 0 && (
+                  <div className={styles.sceneMetaItem}>
+                    <strong>Characters:</strong> {currentScene.characters.join(', ')}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : timelineItems.length === 0 ? (
+            /* Empty state - only show if no scene and no items in timeline */
+            <div className={styles.emptyPlayer}>
+              <Film size={48} className={styles.emptyPlayerIcon} />
+              <p>No items in timeline</p>
+              <p className={styles.emptySubtext}>
+                Add videos or scenes to the timeline to preview them here
+              </p>
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
