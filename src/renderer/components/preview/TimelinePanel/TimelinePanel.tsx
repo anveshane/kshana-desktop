@@ -1025,37 +1025,60 @@ export default function TimelinePanel({
           ]);
 
           // Save to project state as artifact
-          if (projectState) {
-            const artifact: Artifact = {
-              artifact_id: `imported-video-${Date.now()}`,
-              artifact_type: 'video',
-              file_path: relativePath,
-              metadata: {
-                imported: true,
-                original_path: videoPath,
-                duration,
-              },
-              created_at: new Date().toISOString(),
-            };
+          const artifact: Artifact = {
+            artifact_id: `imported-video-${Date.now()}`,
+            artifact_type: 'video',
+            file_path: relativePath,
+            metadata: {
+              imported: true,
+              original_path: videoPath,
+              duration,
+            },
+            created_at: new Date().toISOString(),
+          };
 
-            const updatedState: ProjectState = {
-              ...projectState,
-              artifacts: [...(projectState.artifacts || []), artifact],
-            };
+          // Create or update project state
+          const updatedState: ProjectState = projectState
+            ? {
+                ...projectState,
+                artifacts: [...(projectState.artifacts || []), artifact],
+              }
+            : {
+                // Create new project state if none exists
+                project_id: `proj-${Date.now()}`,
+                project_name: projectDirectory?.split('/').pop() || 'Untitled',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                phase: 'initial',
+                characters: {},
+                locations: {},
+                artifacts: [artifact],
+                character_assets: {},
+                setting_assets: {},
+                character_details: {},
+              };
 
-            // Save updated state
-            const stateFilePath = `${projectDirectory}/.kshana/project.json`;
-            window.electron.project
-              .writeFile(stateFilePath, JSON.stringify(updatedState, null, 2))
-              .then(() => {
-                setProjectState(updatedState);
-                return undefined;
-              })
-              .catch(() => {
-                // Failed to save project state
-                return undefined;
-              });
-          }
+          // Ensure .kshana directory exists and save state
+          const kshanaDir = `${projectDirectory}/.kshana`;
+          const stateFilePath = `${kshanaDir}/project.json`;
+
+          // Create .kshana folder if needed, then write project.json
+          window.electron.project
+            .createFolder(projectDirectory!, '.kshana')
+            .then(() =>
+              window.electron.project.writeFile(
+                stateFilePath,
+                JSON.stringify(updatedState, null, 2),
+              ),
+            )
+            .then(() => {
+              setProjectState(updatedState);
+              return undefined;
+            })
+            .catch(() => {
+              // Failed to save project state
+              return undefined;
+            });
 
           resolve();
         };

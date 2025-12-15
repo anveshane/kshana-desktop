@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Settings } from 'lucide-react';
 import type { AppSettings } from '../../../../shared/settingsTypes';
 import type { BackendEnvOverrides } from '../../../../shared/backendTypes';
@@ -37,8 +37,31 @@ export default function PreviewPanel() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const playbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
 
   const { selectedFile, connectionState, projectDirectory } = useWorkspace();
+
+  // Playback loop - advance playbackTime when playing
+  // VideoLibraryView and TimelinePanel will handle stopping at the end
+  useEffect(() => {
+    if (isPlaying && !isDragging) {
+      playbackIntervalRef.current = setInterval(() => {
+        setPlaybackTime((prev) => prev + 0.1); // Update every 100ms (0.1 seconds)
+      }, 100);
+    } else if (playbackIntervalRef.current) {
+      clearInterval(playbackIntervalRef.current);
+      playbackIntervalRef.current = null;
+    }
+
+    return () => {
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+        playbackIntervalRef.current = null;
+      }
+    };
+  }, [isPlaying, isDragging]);
 
   // Handle timeline resize
   const handleTimelineResize = useCallback(
