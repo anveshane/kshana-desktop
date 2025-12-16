@@ -7,48 +7,9 @@ import React, {
 } from 'react';
 import { Film, Play, Calendar, Pause } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
-import type {
-  ProjectState,
-  Artifact,
-  StoryboardScene,
-} from '../../../types/projectState';
+import { useProject } from '../../../contexts/ProjectContext';
+import type { Artifact, StoryboardScene } from '../../../types/projectState';
 import styles from './VideoLibraryView.module.scss';
-
-// Mock scenes for when no project state exists (same as TimelinePanel)
-const MOCK_SCENES: StoryboardScene[] = [
-  {
-    scene_number: 1,
-    description:
-      'A young boy is seen lying in the ground, looking up at the sky. The lighting suggests late afternoon golden hour.',
-    duration: 5,
-    shot_type: 'Mid Shot',
-    lighting: 'Golden Hour',
-  },
-  {
-    scene_number: 2,
-    description:
-      'The boy stands up abruptly and kicks the soccer ball with significant force towards the horizon. Dust particles float.',
-    duration: 3,
-    shot_type: 'Low Angle',
-    lighting: 'Action',
-  },
-  {
-    scene_number: 3,
-    description:
-      "The Exchange - A mysterious figure's hand, covered in a ragged glove, hands over a metallic data drive in the rain.",
-    duration: 8,
-    shot_type: 'Close Up',
-    lighting: 'Night',
-  },
-  {
-    scene_number: 4,
-    description:
-      'Escape sequence - The protagonist flees on a high-speed bike through neon-lit streets. Blurring lights create streaks.',
-    duration: 12,
-    shot_type: 'Tracking',
-    lighting: 'Speed',
-  },
-];
 
 interface TimelineItem {
   id: string;
@@ -77,92 +38,94 @@ export default function VideoLibraryView({
   onPlaybackStateChange,
 }: VideoLibraryViewProps) {
   const { projectDirectory } = useWorkspace();
-  const [projectState, setProjectState] = useState<ProjectState | null>(null);
-  const [loading, setLoading] = useState(false);
+  const {
+    isLoaded,
+    isLoading,
+    scenes: projectScenes,
+    assetManifest,
+    useMockData,
+  } = useProject();
   const [currentItemIndex, setCurrentItemIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const currentVideoPathRef = useRef<string | null>(null);
   const isSeekingRef = useRef(false);
 
-  // Load project state
-  const loadProjectState = useCallback(async () => {
-    if (!projectDirectory) return;
-
-    setLoading(true);
-    try {
-      const stateFilePath = `${projectDirectory}/.kshana/project.json`;
-      const content = await window.electron.project.readFile(stateFilePath);
-      if (content) {
-        const state = JSON.parse(content) as ProjectState;
-        setProjectState(state);
-      } else {
-        setProjectState(null);
-      }
-    } catch {
-      setProjectState(null);
-    } finally {
-      setLoading(false);
+  // Convert SceneRef from ProjectContext to StoryboardScene format
+  const scenes: StoryboardScene[] = useMemo(() => {
+    if (!isLoaded || projectScenes.length === 0) {
+      return [];
     }
-  }, [projectDirectory]);
 
-  useEffect(() => {
-    loadProjectState();
-  }, [loadProjectState]);
+    return projectScenes.map((scene) => ({
+      scene_number: scene.scene_number,
+      name: scene.title,
+      description: scene.description || '',
+      duration: 5, // Default duration
+      shot_type: 'Mid Shot',
+      lighting: 'Natural',
+    }));
+  }, [isLoaded, projectScenes]);
 
-  // Subscribe to file changes to reload project state when videos are imported
-  useEffect(() => {
-    if (!projectDirectory) return undefined;
+  // Build video artifacts from asset manifest
+  const videoArtifacts: Artifact[] = useMemo(() => {
+    if (!assetManifest?.assets) return [];
 
-    const unsubscribe = window.electron.project.onFileChange((event) => {
-      // Reload project state when project.json changes (e.g., after video import)
-      if (event.path.endsWith('project.json') || event.path.includes('/videos/')) {
-        loadProjectState();
-      }
-    });
-
-    return unsubscribe;
-  }, [projectDirectory, loadProjectState]);
-
-  // Get video artifacts
-  const videoArtifacts: Artifact[] =
-    projectState?.artifacts.filter(
-      (artifact) => artifact.artifact_type === 'video',
-    ) || [];
-
-  // Get scenes and artifacts for timeline
-  // Use mock scenes if no project state exists (same as TimelinePanel)
-  const scenes: StoryboardScene[] =
-    projectState?.storyboard_outline?.scenes || MOCK_SCENES;
+    // Filter for video-related asset types
+    return assetManifest.assets
+      .filter((asset) => asset.type === 'scene_video' || asset.type === 'final_video')
+      .map((asset) => ({
+        artifact_id: asset.id,
+        artifact_type: 'video',
+        file_path: asset.path,
+        created_at: new Date(asset.created_at).toISOString(),
+        scene_number: asset.scene_number,
+        metadata: {
+          title: asset.path.split('/').pop(),
+        },
+      }));
+  }, [assetManifest]);
 
   const { artifactsByScene, importedVideoArtifacts } = useMemo(() => {
     const artifactsBySceneMap: Record<number, Artifact> = {};
     const importedVideoArtifactsList: Artifact[] = [];
 
-    if (projectState?.artifacts) {
-      projectState.artifacts.forEach((artifact) => {
-        if (
-          artifact.scene_number &&
-          (artifact.artifact_type === 'image' ||
-            artifact.artifact_type === 'video')
-        ) {
-          if (
-            !artifactsBySceneMap[artifact.scene_number] ||
-            artifact.artifact_type === 'video'
-          ) {
-            artifactsBySceneMap[artifact.scene_number] = artifact;
-          }
-        }
-        if (artifact.artifact_type === 'video' && artifact.metadata?.imported) {
-          importedVideoArtifactsList.push(artifact);
+    // Build artifacts from project scenes
+    if (isLoaded && projectScenes.length > 0) {
+      projectScenes.forEach((scene) => {
+        // Check if scene has approved video
+        if (scene.video_approval_status === 'approved' && scene.folder) {
+          artifactsBySceneMap[scene.scene_number] = {
+            artifact_id: `scene-${scene.scene_number}-video`,
+            artifact_type: 'video',
+            scene_number: scene.scene_number,
+            file_path: `${scene.folder}/video.mp4`,
+            created_at: new Date().toISOString(),
+          };
+        } else if (scene.image_approval_status === 'approved' && scene.folder) {
+          // Fallback to image if no video
+          artifactsBySceneMap[scene.scene_number] = {
+            artifact_id: `scene-${scene.scene_number}-image`,
+            artifact_type: 'image',
+            scene_number: scene.scene_number,
+            file_path: `${scene.folder}/image.png`,
+            created_at: new Date().toISOString(),
+          };
         }
       });
     }
+
+    // Imported videos from video artifacts
+    videoArtifacts.forEach((artifact) => {
+      if (artifact.metadata?.imported) {
+        importedVideoArtifactsList.push(artifact);
+      }
+    });
 
     return {
       artifactsByScene: artifactsBySceneMap,
       importedVideoArtifacts: importedVideoArtifactsList,
     };
-  }, [projectState?.artifacts]);
+  }, [isLoaded, projectScenes, videoArtifacts]);
 
   // Calculate scene blocks (used for timeline items)
   const sceneBlocks = useMemo(() => {
@@ -425,14 +388,17 @@ export default function VideoLibraryView({
     [handleSeek],
   );
 
+  // Effective project directory (use /mock for mock data mode)
+  const effectiveProjectDir = projectDirectory || '/mock';
+
   // Update video source when current video changes
   // Don't switch videos during dragging - wait until drag ends
   useEffect(() => {
-    if (!currentVideo || !videoRef.current || !projectDirectory || isDragging) {
+    if (!currentVideo || !videoRef.current || (!projectDirectory && !useMockData) || isDragging) {
       return;
     }
 
-    const videoPath = `file://${projectDirectory}/${currentVideo.path}`;
+    const videoPath = `file://${effectiveProjectDir}/${currentVideo.path}`;
     const videoElement = videoRef.current;
 
     // Only update if source actually changed to prevent flickering
@@ -622,7 +588,8 @@ export default function VideoLibraryView({
     onPlaybackStateChange,
   ]);
 
-  if (!projectDirectory) {
+  // Show empty state if no project and not using mock data
+  if (!projectDirectory && !useMockData) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>
@@ -634,7 +601,7 @@ export default function VideoLibraryView({
     );
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className={styles.container}>
         <div className={styles.loading}>Loading video library...</div>
@@ -666,7 +633,7 @@ export default function VideoLibraryView({
           ) : (
             <div className={styles.videoGrid}>
               {videoArtifacts.map((artifact) => {
-                const videoPath = `file://${projectDirectory}/${artifact.file_path}`;
+                const videoPath = `file://${effectiveProjectDir}/${artifact.file_path}`;
 
                 return (
                   <div key={artifact.artifact_id} className={styles.videoCard}>

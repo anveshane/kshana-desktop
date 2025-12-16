@@ -281,3 +281,5 @@ venv.bak/
 
 .erb/node_modules → release/app/node_modules
 src/node_modules  → release/app/node_modules
+
+.kshana

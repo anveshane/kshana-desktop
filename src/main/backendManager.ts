@@ -183,21 +183,86 @@ class BackendManager extends EventEmitter {
       }
 
       // Use dynamic import with package exports
-      // Construct the import strings dynamically so webpack can't analyze them
-      // kshana-ink has proper exports defined in package.json
-      const pkgName = 'kshana-ink';
-      const serverExport = `${pkgName}/server`;
-      const llmExport = `${pkgName}/core/llm`;
+      // kshana-ink now properly exports subpaths via package.json exports field
+      const fs = require('fs');
 
-      log.info(`Loading kshana-ink modules: ${serverExport}, ${llmExport}`);
+      // Find the actual node_modules directory for proper module resolution
+      let nodeModulesDir: string;
+      if (app.isPackaged) {
+        // In packaged app, try unpacked first (for native modules), then asar
+        const unpackedPath = path.join(
+          process.resourcesPath,
+          'app.asar.unpacked',
+          'node_modules',
+          'kshana-ink',
+        );
+        if (fs.existsSync(unpackedPath)) {
+          nodeModulesDir = path.join(
+            process.resourcesPath,
+            'app.asar.unpacked',
+            'node_modules',
+          );
+        } else {
+          nodeModulesDir = path.join(
+            process.resourcesPath,
+            'app.asar',
+            'node_modules',
+          );
+        }
+      } else {
+        // In development, __dirname is .erb/dll, so project root is ../../
+        // Go directly to the project root's node_modules
+        const projectRoot = path.resolve(__dirname, '..', '..');
+        const projectNodeModules = path.join(projectRoot, 'node_modules');
+        const kshanaInkPath = path.join(projectNodeModules, 'kshana-ink');
+        
+        if (fs.existsSync(kshanaInkPath)) {
+          nodeModulesDir = projectNodeModules;
+        } else {
+          // Fallback: search up the directory tree
+          let searchDir = __dirname;
+          nodeModulesDir = '';
+          for (let i = 0; i < 5; i += 1) {
+            const candidatePath = path.join(searchDir, 'node_modules', 'kshana-ink');
+            if (fs.existsSync(candidatePath)) {
+              nodeModulesDir = path.join(searchDir, 'node_modules');
+              break;
+            }
+            searchDir = path.dirname(searchDir);
+          }
+        }
+        
+        if (!nodeModulesDir) {
+          throw new Error(
+            'Could not find kshana-ink in node_modules. Please run npm install.',
+          );
+        }
+      }
+
+      log.info(`Resolved node_modules directory: ${nodeModulesDir}`);
+
+      // Use absolute paths to the kshana-ink exports
+      // This bypasses Node.js module resolution which looks relative to the bundle location
+      const serverModulePath = path.join(nodeModulesDir, 'kshana-ink', 'dist', 'server.js');
+      const llmModulePath = path.join(nodeModulesDir, 'kshana-ink', 'dist', 'core', 'llm.js');
+
+      log.info(`Loading kshana-ink server from: ${serverModulePath}`);
+      log.info(`Loading kshana-ink llm from: ${llmModulePath}`);
+
+      // Verify files exist
+      if (!fs.existsSync(serverModulePath)) {
+        throw new Error(`kshana-ink server module not found at: ${serverModulePath}. Run 'pnpm build' in kshana-ink directory.`);
+      }
+      if (!fs.existsSync(llmModulePath)) {
+        throw new Error(`kshana-ink llm module not found at: ${llmModulePath}. Run 'pnpm build' in kshana-ink directory.`);
+      }
 
       // Use Function constructor to create dynamic import that webpack can't analyze
-      // This ensures the import happens at runtime, not build time
       // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const dynamicImport = new Function('specifier', 'return import(specifier)');
 
-      const serverModule = await dynamicImport(serverExport);
-      const llmModule = await dynamicImport(llmExport);
+      const serverModule = await dynamicImport(serverModulePath);
+      const llmModule = await dynamicImport(llmModulePath);
 
       log.info('Successfully loaded kshana-ink modules');
 

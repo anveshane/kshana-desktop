@@ -17,10 +17,10 @@ import {
   Edit2,
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import { useProject } from '../../../contexts/ProjectContext';
 import { useTimeline } from '../../../contexts/TimelineContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
 import type {
-  ProjectState,
   StoryboardScene,
   Artifact,
   TimelineMarker,
@@ -31,41 +31,6 @@ import SceneActionPopover from './SceneActionPopover';
 import VersionSelector from '../VersionSelector';
 import styles from './TimelinePanel.module.scss';
 
-// Mock scenes for when no project state exists (same as StoryboardView)
-const MOCK_SCENES: StoryboardScene[] = [
-  {
-    scene_number: 1,
-    description:
-      'A young boy is seen lying in the ground, looking up at the sky. The lighting suggests late afternoon golden hour.',
-    duration: 5,
-    shot_type: 'Mid Shot',
-    lighting: 'Golden Hour',
-  },
-  {
-    scene_number: 2,
-    description:
-      'The boy stands up abruptly and kicks the soccer ball with significant force towards the horizon. Dust particles float.',
-    duration: 3,
-    shot_type: 'Low Angle',
-    lighting: 'Action',
-  },
-  {
-    scene_number: 3,
-    description:
-      "The Exchange - A mysterious figure's hand, covered in a ragged glove, hands over a metallic data drive in the rain.",
-    duration: 8,
-    shot_type: 'Close Up',
-    lighting: 'Night',
-  },
-  {
-    scene_number: 4,
-    description:
-      'Escape sequence - The protagonist flees on a high-speed bike through neon-lit streets. Blurring lights create streaks.',
-    duration: 12,
-    shot_type: 'Tracking',
-    lighting: 'Speed',
-  },
-];
 
 // Format time as HH:MM:SS:FF (hours:minutes:seconds:frames)
 const formatTime = (seconds: number): string => {
@@ -115,8 +80,13 @@ export default function TimelinePanel({
   onDragStateChange,
 }: TimelinePanelProps) {
   const { projectDirectory } = useWorkspace();
-  const [projectState, setProjectState] = useState<ProjectState | null>(null);
-  const [loading, setLoading] = useState(false);
+  const {
+    isLoaded,
+    isLoading,
+    scenes: projectScenes,
+    assetManifest,
+    useMockData,
+  } = useProject();
   const [zoomLevel, setZoomLevel] = useState(1);
   const [scrollLeft, setScrollLeft] = useState(0);
 
@@ -219,30 +189,21 @@ export default function TimelinePanel({
 
   const { sendTimelineMarker } = useTimelineWebSocket(handleMarkerUpdate);
 
-  // Load project state
-  const loadProjectState = useCallback(async () => {
-    if (!projectDirectory) return;
-
-    setLoading(true);
-    try {
-      const stateFilePath = `${projectDirectory}/.kshana/project.json`;
-      const content = await window.electron.project.readFile(stateFilePath);
-      if (content) {
-        const state = JSON.parse(content) as ProjectState;
-        setProjectState(state);
-      } else {
-        setProjectState(null);
-      }
-    } catch {
-      setProjectState(null);
-    } finally {
-      setLoading(false);
+  // Convert SceneRef from ProjectContext to StoryboardScene format
+  const scenes: StoryboardScene[] = useMemo(() => {
+    if (!isLoaded || projectScenes.length === 0) {
+      return [];
     }
-  }, [projectDirectory]);
 
-  useEffect(() => {
-    loadProjectState();
-  }, [loadProjectState]);
+    return projectScenes.map((scene) => ({
+      scene_number: scene.scene_number,
+      name: scene.title,
+      description: scene.description || '',
+      duration: 5, // Default duration
+      shot_type: 'Mid Shot',
+      lighting: 'Natural',
+    }));
+  }, [isLoaded, projectScenes]);
 
   // Restore scroll position when exiting edit mode
   useEffect(() => {
@@ -264,89 +225,57 @@ export default function TimelinePanel({
   // Handle scene name change
   const handleNameChange = useCallback(
     async (sceneNumber: number, name: string) => {
-      if (!projectDirectory || !projectState) return;
-
-      // Update local state immediately (optimistic update)
-      const updatedScenes = (projectState.storyboard_outline?.scenes || []).map(
-        (scene) =>
-          scene.scene_number === sceneNumber
-            ? { ...scene, name: name || undefined }
-            : scene,
-      );
-
-      const updatedState: ProjectState = {
-        ...projectState,
-        storyboard_outline: projectState.storyboard_outline
-          ? {
-              ...projectState.storyboard_outline,
-              scenes: updatedScenes,
-            }
-          : {
-              scenes: updatedScenes,
-            },
-      };
-
-      // Update local state immediately to avoid flickering
-      setProjectState(updatedState);
-
-      // Restore scroll position after state update
-      if (scrollPositionBeforeEditRef.current !== null && tracksRef.current) {
-        // Use requestAnimationFrame to ensure DOM has updated
-        requestAnimationFrame(() => {
-          if (
-            tracksRef.current &&
-            scrollPositionBeforeEditRef.current !== null
-          ) {
-            tracksRef.current.scrollLeft = scrollPositionBeforeEditRef.current;
-            scrollPositionBeforeEditRef.current = null;
-          }
-        });
-      }
-
-      // Save to project.json in the background
-      try {
-        const stateFilePath = `${projectDirectory}/.kshana/project.json`;
-        await window.electron.project.writeFile(
-          stateFilePath,
-          JSON.stringify(updatedState, null, 2),
-        );
-      } catch {
-        // If save fails, reload from disk to restore previous state
-        await loadProjectState();
-      }
+      // TODO: Implement name change via ProjectContext
+      console.log('Name change:', sceneNumber, name);
     },
-    [projectDirectory, projectState, loadProjectState],
-  );
-
-  // Get scenes and artifacts - memoized to prevent infinite loops
-  // Use mock scenes if no project state exists (same as StoryboardView)
-  const scenes: StoryboardScene[] = useMemo(
-    () => projectState?.storyboard_outline?.scenes || MOCK_SCENES,
-    [projectState?.storyboard_outline?.scenes],
+    [],
   );
 
   const { artifactsByScene, importedVideoArtifacts } = useMemo(() => {
     const artifactsBySceneMap: Record<number, Artifact> = {};
     const importedVideoArtifactsList: Artifact[] = [];
 
-    if (projectState?.artifacts) {
-      projectState.artifacts.forEach((artifact) => {
-        if (
-          artifact.scene_number &&
-          (artifact.artifact_type === 'image' ||
-            artifact.artifact_type === 'video')
-        ) {
-          // Use video if available, otherwise image
-          if (
-            !artifactsBySceneMap[artifact.scene_number] ||
-            artifact.artifact_type === 'video'
-          ) {
-            artifactsBySceneMap[artifact.scene_number] = artifact;
-          }
+    // Build artifacts from project scenes
+    if (isLoaded && projectScenes.length > 0) {
+      projectScenes.forEach((scene) => {
+        // Check if scene has approved video
+        if (scene.video_approval_status === 'approved' && scene.folder) {
+          artifactsBySceneMap[scene.scene_number] = {
+            artifact_id: `scene-${scene.scene_number}-video`,
+            artifact_type: 'video',
+            scene_number: scene.scene_number,
+            file_path: `${scene.folder}/video.mp4`,
+            created_at: new Date().toISOString(),
+          };
+        } else if (scene.image_approval_status === 'approved' && scene.folder) {
+          // Fallback to image if no video
+          artifactsBySceneMap[scene.scene_number] = {
+            artifact_id: `scene-${scene.scene_number}-image`,
+            artifact_type: 'image',
+            scene_number: scene.scene_number,
+            file_path: `${scene.folder}/image.png`,
+            created_at: new Date().toISOString(),
+          };
         }
-        // Track imported videos separately
-        if (artifact.artifact_type === 'video' && artifact.metadata?.imported) {
-          importedVideoArtifactsList.push(artifact);
+      });
+    }
+
+    // Imported videos from asset manifest
+    if (assetManifest?.assets) {
+      assetManifest.assets.forEach((asset) => {
+        if (asset.type === 'scene_video' || asset.type === 'final_video') {
+          if (asset.metadata?.imported) {
+            importedVideoArtifactsList.push({
+              artifact_id: asset.id,
+              artifact_type: 'video',
+              file_path: asset.path,
+              created_at: new Date(asset.created_at).toISOString(),
+              scene_number: asset.scene_number,
+              metadata: {
+                imported: true,
+              },
+            });
+          }
         }
       });
     }
@@ -355,16 +284,25 @@ export default function TimelinePanel({
       artifactsByScene: artifactsBySceneMap,
       importedVideoArtifacts: importedVideoArtifactsList,
     };
-  }, [projectState?.artifacts]);
+  }, [isLoaded, projectScenes, assetManifest]);
 
-  // Get all video artifacts (both scene videos and imported videos)
-  const allVideoArtifacts: Artifact[] = useMemo(
-    () =>
-      projectState?.artifacts.filter(
-        (artifact) => artifact.artifact_type === 'video',
-      ) || [],
-    [projectState?.artifacts],
-  );
+  // Get all video artifacts from asset manifest
+  const allVideoArtifacts: Artifact[] = useMemo(() => {
+    if (!assetManifest?.assets) return [];
+
+    return assetManifest.assets
+      .filter((asset) => asset.type === 'scene_video' || asset.type === 'final_video')
+      .map((asset) => ({
+        artifact_id: asset.id,
+        artifact_type: 'video',
+        file_path: asset.path,
+        created_at: new Date(asset.created_at).toISOString(),
+        scene_number: asset.scene_number,
+        metadata: {
+          title: asset.path.split('/').pop(),
+        },
+      }));
+  }, [assetManifest]);
 
   // Calculate scene blocks (used for rendering and context)
   // ALL scenes from storyboard are included, regardless of artifacts
@@ -503,9 +441,9 @@ export default function TimelinePanel({
     return scenes.reduce((acc, scene) => acc + (scene.duration || 5), 0);
   }, [scenes]);
 
-  // Load imported videos from project state
+  // Load imported videos from asset manifest
   useEffect(() => {
-    if (projectState && importedVideoArtifacts.length > 0) {
+    if (isLoaded && importedVideoArtifacts.length > 0) {
       let currentTime = sceneDurationForImports;
       const videos = importedVideoArtifacts.map((artifact) => {
         const startTime = currentTime;
@@ -518,11 +456,11 @@ export default function TimelinePanel({
         };
       });
       setImportedVideos(videos);
-    } else if (projectState && importedVideoArtifacts.length === 0) {
-      // Clear imported videos if none in project state
+    } else if (isLoaded && importedVideoArtifacts.length === 0) {
+      // Clear imported videos if none
       setImportedVideos([]);
     }
-  }, [projectState, sceneDurationForImports, importedVideoArtifacts]);
+  }, [isLoaded, sceneDurationForImports, importedVideoArtifacts]);
 
   // Timeline click handler removed - no longer opens marker prompt
   // Marker functionality can be accessed via keyboard shortcut or toolbar button
@@ -803,13 +741,13 @@ export default function TimelinePanel({
         // Dropping at the end
         const lastScene = sceneBlocks[sceneBlocks.length - 1];
         if (lastScene) {
-          await reorderScenes(
-            draggedSceneNumber,
-            sceneBlocks.length,
-            projectState,
-            projectDirectory,
-            setProjectState,
-          );
+        await reorderScenes(
+          draggedSceneNumber,
+          sceneBlocks.length,
+          null, // projectState no longer needed
+          projectDirectory,
+          null, // setProjectState no longer needed
+        );
         }
       } else {
         // Find the index of the dragged scene in sceneBlocks
@@ -820,9 +758,9 @@ export default function TimelinePanel({
           await reorderScenes(
             draggedSceneNumber,
             dropInsertIndex,
-            projectState,
+            null, // projectState no longer needed
             projectDirectory,
-            setProjectState,
+            null, // setProjectState no longer needed
           );
         }
       }
@@ -834,9 +772,7 @@ export default function TimelinePanel({
       dropInsertIndex,
       sceneBlocks,
       reorderScenes,
-      projectState,
       projectDirectory,
-      setProjectState,
       endDrag,
     ],
   );
@@ -1024,61 +960,8 @@ export default function TimelinePanel({
             },
           ]);
 
-          // Save to project state as artifact
-          const artifact: Artifact = {
-            artifact_id: `imported-video-${Date.now()}`,
-            artifact_type: 'video',
-            file_path: relativePath,
-            metadata: {
-              imported: true,
-              original_path: videoPath,
-              duration,
-            },
-            created_at: new Date().toISOString(),
-          };
-
-          // Create or update project state
-          const updatedState: ProjectState = projectState
-            ? {
-                ...projectState,
-                artifacts: [...(projectState.artifacts || []), artifact],
-              }
-            : {
-                // Create new project state if none exists
-                project_id: `proj-${Date.now()}`,
-                project_name: projectDirectory?.split('/').pop() || 'Untitled',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                phase: 'initial',
-                characters: {},
-                locations: {},
-                artifacts: [artifact],
-                character_assets: {},
-                setting_assets: {},
-                character_details: {},
-              };
-
-          // Ensure .kshana directory exists and save state
-          const kshanaDir = `${projectDirectory}/.kshana`;
-          const stateFilePath = `${kshanaDir}/project.json`;
-
-          // Create .kshana folder if needed, then write project.json
-          window.electron.project
-            .createFolder(projectDirectory!, '.kshana')
-            .then(() =>
-              window.electron.project.writeFile(
-                stateFilePath,
-                JSON.stringify(updatedState, null, 2),
-              ),
-            )
-            .then(() => {
-              setProjectState(updatedState);
-              return undefined;
-            })
-            .catch(() => {
-              // Failed to save project state
-              return undefined;
-            });
+          // TODO: Save imported video to asset manifest via ProjectContext
+          console.log('Imported video:', relativePath, duration);
 
           resolve();
         };
@@ -1087,7 +970,7 @@ export default function TimelinePanel({
     } catch {
       // Failed to import video
     }
-  }, [projectDirectory, totalDuration, projectState]);
+  }, [projectDirectory, totalDuration]);
 
   // Drag handlers removed - not used in unified timeline
 
@@ -1195,7 +1078,8 @@ export default function TimelinePanel({
     setIsPlaying,
   ]);
 
-  if (!projectDirectory) {
+  // Show empty state if no project and not using mock data
+  if (!projectDirectory && !useMockData) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>
@@ -1205,13 +1089,15 @@ export default function TimelinePanel({
     );
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className={styles.container}>
         <div className={styles.loading}>Loading timeline...</div>
       </div>
     );
   }
+
+  const effectiveProjectDir = projectDirectory || '/mock';
 
   // Calculate timeline width based on total duration (ensure minimum width)
   const minDuration = Math.max(totalDuration, 10); // At least 10 seconds
@@ -1395,12 +1281,12 @@ export default function TimelinePanel({
                         const left = secondsToPixels(item.startTime, zoomLevel);
                         const width = secondsToPixels(item.duration, zoomLevel);
                         const videoPath = item.path
-                          ? `file://${projectDirectory}/${item.path}`
+                          ? `file://${effectiveProjectDir}/${item.path}`
                           : null;
                         const imagePath =
                           item.artifact &&
                           item.artifact.artifact_type === 'image'
-                            ? `file://${projectDirectory}/${item.artifact.file_path}`
+                            ? `file://${effectiveProjectDir}/${item.artifact.file_path}`
                             : null;
 
                         if (item.type === 'video' && videoPath) {
