@@ -43,13 +43,13 @@ export default function StoryboardView() {
     if (!isLoaded || projectScenes.length === 0) return map;
 
     for (const scene of projectScenes) {
-      // Check if scene has an approved image
-      if (scene.image_approval_status === 'approved' && scene.folder) {
+      // Check if scene has an approved image and use the actual image_path
+      if (scene.image_approval_status === 'approved' && scene.image_path) {
         map[scene.scene_number] = {
-          artifact_id: `scene-${scene.scene_number}-image`,
+          artifact_id: scene.image_artifact_id || `scene-${scene.scene_number}-image`,
           artifact_type: 'image',
           scene_number: scene.scene_number,
-          file_path: `${scene.folder}/image.png`,
+          file_path: scene.image_path, // Use the actual image_path from scene data
           status: 'completed',
           created_at: new Date().toISOString(),
         };

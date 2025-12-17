@@ -20,6 +20,8 @@ import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimeline } from '../../../contexts/TimelineContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
+import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
+import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import type {
   StoryboardScene,
   Artifact,
@@ -31,6 +33,215 @@ import SceneActionPopover from './SceneActionPopover';
 import VersionSelector from '../VersionSelector';
 import styles from './TimelinePanel.module.scss';
 
+// Timeline Item Component for proper hook usage
+interface TimelineItemComponentProps {
+  item: TimelineItem;
+  left: number;
+  width: number;
+  projectDirectory: string | null;
+  useMockData: boolean;
+  isSelected: boolean;
+  isSceneDragging: boolean;
+  editingSceneNumber: number | null;
+  editedSceneName: string;
+  onSceneDragStart: (e: React.DragEvent, sceneNumber: number) => void;
+  onSceneDragEnd: () => void;
+  onSceneBlockClick: (e: React.MouseEvent, sceneNumber: number) => void;
+  onNameChange: (sceneNumber: number, name: string) => void;
+  onEditedNameChange: (name: string) => void;
+  onEditingCancel: () => void;
+}
+
+function TimelineItemComponent({
+  item,
+  left,
+  width,
+  projectDirectory,
+  useMockData,
+  isSelected,
+  isSceneDragging,
+  editingSceneNumber,
+  editedSceneName,
+  onSceneDragStart,
+  onSceneDragEnd,
+  onSceneBlockClick,
+  onNameChange,
+  onEditedNameChange,
+  onEditingCancel,
+}: TimelineItemComponentProps) {
+  const [videoPath, setVideoPath] = useState<string | null>(null);
+  const [imagePath, setImagePath] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (item.path) {
+      resolveAssetPathForDisplay(
+        item.path,
+        projectDirectory,
+        useMockData,
+      ).then((resolved) => {
+        setVideoPath(resolved);
+      });
+    } else {
+      setVideoPath(null);
+    }
+  }, [item.path, projectDirectory, useMockData]);
+
+  useEffect(() => {
+    if (item.artifact && item.artifact.artifact_type === 'image') {
+      resolveAssetPathForDisplay(
+        item.artifact.file_path,
+        projectDirectory,
+        useMockData,
+      ).then(async (resolved) => {
+        // For test images in mock mode, try to convert to base64
+        if (shouldUseBase64(resolved, useMockData)) {
+          const base64 = await imageToBase64(resolved);
+          if (base64) {
+            setImagePath(base64);
+            return;
+          }
+        }
+        // Fallback to file:// path
+        setImagePath(resolved);
+      });
+    } else {
+      setImagePath(null);
+    }
+  }, [item.artifact?.file_path, projectDirectory, useMockData]);
+
+  if (item.type === 'video' && videoPath) {
+    return (
+      <div
+        className={styles.videoBlock}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+      >
+        <video
+          src={videoPath}
+          className={styles.videoThumbnail}
+          preload="metadata"
+          muted
+        />
+        <div className={styles.videoLabel}>{item.label}</div>
+      </div>
+    );
+  }
+
+  // Scene block (with or without image)
+  let thumbnailElement: React.ReactNode;
+  if (imagePath) {
+    thumbnailElement = (
+      <img
+        src={imagePath}
+        alt={item.label}
+        className={styles.sceneThumbnail}
+      />
+    );
+  } else if (videoPath) {
+    thumbnailElement = (
+      <video
+        src={videoPath}
+        className={styles.sceneThumbnail}
+        preload="metadata"
+        muted
+      />
+    );
+  } else {
+    thumbnailElement = <div className={styles.scenePlaceholder} />;
+  }
+
+  return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events
+    <div
+      className={`${styles.sceneBlock} ${isSelected ? styles.selected : ''} ${isSceneDragging ? styles.dragging : ''}`}
+      style={{
+        left: `${left}px`,
+        width: `${width}px`,
+      }}
+      draggable={!!item.scene}
+      onDragStart={(e) => {
+        if (item.scene) {
+          onSceneDragStart(e, item.scene.scene_number);
+        }
+      }}
+      onDragEnd={onSceneDragEnd}
+      onClick={(e) => {
+        if (item.scene) {
+          onSceneBlockClick(e, item.scene.scene_number);
+        }
+      }}
+    >
+      {thumbnailElement}
+      {item.scene && editingSceneNumber === item.scene.scene_number ? (
+        <div className={styles.sceneNameEdit}>
+          <input
+            type="text"
+            value={editedSceneName}
+            onChange={(e) => onEditedNameChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                onNameChange(item.scene!.scene_number, editedSceneName);
+                onEditingCancel();
+              } else if (e.key === 'Escape') {
+                onEditingCancel();
+              }
+            }}
+            onBlur={() => {
+              onNameChange(item.scene!.scene_number, editedSceneName);
+              onEditingCancel();
+            }}
+            onFocus={(e) => {
+              // Prevent browser from scrolling to input
+              e.target.scrollIntoView({
+                behavior: 'instant',
+                block: 'nearest',
+                inline: 'nearest',
+              });
+            }}
+            className={styles.sceneNameInput}
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+            onClick={(e) => e.stopPropagation()}
+            placeholder={`Scene ${item.scene.scene_number}`}
+          />
+        </div>
+      ) : (
+        <div
+          className={styles.sceneId}
+          onDoubleClick={(e) => {
+            if (item.scene) {
+              e.stopPropagation();
+              // This will be handled by parent component
+            }
+          }}
+          title="Double-click to edit name"
+        >
+          {item.label}
+          {item.scene && (
+            <button
+              type="button"
+              className={styles.sceneNameEditButton}
+              onClick={(e) => {
+                e.stopPropagation();
+                // This will be handled by parent component
+              }}
+              title="Edit scene name"
+            >
+              <Edit2 size={10} />
+            </button>
+          )}
+        </div>
+      )}
+      {item.scene && (
+        <div className={styles.sceneDescription}>
+          {item.scene.description}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Format time as HH:MM:SS:FF (hours:minutes:seconds:frames)
 const formatTime = (seconds: number): string => {
@@ -247,13 +458,13 @@ export default function TimelinePanel({
             file_path: `${scene.folder}/video.mp4`,
             created_at: new Date().toISOString(),
           };
-        } else if (scene.image_approval_status === 'approved' && scene.folder) {
-          // Fallback to image if no video
+        } else if (scene.image_approval_status === 'approved' && scene.image_path) {
+          // Use the actual image_path from scene data (like StoryboardView does)
           artifactsBySceneMap[scene.scene_number] = {
-            artifact_id: `scene-${scene.scene_number}-image`,
+            artifact_id: scene.image_artifact_id || `scene-${scene.scene_number}-image`,
             artifact_type: 'image',
             scene_number: scene.scene_number,
-            file_path: `${scene.folder}/image.png`,
+            file_path: scene.image_path, // Use actual image_path from scene
             created_at: new Date().toISOString(),
           };
         }
@@ -1280,63 +1491,6 @@ export default function TimelinePanel({
                       {timelineItems.map((item) => {
                         const left = secondsToPixels(item.startTime, zoomLevel);
                         const width = secondsToPixels(item.duration, zoomLevel);
-                        const videoPath = item.path
-                          ? `file://${effectiveProjectDir}/${item.path}`
-                          : null;
-                        const imagePath =
-                          item.artifact &&
-                          item.artifact.artifact_type === 'image'
-                            ? `file://${effectiveProjectDir}/${item.artifact.file_path}`
-                            : null;
-
-                        if (item.type === 'video' && videoPath) {
-                          return (
-                            <div
-                              key={item.id}
-                              className={styles.videoBlock}
-                              style={{
-                                left: `${left}px`,
-                                width: `${width}px`,
-                              }}
-                            >
-                              <video
-                                src={videoPath}
-                                className={styles.videoThumbnail}
-                                preload="metadata"
-                                muted
-                              />
-                              <div className={styles.videoLabel}>
-                                {item.label}
-                              </div>
-                            </div>
-                          );
-                        }
-
-                        // Scene block (with or without image)
-                        let thumbnailElement: React.ReactNode;
-                        if (imagePath) {
-                          thumbnailElement = (
-                            <img
-                              src={imagePath}
-                              alt={item.label}
-                              className={styles.sceneThumbnail}
-                            />
-                          );
-                        } else if (videoPath) {
-                          thumbnailElement = (
-                            <video
-                              src={videoPath}
-                              className={styles.sceneThumbnail}
-                              preload="metadata"
-                              muted
-                            />
-                          );
-                        } else {
-                          thumbnailElement = (
-                            <div className={styles.scenePlaceholder} />
-                          );
-                        }
-
                         const isSelected =
                           item.scene &&
                           selectedScenes.has(item.scene.scene_number);
@@ -1345,141 +1499,38 @@ export default function TimelinePanel({
                           draggedSceneNumber === item.scene.scene_number;
 
                         return (
-                          // eslint-disable-next-line jsx-a11y/click-events-have-key-events
-                          <div
+                          <TimelineItemComponent
                             key={item.id}
-                            className={`${styles.sceneBlock} ${isSelected ? styles.selected : ''} ${isSceneDragging ? styles.dragging : ''}`}
-                            style={{
-                              left: `${left}px`,
-                              width: `${width}px`,
-                            }}
-                            draggable={!!item.scene}
-                            onDragStart={(e) => {
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            useMockData={useMockData}
+                            isSelected={isSelected}
+                            isSceneDragging={isSceneDragging}
+                            editingSceneNumber={editingSceneNumber}
+                            editedSceneName={editedSceneName}
+                            onSceneDragStart={handleSceneDragStart}
+                            onSceneDragEnd={handleSceneDragEnd}
+                            onSceneBlockClick={handleSceneBlockClick}
+                            onNameChange={handleNameChange}
+                            onEditedNameChange={setEditedSceneName}
+                            onEditingCancel={() => {
+                              // Restore scroll position on cancel
+                              if (
+                                scrollPositionBeforeEditRef.current !== null &&
+                                tracksRef.current
+                              ) {
+                                tracksRef.current.scrollLeft =
+                                  scrollPositionBeforeEditRef.current;
+                                scrollPositionBeforeEditRef.current = null;
+                              }
+                              setEditingSceneNumber(null);
                               if (item.scene) {
-                                handleSceneDragStart(
-                                  e,
-                                  item.scene.scene_number,
-                                );
+                                setEditedSceneName(item.scene.name || '');
                               }
                             }}
-                            onDragEnd={handleSceneDragEnd}
-                            onClick={(e) => {
-                              if (item.scene) {
-                                handleSceneBlockClick(
-                                  e,
-                                  item.scene.scene_number,
-                                );
-                              }
-                            }}
-                          >
-                            {thumbnailElement}
-                            {item.scene &&
-                            editingSceneNumber === item.scene.scene_number ? (
-                              <div className={styles.sceneNameEdit}>
-                                <input
-                                  type="text"
-                                  value={editedSceneName}
-                                  onChange={(e) =>
-                                    setEditedSceneName(e.target.value)
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      handleNameChange(
-                                        item.scene!.scene_number,
-                                        editedSceneName,
-                                      );
-                                      setEditingSceneNumber(null);
-                                    } else if (e.key === 'Escape') {
-                                      // Restore scroll position on cancel
-                                      if (
-                                        scrollPositionBeforeEditRef.current !==
-                                          null &&
-                                        tracksRef.current
-                                      ) {
-                                        tracksRef.current.scrollLeft =
-                                          scrollPositionBeforeEditRef.current;
-                                        scrollPositionBeforeEditRef.current =
-                                          null;
-                                      }
-                                      setEditingSceneNumber(null);
-                                      setEditedSceneName(
-                                        item.scene!.name || '',
-                                      );
-                                    }
-                                  }}
-                                  onBlur={() => {
-                                    handleNameChange(
-                                      item.scene!.scene_number,
-                                      editedSceneName,
-                                    );
-                                    setEditingSceneNumber(null);
-                                  }}
-                                  onFocus={(e) => {
-                                    // Prevent browser from scrolling to input
-                                    e.target.scrollIntoView({
-                                      behavior: 'instant',
-                                      block: 'nearest',
-                                      inline: 'nearest',
-                                    });
-                                  }}
-                                  className={styles.sceneNameInput}
-                                  // eslint-disable-next-line jsx-a11y/no-autofocus
-                                  autoFocus
-                                  onClick={(e) => e.stopPropagation()}
-                                  placeholder={`Scene ${item.scene.scene_number}`}
-                                />
-                              </div>
-                            ) : (
-                              <div
-                                className={styles.sceneId}
-                                onDoubleClick={(e) => {
-                                  if (item.scene) {
-                                    e.stopPropagation();
-                                    // Save scroll position before editing
-                                    if (tracksRef.current) {
-                                      scrollPositionBeforeEditRef.current =
-                                        tracksRef.current.scrollLeft;
-                                    }
-                                    setEditingSceneNumber(
-                                      item.scene.scene_number,
-                                    );
-                                    setEditedSceneName(item.scene.name || '');
-                                  }
-                                }}
-                                title="Double-click to edit name"
-                              >
-                                {item.label}
-                                {item.scene && (
-                                  <button
-                                    type="button"
-                                    className={styles.sceneNameEditButton}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      // Save scroll position before editing
-                                      if (tracksRef.current) {
-                                        scrollPositionBeforeEditRef.current =
-                                          tracksRef.current.scrollLeft;
-                                      }
-                                      setEditingSceneNumber(
-                                        item.scene!.scene_number,
-                                      );
-                                      setEditedSceneName(
-                                        item.scene!.name || '',
-                                      );
-                                    }}
-                                    title="Edit scene name"
-                                  >
-                                    <Edit2 size={10} />
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                            {item.scene && (
-                              <div className={styles.sceneDescription}>
-                                {item.scene.description}
-                              </div>
-                            )}
-                          </div>
+                          />
                         );
                       })}
 

@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Maximize2, RefreshCw, Image as ImageIcon, Edit2, Check, X } from 'lucide-react';
 import type { StoryboardScene, Artifact } from '../../../types/projectState';
+import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
+import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
+import { useProject } from '../../../contexts/ProjectContext';
 import styles from './SceneCard.module.scss';
 
 interface SceneCardProps {
@@ -23,16 +26,38 @@ export default function SceneCard({
   const [imageError, setImageError] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(scene.name || '');
+  const [imagePath, setImagePath] = useState<string | null>(null);
+  const { useMockData } = useProject();
 
   const sceneId = `SCN_${String(scene.scene_number).padStart(2, '0')}`;
-  const hasImage = artifact && !imageError;
+  const hasImage = artifact && !imageError && imagePath;
   
   const displayName = scene.name || `Scene ${scene.scene_number}`;
 
-  // Construct the full image path
-  const imagePath = artifact
-    ? `file://${projectDirectory}/${artifact.file_path}`
-    : null;
+  // Resolve image path asynchronously and convert to base64 if needed
+  useEffect(() => {
+    if (!artifact?.file_path) {
+      setImagePath(null);
+      return;
+    }
+
+    resolveAssetPathForDisplay(
+      artifact.file_path,
+      projectDirectory || null,
+      useMockData,
+    ).then(async (resolved) => {
+      // For test images in mock mode, try to convert to base64
+      if (shouldUseBase64(resolved, useMockData)) {
+        const base64 = await imageToBase64(resolved);
+        if (base64) {
+          setImagePath(base64);
+          return;
+        }
+      }
+      // Fallback to file:// path
+      setImagePath(resolved);
+    });
+  }, [artifact?.file_path, projectDirectory, useMockData]);
 
   // Default metadata tags
   const duration = scene.duration || 5;

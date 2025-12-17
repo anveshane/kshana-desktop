@@ -4,6 +4,11 @@
  */
 
 import type { SceneRef } from '../../../types/kshana';
+import {
+  getTestImageForScene,
+  getTestVideoForScene,
+  resolveTestAssetPath,
+} from './testAssetMapping';
 
 /**
  * Scene 1: The Discovery
@@ -21,14 +26,22 @@ export const SCENE_001: SceneRef = {
 
   image_approval_status: 'approved',
   image_artifact_id: 'scene_001_image',
-  image_path: '.kshana/agent/scenes/scene-001/image.png',
+  image_path: (() => {
+    const testImage = getTestImageForScene('scene-001');
+    return testImage
+      ? resolveTestAssetPath('image', testImage)
+      : '.kshana/agent/scenes/scene-001/image.png';
+  })(),
   image_prompt:
     'Close-up of hands brushing sand away from a golden artifact with ancient symbols, warm sunset lighting, archaeological excavation site',
   image_approved_at: Date.now() - 86400000 * 3,
 
   video_approval_status: 'approved',
   video_artifact_id: 'scene_001_video_v2',
-  video_path: '.kshana/agent/scenes/scene-001/video/v2.mp4',
+  video_path: (() => {
+    const testVideo = getTestVideoForScene(1, 2);
+    return resolveTestAssetPath('video', testVideo);
+  })(),
   video_approved_at: Date.now() - 86400000 * 2,
 
   audio_approval_status: 'approved',
@@ -60,14 +73,22 @@ export const SCENE_002: SceneRef = {
 
   image_approval_status: 'approved',
   image_artifact_id: 'scene_002_image',
-  image_path: '.kshana/agent/scenes/scene-002/image.png',
+  image_path: (() => {
+    const testImage = getTestImageForScene('scene-002');
+    return testImage
+      ? resolveTestAssetPath('image', testImage)
+      : '.kshana/agent/scenes/scene-002/image.png';
+  })(),
   image_prompt:
     'Weathered expedition guide examining golden artifact with concerned expression, desert camp background, dramatic lighting',
   image_approved_at: Date.now() - 86400000 * 3,
 
   video_approval_status: 'approved',
   video_artifact_id: 'scene_002_video_v1',
-  video_path: '.kshana/agent/scenes/scene-002/video/v1.mp4',
+  video_path: (() => {
+    const testVideo = getTestVideoForScene(2, 1);
+    return resolveTestAssetPath('video', testVideo);
+  })(),
   video_approved_at: Date.now() - 86400000 * 2,
 
   audio_approval_status: 'approved',
@@ -94,14 +115,22 @@ export const SCENE_003: SceneRef = {
 
   image_approval_status: 'approved',
   image_artifact_id: 'scene_003_image',
-  image_path: '.kshana/agent/scenes/scene-003/image.png',
+  image_path: (() => {
+    const testImage = getTestImageForScene('scene-003');
+    return testImage
+      ? resolveTestAssetPath('image', testImage)
+      : '.kshana/agent/scenes/scene-003/image.png';
+  })(),
   image_prompt:
     'Female linguist at desk with ancient texts, lamp light illuminating papers, moment of discovery expression, research tent interior',
   image_approved_at: Date.now() - 86400000 * 3,
 
   video_approval_status: 'in_review',
   video_artifact_id: 'scene_003_video_v3',
-  video_path: '.kshana/agent/scenes/scene-003/video/v3.mp4',
+  video_path: (() => {
+    const testVideo = getTestVideoForScene(3, 3);
+    return resolveTestAssetPath('video', testVideo);
+  })(),
 
   audio_approval_status: 'pending',
 
@@ -125,7 +154,12 @@ export const SCENE_004: SceneRef = {
 
   image_approval_status: 'approved',
   image_artifact_id: 'scene_004_image',
-  image_path: '.kshana/agent/scenes/scene-004/image.png',
+  image_path: (() => {
+    const testImage = getTestImageForScene('scene-004');
+    return testImage
+      ? resolveTestAssetPath('image', testImage)
+      : '.kshana/agent/scenes/scene-004/image.png';
+  })(),
   image_prompt:
     'Wide shot of expedition vehicles crossing massive sand dunes at sunrise, golden light, dramatic scale',
   image_approved_at: Date.now() - 86400000 * 2,
@@ -151,7 +185,12 @@ export const SCENE_005: SceneRef = {
 
   image_approval_status: 'in_review',
   image_artifact_id: 'scene_005_image_v2',
-  image_path: '.kshana/agent/scenes/scene-005/image.png',
+  image_path: (() => {
+    const testImage = getTestImageForScene('scene-005');
+    return testImage
+      ? resolveTestAssetPath('image', testImage)
+      : '.kshana/agent/scenes/scene-005/image.png';
+  })(),
   image_prompt:
     'Abandoned desert village with crumbling adobe buildings, expedition team entering cautiously, late afternoon shadows',
 

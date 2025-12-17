@@ -162,6 +162,17 @@ ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {
   fileSystemManager.addRecentProject(projectPath);
 });
 
+ipcMain.handle('project:get-resources-path', async () => {
+  // Get the path to resources (where Test_Images and Test_videos are packaged)
+  // In development: __dirname/../../Test_Images or Test_videos
+  // In packaged: process.resourcesPath/Test_Images or Test_videos
+  if (app.isPackaged) {
+    return process.resourcesPath;
+  }
+  // In development, return the path relative to main process
+  return path.join(__dirname, '../../');
+});
+
 ipcMain.handle(
   'project:read-file',
   async (_event, filePath: string): Promise<string | null> => {
@@ -173,6 +184,40 @@ ipcMain.handle(
       const err = error as { code?: string };
       if (err.code === 'ENOENT') {
         // Return null for missing files - frontend handles this gracefully
+        return null;
+      }
+      throw error;
+    }
+  },
+);
+
+ipcMain.handle(
+  'project:read-file-base64',
+  async (_event, filePath: string): Promise<string | null> => {
+    try {
+      // Check if file exists first
+      await fs.access(filePath);
+      // Read file as buffer and convert to base64
+      const buffer = await fs.readFile(filePath);
+      const base64 = buffer.toString('base64');
+      
+      // Determine MIME type from file extension
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+      };
+      const mimeType = mimeTypes[ext] || 'application/octet-stream';
+      
+      return `data:${mimeType};base64,${base64}`;
+    } catch (error: unknown) {
+      const err = error as { code?: string };
+      if (err.code === 'ENOENT') {
         return null;
       }
       throw error;

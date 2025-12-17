@@ -241,7 +241,9 @@
       "output": "release/build"
     },
     "extraResources": [
-      "./assets/**"
+      "./assets/**",
+      "./Test_Images/**",
+      "./Test_videos/**"
     ],
     "publish": {
       "provider": "github",

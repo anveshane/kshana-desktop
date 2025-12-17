@@ -4,6 +4,10 @@
  */
 
 import type { SettingData } from '../../../types/kshana';
+import {
+  getTestImageForSetting,
+  resolveTestAssetPath,
+} from './testAssetMapping';
 
 /**
  * Dusty Village - Main location
@@ -21,7 +25,12 @@ export const DUSTY_VILLAGE: SettingData = {
   reference_image_approval_status: 'approved',
   content_artifact_id: 'set_dusty_village_content_001',
   reference_image_id: 'set_dusty_village_ref_001',
-  reference_image_path: '.kshana/agent/settings/dusty-village/reference.png',
+  reference_image_path: (() => {
+    const testImage = getTestImageForSetting('dusty-village');
+    return testImage
+      ? resolveTestAssetPath('image', testImage)
+      : '.kshana/agent/settings/dusty-village/reference.png';
+  })(),
   approved_at: Date.now() - 86400000 * 3,
   reference_image_approved_at: Date.now() - 86400000 * 2,
   regeneration_count: 0,
@@ -43,7 +52,12 @@ export const DESERT_CAMP: SettingData = {
   reference_image_approval_status: 'approved',
   content_artifact_id: 'set_desert_camp_content_001',
   reference_image_id: 'set_desert_camp_ref_001',
-  reference_image_path: '.kshana/agent/settings/desert-camp/reference.png',
+  reference_image_path: (() => {
+    const testImage = getTestImageForSetting('desert-camp');
+    return testImage
+      ? resolveTestAssetPath('image', testImage)
+      : '.kshana/agent/settings/desert-camp/reference.png';
+  })(),
   approved_at: Date.now() - 86400000 * 3,
   reference_image_approved_at: Date.now() - 86400000 * 2,
   regeneration_count: 1,

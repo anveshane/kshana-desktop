@@ -4,6 +4,10 @@
  */
 
 import type { CharacterData } from '../../../types/kshana';
+import {
+  getTestImageForCharacter,
+  resolveTestAssetPath,
+} from './testAssetMapping';
 
 /**
  * Alice Chen - Main protagonist
@@ -21,7 +25,12 @@ export const ALICE_CHEN: CharacterData = {
   reference_image_approval_status: 'approved',
   content_artifact_id: 'char_alice_content_001',
   reference_image_id: 'char_alice_ref_001',
-  reference_image_path: '.kshana/agent/characters/alice-chen/reference.png',
+  reference_image_path: (() => {
+    const testImage = getTestImageForCharacter('alice-chen');
+    return testImage
+      ? resolveTestAssetPath('image', testImage)
+      : '.kshana/agent/characters/alice-chen/reference.png';
+  })(),
   approved_at: Date.now() - 86400000 * 2, // 2 days ago
   reference_image_approved_at: Date.now() - 86400000, // 1 day ago
   regeneration_count: 1,
@@ -43,7 +52,12 @@ export const MARCUS_WEBB: CharacterData = {
   reference_image_approval_status: 'in_review',
   content_artifact_id: 'char_marcus_content_001',
   reference_image_id: 'char_marcus_ref_001',
-  reference_image_path: '.kshana/agent/characters/marcus-webb/reference.png',
+  reference_image_path: (() => {
+    const testImage = getTestImageForCharacter('marcus-webb');
+    return testImage
+      ? resolveTestAssetPath('image', testImage)
+      : '.kshana/agent/characters/marcus-webb/reference.png';
+  })(),
   approved_at: Date.now() - 86400000 * 2,
   regeneration_count: 0,
 };

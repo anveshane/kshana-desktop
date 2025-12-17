@@ -1,6 +1,9 @@
 /* eslint-disable react/require-default-props */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { User, MapPin, Package, Image as ImageIcon } from 'lucide-react';
+import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
+import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
+import { useProject } from '../../../contexts/ProjectContext';
 import styles from './AssetCard.module.scss';
 
 export type AssetType = 'character' | 'location' | 'prop';
@@ -35,15 +38,36 @@ export default function AssetCard({
   metadata = {},
 }: AssetCardProps) {
   const [imageError, setImageError] = useState(false);
+  const [fullImagePath, setFullImagePath] = useState<string>('');
+  const { useMockData } = useProject();
 
   const Icon = TYPE_ICONS[type];
   const colorClass = styles[TYPE_COLORS[type]];
 
-  // Construct full image path
-  const fullImagePath =
-    imagePath && projectDirectory
-      ? `file://${projectDirectory}/${imagePath}`
-      : imagePath;
+  // Resolve image path asynchronously and convert to base64 if needed
+  useEffect(() => {
+    if (!imagePath) {
+      setFullImagePath('');
+      return;
+    }
+
+    resolveAssetPathForDisplay(
+      imagePath,
+      projectDirectory || null,
+      useMockData,
+    ).then(async (resolved) => {
+      // For test images in mock mode, try to convert to base64
+      if (shouldUseBase64(resolved, useMockData)) {
+        const base64 = await imageToBase64(resolved);
+        if (base64) {
+          setFullImagePath(base64);
+          return;
+        }
+      }
+      // Fallback to file:// path
+      setFullImagePath(resolved);
+    });
+  }, [imagePath, projectDirectory, useMockData]);
 
   const hasImage = fullImagePath && !imageError;
 

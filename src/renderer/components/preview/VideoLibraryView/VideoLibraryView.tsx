@@ -8,8 +8,68 @@ import React, {
 import { Film, Play, Calendar, Pause } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
+import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import type { Artifact, StoryboardScene } from '../../../types/projectState';
 import styles from './VideoLibraryView.module.scss';
+
+// Video Card Component
+interface VideoCardProps {
+  artifact: Artifact;
+  formatDate: (dateString: string) => string;
+  projectDirectory: string | null;
+  useMockData: boolean;
+}
+
+function VideoCard({
+  artifact,
+  formatDate,
+  projectDirectory,
+  useMockData,
+}: VideoCardProps) {
+  const [videoPath, setVideoPath] = useState<string>('');
+
+  useEffect(() => {
+    resolveAssetPathForDisplay(
+      artifact.file_path,
+      projectDirectory,
+      useMockData,
+    ).then((resolved) => {
+      setVideoPath(resolved);
+    });
+  }, [artifact.file_path, projectDirectory, useMockData]);
+
+  return (
+    <div className={styles.videoCard}>
+      <div className={styles.videoThumbnail}>
+        {videoPath && (
+          <video
+            src={videoPath}
+            className={styles.video}
+            preload="metadata"
+            muted
+          />
+        )}
+        {artifact.scene_number && (
+          <div className={styles.sceneBadge}>
+            Scene {artifact.scene_number}
+          </div>
+        )}
+      </div>
+      <div className={styles.videoInfo}>
+        <div className={styles.videoTitle}>
+          {(artifact.metadata?.title as string) ||
+            `Video ${artifact.artifact_id.slice(-8)}`}
+        </div>
+        <div className={styles.videoMeta}>
+          <div className={styles.metaItem}>
+            <Calendar size={12} />
+            <span>{formatDate(artifact.created_at)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface TimelineItem {
   id: string;
@@ -388,29 +448,45 @@ export default function VideoLibraryView({
     [handleSeek],
   );
 
-  // Effective project directory (use /mock for mock data mode)
-  const effectiveProjectDir = projectDirectory || '/mock';
+
+  // Resolved video path state
+  const [currentVideoPath, setCurrentVideoPath] = useState<string>('');
+
+  // Resolve video path when current video changes
+  useEffect(() => {
+    if (!currentVideo?.path) {
+      setCurrentVideoPath('');
+      return;
+    }
+
+    resolveAssetPathForDisplay(
+      currentVideo.path,
+      projectDirectory || null,
+      useMockData,
+    ).then((resolved) => {
+      setCurrentVideoPath(resolved);
+    });
+  }, [currentVideo?.path, projectDirectory, useMockData]);
 
   // Update video source when current video changes
   // Don't switch videos during dragging - wait until drag ends
   useEffect(() => {
-    if (!currentVideo || !videoRef.current || (!projectDirectory && !useMockData) || isDragging) {
+    if (!currentVideo || !videoRef.current || !currentVideoPath || isDragging) {
       return;
     }
 
-    const videoPath = `file://${effectiveProjectDir}/${currentVideo.path}`;
     const videoElement = videoRef.current;
 
     // Only update if source actually changed to prevent flickering
-    if (currentVideoPathRef.current !== videoPath) {
+    if (currentVideoPathRef.current !== currentVideoPath) {
       const wasPlaying = !videoElement.paused;
-      currentVideoPathRef.current = videoPath;
+      currentVideoPathRef.current = currentVideoPath;
 
       // Pause current video before changing source
       videoElement.pause();
 
       // Set new source
-      videoElement.src = videoPath;
+      videoElement.src = currentVideoPath;
       videoElement.currentTime = 0;
 
       // Wait for video to be ready before playing
@@ -442,7 +518,7 @@ export default function VideoLibraryView({
         videoElement.removeEventListener('loadeddata', handleLoadedData);
       };
     }
-  }, [currentVideo, projectDirectory, isPlaying, isDragging]);
+  }, [currentVideo, currentVideoPath, isPlaying, isDragging]);
 
   // Update current item index based on playbackTime - works for both videos and scenes
   // This ensures scenes without videos are also tracked during playback
@@ -632,39 +708,15 @@ export default function VideoLibraryView({
             </div>
           ) : (
             <div className={styles.videoGrid}>
-              {videoArtifacts.map((artifact) => {
-                const videoPath = `file://${effectiveProjectDir}/${artifact.file_path}`;
-
-                return (
-                  <div key={artifact.artifact_id} className={styles.videoCard}>
-                    <div className={styles.videoThumbnail}>
-                      <video
-                        src={videoPath}
-                        className={styles.video}
-                        preload="metadata"
-                        muted
-                      />
-                      {artifact.scene_number && (
-                        <div className={styles.sceneBadge}>
-                          Scene {artifact.scene_number}
-                        </div>
-                      )}
-                    </div>
-                    <div className={styles.videoInfo}>
-                      <div className={styles.videoTitle}>
-                        {(artifact.metadata?.title as string) ||
-                          `Video ${artifact.artifact_id.slice(-8)}`}
-                      </div>
-                      <div className={styles.videoMeta}>
-                        <div className={styles.metaItem}>
-                          <Calendar size={12} />
-                          <span>{formatDate(artifact.created_at)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {videoArtifacts.map((artifact) => (
+                <VideoCard
+                  key={artifact.artifact_id}
+                  artifact={artifact}
+                  formatDate={formatDate}
+                  projectDirectory={projectDirectory || null}
+                  useMockData={useMockData}
+                />
+              ))}
             </div>
           )}
         </div>

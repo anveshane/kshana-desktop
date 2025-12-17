@@ -66,6 +66,9 @@ const projectBridge = {
   readFile(filePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:read-file', filePath);
   },
+  readFileBase64(filePath: string): Promise<string | null> {
+    return ipcRenderer.invoke('project:read-file-base64', filePath);
+  },
   writeFile(filePath: string, content: string): Promise<void> {
     return ipcRenderer.invoke('project:write-file', filePath, content);
   },
@@ -101,6 +104,9 @@ const projectBridge = {
   },
   addRecent(projectPath: string): Promise<void> {
     return ipcRenderer.invoke('project:add-recent', projectPath);
+  },
+  getResourcesPath(): Promise<string> {
+    return ipcRenderer.invoke('project:get-resources-path');
   },
   onFileChange(callback: (event: FileChangeEvent) => void) {
     const subscription = (
