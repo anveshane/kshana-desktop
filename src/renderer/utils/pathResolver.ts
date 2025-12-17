@@ -17,7 +17,15 @@ async function getResourcesPath(): Promise<string> {
   try {
     // Use IPC to get resources path from main process
     if (typeof window !== 'undefined' && window.electron?.project?.getResourcesPath) {
-      cachedResourcesPath = await window.electron.project.getResourcesPath();
+      const resourcesPath = await window.electron.project.getResourcesPath();
+      // In development, resources path is the workspace root, but Test_videos is in kshana-frontend/
+      // In production, resources path should already point to the right location
+      // For now, append kshana-frontend if it doesn't already contain it
+      if (resourcesPath && !resourcesPath.includes('kshana-frontend')) {
+        cachedResourcesPath = `${resourcesPath}/kshana-frontend`;
+      } else {
+        cachedResourcesPath = resourcesPath;
+      }
       return cachedResourcesPath;
     }
   } catch (error) {
@@ -26,12 +34,13 @@ async function getResourcesPath(): Promise<string> {
   
   // Fallback: try environment variable
   if (typeof process !== 'undefined' && process.env.WORKSPACE_ROOT) {
-    cachedResourcesPath = process.env.WORKSPACE_ROOT;
+    const workspaceRoot = process.env.WORKSPACE_ROOT;
+    cachedResourcesPath = `${workspaceRoot}/kshana-frontend`;
     return cachedResourcesPath;
   }
   
-  // Last resort: default path (development)
-  cachedResourcesPath = '/Users/indhicdev/Agentic-video-editor';
+  // Last resort: default path (development) - point to kshana-frontend
+  cachedResourcesPath = '/Users/indhicdev/Agentic-video-editor/kshana-frontend';
   return cachedResourcesPath;
 }
 
@@ -76,12 +85,15 @@ export async function resolveTestAssetPathToAbsolute(
       ? cleanPath.replace('Test_Images/', '')
       : cleanPath.replace('Test_videos/', '');
     const folder = isImage ? 'Test_Images' : 'Test_videos';
-    return `${resourcesPath}/${folder}/${filename}`;
+    // Normalize path to avoid double slashes
+    const parts = [resourcesPath.replace(/\/$/, ''), folder, filename].filter(Boolean);
+    return parts.join('/').replace(/\/+/g, '/');
   }
 
   // Fallback: resolve to resources path
   const resourcesPath = await getResourcesPath();
-  return `${resourcesPath}/${cleanPath}`;
+  const parts = [resourcesPath.replace(/\/$/, ''), cleanPath].filter(Boolean);
+  return parts.join('/').replace(/\/+/g, '/');
 }
 
 /**

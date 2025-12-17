@@ -21,9 +21,13 @@ import {
   getTestImageForCharacter,
   getTestImageForSetting,
   getTestImageForScene,
+  getTestVideoForScene,
   resolveTestAssetPath,
 } from './testAssetMapping';
 import { resolveTestAssetPathToAbsolute } from '../../../utils/pathResolver';
+import { getSceneVideoVersions } from './mockAssets';
+import { createMockAssetManifest } from './mockAssets';
+import { copyVideoToScene, setActiveVideoVersion } from '../../../utils/videoWorkspace';
 
 /**
  * Generates the complete mock project structure
@@ -60,7 +64,7 @@ export async function generateMockProjectStructure(
     await generatePropFiles(propsPath);
 
     // Generate scene files
-    await generateSceneFiles(scenesPath);
+    await generateSceneFiles(scenesPath, projectDirectory);
 
     // Generate plan files
     await generatePlanFiles(plansPath);
@@ -212,7 +216,10 @@ async function generatePropFiles(propsPath: string): Promise<void> {
 /**
  * Generates scene directory structure and files
  */
-async function generateSceneFiles(scenesPath: string): Promise<void> {
+async function generateSceneFiles(
+  scenesPath: string,
+  projectDirectory: string,
+): Promise<void> {
   const sceneMarkdowns = generateAllSceneMarkdowns();
 
   for (const scene of MOCK_SCENES) {
@@ -253,6 +260,73 @@ async function generateSceneFiles(scenesPath: string): Promise<void> {
           console.warn(
             `Failed to copy image for scene ${scene.folder}:`,
             imageError,
+          );
+        }
+      }
+
+      // Copy videos if available (similar to images)
+      // Get all video versions for this scene from the asset manifest
+      const assetManifest = createMockAssetManifest();
+      const videoVersions = getSceneVideoVersions(
+        assetManifest,
+        scene.scene_number,
+      );
+
+      if (videoVersions.length > 0) {
+        // Determine active version from scene data
+        let activeVersion = 1;
+        if (scene.video_artifact_id) {
+          const versionMatch = scene.video_artifact_id.match(/v(\d+)$/);
+          if (versionMatch) {
+            activeVersion = parseInt(versionMatch[1], 10);
+          }
+        }
+
+        // Copy each video version
+        for (const videoAsset of videoVersions) {
+          try {
+            const version = videoAsset.version || 1;
+            const testVideo = getTestVideoForScene(scene.scene_number, version);
+            
+            if (testVideo) {
+              const sourcePath = await resolveTestAssetPathToAbsolute(
+                resolveTestAssetPath('video', testVideo),
+              );
+              
+              // Use videoWorkspace utility to copy video to scene folder
+              await copyVideoToScene(
+                sourcePath,
+                projectDirectory,
+                scene.folder,
+                version,
+                {
+                  artifact_id: videoAsset.id,
+                  duration: (videoAsset.metadata?.duration as number) || 5,
+                  prompt: (videoAsset.metadata?.prompt as string) || '',
+                  seed: (videoAsset.metadata?.seed as number) || undefined,
+                  created_at: new Date().toISOString(),
+                },
+              );
+            }
+          } catch (videoError) {
+            console.warn(
+              `Failed to copy video v${videoAsset.version} for scene ${scene.folder}:`,
+              videoError,
+            );
+          }
+        }
+
+        // Set active version in current.txt
+        try {
+          await setActiveVideoVersion(
+            projectDirectory,
+            scene.folder,
+            activeVersion,
+          );
+        } catch (currentError) {
+          console.warn(
+            `Failed to set active video version for scene ${scene.folder}:`,
+            currentError,
           );
         }
       }

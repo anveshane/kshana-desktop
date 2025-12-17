@@ -72,6 +72,9 @@ const projectBridge = {
   writeFile(filePath: string, content: string): Promise<void> {
     return ipcRenderer.invoke('project:write-file', filePath, content);
   },
+  writeFileBinary(filePath: string, base64Data: string): Promise<void> {
+    return ipcRenderer.invoke('project:write-file-binary', filePath, base64Data);
+  },
   createFile(basePath: string, relativePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:create-file', basePath, relativePath);
   },

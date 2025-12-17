@@ -15,6 +15,7 @@ import {
   Upload,
   Scissors,
   Edit2,
+  FileText,
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
@@ -23,14 +24,20 @@ import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
 import { useTimelineData, type TimelineItem } from '../../../hooks/useTimelineData';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
+import { setActiveVideoVersion } from '../../../utils/videoWorkspace';
 import type {
   Artifact,
   TimelineMarker,
 } from '../../../types/projectState';
+import type {
+  KshanaTimelineMarker,
+  ImportedClip,
+} from '../../../types/kshana';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
 import SceneActionPopover from './SceneActionPopover';
 import VersionSelector from '../VersionSelector';
+import MarkdownPreview from '../MarkdownPreview';
 import styles from './TimelinePanel.module.scss';
 
 // Timeline Item Component for proper hook usage
@@ -44,12 +51,14 @@ interface TimelineItemComponentProps {
   isSceneDragging: boolean;
   editingSceneNumber: number | null;
   editedSceneName: string;
+  sceneFolder?: string;
   onSceneDragStart: (e: React.DragEvent<HTMLDivElement>, sceneNumber: number) => void;
   onSceneDragEnd: () => void;
   onSceneBlockClick: (e: React.MouseEvent<HTMLDivElement>, sceneNumber: number) => void;
   onNameChange: (sceneNumber: number, name: string) => void;
   onEditedNameChange: (name: string) => void;
   onEditingCancel: () => void;
+  onViewDetails?: (sceneNumber: number, sceneFolder: string) => void;
 }
 
 function TimelineItemComponent({
@@ -62,12 +71,14 @@ function TimelineItemComponent({
   isSceneDragging,
   editingSceneNumber,
   editedSceneName,
+  sceneFolder,
   onSceneDragStart,
   onSceneDragEnd,
   onSceneBlockClick,
   onNameChange,
   onEditedNameChange,
   onEditingCancel,
+  onViewDetails,
 }: TimelineItemComponentProps) {
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [imagePath, setImagePath] = useState<string | null>(null);
@@ -239,6 +250,21 @@ function TimelineItemComponent({
           {item.scene.description}
         </div>
       )}
+      {item.scene && sceneFolder && onViewDetails && (
+        <div className={styles.sceneFooter}>
+          <button
+            type="button"
+            className={styles.viewDetailsButton}
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewDetails(item.scene!.scene_number, sceneFolder);
+            }}
+            title="View details"
+          >
+            <FileText size={10} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -291,7 +317,18 @@ export default function TimelinePanel({
   onDragStateChange,
 }: TimelinePanelProps) {
   const { projectDirectory } = useWorkspace();
-  const { isLoading, useMockData } = useProject();
+  const {
+    isLoading,
+    useMockData,
+    scenes: projectScenes,
+    timelineState,
+    saveTimelineState,
+    updatePlayhead,
+    updateZoom,
+    setActiveVersion,
+    updateMarkers,
+    updateImportedClips,
+  } = useProject();
   
   // Use unified timeline data hook
   const {
@@ -301,15 +338,36 @@ export default function TimelinePanel({
     importedVideoArtifacts,
   } = useTimelineData();
   
-  const [zoomLevel, setZoomLevel] = useState(1);
+  // Initialize zoom level from timeline state
+  const [zoomLevel, setZoomLevel] = useState(timelineState.zoom_level);
   const [scrollLeft, setScrollLeft] = useState(0);
 
+  // Sync zoom level to timeline state
+  useEffect(() => {
+    updateZoom(zoomLevel);
+  }, [zoomLevel, updateZoom]);
+
   // Use external playback state if provided, otherwise use internal state
-  const [internalPlaybackTime, setInternalPlaybackTime] = useState(0);
+  // Initialize from timeline state if available
+  const [internalPlaybackTime, setInternalPlaybackTime] = useState(
+    timelineState.playhead_seconds,
+  );
   const [internalIsPlaying, setInternalIsPlaying] = useState(false);
 
   const currentPosition = externalPlaybackTime ?? internalPlaybackTime;
   const isPlaying = externalIsPlaying ?? internalIsPlaying;
+
+  // Sync playhead position to timeline state (debounced)
+  useEffect(() => {
+    if (!externalPlaybackTime) {
+      // Only sync if using internal state
+      const timeoutId = setTimeout(() => {
+        updatePlayhead(currentPosition);
+      }, 100); // Debounce 100ms for playhead updates
+      return () => clearTimeout(timeoutId);
+    }
+    return undefined;
+  }, [currentPosition, externalPlaybackTime, updatePlayhead]);
 
   const setCurrentPosition = useCallback(
     (value: number | ((prev: number) => number)) => {
@@ -335,7 +393,116 @@ export default function TimelinePanel({
     },
     [onPlayPause, isPlaying],
   );
-  const [markers, setMarkers] = useState<TimelineMarker[]>([]);
+  // Helper functions to convert between marker formats
+  const convertKshanaMarkerToLocal = useCallback(
+    (marker: KshanaTimelineMarker): TimelineMarker => ({
+      id: marker.id,
+      position: marker.position_seconds,
+      prompt: marker.prompt,
+      status: marker.status,
+      generatedArtifactId: marker.generated_artifact_id,
+      createdAt: marker.created_at,
+    }),
+    [],
+  );
+
+  const convertLocalMarkerToKshana = useCallback(
+    (marker: TimelineMarker): KshanaTimelineMarker => ({
+      id: marker.id,
+      position_seconds: marker.position,
+      prompt: marker.prompt,
+      status: marker.status,
+      generated_artifact_id: marker.generatedArtifactId,
+      created_at: marker.createdAt,
+    }),
+    [],
+  );
+
+  // Load markers and imported clips from timeline state on mount
+  const [markers, setMarkers] = useState<TimelineMarker[]>(() => {
+    return timelineState.markers.map(convertKshanaMarkerToLocal);
+  });
+
+  // Sync markers to timeline state when they change
+  useEffect(() => {
+    const kshanaMarkers = markers.map(convertLocalMarkerToKshana);
+    updateMarkers(kshanaMarkers);
+  }, [markers, convertLocalMarkerToKshana, updateMarkers]);
+
+  // Imported videos state - kept for local video import functionality
+  const [importedVideos, setImportedVideos] = useState<
+    Array<{ path: string; duration: number; startTime: number }>
+  >(() => {
+    // Initialize from timeline state
+    return timelineState.imported_clips.map((clip) => ({
+      path: clip.path,
+      duration: clip.duration_seconds,
+      startTime: clip.start_time_seconds,
+    }));
+  });
+
+  // Use a ref to track if we're updating from external source to prevent loops
+  const isUpdatingFromExternalRef = useRef(false);
+
+  // Load imported clips from timeline state when it changes externally
+  // Only update if the data actually changed to prevent infinite loops
+  useEffect(() => {
+    const importedClips = timelineState.imported_clips.map((clip) => ({
+      path: clip.path,
+      duration: clip.duration_seconds,
+      startTime: clip.start_time_seconds,
+    }));
+    
+    // Compare with current state to avoid unnecessary updates
+    setImportedVideos((current) => {
+      const currentVideosStr = JSON.stringify(current);
+      const newVideosStr = JSON.stringify(importedClips);
+      
+      if (currentVideosStr !== newVideosStr) {
+        isUpdatingFromExternalRef.current = true;
+        return importedClips;
+      }
+      return current;
+    });
+  }, [timelineState.imported_clips]);
+
+  // Sync imported videos to timeline state when they change locally
+  
+  useEffect(() => {
+    // Skip if this update came from external source
+    if (isUpdatingFromExternalRef.current) {
+      isUpdatingFromExternalRef.current = false;
+      return;
+    }
+
+    const kshanaClips: ImportedClip[] = importedVideos.map((video, index) => ({
+      id: video.path || `imported-${index}`,
+      path: video.path,
+      duration_seconds: video.duration,
+      start_time_seconds: video.startTime,
+    }));
+    
+    // Compare with current timeline state to avoid unnecessary updates
+    const currentClipsStr = JSON.stringify(
+      timelineState.imported_clips.map((c) => ({
+        path: c.path,
+        duration: c.duration_seconds,
+        startTime: c.start_time_seconds,
+      })),
+    );
+    const newClipsStr = JSON.stringify(
+      kshanaClips.map((c) => ({
+        path: c.path,
+        duration: c.duration_seconds,
+        startTime: c.start_time_seconds,
+      })),
+    );
+    
+    if (currentClipsStr !== newClipsStr) {
+      updateImportedClips(kshanaClips);
+    }
+  }, [importedVideos, updateImportedClips, timelineState.imported_clips]);
+
   const [markerPromptOpen, setMarkerPromptOpen] = useState(false);
   const [markerPromptPosition, setMarkerPromptPosition] = useState<
     number | null
@@ -347,17 +514,61 @@ export default function TimelinePanel({
     x: number;
     y: number;
   } | null>(null);
+  const [previewSceneNumber, setPreviewSceneNumber] = useState<number | null>(
+    null,
+  );
+  const [markdownContent, setMarkdownContent] = useState<string>('');
+  const [isLoadingMarkdown, setIsLoadingMarkdown] = useState(false);
   const [editingSceneNumber, setEditingSceneNumber] = useState<number | null>(
     null,
   );
   const [editedSceneName, setEditedSceneName] = useState<string>('');
-  // Imported videos state - kept for local video import functionality
-  const [importedVideos, setImportedVideos] = useState<
-    Array<{ path: string; duration: number; startTime: number }>
-  >([]);
+  // Create scene folder map for markdown preview and version management
+  const sceneFoldersByNumber = useMemo(() => {
+    const map: Record<number, string> = {};
+    if (!projectScenes || projectScenes.length === 0) return map;
+    
+    projectScenes.forEach((scene) => {
+      map[scene.scene_number] = scene.folder;
+    });
+    return map;
+  }, [projectScenes]);
+
+  // Load active versions from timeline state
   const [activeVersions, setActiveVersions] = useState<Record<number, number>>(
-    {},
+    () => {
+      const versions: Record<number, number> = {};
+      Object.entries(timelineState.active_versions).forEach(([folder, version]) => {
+        // Extract scene number from folder name (e.g., "scene-001" -> 1)
+        const match = folder.match(/scene-(\d+)/);
+        if (match) {
+          const sceneNumber = parseInt(match[1], 10);
+          versions[sceneNumber] = version;
+        }
+      });
+      return versions;
+    },
   );
+
+  // Sync active versions to timeline state when they change
+  useEffect(() => {
+    if (!projectDirectory || useMockData) return;
+
+    Object.entries(activeVersions).forEach(async ([sceneNumber, version]) => {
+      const sceneFolder = sceneFoldersByNumber[parseInt(sceneNumber, 10)];
+      if (sceneFolder) {
+        // Update timeline state active_versions
+        setActiveVersion(sceneFolder, version);
+        
+        // Update current.txt file
+        try {
+          await setActiveVideoVersion(projectDirectory, sceneFolder, version);
+        } catch (error) {
+          console.error('Failed to update current.txt:', error);
+        }
+      }
+    });
+  }, [activeVersions, projectDirectory, useMockData, sceneFoldersByNumber, setActiveVersion]);
   const {
     selectedScenes,
     selectScene,
@@ -429,6 +640,47 @@ export default function TimelinePanel({
     },
     [],
   );
+
+  // Load markdown content when preview is opened
+  const handleViewSceneDetails = useCallback(
+    async (sceneNumber: number, sceneFolder: string) => {
+      setPreviewSceneNumber(sceneNumber);
+      setIsLoadingMarkdown(true);
+
+      const basePath = projectDirectory || '/mock';
+      const markdownPath = `${basePath}/.kshana/agent/scenes/${sceneFolder}/scene.md`;
+
+      try {
+        const content = await window.electron.project.readFile(markdownPath);
+        if (content !== null) {
+          setMarkdownContent(content);
+        } else {
+          const scene = scenes.find((s) => s.scene_number === sceneNumber);
+          setMarkdownContent(
+            `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
+              scene?.description || 'No details available.'
+            }`,
+          );
+        }
+      } catch (error) {
+        console.error('Failed to load scene markdown:', error);
+        const scene = scenes.find((s) => s.scene_number === sceneNumber);
+        setMarkdownContent(
+          `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
+            scene?.description || 'No details available.'
+          }`,
+        );
+      } finally {
+        setIsLoadingMarkdown(false);
+      }
+    },
+    [projectDirectory, scenes],
+  );
+
+  const handleClosePreview = useCallback(() => {
+    setPreviewSceneNumber(null);
+    setMarkdownContent('');
+  }, []);
 
   // Calculate scene blocks for marker context and version selector
   const sceneBlocks = useMemo(() => {
@@ -1297,6 +1549,10 @@ export default function TimelinePanel({
                           draggedSceneNumber === item.scene.scene_number,
                         );
 
+                        const sceneFolder = item.scene
+                          ? sceneFoldersByNumber[item.scene.scene_number]
+                          : undefined;
+
                         return (
                           <TimelineItemComponent
                             key={item.id}
@@ -1309,11 +1565,13 @@ export default function TimelinePanel({
                             isSceneDragging={isSceneDragging}
                             editingSceneNumber={editingSceneNumber}
                             editedSceneName={editedSceneName}
+                            sceneFolder={sceneFolder}
                             onSceneDragStart={handleSceneDragStart}
                             onSceneDragEnd={handleSceneDragEnd}
                             onSceneBlockClick={handleSceneBlockClick}
                             onNameChange={handleNameChange}
                             onEditedNameChange={setEditedSceneName}
+                            onViewDetails={handleViewSceneDetails}
                             onEditingCancel={() => {
                               // Restore scroll position on cancel
                               if (
@@ -1416,6 +1674,22 @@ export default function TimelinePanel({
                 const unusedParams = { sceneNum, prompt };
                 return unusedParams;
               }}
+            />
+          )}
+
+          {previewSceneNumber !== null && (
+            <MarkdownPreview
+              isOpen={previewSceneNumber !== null}
+              title={
+                scenes.find((s) => s.scene_number === previewSceneNumber)
+                  ?.name || `Scene ${previewSceneNumber}`
+              }
+              content={
+                isLoadingMarkdown
+                  ? 'Loading...'
+                  : markdownContent || 'Loading...'
+              }
+              onClose={handleClosePreview}
             />
           )}
         </>

@@ -233,6 +233,19 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'project:write-file-binary',
+  async (_event, filePath: string, base64Data: string): Promise<void> => {
+    // Ensure directory exists before writing
+    const dirPath = path.dirname(filePath);
+    await fs.mkdir(dirPath, { recursive: true });
+    
+    // Convert base64 string to buffer and write as binary
+    const buffer = Buffer.from(base64Data, 'base64');
+    return fs.writeFile(filePath, buffer);
+  },
+);
+
+ipcMain.handle(
   'project:create-file',
   async (
     _event,

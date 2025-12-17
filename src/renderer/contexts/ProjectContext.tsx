@@ -106,6 +106,12 @@ interface ProjectActions {
 
   /** Set active version for a scene */
   setActiveVersion: (sceneFolder: string, version: number) => void;
+
+  /** Update timeline markers */
+  updateMarkers: (markers: KshanaTimelineState['markers']) => void;
+
+  /** Update imported clips */
+  updateImportedClips: (importedClips: KshanaTimelineState['imported_clips']) => void;
 }
 
 /**
@@ -387,7 +393,7 @@ export function ProjectProvider({
     [],
   );
 
-  // Update playhead
+  // Update playhead with auto-save
   const updatePlayhead = useCallback((seconds: number) => {
     setState((prev) => ({
       ...prev,
@@ -395,7 +401,7 @@ export function ProjectProvider({
     }));
   }, []);
 
-  // Update zoom
+  // Update zoom with auto-save
   const updateZoom = useCallback((level: number) => {
     setState((prev) => ({
       ...prev,
@@ -403,7 +409,7 @@ export function ProjectProvider({
     }));
   }, []);
 
-  // Set active version
+  // Set active version with auto-save
   const setActiveVersion = useCallback(
     (sceneFolder: string, version: number) => {
       setState((prev) => ({
@@ -419,6 +425,48 @@ export function ProjectProvider({
     },
     [],
   );
+
+  // Update markers
+  const updateMarkers = useCallback(
+    (markers: KshanaTimelineState['markers']) => {
+      setState((prev) => ({
+        ...prev,
+        timelineState: { ...prev.timelineState, markers },
+      }));
+    },
+    [],
+  );
+
+  // Update imported clips
+  const updateImportedClips = useCallback(
+    (importedClips: KshanaTimelineState['imported_clips']) => {
+      setState((prev) => ({
+        ...prev,
+        timelineState: { ...prev.timelineState, imported_clips: importedClips },
+      }));
+    },
+    [],
+  );
+
+  // Auto-save timeline state with debouncing
+  useEffect(() => {
+    if (!state.isLoaded || state.useMockData) return;
+
+    const timeoutId = setTimeout(() => {
+      saveTimelineState(state.timelineState);
+    }, 500); // Debounce 500ms
+
+    return () => clearTimeout(timeoutId);
+  }, [
+    state.timelineState.playhead_seconds,
+    state.timelineState.zoom_level,
+    state.timelineState.active_versions,
+    state.timelineState.markers,
+    state.timelineState.imported_clips,
+    state.isLoaded,
+    state.useMockData,
+    saveTimelineState,
+  ]);
 
   // Computed values
   const computed = useMemo<ProjectComputed>(() => {
@@ -461,6 +509,8 @@ export function ProjectProvider({
       updatePlayhead,
       updateZoom,
       setActiveVersion,
+      updateMarkers,
+      updateImportedClips,
     }),
     [
       state,
@@ -476,6 +526,8 @@ export function ProjectProvider({
       updatePlayhead,
       updateZoom,
       setActiveVersion,
+      updateMarkers,
+      updateImportedClips,
     ],
   );
 
