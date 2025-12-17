@@ -25,6 +25,7 @@ import {
   createMockKshanaProject,
   createEmptyKshanaProject,
 } from './mockData';
+import { generateMockProjectStructure } from './mockData/generateMockStructure';
 
 /**
  * Result type for async operations
@@ -119,6 +120,9 @@ export class ProjectService {
       try {
         // Create project structure first
         await this.createProjectStructure(directory);
+
+        // Generate mock asset structure (characters, settings, props, plans)
+        await generateMockProjectStructure(directory);
 
         // Generate mock project data
         const mockProject = createMockKshanaProject();

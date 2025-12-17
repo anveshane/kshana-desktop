@@ -20,10 +20,10 @@ import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimeline } from '../../../contexts/TimelineContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
+import { useTimelineData, type TimelineItem } from '../../../hooks/useTimelineData';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import type {
-  StoryboardScene,
   Artifact,
   TimelineMarker,
 } from '../../../types/projectState';
@@ -44,9 +44,9 @@ interface TimelineItemComponentProps {
   isSceneDragging: boolean;
   editingSceneNumber: number | null;
   editedSceneName: string;
-  onSceneDragStart: (e: React.DragEvent, sceneNumber: number) => void;
+  onSceneDragStart: (e: React.DragEvent<HTMLDivElement>, sceneNumber: number) => void;
   onSceneDragEnd: () => void;
-  onSceneBlockClick: (e: React.MouseEvent, sceneNumber: number) => void;
+  onSceneBlockClick: (e: React.MouseEvent<HTMLDivElement>, sceneNumber: number) => void;
   onNameChange: (sceneNumber: number, name: string) => void;
   onEditedNameChange: (name: string) => void;
   onEditingCancel: () => void;
@@ -291,13 +291,16 @@ export default function TimelinePanel({
   onDragStateChange,
 }: TimelinePanelProps) {
   const { projectDirectory } = useWorkspace();
+  const { isLoading, useMockData } = useProject();
+  
+  // Use unified timeline data hook
   const {
-    isLoaded,
-    isLoading,
-    scenes: projectScenes,
-    assetManifest,
-    useMockData,
-  } = useProject();
+    scenes,
+    timelineItems,
+    artifactsByScene,
+    importedVideoArtifacts,
+  } = useTimelineData();
+  
   const [zoomLevel, setZoomLevel] = useState(1);
   const [scrollLeft, setScrollLeft] = useState(0);
 
@@ -348,6 +351,7 @@ export default function TimelinePanel({
     null,
   );
   const [editedSceneName, setEditedSceneName] = useState<string>('');
+  // Imported videos state - kept for local video import functionality
   const [importedVideos, setImportedVideos] = useState<
     Array<{ path: string; duration: number; startTime: number }>
   >([]);
@@ -400,22 +404,6 @@ export default function TimelinePanel({
 
   const { sendTimelineMarker } = useTimelineWebSocket(handleMarkerUpdate);
 
-  // Convert SceneRef from ProjectContext to StoryboardScene format
-  const scenes: StoryboardScene[] = useMemo(() => {
-    if (!isLoaded || projectScenes.length === 0) {
-      return [];
-    }
-
-    return projectScenes.map((scene) => ({
-      scene_number: scene.scene_number,
-      name: scene.title,
-      description: scene.description || '',
-      duration: 5, // Default duration
-      shot_type: 'Mid Shot',
-      lighting: 'Natural',
-    }));
-  }, [isLoaded, projectScenes]);
-
   // Restore scroll position when exiting edit mode
   useEffect(() => {
     if (
@@ -442,81 +430,7 @@ export default function TimelinePanel({
     [],
   );
 
-  const { artifactsByScene, importedVideoArtifacts } = useMemo(() => {
-    const artifactsBySceneMap: Record<number, Artifact> = {};
-    const importedVideoArtifactsList: Artifact[] = [];
-
-    // Build artifacts from project scenes
-    if (isLoaded && projectScenes.length > 0) {
-      projectScenes.forEach((scene) => {
-        // Check if scene has approved video
-        if (scene.video_approval_status === 'approved' && scene.folder) {
-          artifactsBySceneMap[scene.scene_number] = {
-            artifact_id: `scene-${scene.scene_number}-video`,
-            artifact_type: 'video',
-            scene_number: scene.scene_number,
-            file_path: `${scene.folder}/video.mp4`,
-            created_at: new Date().toISOString(),
-          };
-        } else if (scene.image_approval_status === 'approved' && scene.image_path) {
-          // Use the actual image_path from scene data (like StoryboardView does)
-          artifactsBySceneMap[scene.scene_number] = {
-            artifact_id: scene.image_artifact_id || `scene-${scene.scene_number}-image`,
-            artifact_type: 'image',
-            scene_number: scene.scene_number,
-            file_path: scene.image_path, // Use actual image_path from scene
-            created_at: new Date().toISOString(),
-          };
-        }
-      });
-    }
-
-    // Imported videos from asset manifest
-    if (assetManifest?.assets) {
-      assetManifest.assets.forEach((asset) => {
-        if (asset.type === 'scene_video' || asset.type === 'final_video') {
-          if (asset.metadata?.imported) {
-            importedVideoArtifactsList.push({
-              artifact_id: asset.id,
-              artifact_type: 'video',
-              file_path: asset.path,
-              created_at: new Date(asset.created_at).toISOString(),
-              scene_number: asset.scene_number,
-              metadata: {
-                imported: true,
-              },
-            });
-          }
-        }
-      });
-    }
-
-    return {
-      artifactsByScene: artifactsBySceneMap,
-      importedVideoArtifacts: importedVideoArtifactsList,
-    };
-  }, [isLoaded, projectScenes, assetManifest]);
-
-  // Get all video artifacts from asset manifest
-  const allVideoArtifacts: Artifact[] = useMemo(() => {
-    if (!assetManifest?.assets) return [];
-
-    return assetManifest.assets
-      .filter((asset) => asset.type === 'scene_video' || asset.type === 'final_video')
-      .map((asset) => ({
-        artifact_id: asset.id,
-        artifact_type: 'video',
-        file_path: asset.path,
-        created_at: new Date(asset.created_at).toISOString(),
-        scene_number: asset.scene_number,
-        metadata: {
-          title: asset.path.split('/').pop(),
-        },
-      }));
-  }, [assetManifest]);
-
-  // Calculate scene blocks (used for rendering and context)
-  // ALL scenes from storyboard are included, regardless of artifacts
+  // Calculate scene blocks for marker context and version selector
   const sceneBlocks = useMemo(() => {
     let currentTime = 0;
     return scenes.map((scene) => {
@@ -532,130 +446,22 @@ export default function TimelinePanel({
     });
   }, [scenes, artifactsByScene]);
 
-  // Create unified timeline items - combine all videos and scenes
-  interface TimelineItem {
-    id: string;
-    type: 'video' | 'scene';
-    startTime: number;
-    duration: number;
-    artifact?: Artifact;
-    scene?: StoryboardScene;
-    path?: string;
-    label: string;
-  }
+  // Calculate total duration from timeline items
+  const totalDuration = useMemo(() => {
+    if (timelineItems.length === 0) return 10;
+    const lastItem = timelineItems[timelineItems.length - 1];
+    return Math.max(lastItem.startTime + lastItem.duration, 10);
+  }, [timelineItems]);
 
-  const timelineItems: TimelineItem[] = useMemo(() => {
-    const items: TimelineItem[] = [];
-
-    // Add ALL scene blocks from storyboard - every scene appears on timeline
-    sceneBlocks.forEach((block) => {
-      const sceneLabel =
-        block.scene.name || `Scene ${block.scene.scene_number}`;
-      if (block.artifact && block.artifact.artifact_type === 'video') {
-        // Scene has video - add as video item
-        items.push({
-          id: `scene-video-${block.scene.scene_number}`,
-          type: 'video',
-          startTime: block.startTime,
-          duration: block.duration,
-          artifact: block.artifact,
-          scene: block.scene,
-          path: block.artifact.file_path,
-          label: sceneLabel,
-        });
-      } else {
-        // Scene without video - add as scene item (will show placeholder or image)
-        items.push({
-          id: `scene-${block.scene.scene_number}`,
-          type: 'scene',
-          startTime: block.startTime,
-          duration: block.duration,
-          scene: block.scene,
-          artifact: block.artifact,
-          label: sceneLabel,
-        });
-      }
-    });
-
-    // Calculate scene end time for positioning imported videos
-    const sceneEndTime =
-      sceneBlocks.length > 0
-        ? sceneBlocks[sceneBlocks.length - 1].startTime +
-          sceneBlocks[sceneBlocks.length - 1].duration
-        : 0;
-
-    // Add imported videos (they go after all scenes)
-    let importedVideoTime = sceneEndTime;
-    importedVideos.forEach((video, index) => {
-      items.push({
-        id: `imported-${index}`,
-        type: 'video',
-        startTime: importedVideoTime,
-        duration: video.duration,
-        path: video.path,
-        label: 'Imported',
-      });
-      importedVideoTime += video.duration;
-    });
-
-    // Add other video artifacts that don't have scene numbers
-    let orphanVideoTime = importedVideoTime;
-    allVideoArtifacts.forEach((artifact) => {
-      if (!artifact.scene_number && !artifact.metadata?.imported) {
-        const duration = (artifact.metadata?.duration as number) || 5;
-        items.push({
-          id: artifact.artifact_id,
-          type: 'video',
-          startTime: orphanVideoTime,
-          duration,
-          artifact,
-          path: artifact.file_path,
-          label: `VID_${artifact.artifact_id.slice(-6)}`,
-        });
-        orphanVideoTime += duration;
-      }
-    });
-
-    // Sort timeline items by startTime to ensure correct order
-    items.sort((a, b) => a.startTime - b.startTime);
-
-    return items;
-  }, [sceneBlocks, importedVideos, allVideoArtifacts]);
-
-  // Calculate total duration from all timeline items
-  const totalDuration =
-    timelineItems.length > 0
-      ? Math.max(
-          ...timelineItems.map((item) => item.startTime + item.duration),
-          10,
-        )
-      : 10;
-
-  // Calculate scene blocks for marker context - memoized
-  const sceneBlocksForMarkers = useMemo(() => {
-    let currentTime = 0;
-    return scenes.map((scene) => {
-      const startTime = currentTime;
-      const duration = scene.duration || 5;
-      currentTime += duration;
-      return {
-        scene,
-        startTime,
-        duration,
-        artifact: artifactsByScene[scene.scene_number],
-      };
-    });
-  }, [scenes, artifactsByScene]);
-
-  // Calculate scene duration for imported videos positioning
-  const sceneDurationForImports = useMemo(() => {
-    return scenes.reduce((acc, scene) => acc + (scene.duration || 5), 0);
-  }, [scenes]);
-
-  // Load imported videos from asset manifest
+  // Load imported videos from asset manifest (for local video import feature)
   useEffect(() => {
-    if (isLoaded && importedVideoArtifacts.length > 0) {
-      let currentTime = sceneDurationForImports;
+    if (importedVideoArtifacts.length > 0) {
+      const sceneEndTime =
+        sceneBlocks.length > 0
+          ? sceneBlocks[sceneBlocks.length - 1].startTime +
+            sceneBlocks[sceneBlocks.length - 1].duration
+          : 0;
+      let currentTime = sceneEndTime;
       const videos = importedVideoArtifacts.map((artifact) => {
         const startTime = currentTime;
         const duration = (artifact.metadata?.duration as number) || 5;
@@ -667,11 +473,11 @@ export default function TimelinePanel({
         };
       });
       setImportedVideos(videos);
-    } else if (isLoaded && importedVideoArtifacts.length === 0) {
+    } else {
       // Clear imported videos if none
       setImportedVideos([]);
     }
-  }, [isLoaded, sceneDurationForImports, importedVideoArtifacts]);
+  }, [importedVideoArtifacts, sceneBlocks]);
 
   // Timeline click handler removed - no longer opens marker prompt
   // Marker functionality can be accessed via keyboard shortcut or toolbar button
@@ -701,13 +507,13 @@ export default function TimelinePanel({
       // Send to backend via WebSocket
       try {
         // Get current scene context
-        const currentScene = sceneBlocksForMarkers.find(
+        const currentScene = sceneBlocks.find(
           (block) =>
             position >= block.startTime &&
             position < block.startTime + block.duration,
         );
 
-        const previousScenes = sceneBlocksForMarkers
+        const previousScenes = sceneBlocks
           .filter((block) => block.startTime + block.duration <= position)
           .map((block) => ({
             scene_number: block.scene.scene_number,
@@ -732,7 +538,7 @@ export default function TimelinePanel({
         );
       }
     },
-    [sceneBlocksForMarkers, sendTimelineMarker],
+    [sceneBlocks, sendTimelineMarker],
   );
 
   // Open marker popover at current playhead position (keyboard shortcut)
@@ -759,13 +565,9 @@ export default function TimelinePanel({
     if (isPlaying) {
       playheadIntervalRef.current = setInterval(() => {
         const next = currentPosition + 0.1; // Update every 100ms
-        const maxDuration = Math.max(
-          totalDuration,
-          ...importedVideos.map((v) => v.startTime + v.duration),
-        );
-        if (next >= maxDuration) {
+        if (next >= totalDuration) {
           setIsPlaying(false);
-          setCurrentPosition(maxDuration);
+          setCurrentPosition(totalDuration);
         } else {
           setCurrentPosition(next);
         }
@@ -784,7 +586,6 @@ export default function TimelinePanel({
   }, [
     isPlaying,
     totalDuration,
-    importedVideos,
     externalPlaybackTime,
     externalIsPlaying,
     setCurrentPosition,
@@ -799,13 +600,9 @@ export default function TimelinePanel({
       const rect = tracksRef.current.getBoundingClientRect();
       const x = clientX - rect.left + scrollLeft;
       const seconds = pixelsToSeconds(x, zoomLevel);
-      const maxDuration = Math.max(
-        totalDuration,
-        ...importedVideos.map((v) => v.startTime + v.duration),
-      );
-      return Math.max(0, Math.min(maxDuration, seconds));
+      return Math.max(0, Math.min(totalDuration, seconds));
     },
-    [scrollLeft, zoomLevel, totalDuration, importedVideos, currentPosition],
+    [scrollLeft, zoomLevel, totalDuration, currentPosition],
   );
 
   // Handle playhead drag start
@@ -957,7 +754,7 @@ export default function TimelinePanel({
           sceneBlocks.length,
           null, // projectState no longer needed
           projectDirectory,
-          null, // setProjectState no longer needed
+          () => {}, // No-op function for state update
         );
         }
       } else {
@@ -971,7 +768,7 @@ export default function TimelinePanel({
             dropInsertIndex,
             null, // projectState no longer needed
             projectDirectory,
-            null, // setProjectState no longer needed
+            () => {}, // No-op function for state update
           );
         }
       }
@@ -1187,7 +984,7 @@ export default function TimelinePanel({
 
   // Handle scene split at playhead
   const handleSplitScene = useCallback(() => {
-    const currentSceneIndex = sceneBlocksForMarkers.findIndex(
+    const currentSceneIndex = sceneBlocks.findIndex(
       (block) =>
         currentPosition >= block.startTime &&
         currentPosition < block.startTime + block.duration,
@@ -1197,7 +994,7 @@ export default function TimelinePanel({
       return;
     }
 
-    const block = sceneBlocksForMarkers[currentSceneIndex];
+    const block = sceneBlocks[currentSceneIndex];
     const splitTime = currentPosition - block.startTime;
 
     if (splitTime > 0 && splitTime < block.duration) {
@@ -1213,7 +1010,7 @@ export default function TimelinePanel({
       //   duration: block.duration - splitTime,
       // };
     }
-  }, [currentPosition, sceneBlocksForMarkers]);
+  }, [currentPosition, sceneBlocks]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1491,12 +1288,14 @@ export default function TimelinePanel({
                       {timelineItems.map((item) => {
                         const left = secondsToPixels(item.startTime, zoomLevel);
                         const width = secondsToPixels(item.duration, zoomLevel);
-                        const isSelected =
+                        const isSelected = Boolean(
                           item.scene &&
-                          selectedScenes.has(item.scene.scene_number);
-                        const isSceneDragging =
+                          selectedScenes.has(item.scene.scene_number),
+                        );
+                        const isSceneDragging = Boolean(
                           item.scene &&
-                          draggedSceneNumber === item.scene.scene_number;
+                          draggedSceneNumber === item.scene.scene_number,
+                        );
 
                         return (
                           <TimelineItemComponent

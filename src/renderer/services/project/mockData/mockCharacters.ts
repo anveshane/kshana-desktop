@@ -29,7 +29,7 @@ export const ALICE_CHEN: CharacterData = {
     const testImage = getTestImageForCharacter('alice-chen');
     return testImage
       ? resolveTestAssetPath('image', testImage)
-      : '.kshana/agent/characters/alice-chen/reference.png';
+      : 'characters/alice-chen/image.png';
   })(),
   approved_at: Date.now() - 86400000 * 2, // 2 days ago
   reference_image_approved_at: Date.now() - 86400000, // 1 day ago
@@ -56,7 +56,7 @@ export const MARCUS_WEBB: CharacterData = {
     const testImage = getTestImageForCharacter('marcus-webb');
     return testImage
       ? resolveTestAssetPath('image', testImage)
-      : '.kshana/agent/characters/marcus-webb/reference.png';
+      : 'characters/marcus-webb/image.png';
   })(),
   approved_at: Date.now() - 86400000 * 2,
   regeneration_count: 0,
@@ -89,6 +89,46 @@ export const MOCK_CHARACTERS: CharacterData[] = [
   MARCUS_WEBB,
   FATIMA_HASSAN,
 ];
+
+/**
+ * Generates markdown content for a character's character.md file
+ */
+export function generateCharacterMarkdown(character: CharacterData): string {
+  return `# ${character.name}
+
+## Description
+
+${character.description}
+
+## Visual Description
+
+${character.visual_description}
+
+## Approval Status
+
+- **Character Definition:** ${character.approval_status}
+- **Reference Image:** ${character.reference_image_approval_status || 'pending'}
+
+## Metadata
+
+- **Slug:** ${character.slug}
+- **Content Artifact ID:** ${character.content_artifact_id || 'N/A'}
+- **Reference Image ID:** ${character.reference_image_id || 'N/A'}
+- **Regeneration Count:** ${character.regeneration_count}
+
+`;
+}
+
+/**
+ * Generates markdown content for all characters
+ */
+export function generateAllCharacterMarkdowns(): Record<string, string> {
+  const markdowns: Record<string, string> = {};
+  for (const char of MOCK_CHARACTERS) {
+    markdowns[char.slug] = generateCharacterMarkdown(char);
+  }
+  return markdowns;
+}
 
 /**
  * Creates a copy of mock characters with fresh timestamps

@@ -36,6 +36,17 @@ export default function StoryboardView() {
     }));
   }, [isLoaded, projectScenes]);
 
+  // Create a map of scene numbers to folder names
+  const sceneFoldersByNumber = useMemo(() => {
+    const map: Record<number, string> = {};
+    if (!isLoaded || projectScenes.length === 0) return map;
+    
+    for (const scene of projectScenes) {
+      map[scene.scene_number] = scene.folder;
+    }
+    return map;
+  }, [isLoaded, projectScenes]);
+
   // Build artifacts map from scene data for backward compatibility
   const artifactsByScene: Record<number, Artifact> = useMemo(() => {
     const map: Record<number, Artifact> = {};
@@ -189,6 +200,7 @@ export default function StoryboardView() {
                 scene={scene}
                 artifact={artifactsByScene[scene.scene_number]}
                 projectDirectory={projectDirectory || '/mock'}
+                sceneFolder={sceneFoldersByNumber[scene.scene_number]}
                 onExpand={handleExpand}
                 onRegenerate={handleRegenerate}
                 onNameChange={handleNameChange}

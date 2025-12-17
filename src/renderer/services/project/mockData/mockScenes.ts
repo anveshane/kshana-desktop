@@ -282,3 +282,178 @@ export function getSceneApprovalStats(scenes: SceneRef[]): {
   };
 }
 
+/**
+ * Extracts character names from scene description
+ */
+function extractCharacters(scene: SceneRef): string[] {
+  const description = scene.description?.toLowerCase() || '';
+  const characters: string[] = [];
+  
+  // Extract known character names from description
+  if (description.includes('alice')) {
+    characters.push('Alice Chen');
+  }
+  if (description.includes('marcus')) {
+    characters.push('Marcus Webb');
+  }
+  if (description.includes('fatima') || description.includes('dr.')) {
+    characters.push('Dr. Fatima Hassan');
+  }
+  
+  // If no characters found, use "The Team" for group scenes
+  if (characters.length === 0 && description.includes('team')) {
+    characters.push('The Team');
+  }
+  
+  return characters.length > 0 ? characters : ['Alice Chen']; // Default to Alice
+}
+
+/**
+ * Infers location from scene description
+ */
+function inferLocation(scene: SceneRef): string {
+  const description = scene.description?.toLowerCase() || '';
+  
+  if (description.includes('excavation') || description.includes('artifact')) {
+    return 'Desert excavation site';
+  }
+  if (description.includes('camp')) {
+    return 'Desert camp';
+  }
+  if (description.includes('village')) {
+    return 'Dusty village';
+  }
+  if (description.includes('tomb') || description.includes('entrance') || description.includes('well')) {
+    return 'Underground tomb entrance';
+  }
+  if (description.includes('dunes') || description.includes('sahara')) {
+    return 'Sahara Desert';
+  }
+  if (description.includes('tent') || description.includes('research')) {
+    return 'Research tent';
+  }
+  
+  return 'Desert location'; // Default
+}
+
+/**
+ * Infers mood from scene description
+ */
+function inferMood(scene: SceneRef): string {
+  const description = scene.description?.toLowerCase() || '';
+  
+  if (description.includes('troubled') || description.includes('warn')) {
+    return 'Concerned';
+  }
+  if (description.includes('discover') || description.includes('find')) {
+    return 'Tense';
+  }
+  if (description.includes('vast') || description.includes('empty')) {
+    return 'Reflective';
+  }
+  if (description.includes('howls') || description.includes('darkness')) {
+    return 'Mysterious';
+  }
+  
+  return 'Tense'; // Default
+}
+
+/**
+ * Infers shot type from image prompt or description
+ */
+function inferShotType(scene: SceneRef): string {
+  const prompt = scene.image_prompt?.toLowerCase() || '';
+  const description = scene.description?.toLowerCase() || '';
+  
+  if (prompt.includes('close-up') || description.includes('close')) {
+    return 'Close-up';
+  }
+  if (prompt.includes('wide shot') || description.includes('vast')) {
+    return 'Wide Shot';
+  }
+  if (prompt.includes('mid')) {
+    return 'Mid Shot';
+  }
+  
+  return 'Mid Shot'; // Default
+}
+
+/**
+ * Infers dialogue from scene description
+ */
+function inferDialogue(scene: SceneRef): string {
+  const description = scene.description || '';
+  
+  // Scene 1 has specific dialogue mentioned
+  if (scene.scene_number === 1) {
+    return '(whispering) "This can\'t be real..."';
+  }
+  
+  // Scene 2 mentions warning
+  if (scene.scene_number === 2) {
+    return 'Marcus: "We need to be careful with ancient artifacts."';
+  }
+  
+  // Other scenes don't have explicit dialogue in the mock data
+  return '';
+}
+
+/**
+ * Generates markdown content for a scene's scene.md file
+ * Follows the Kshana Project Directory Specification v1.0 format
+ */
+export function generateSceneMarkdown(scene: SceneRef): string {
+  const title = scene.title || `Scene ${scene.scene_number}`;
+  const description = scene.description || 'No description available.';
+  const characters = extractCharacters(scene);
+  const location = inferLocation(scene);
+  const mood = inferMood(scene);
+  const duration = '5 seconds'; // Default duration per spec example
+  const shotType = inferShotType(scene);
+  const imagePrompt = scene.image_prompt || 'No image prompt available.';
+  const dialogue = inferDialogue(scene);
+  
+  return `# Scene ${scene.scene_number}: ${title}
+
+## Description
+
+${description}
+
+## Characters
+
+${characters.map(char => `- ${char}`).join('\n')}
+
+## Location
+
+${location}
+
+## Mood
+
+${mood}
+
+## Duration
+
+${duration}
+
+## Shot Type
+
+${shotType}
+
+## Image Prompt
+
+${imagePrompt}
+${dialogue ? `\n## Dialogue\n\n${dialogue}` : ''}
+`;
+}
+
+/**
+ * Generates markdown content for all scenes
+ */
+export function generateAllSceneMarkdowns(): Record<string, string> {
+  const markdowns: Record<string, string> = {};
+  for (const scene of MOCK_SCENES) {
+    markdowns[scene.folder] = generateSceneMarkdown(scene);
+  }
+  return markdowns;
+}
+

@@ -1,15 +1,18 @@
-import { useState, useEffect } from 'react';
-import { Maximize2, RefreshCw, Image as ImageIcon, Edit2, Check, X } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Maximize2, RefreshCw, Image as ImageIcon, Edit2, Check, X, FileText } from 'lucide-react';
 import type { StoryboardScene, Artifact } from '../../../types/projectState';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import { useProject } from '../../../contexts/ProjectContext';
+import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import MarkdownPreview from '../MarkdownPreview';
 import styles from './SceneCard.module.scss';
 
 interface SceneCardProps {
   scene: StoryboardScene;
   artifact?: Artifact;
   projectDirectory: string;
+  sceneFolder?: string; // Folder name like "scene-001"
   onExpand?: (scene: StoryboardScene) => void;
   onRegenerate?: (scene: StoryboardScene) => void;
   onNameChange?: (sceneNumber: number, name: string) => void;
@@ -19,6 +22,7 @@ export default function SceneCard({
   scene,
   artifact,
   projectDirectory,
+  sceneFolder,
   onExpand,
   onRegenerate,
   onNameChange,
@@ -27,7 +31,15 @@ export default function SceneCard({
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(scene.name || '');
   const [imagePath, setImagePath] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [markdownContent, setMarkdownContent] = useState<string>('');
+  const [isLoadingMarkdown, setIsLoadingMarkdown] = useState(false);
   const { useMockData } = useProject();
+  const { projectDirectory: workspaceProjectDir } = useWorkspace();
+
+  const effectiveProjectDir = projectDirectory || workspaceProjectDir || '';
+  // Use provided folder or generate from scene number
+  const folder = sceneFolder || `scene-${String(scene.scene_number).padStart(3, '0')}`;
 
   const sceneId = `SCN_${String(scene.scene_number).padStart(2, '0')}`;
   const hasImage = artifact && !imageError && imagePath;
@@ -91,7 +103,36 @@ export default function SceneCard({
     }
   };
 
+  // Load markdown content when preview is opened
+  const handleViewDetails = useCallback(async () => {
+    setIsPreviewOpen(true);
+    setIsLoadingMarkdown(true);
+    
+    const basePath = effectiveProjectDir || '/mock';
+    const markdownPath = `${basePath}/.kshana/agent/scenes/${folder}/scene.md`;
+    
+    try {
+      const content = await window.electron.project.readFile(markdownPath);
+      if (content !== null) {
+        setMarkdownContent(content);
+      } else {
+        setMarkdownContent(`# ${displayName}\n\n${scene.description || 'No details available.'}`);
+      }
+    } catch (error) {
+      console.error('Failed to load scene markdown:', error);
+      setMarkdownContent(`# ${displayName}\n\n${scene.description || 'No details available.'}`);
+    } finally {
+      setIsLoadingMarkdown(false);
+    }
+  }, [effectiveProjectDir, folder, displayName, scene.description]);
+
+  const handleClosePreview = useCallback(() => {
+    setIsPreviewOpen(false);
+    setMarkdownContent('');
+  }, []);
+
   return (
+    <>
     <div className={styles.card}>
       <div className={styles.imageContainer}>
         <span className={styles.sceneId}>{sceneId}</span>
@@ -166,6 +207,19 @@ export default function SceneCard({
         <p className={styles.description}>{scene.description}</p>
 
         <div className={styles.footer}>
+          <button
+            type="button"
+            className={styles.viewDetailsButton}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleViewDetails();
+            }}
+            title="View details"
+          >
+            <FileText size={12} />
+            View Details
+          </button>
+          
           <span
             className={`${styles.status} ${artifact ? styles.generated : styles.pending}`}
           >
@@ -198,5 +252,12 @@ export default function SceneCard({
         </div>
       </div>
     </div>
+      <MarkdownPreview
+        isOpen={isPreviewOpen}
+        title={displayName}
+        content={isLoadingMarkdown ? 'Loading...' : markdownContent || 'Loading...'}
+        onClose={handleClosePreview}
+      />
+    </>
   );
 }

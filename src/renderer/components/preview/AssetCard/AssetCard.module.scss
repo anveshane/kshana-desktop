@@ -5,13 +5,14 @@
   @include panel-base;
   border-radius: $radius-lg;
   overflow: hidden;
-  transition: all $transition-normal;
+  transition: all $transition-fast;
   background-color: $color-panel-background;
+  cursor: pointer;
 
   &:hover {
-    border-color: $color-text-muted;
+    border-color: rgba($color-accent-green, 0.5);
     transform: translateY(-2px);
-    box-shadow: $shadow-md;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   }
 }
 
@@ -26,6 +27,11 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform $transition-normal;
+
+  .card:hover & {
+    transform: scale(1.05);
+  }
 }
 
 .placeholder {
@@ -80,8 +86,10 @@
   font-weight: $font-weight-semibold;
   text-transform: capitalize;
   border-radius: $radius-sm;
-  background-color: rgba($color-background-dark, 0.8);
+  background-color: rgba($color-background-dark, 0.85);
   color: $color-text-secondary;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 
   &.cyan {
     background-color: rgba($color-accent-cyan, 0.9);
@@ -148,8 +156,34 @@
 .footer {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
   padding-top: $spacing-sm;
   border-top: 1px solid $color-panel-border;
+}
+
+.viewDetailsButton {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background: none;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    color: $color-text-primary;
+    border-color: $color-accent-green;
+    background-color: rgba($color-accent-green, 0.1);
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
 }
 
 .statusGenerated {

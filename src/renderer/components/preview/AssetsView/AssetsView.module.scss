@@ -95,3 +95,61 @@
   opacity: 0.5;
 }
 
+.emptySection {
+  @include flex-center;
+  padding: $spacing-xl;
+  color: $color-text-muted;
+  font-size: $font-size-sm;
+  grid-column: 1 / -1;
+}
+
+.plansGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: $spacing-md;
+}
+
+.planItem {
+  @include panel-base;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xl;
+  background-color: $color-panel-background;
+  border-radius: $radius-lg;
+  cursor: pointer;
+  transition: all $transition-fast;
+  gap: $spacing-sm;
+  border: 1px solid $color-panel-border;
+
+  &:hover {
+    border-color: rgba($color-accent-green, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
+}
+
+.planIcon {
+  color: $color-accent-green;
+  opacity: 0.8;
+}
+
+.planName {
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  text-align: center;
+}
+
+.planFileName {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  font-family: $font-family-mono;
+  text-align: center;
+}
+

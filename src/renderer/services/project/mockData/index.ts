@@ -34,6 +34,8 @@ import {
   createMockScenes,
   MOCK_SCENES,
   getSceneApprovalStats,
+  generateSceneMarkdown,
+  generateAllSceneMarkdowns,
 } from './mockScenes';
 import {
   createMockAssetManifest,
@@ -41,6 +43,7 @@ import {
   getAssetsGroupedByType,
   getSceneVideoVersions,
 } from './mockAssets';
+export { generateMockProjectStructure } from './generateMockStructure';
 import {
   createMockTimelineState,
   createEmptyTimelineState,
@@ -84,6 +87,8 @@ export {
   createMockScenes,
   MOCK_SCENES,
   getSceneApprovalStats,
+  generateSceneMarkdown,
+  generateAllSceneMarkdowns,
   // Assets
   createMockAssetManifest,
   MOCK_ASSETS,

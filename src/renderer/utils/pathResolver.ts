@@ -107,7 +107,17 @@ export async function resolveAssetPathForDisplay(
 
   // Otherwise, construct path relative to project directory
   if (projectDirectory) {
-    // Handle paths that already start with .kshana or are relative
+    // Handle paths that already start with .kshana
+    if (assetPath.startsWith('.kshana/')) {
+      return `file://${projectDirectory}/${assetPath}`;
+    }
+    
+    // Handle paths relative to .kshana/agent/ (e.g., characters/alice-chen/image.png)
+    if (assetPath.match(/^(characters|settings|props|plans|scenes)\//)) {
+      return `file://${projectDirectory}/.kshana/agent/${assetPath}`;
+    }
+    
+    // Handle other relative paths
     return `file://${projectDirectory}/${assetPath}`;
   }
 

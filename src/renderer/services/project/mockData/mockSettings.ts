@@ -29,7 +29,7 @@ export const DUSTY_VILLAGE: SettingData = {
     const testImage = getTestImageForSetting('dusty-village');
     return testImage
       ? resolveTestAssetPath('image', testImage)
-      : '.kshana/agent/settings/dusty-village/reference.png';
+      : 'settings/dusty-village/image.png';
   })(),
   approved_at: Date.now() - 86400000 * 3,
   reference_image_approved_at: Date.now() - 86400000 * 2,
@@ -56,7 +56,7 @@ export const DESERT_CAMP: SettingData = {
     const testImage = getTestImageForSetting('desert-camp');
     return testImage
       ? resolveTestAssetPath('image', testImage)
-      : '.kshana/agent/settings/desert-camp/reference.png';
+      : 'settings/desert-camp/image.png';
   })(),
   approved_at: Date.now() - 86400000 * 3,
   reference_image_approved_at: Date.now() - 86400000 * 2,
@@ -89,6 +89,46 @@ export const MOCK_SETTINGS: SettingData[] = [
   DESERT_CAMP,
   UNDERGROUND_TOMB,
 ];
+
+/**
+ * Generates markdown content for a setting's setting.md file
+ */
+export function generateSettingMarkdown(setting: SettingData): string {
+  return `# ${setting.name}
+
+## Description
+
+${setting.description}
+
+## Visual Description
+
+${setting.visual_description}
+
+## Approval Status
+
+- **Setting Definition:** ${setting.approval_status}
+- **Reference Image:** ${setting.reference_image_approval_status || 'pending'}
+
+## Metadata
+
+- **Slug:** ${setting.slug}
+- **Content Artifact ID:** ${setting.content_artifact_id || 'N/A'}
+- **Reference Image ID:** ${setting.reference_image_id || 'N/A'}
+- **Regeneration Count:** ${setting.regeneration_count}
+
+`;
+}
+
+/**
+ * Generates markdown content for all settings
+ */
+export function generateAllSettingMarkdowns(): Record<string, string> {
+  const markdowns: Record<string, string> = {};
+  for (const setting of MOCK_SETTINGS) {
+    markdowns[setting.slug] = generateSettingMarkdown(setting);
+  }
+  return markdowns;
+}
 
 /**
  * Creates a copy of mock settings with fresh timestamps

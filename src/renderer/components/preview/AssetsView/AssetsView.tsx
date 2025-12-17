@@ -1,14 +1,15 @@
-import { useMemo } from 'react';
-import { User, MapPin, Package, Layers } from 'lucide-react';
+import { useMemo, useState, useCallback } from 'react';
+import { User, MapPin, Package, Layers, FileText } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
-import type { PropAsset } from '../../../types/projectState';
-import { MOCK_PROPS as mockPropsData } from '../../../types/projectState';
+import { MOCK_PROPS as mockPropsData } from '../../../services/project/mockData/mockProps';
 import AssetCard from '../AssetCard';
+import MarkdownPreview from '../MarkdownPreview';
 import styles from './AssetsView.module.scss';
 
 interface CharacterAsset {
   name: string;
+  slug: string;
   description?: string;
   appearance?: string;
   imagePath?: string;
@@ -16,10 +17,24 @@ interface CharacterAsset {
 
 interface LocationAsset {
   name: string;
+  slug: string;
   description?: string;
   atmosphere?: string;
   imagePath?: string;
 }
+
+interface PlanFile {
+  name: string;
+  displayName: string;
+  path: string;
+}
+
+const PLAN_FILES: PlanFile[] = [
+  { name: 'plot.md', displayName: 'Plot Summary', path: 'plans/plot.md' },
+  { name: 'story.md', displayName: 'Full Story', path: 'plans/story.md' },
+  { name: 'scenes.md', displayName: 'Scene Breakdown', path: 'plans/scenes.md' },
+  { name: 'full_script.md', displayName: 'Full Script', path: 'plans/full_script.md' },
+];
 
 export default function AssetsView() {
   const { projectDirectory } = useWorkspace();
@@ -31,6 +46,10 @@ export default function AssetsView() {
     useMockData,
   } = useProject();
 
+  const [previewPlan, setPreviewPlan] = useState<PlanFile | null>(null);
+  const [planContent, setPlanContent] = useState<string>('');
+  const [isLoadingPlan, setIsLoadingPlan] = useState(false);
+
   // Convert CharacterData from ProjectContext to CharacterAsset format
   const characters: CharacterAsset[] = useMemo(() => {
     if (!isLoaded || projectCharacters.length === 0) {
@@ -39,6 +58,7 @@ export default function AssetsView() {
 
     return projectCharacters.map((char) => ({
       name: char.name,
+      slug: char.slug,
       description: char.visual_description,
       appearance: char.visual_description,
       // CharacterData uses reference_image_approval_status and reference_image_path
@@ -54,6 +74,7 @@ export default function AssetsView() {
 
     return projectSettings.map((setting) => ({
       name: setting.name,
+      slug: setting.slug,
       description: setting.visual_description,
       atmosphere: setting.visual_description, // Settings use visual_description for atmosphere
       // SettingData uses reference_image_approval_status and reference_image_path
@@ -61,9 +82,16 @@ export default function AssetsView() {
     }));
   }, [isLoaded, projectSettings]);
 
-  // Get props (still using mock data for now)
-  const props: PropAsset[] = useMemo(() => {
-    return mockPropsData;
+  // Get props from mock data
+  const props = useMemo(() => {
+    return mockPropsData.map((prop) => ({
+      id: prop.id,
+      name: prop.name,
+      slug: prop.slug,
+      description: prop.description,
+      category: prop.category,
+      imagePath: prop.image_path,
+    }));
   }, []);
 
   // Show empty state if no project and not using mock data
@@ -103,8 +131,35 @@ export default function AssetsView() {
 
   const effectiveProjectDir = projectDirectory || '/mock';
 
+  const handleViewPlan = useCallback(async (plan: PlanFile) => {
+    setPreviewPlan(plan);
+    setIsLoadingPlan(true);
+    
+    const planPath = `${effectiveProjectDir}/.kshana/agent/${plan.path}`;
+    
+    try {
+      const content = await window.electron.project.readFile(planPath);
+      if (content !== null) {
+        setPlanContent(content);
+      } else {
+        setPlanContent(`# ${plan.displayName}\n\nContent not available.`);
+      }
+    } catch (error) {
+      console.error('Failed to load plan file:', error);
+      setPlanContent(`# ${plan.displayName}\n\nFailed to load content.`);
+    } finally {
+      setIsLoadingPlan(false);
+    }
+  }, [effectiveProjectDir]);
+
+  const handleClosePlanPreview = useCallback(() => {
+    setPreviewPlan(null);
+    setPlanContent('');
+  }, []);
+
   return (
-    <div className={styles.container}>
+    <>
+      <div className={styles.container}>
       <div className={styles.content}>
         {/* Characters Section */}
         <div className={styles.section}>
@@ -120,6 +175,7 @@ export default function AssetsView() {
                   key={char.name}
                   type="character"
                   name={char.name}
+                  slug={char.slug}
                   description={char.appearance || char.description}
                   imagePath={char.imagePath}
                   projectDirectory={effectiveProjectDir}
@@ -147,6 +203,7 @@ export default function AssetsView() {
                   key={loc.name}
                   type="location"
                   name={loc.name}
+                  slug={loc.slug}
                   description={loc.description}
                   imagePath={loc.imagePath}
                   projectDirectory={effectiveProjectDir}
@@ -176,7 +233,10 @@ export default function AssetsView() {
                 key={prop.id || prop.name}
                 type="prop"
                 name={prop.name}
+                slug={prop.slug}
                 description={prop.description}
+                imagePath={prop.imagePath}
+                projectDirectory={effectiveProjectDir}
                 metadata={{
                   Category: prop.category,
                 }}
@@ -184,7 +244,39 @@ export default function AssetsView() {
             ))}
           </div>
         </div>
+
+        {/* Plans Section */}
+        <div className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <FileText size={16} />
+            <h3>Plans</h3>
+            <span className={styles.count}>{PLAN_FILES.length}</span>
+          </div>
+          <div className={styles.plansGrid}>
+            {PLAN_FILES.map((plan) => (
+              <button
+                key={plan.name}
+                type="button"
+                className={styles.planItem}
+                onClick={() => handleViewPlan(plan)}
+              >
+                <FileText size={20} className={styles.planIcon} />
+                <span className={styles.planName}>{plan.displayName}</span>
+                <span className={styles.planFileName}>{plan.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        </div>
       </div>
-    </div>
+      {previewPlan && (
+      <MarkdownPreview
+        isOpen={!!previewPlan}
+        title={previewPlan.displayName}
+        content={isLoadingPlan ? 'Loading...' : planContent || 'Loading...'}
+        onClose={handleClosePlanPreview}
+      />
+    )}
+  </>
   );
 }

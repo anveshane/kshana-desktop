@@ -1,9 +1,12 @@
 /* eslint-disable react/require-default-props */
-import { useState, useEffect } from 'react';
-import { User, MapPin, Package, Image as ImageIcon } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { User, MapPin, Package, Image as ImageIcon, FileText } from 'lucide-react';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import { useProject } from '../../../contexts/ProjectContext';
+import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import { generateSlug } from '../../../utils/slug';
+import MarkdownPreview from '../MarkdownPreview';
 import styles from './AssetCard.module.scss';
 
 export type AssetType = 'character' | 'location' | 'prop';
@@ -15,6 +18,7 @@ export interface AssetCardProps {
   imagePath?: string;
   projectDirectory?: string;
   metadata?: Record<string, string | number | undefined>;
+  slug?: string; // Optional slug, will be auto-generated from name if not provided
 }
 
 const TYPE_ICONS = {
@@ -36,10 +40,18 @@ export default function AssetCard({
   imagePath = '',
   projectDirectory = '',
   metadata = {},
+  slug,
 }: AssetCardProps) {
   const [imageError, setImageError] = useState(false);
   const [fullImagePath, setFullImagePath] = useState<string>('');
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [markdownContent, setMarkdownContent] = useState<string>('');
+  const [isLoadingMarkdown, setIsLoadingMarkdown] = useState(false);
   const { useMockData } = useProject();
+  const { projectDirectory: workspaceProjectDir } = useWorkspace();
+
+  const effectiveProjectDir = projectDirectory || workspaceProjectDir || '';
+  const assetSlug = slug || generateSlug(name);
 
   const Icon = TYPE_ICONS[type];
   const colorClass = styles[TYPE_COLORS[type]];
@@ -71,9 +83,59 @@ export default function AssetCard({
 
   const hasImage = fullImagePath && !imageError;
 
+  // Determine markdown file path based on asset type
+  const getMarkdownPath = useCallback((): string => {
+    const basePath = effectiveProjectDir || '/mock';
+    const agentPath = `${basePath}/.kshana/agent`;
+    
+    switch (type) {
+      case 'character':
+        return `${agentPath}/characters/${assetSlug}/character.md`;
+      case 'location':
+        return `${agentPath}/settings/${assetSlug}/setting.md`;
+      case 'prop':
+        return `${agentPath}/props/${assetSlug}/prop.md`;
+      default:
+        return '';
+    }
+  }, [type, assetSlug, effectiveProjectDir]);
+
+  // Load markdown content when preview is opened
+  const handleViewDetails = useCallback(async () => {
+    setIsPreviewOpen(true);
+    setIsLoadingMarkdown(true);
+    
+    const markdownPath = getMarkdownPath();
+    if (!markdownPath) {
+      setMarkdownContent('# ' + name + '\n\nNo details available.');
+      setIsLoadingMarkdown(false);
+      return;
+    }
+
+    try {
+      const content = await window.electron.project.readFile(markdownPath);
+      if (content !== null) {
+        setMarkdownContent(content);
+      } else {
+        setMarkdownContent(`# ${name}\n\n${description || 'No details available.'}`);
+      }
+    } catch (error) {
+      console.error('Failed to load markdown:', error);
+      setMarkdownContent(`# ${name}\n\n${description || 'No details available.'}`);
+    } finally {
+      setIsLoadingMarkdown(false);
+    }
+  }, [getMarkdownPath, name, description]);
+
+  const handleClosePreview = useCallback(() => {
+    setIsPreviewOpen(false);
+    setMarkdownContent('');
+  }, []);
+
   return (
-    <div className={styles.card}>
-      <div className={styles.imageContainer}>
+    <>
+      <div className={styles.card}>
+        <div className={styles.imageContainer}>
         {hasImage ? (
           <img
             src={fullImagePath}
@@ -90,9 +152,9 @@ export default function AssetCard({
           <Icon size={12} />
           {type}
         </span>
-      </div>
+        </div>
 
-      <div className={styles.content}>
+        <div className={styles.content}>
         <h4 className={styles.name}>{name}</h4>
         {description && <p className={styles.description}>{description}</p>}
 
@@ -111,6 +173,18 @@ export default function AssetCard({
         )}
 
         <div className={styles.footer}>
+          <button
+            type="button"
+            className={styles.viewDetailsButton}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleViewDetails();
+            }}
+            title="View details"
+          >
+            <FileText size={12} />
+            View Details
+          </button>
           {hasImage ? (
             <span className={styles.statusGenerated}>
               <span className={styles.statusDot} />
@@ -123,7 +197,14 @@ export default function AssetCard({
             </span>
           )}
         </div>
+        </div>
       </div>
-    </div>
+      <MarkdownPreview
+      isOpen={isPreviewOpen}
+      title={name}
+      content={isLoadingMarkdown ? 'Loading...' : markdownContent || 'Loading...'}
+      onClose={handleClosePreview}
+    />
+  </>
   );
 }
