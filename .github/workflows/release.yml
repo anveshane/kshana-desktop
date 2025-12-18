@@ -110,20 +110,20 @@ jobs:
           echo "Verifying kshana-ink package.json exists:"
           test -f kshana-ink/package.json && echo "✓ kshana-ink/package.json found" || echo "✗ kshana-ink/package.json NOT found"
           echo ""
-          echo "Verifying Test_Images and Test_videos folders exist:"
-          if [ -d "kshana-desktop/Test_Images" ]; then
-            echo "✓ Test_Images folder found"
-            echo "  Images: $(ls kshana-desktop/Test_Images/ | wc -l) files"
-            ls kshana-desktop/Test_Images/
+          echo "Verifying test_image and test_video folders exist:"
+          if [ -d "kshana-desktop/test_image" ]; then
+            echo "✓ test_image folder found"
+            echo "  Images: $(ls kshana-desktop/test_image/ | wc -l) files"
+            ls kshana-desktop/test_image/
           else
-            echo "✗ Test_Images folder NOT found - images won't load in production!"
+            echo "✗ test_image folder NOT found - images won't load in production!"
           fi
-          if [ -d "kshana-desktop/Test_videos" ]; then
-            echo "✓ Test_videos folder found"
-            echo "  Videos: $(ls kshana-desktop/Test_videos/*.mp4 2>/dev/null | wc -l) files"
-            ls kshana-desktop/Test_videos/*.mp4 2>/dev/null || echo "  No .mp4 files found"
+          if [ -d "kshana-desktop/test_video" ]; then
+            echo "✓ test_video folder found"
+            echo "  Videos: $(ls kshana-desktop/test_video/*.mp4 2>/dev/null | wc -l) files"
+            ls kshana-desktop/test_video/*.mp4 2>/dev/null || echo "  No .mp4 files found"
           else
-            echo "✗ Test_videos folder NOT found - videos won't load in production!"
+            echo "✗ test_video folder NOT found - videos won't load in production!"
           fi
 
       - name: Build kshana-ink
@@ -145,11 +145,6 @@ jobs:
           if [ -L "node_modules/kshana-ink" ] || [ -d "node_modules/kshana-ink" ]; then
             rm -rf node_modules/kshana-ink
             cp -RL ../kshana-ink node_modules/kshana-ink
-            # Remove source files, keep only dist, package.json, and node_modules
-            cd node_modules/kshana-ink
-            find . -maxdepth 1 -type f ! -name 'package.json' -delete
-            find . -maxdepth 1 -type d ! -name '.' ! -name 'dist' ! -name 'node_modules' -exec rm -rf {} + 2>/dev/null || true
-            cd ../..
             echo "✓ kshana-ink copied to node_modules (no symlinks)"
           fi
 

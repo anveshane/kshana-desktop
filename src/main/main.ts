@@ -163,7 +163,7 @@ ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {
 });
 
 ipcMain.handle('project:get-resources-path', async () => {
-  // Get the path to resources (where Test_Images and Test_videos are packaged)
+  // Get the path to resources (where test_image and test_video are packaged)
   // In development: __dirname/../../ (points to kshana-frontend directory)
   // In packaged: process.resourcesPath (where extraResources are placed)
   if (app.isPackaged) {
@@ -171,7 +171,7 @@ ipcMain.handle('project:get-resources-path', async () => {
     return process.resourcesPath;
   }
   // In development, __dirname is dist/main, so ../../ gives us kshana-frontend
-  // Test_Images and Test_videos are in kshana-frontend directory
+  // test_image and test_video are in kshana-frontend directory
   const devPath = path.join(__dirname, '../../');
   return path.resolve(devPath);
 });
@@ -203,7 +203,7 @@ ipcMain.handle(
       // Read file as buffer and convert to base64
       const buffer = await fs.readFile(filePath);
       const base64 = buffer.toString('base64');
-      
+
       // Determine MIME type from file extension
       const ext = path.extname(filePath).toLowerCase();
       const mimeTypes: Record<string, string> = {
@@ -216,7 +216,7 @@ ipcMain.handle(
         '.webm': 'video/webm',
       };
       const mimeType = mimeTypes[ext] || 'application/octet-stream';
-      
+
       return `data:${mimeType};base64,${base64}`;
     } catch (error: unknown) {
       const err = error as { code?: string };
@@ -241,7 +241,7 @@ ipcMain.handle(
     // Ensure directory exists before writing
     const dirPath = path.dirname(filePath);
     await fs.mkdir(dirPath, { recursive: true });
-    
+
     // Convert base64 string to buffer and write as binary
     const buffer = Buffer.from(base64Data, 'base64');
     return fs.writeFile(filePath, buffer);

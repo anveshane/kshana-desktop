@@ -15,6 +15,7 @@
     "link-modules": "node -r ts-node/register ../../.erb/scripts/link-modules.ts"
   },
   "dependencies": {
+    "kshana-ink": "file:../../node_modules/kshana-ink",
     "@fastify/cors": "^11.1.0",
     "@fastify/websocket": "^11.2.0",
     "dotenv": "^17.2.3",

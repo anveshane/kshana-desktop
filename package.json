@@ -255,8 +255,8 @@
     },
     "extraResources": [
       "./assets/**",
-      "./Test_Images/**",
-      "./Test_videos/**"
+      "./test_image/**",
+      "./test_video/**"
     ],
     "publish": {
       "provider": "github",

@@ -32,7 +32,7 @@ export async function videoToBase64(videoPath: string): Promise<string | null> {
  */
 export function shouldUseBase64ForVideo(filePath: string, useMockData: boolean): boolean {
   // Use base64 for test videos in mock mode
-  if (useMockData && (filePath.includes('Test_videos/') || filePath.includes('Test_Images/'))) {
+  if (useMockData && (filePath.includes('test_video/') || filePath.includes('test_image/'))) {
     return true;
   }
   return false;
