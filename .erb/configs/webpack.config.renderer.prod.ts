@@ -146,6 +146,22 @@ const configuration: webpack.Configuration = {
       'process.type': '"renderer"',
     }),
   ],
+
+  // Override externals from base config - bundle React and React-DOM instead of externalizing
+  // This is necessary because React needs to be bundled in the renderer for proper initialization
+  externals: [
+    // Exclude React and React-DOM from externals so they get bundled into the renderer
+    ...Object.keys(require('../../release/app/package.json').dependencies || {}).filter(
+      (dep) => dep !== 'react' && dep !== 'react-dom'
+    ),
+    // Keep kshana-ink and its dependencies externalized (loaded at runtime)
+    'kshana-ink',
+    /^kshana-ink\/.*/,
+    'fastify',
+    '@fastify/websocket',
+    '@fastify/cors',
+    'dotenv',
+  ],
 };
 
 export default merge(baseConfig, configuration);
