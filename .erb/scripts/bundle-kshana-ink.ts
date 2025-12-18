@@ -72,6 +72,48 @@ if (!fs.existsSync(llmEntry)) {
   process.exit(1);
 }
 
+// Node.js built-in modules that should not be bundled
+const nodeBuiltins = [
+  'events',
+  'fs',
+  'path',
+  'url',
+  'http',
+  'https',
+  'stream',
+  'util',
+  'crypto',
+  'buffer',
+  'os',
+  'net',
+  'tls',
+  'dns',
+  'zlib',
+  'querystring',
+  'assert',
+  'child_process',
+  'cluster',
+  'dgram',
+  'module',
+  'perf_hooks',
+  'process',
+  'punycode',
+  'readline',
+  'repl',
+  'string_decoder',
+  'timers',
+  'tty',
+  'vm',
+  'worker_threads',
+];
+
+// External patterns: Node.js built-ins (with and without node: prefix) and electron
+const externalPatterns = [
+  'electron',
+  ...nodeBuiltins,
+  ...nodeBuiltins.map(m => `node:${m}`),
+];
+
 async function bundleModules() {
   console.log('Bundling server module...');
   try {
@@ -82,7 +124,7 @@ async function bundleModules() {
       target: 'node20',
       format: 'esm',
       outfile: path.join(kshanaInkTargetPath, 'server.bundle.mjs'),
-      external: ['electron'], // Don't bundle electron
+      external: externalPatterns, // Don't bundle Node.js built-ins or electron
       minify: true,
       sourcemap: false,
       treeShaking: true,
@@ -105,7 +147,7 @@ async function bundleModules() {
       target: 'node20',
       format: 'esm',
       outfile: path.join(kshanaInkTargetPath, 'llm.bundle.mjs'),
-      external: ['electron'],
+      external: externalPatterns,
       minify: true,
       sourcemap: false,
       treeShaking: true,
