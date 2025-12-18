@@ -15,7 +15,7 @@ jobs:
       - name: Set branch names
         id: set_branches
         run: |
-          # Branch names for kshana-desktop and kshana-ink
+          # Hardcoded branch names for now
           FRONTEND_BRANCH="fix/version-2"
           BACKEND_BRANCH="merged-cleanup-fixes"
           echo "FRONTEND_BRANCH=$FRONTEND_BRANCH" >> $GITHUB_OUTPUT
@@ -28,63 +28,67 @@ jobs:
           path: kshana-desktop
           ref: ${{ steps.set_branches.outputs.FRONTEND_BRANCH }}
 
-      - name: Set kshana-ink token
-        id: set_token
+      - name: Verify backend repo access
         run: |
-          if [ -n "${{ secrets.KSHANA_INK_REPO_TOKEN }}" ]; then
-            echo "token=${{ secrets.KSHANA_INK_REPO_TOKEN }}" >> $GITHUB_OUTPUT
-            echo "✓ Using KSHANA_INK_REPO_TOKEN"
+          echo "Attempting to access backend repo..."
+          echo "Branch: ${{ steps.set_branches.outputs.BACKEND_BRANCH }}"
+          if [ -z "${{ secrets.BACKEND_REPO_TOKEN }}" ]; then
+            echo "⚠ BACKEND_REPO_TOKEN secret is not set, will try GITHUB_TOKEN"
           else
-            echo "token=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_OUTPUT
-            echo "✓ Using GITHUB_TOKEN (KSHANA_INK_REPO_TOKEN not set)"
+            echo "✓ BACKEND_REPO_TOKEN is set"
           fi
           
-      - name: Checkout kshana-ink (TypeScript backend)
-        id: checkout_kshana_ink
+      - name: Checkout kshana-ink backend
+        id: checkout_backend
         uses: actions/checkout@v4
         with:
           repository: anveshane/kshana-ink
           path: kshana-ink
           ref: ${{ steps.set_branches.outputs.BACKEND_BRANCH }}
-          token: ${{ steps.set_token.outputs.token }}
+          token: ${{ secrets.BACKEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 1
         continue-on-error: true
 
-      - name: Handle kshana-ink checkout failure
-        if: steps.checkout_kshana_ink.outcome == 'failure'
+      - name: Handle backend checkout failure
+        if: steps.checkout_backend.outcome == 'failure'
         run: |
-          echo "kshana-ink checkout failed. Trying default branch..."
+          echo "Backend checkout failed. Trying default branch..."
           echo "Attempted branch: ${{ steps.set_branches.outputs.BACKEND_BRANCH }}"
           echo ""
           echo "Possible issues:"
           echo "1. Branch '${{ steps.set_branches.outputs.BACKEND_BRANCH }}' doesn't exist"
-          echo "2. Token doesn't have access to kshana-ink repo"
+          echo "2. BACKEND_REPO_TOKEN doesn't have access"
           echo "3. Token is invalid or expired"
           echo ""
           echo "Trying to checkout without specifying branch (uses default)..."
           
-      - name: Checkout kshana-ink (fallback to default)
-        if: steps.checkout_kshana_ink.outcome == 'failure'
+      - name: Checkout kshana-ink backend (fallback to default)
+        if: steps.checkout_backend.outcome == 'failure'
         uses: actions/checkout@v4
         with:
           repository: anveshane/kshana-ink
           path: kshana-ink
-          token: ${{ steps.set_token.outputs.token }}
+          token: ${{ secrets.BACKEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 1
 
-      - name: Verify kshana-ink checkout succeeded
+      - name: Verify backend checkout succeeded
         run: |
-          echo "Checking if kshana-ink repo was checked out..."
+          echo "Checking if backend repo was checked out..."
           if [ ! -d "kshana-ink" ]; then
-            echo "Error: kshana-ink repo directory not found!"
+            echo "Error: Backend repo directory not found!"
             echo "Current directory: $(pwd)"
             echo "Contents:"
             ls -la
             exit 1
           fi
-          echo "✓ kshana-ink repo directory exists"
-          echo "kshana-ink repo contents:"
+          echo "✓ Backend repo directory exists"
+          echo "Backend repo contents:"
           ls -la kshana-ink/ | head -10
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -93,61 +97,62 @@ jobs:
           cache: 'npm'
           cache-dependency-path: kshana-desktop/package-lock.json
 
-      - name: Setup pnpm for kshana-ink
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.24.0
-          run_install: false
-
-      - name: Install kshana-ink dependencies
-        working-directory: kshana-ink
-        run: pnpm install
-
-      - name: Build kshana-ink
-        working-directory: kshana-ink
-        run: pnpm build
-
-      - name: Verify kshana-ink build
+      - name: Verify directory structure
         run: |
-          echo "Verifying kshana-ink build artifacts..."
-          if [ ! -f "kshana-ink/dist/server/index.js" ]; then
-            echo "Error: kshana-ink server module not found!"
-            exit 1
-          fi
-          if [ ! -f "kshana-ink/dist/core/llm/index.js" ]; then
-            echo "Error: kshana-ink LLM module not found!"
-            exit 1
-          fi
-          if [ ! -d "kshana-ink/dist/prompts" ]; then
-            echo "Error: kshana-ink prompts directory not found!"
-            exit 1
-          fi
-          echo "✓ kshana-ink build verified"
-
-      - name: Setup directory structure for kshana-desktop
-        run: |
-          # kshana-desktop expects kshana-ink at ../kshana-ink relative to its root
-          # Current structure: kshana-desktop/ and kshana-ink/ are siblings
-          # We need to move kshana-ink to be a sibling of kshana-desktop
           echo "Current directory: $(pwd)"
-          echo "Directory structure:"
+          echo "Directory contents:"
           ls -la
           echo ""
-          echo "✓ Directory structure is correct (kshana-desktop and kshana-ink are siblings)"
+          echo "kshana-desktop location:"
+          ls -la kshana-desktop/ | head -5
+          echo ""
+          echo "kshana-ink location:"
+          ls -la kshana-ink/ | head -5
+          echo ""
+          echo "Verifying kshana-ink package.json exists:"
+          test -f kshana-ink/package.json && echo "✓ kshana-ink/package.json found" || echo "✗ kshana-ink/package.json NOT found"
+          echo ""
+          echo "Verifying test_image and test_video folders exist:"
+          if [ -d "kshana-desktop/test_image" ]; then
+            echo "✓ test_image folder found"
+            echo "  Images: $(ls kshana-desktop/test_image/ | wc -l) files"
+            ls kshana-desktop/test_image/
+          else
+            echo "✗ test_image folder NOT found - images won't load in production!"
+          fi
+          if [ -d "kshana-desktop/test_video" ]; then
+            echo "✓ test_video folder found"
+            echo "  Videos: $(ls kshana-desktop/test_video/*.mp4 2>/dev/null | wc -l) files"
+            ls kshana-desktop/test_video/*.mp4 2>/dev/null || echo "  No .mp4 files found"
+          else
+            echo "✗ test_video folder NOT found - videos won't load in production!"
+          fi
 
-      - name: Install kshana-desktop dependencies
-        working-directory: kshana-desktop
-        run: npm ci
+      - name: Build kshana-ink
+        run: |
+          cd kshana-ink
+          echo "Building kshana-ink from: $(pwd)"
+          pnpm install
+          pnpm build
+          echo "✓ kshana-ink built successfully"
+          echo "Verifying dist directory exists:"
+          ls -la dist/ | head -10 || echo "✗ dist directory not found"
 
-      - name: Verify kshana-ink before packaging
+      - name: Install dependencies
         working-directory: kshana-desktop
         run: |
-          # Run verification script to ensure kshana-ink is ready
-          npx ts-node ./.erb/scripts/verify-kshana-ink.ts ../kshana-ink
+          npm ci
+          echo "✓ Dependencies installed"
+          echo "Note: kshana-ink will be copied by install-app-deps.ts script during package step"
 
       - name: Build Electron app
         working-directory: kshana-desktop
-        run: npm run package
+        run: |
+          # npm run package will:
+          # 1. Run prepackage (verify-kshana-ink.ts) - verifies source kshana-ink is built
+          # 2. Run install-app-deps.ts - copies kshana-ink to release/app/node_modules/kshana-ink
+          # 3. Build Electron app
+          # 4. Package with electron-builder
+          npm run package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
