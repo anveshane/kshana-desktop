@@ -1,11 +1,11 @@
 /// <reference types="node" />
-import { build } from 'esbuild';
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 
 /**
- * Bundles kshana-ink into single files with all dependencies included.
- * This eliminates the need for node_modules and reduces size significantly.
+ * Prepares kshana-ink for production by copying dist files and production dependencies.
+ * This avoids bundling issues with dynamic requires and Node.js built-ins.
  */
 
 const projectRoot = path.resolve(__dirname, '../..');
@@ -42,14 +42,14 @@ if (!foundSource) {
   process.exit(1);
 }
 
-console.log(`Bundling kshana-ink from: ${foundSource}`);
+console.log(`Preparing kshana-ink from: ${foundSource}`);
 
 // Ensure resources directory exists
 if (!fs.existsSync(resourcesDir)) {
   fs.mkdirSync(resourcesDir, { recursive: true });
 }
 
-// Remove existing bundle
+// Remove existing copy
 if (fs.existsSync(kshanaInkTargetPath)) {
   console.log('Removing existing resources/kshana-ink...');
   fs.rmSync(kshanaInkTargetPath, { recursive: true, force: true });
@@ -72,131 +72,138 @@ if (!fs.existsSync(llmEntry)) {
   process.exit(1);
 }
 
-// Node.js built-in modules that should not be bundled
-const nodeBuiltins = [
-  'events',
-  'fs',
-  'path',
-  'url',
-  'http',
-  'https',
-  'stream',
-  'util',
-  'crypto',
-  'buffer',
-  'os',
-  'net',
-  'tls',
-  'dns',
-  'zlib',
-  'querystring',
-  'assert',
-  'child_process',
-  'cluster',
-  'dgram',
-  'module',
-  'perf_hooks',
-  'process',
-  'punycode',
-  'readline',
-  'repl',
-  'string_decoder',
-  'timers',
-  'tty',
-  'vm',
-  'worker_threads',
-];
+// Copy dist directory
+console.log('Copying dist files...');
+const distSource = path.join(foundSource, 'dist');
+const distTarget = path.join(kshanaInkTargetPath, 'dist');
+copyDirectory(distSource, distTarget);
+console.log('✓ Dist files copied');
 
-// External patterns: Node.js built-ins (with and without node: prefix) and electron
-const externalPatterns = [
-  'electron',
-  ...nodeBuiltins,
-  ...nodeBuiltins.map(m => `node:${m}`),
-];
-
-async function bundleModules() {
-  console.log('Bundling server module...');
-  try {
-    await build({
-      entryPoints: [serverEntry],
-      bundle: true,
-      platform: 'node',
-      target: 'node20',
-      format: 'esm',
-      outfile: path.join(kshanaInkTargetPath, 'server.bundle.mjs'),
-      external: externalPatterns, // Don't bundle Node.js built-ins or electron
-      minify: true,
-      sourcemap: false,
-      treeShaking: true,
-      banner: {
-        js: '// Bundled kshana-ink server module',
-      },
-    });
-    console.log('✓ Server module bundled successfully');
-  } catch (err) {
-    console.error('✗ ERROR: Failed to bundle server:', err);
-    process.exit(1);
-  }
-
-  console.log('Bundling LLM module...');
-  try {
-    await build({
-      entryPoints: [llmEntry],
-      bundle: true,
-      platform: 'node',
-      target: 'node20',
-      format: 'esm',
-      outfile: path.join(kshanaInkTargetPath, 'llm.bundle.mjs'),
-      external: externalPatterns,
-      minify: true,
-      sourcemap: false,
-      treeShaking: true,
-      banner: {
-        js: '// Bundled kshana-ink LLM module',
-      },
-    });
-    console.log('✓ LLM module bundled successfully');
-  } catch (err) {
-    console.error('✗ ERROR: Failed to bundle LLM:', err);
-    process.exit(1);
-  }
-
-  // Note: package.json is not needed since all dependencies are bundled
-
-  // Calculate and report size
-  try {
-    const getSize = (dir: string): number => {
-      let size = 0;
-      const files = fs.readdirSync(dir);
-      for (const file of files) {
-        const filePath = path.join(dir, file);
-        const stats = fs.statSync(filePath);
-        if (stats.isDirectory()) {
-          size += getSize(filePath);
-        } else {
-          size += stats.size;
-        }
-      }
-      return size;
-    };
-
-    const totalSize = getSize(kshanaInkTargetPath);
-    const sizeMB = (totalSize / (1024 * 1024)).toFixed(2);
-    console.log(`✓ Bundle size: ${sizeMB} MB`);
-  } catch (err) {
-    // Size calculation is optional
-  }
-
-  console.log('✓ kshana-ink bundled successfully');
-  console.log(`  Output: ${kshanaInkTargetPath}`);
-  console.log('  Files:');
-  console.log('    - server.bundle.mjs');
-  console.log('    - llm.bundle.mjs');
+// Copy package.json
+const packageJsonSource = path.join(foundSource, 'package.json');
+const packageJsonTarget = path.join(kshanaInkTargetPath, 'package.json');
+if (fs.existsSync(packageJsonSource)) {
+  fs.copyFileSync(packageJsonSource, packageJsonTarget);
+  console.log('✓ package.json copied');
 }
 
-// Run bundling
-bundleModules().catch((err) => {
-  console.error('✗ ERROR: Bundling failed:', err);
+// Install production dependencies including peer dependencies
+console.log('Installing production dependencies...');
+try {
+  // First install all dependencies (needed for peer dependencies)
+  // Then remove dev dependencies to keep size down
+  execSync('npm install --legacy-peer-deps --no-audit --no-fund', {
+    cwd: kshanaInkTargetPath,
+    stdio: 'inherit',
+  });
+  
+  // Remove dev dependencies after installation
+  console.log('Removing dev dependencies...');
+  execSync('npm prune --production --no-audit --no-fund', {
+    cwd: kshanaInkTargetPath,
+    stdio: 'inherit',
+  });
+  
+  console.log('✓ Production dependencies installed');
+} catch (err) {
+  console.error('✗ ERROR: Failed to install dependencies:', err);
   process.exit(1);
-});
+}
 
+// Remove unnecessary files to reduce size
+console.log('Cleaning up unnecessary files...');
+const cleanupPatterns = [
+  '**/*.test.js',
+  '**/*.spec.js',
+  '**/test/**',
+  '**/tests/**',
+  '**/__tests__/**',
+  '**/docs/**',
+  '**/doc/**',
+  '**/examples/**',
+  '**/example/**',
+  '**/*.md',
+  '**/README*',
+  '**/CHANGELOG*',
+  '**/LICENSE*',
+  '**/.github/**',
+  '**/.git/**',
+  '**/.gitignore',
+  '**/.npmignore',
+  '**/tsconfig.json',
+  '**/tsconfig.*.json',
+  '**/*.ts',
+  '**/*.tsx',
+  '**/*.map',
+];
+
+function shouldDelete(filePath: string, basePath: string): boolean {
+  const relativePath = path.relative(basePath, filePath);
+  return cleanupPatterns.some(pattern => {
+    const regex = new RegExp('^' + pattern.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*') + '$');
+    return regex.test(relativePath);
+  });
+}
+
+function cleanupDirectory(dir: string, basePath: string) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (shouldDelete(fullPath, basePath)) {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+    } else if (entry.isDirectory()) {
+      cleanupDirectory(fullPath, basePath);
+    }
+  }
+}
+
+cleanupDirectory(kshanaInkTargetPath, kshanaInkTargetPath);
+console.log('✓ Cleanup completed');
+
+// Calculate and report size
+try {
+  const getSize = (dir: string): number => {
+    let size = 0;
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      const stats = fs.statSync(filePath);
+      if (stats.isDirectory()) {
+        size += getSize(filePath);
+      } else {
+        size += stats.size;
+      }
+    }
+    return size;
+  };
+
+  const totalSize = getSize(kshanaInkTargetPath);
+  const sizeMB = (totalSize / (1024 * 1024)).toFixed(2);
+  console.log(`✓ Total size: ${sizeMB} MB`);
+} catch (err) {
+  // Size calculation is optional
+}
+
+console.log('✓ kshana-ink prepared successfully');
+console.log(`  Output: ${kshanaInkTargetPath}`);
+console.log('  Structure:');
+console.log('    - dist/ (compiled TypeScript)');
+console.log('    - node_modules/ (production dependencies)');
+console.log('    - package.json');
+
+// Helper function to copy directory recursively
+function copyDirectory(src: string, dest: string) {
+  fs.mkdirSync(dest, { recursive: true });
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    
+    if (entry.isDirectory()) {
+      copyDirectory(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}

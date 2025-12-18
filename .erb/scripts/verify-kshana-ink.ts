@@ -9,21 +9,23 @@ import path from 'path';
 
 const projectRoot = path.resolve(__dirname, '../..');
 const kshanaInkPath = path.join(projectRoot, 'resources', 'kshana-ink');
-const serverBundlePath = path.join(kshanaInkPath, 'server.bundle.mjs');
-const llmBundlePath = path.join(kshanaInkPath, 'llm.bundle.mjs');
+const serverDistPath = path.join(kshanaInkPath, 'dist', 'server', 'index.js');
+const llmDistPath = path.join(kshanaInkPath, 'dist', 'core', 'llm', 'index.js');
+const packageJsonPath = path.join(kshanaInkPath, 'package.json');
+const nodeModulesPath = path.join(kshanaInkPath, 'node_modules');
 
-console.log('Verifying kshana-ink bundle is ready for packaging...');
+console.log('Verifying kshana-ink is ready for packaging...');
 console.log(`Checking: ${kshanaInkPath}`);
 
 if (!fs.existsSync(kshanaInkPath)) {
   console.error(`✗ ERROR: kshana-ink resource not found at: ${kshanaInkPath}`);
-  console.error('  kshana-ink must be bundled in resources/kshana-ink before packaging');
+  console.error('  kshana-ink must be prepared in resources/kshana-ink before packaging');
   console.error('  Run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
   process.exit(1);
 }
 
-if (!fs.existsSync(serverBundlePath)) {
-  console.error(`✗ ERROR: kshana-ink server bundle not found at: ${serverBundlePath}`);
+if (!fs.existsSync(serverDistPath)) {
+  console.error(`✗ ERROR: kshana-ink server dist not found at: ${serverDistPath}`);
   console.error('  Contents of kshana-ink:');
   try {
     const contents = fs.readdirSync(kshanaInkPath);
@@ -35,30 +37,53 @@ if (!fs.existsSync(serverBundlePath)) {
   process.exit(1);
 }
 
-if (!fs.existsSync(llmBundlePath)) {
-  console.error(`✗ ERROR: kshana-ink LLM bundle not found at: ${llmBundlePath}`);
+if (!fs.existsSync(llmDistPath)) {
+  console.error(`✗ ERROR: kshana-ink LLM dist not found at: ${llmDistPath}`);
   console.error('\n  Please run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
   process.exit(1);
 }
 
-// Calculate bundle sizes
-try {
-  const serverSize = fs.statSync(serverBundlePath).size;
-  const llmSize = fs.statSync(llmBundlePath).size;
-  const totalSize = serverSize + llmSize;
-  const totalMB = (totalSize / (1024 * 1024)).toFixed(2);
-  const serverMB = (serverSize / (1024 * 1024)).toFixed(2);
-  const llmMB = (llmSize / (1024 * 1024)).toFixed(2);
+if (!fs.existsSync(packageJsonPath)) {
+  console.error(`✗ ERROR: package.json not found at: ${packageJsonPath}`);
+  console.error('\n  Please run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
+  process.exit(1);
+}
 
-  console.log('✓ kshana-ink bundle verified and ready for packaging');
+if (!fs.existsSync(nodeModulesPath)) {
+  console.error(`✗ ERROR: node_modules not found at: ${nodeModulesPath}`);
+  console.error('\n  Please run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
+  process.exit(1);
+}
+
+// Calculate total size
+try {
+  const getSize = (dir: string): number => {
+    let size = 0;
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      const stats = fs.statSync(filePath);
+      if (stats.isDirectory()) {
+        size += getSize(filePath);
+      } else {
+        size += stats.size;
+      }
+    }
+    return size;
+  };
+
+  const totalSize = getSize(kshanaInkPath);
+  const totalMB = (totalSize / (1024 * 1024)).toFixed(2);
+
+  console.log('✓ kshana-ink verified and ready for packaging');
   console.log(`  - Directory: ${kshanaInkPath}`);
-  console.log(`  - Server bundle: ${serverBundlePath} (${serverMB} MB)`);
-  console.log(`  - LLM bundle: ${llmBundlePath} (${llmMB} MB)`);
+  console.log(`  - Server: ${serverDistPath}`);
+  console.log(`  - LLM: ${llmDistPath}`);
   console.log(`  - Total size: ${totalMB} MB`);
 } catch (err) {
-  console.log('✓ kshana-ink bundle verified and ready for packaging');
+  console.log('✓ kshana-ink verified and ready for packaging');
   console.log(`  - Directory: ${kshanaInkPath}`);
-  console.log(`  - Server bundle: ${serverBundlePath}`);
-  console.log(`  - LLM bundle: ${llmBundlePath}`);
+  console.log(`  - Server: ${serverDistPath}`);
+  console.log(`  - LLM: ${llmDistPath}`);
 }
 

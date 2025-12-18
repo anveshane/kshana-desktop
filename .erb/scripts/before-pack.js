@@ -23,12 +23,14 @@ module.exports = async function beforePack(context) {
 
   console.log(`[beforePack] Using project root: ${projectRoot}`);
 
-  // Verify resources/kshana-ink exists (bundled by bundle-kshana-ink.ts)
+  // Verify resources/kshana-ink exists (prepared by bundle-kshana-ink.ts)
   const resourcesPath = path.join(projectRoot, 'resources', 'kshana-ink');
-  const serverBundlePath = path.join(resourcesPath, 'server.bundle.mjs');
-  const llmBundlePath = path.join(resourcesPath, 'llm.bundle.mjs');
+  const serverDistPath = path.join(resourcesPath, 'dist', 'server', 'index.js');
+  const llmDistPath = path.join(resourcesPath, 'dist', 'core', 'llm', 'index.js');
+  const packageJsonPath = path.join(resourcesPath, 'package.json');
+  const nodeModulesPath = path.join(resourcesPath, 'node_modules');
 
-  console.log('[beforePack] Verifying kshana-ink bundle...');
+  console.log('[beforePack] Verifying kshana-ink...');
   console.log(`  Resource path: ${resourcesPath}`);
 
   if (!fs.existsSync(resourcesPath)) {
@@ -37,26 +39,52 @@ module.exports = async function beforePack(context) {
     throw new Error('kshana-ink resource not found - cannot package app');
   }
 
-  if (!fs.existsSync(serverBundlePath)) {
-    console.error(`[beforePack] ✗ ERROR: kshana-ink server bundle not found at: ${serverBundlePath}`);
+  if (!fs.existsSync(serverDistPath)) {
+    console.error(`[beforePack] ✗ ERROR: kshana-ink server dist not found at: ${serverDistPath}`);
     console.error('  Please run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
-    throw new Error('kshana-ink server bundle missing - cannot package app');
+    throw new Error('kshana-ink server dist missing - cannot package app');
   }
 
-  if (!fs.existsSync(llmBundlePath)) {
-    console.error(`[beforePack] ✗ ERROR: kshana-ink LLM bundle not found at: ${llmBundlePath}`);
+  if (!fs.existsSync(llmDistPath)) {
+    console.error(`[beforePack] ✗ ERROR: kshana-ink LLM dist not found at: ${llmDistPath}`);
     console.error('  Please run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
-    throw new Error('kshana-ink LLM bundle missing - cannot package app');
+    throw new Error('kshana-ink LLM dist missing - cannot package app');
   }
 
-  // Calculate bundle sizes
+  if (!fs.existsSync(packageJsonPath)) {
+    console.error(`[beforePack] ✗ ERROR: package.json not found at: ${packageJsonPath}`);
+    console.error('  Please run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
+    throw new Error('kshana-ink package.json missing - cannot package app');
+  }
+
+  if (!fs.existsSync(nodeModulesPath)) {
+    console.error(`[beforePack] ✗ ERROR: node_modules not found at: ${nodeModulesPath}`);
+    console.error('  Please run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
+    throw new Error('kshana-ink node_modules missing - cannot package app');
+  }
+
+  // Calculate total size
   try {
-    const serverSize = fs.statSync(serverBundlePath).size;
-    const llmSize = fs.statSync(llmBundlePath).size;
-    const totalMB = ((serverSize + llmSize) / (1024 * 1024)).toFixed(2);
-    console.log(`[beforePack] ✓ kshana-ink bundle verified (${totalMB} MB total)`);
+    const getSize = (dir) => {
+      let size = 0;
+      const files = fs.readdirSync(dir);
+      for (const file of files) {
+        const filePath = path.join(dir, file);
+        const stats = fs.statSync(filePath);
+        if (stats.isDirectory()) {
+          size += getSize(filePath);
+        } else {
+          size += stats.size;
+        }
+      }
+      return size;
+    };
+
+    const totalSize = getSize(resourcesPath);
+    const totalMB = (totalSize / (1024 * 1024)).toFixed(2);
+    console.log(`[beforePack] ✓ kshana-ink verified (${totalMB} MB total)`);
   } catch (err) {
-    console.log('[beforePack] ✓ kshana-ink bundle verified and ready for packaging');
+    console.log('[beforePack] ✓ kshana-ink verified and ready for packaging');
   }
 };
 
