@@ -138,12 +138,57 @@ jobs:
           echo "Verifying dist directory exists:"
           ls -la dist/ | head -10 || echo "✗ dist directory not found"
 
+      - name: Prepare release/app before install
+        working-directory: kshana-desktop
+        run: |
+          # Create release/app directory structure and package.json without kshana-ink
+          # This prevents electron-builder install-app-deps from trying to resolve kshana-ink
+          # during postinstall. Our install-app-deps.ts will handle kshana-ink later.
+          mkdir -p release/app
+          
+          # Create a minimal package.json without kshana-ink
+          # electron-builder install-app-deps will merge dependencies from main package.json
+          # but won't try to resolve kshana-ink if it's not in release/app/package.json
+          node << 'EOF'
+          const fs = require('fs');
+          const mainPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          
+          // Create release/app/package.json without kshana-ink
+          const appPkg = {
+            name: mainPkg.name,
+            version: mainPkg.version,
+            description: mainPkg.description,
+            main: mainPkg.main,
+            dependencies: {}
+          };
+          
+          // Copy dependencies except kshana-ink
+          if (mainPkg.dependencies) {
+            Object.keys(mainPkg.dependencies).forEach(dep => {
+              if (dep !== 'kshana-ink') {
+                appPkg.dependencies[dep] = mainPkg.dependencies[dep];
+              }
+            });
+          }
+          
+          fs.writeFileSync('release/app/package.json', JSON.stringify(appPkg, null, 2) + '\n');
+          console.log('✓ Created release/app/package.json without kshana-ink');
+          EOF
+
       - name: Install dependencies
         working-directory: kshana-desktop
         run: |
-          npm ci
-          echo "✓ Dependencies installed"
-          echo "Note: kshana-ink will be copied by install-app-deps.ts script during package step"
+          # Skip postinstall scripts to avoid electron-builder install-app-deps running
+          # with kshana-ink in package.json. Our install-app-deps.ts will handle everything.
+          npm ci --ignore-scripts
+          echo "✓ Dependencies installed (postinstall scripts skipped)"
+          
+          # Manually run the postinstall steps we need (excluding electron-builder install-app-deps)
+          echo "Running postinstall steps manually..."
+          npx ts-node .erb/scripts/check-native-dep.js
+          npm run build:dll
+          echo "✓ Postinstall steps completed"
+          echo "Note: kshana-ink will be handled by install-app-deps.ts during package step"
 
       - name: Build Electron app
         working-directory: kshana-desktop
