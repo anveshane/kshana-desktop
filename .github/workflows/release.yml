@@ -154,13 +154,20 @@ jobs:
           const mainPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           
           // Create release/app/package.json without kshana-ink
+          // Ensure version is set (required by electron-builder)
           const appPkg = {
             name: mainPkg.name,
-            version: mainPkg.version,
+            version: mainPkg.version || '1.0.0',
             description: mainPkg.description,
             main: mainPkg.main,
             dependencies: {}
           };
+          
+          // Ensure version is present (electron-builder requirement)
+          if (!appPkg.version) {
+            appPkg.version = '1.0.0';
+            console.log('⚠ Version not found in package.json, using default: 1.0.0');
+          }
           
           // Copy dependencies except kshana-ink
           if (mainPkg.dependencies) {

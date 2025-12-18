@@ -263,6 +263,26 @@ if (!kshanaInkSourcePath || !absoluteKshanaInkPath) {
   // Use file: path pointing to the copied location (relative to release/app)
   // Read package.json again in case it was modified
   const updatedPackageJson = JSON.parse(fs.readFileSync(appPackagePath, 'utf-8'));
+  
+  // Ensure required fields are present (electron-builder requirements)
+  if (!updatedPackageJson.version) {
+    // Try to get version from main package.json as fallback
+    const mainPackageJsonPath = path.join(rootPath, 'package.json');
+    if (fs.existsSync(mainPackageJsonPath)) {
+      try {
+        const mainPkg = JSON.parse(fs.readFileSync(mainPackageJsonPath, 'utf-8'));
+        updatedPackageJson.version = mainPkg.version || '1.0.0';
+        console.log(`✓ Set version from main package.json: ${updatedPackageJson.version}`);
+      } catch {
+        updatedPackageJson.version = '1.0.0';
+        console.log('⚠ Could not read main package.json, using default version: 1.0.0');
+      }
+    } else {
+      updatedPackageJson.version = '1.0.0';
+      console.log('⚠ Main package.json not found, using default version: 1.0.0');
+    }
+  }
+  
   updatedPackageJson.dependencies = updatedPackageJson.dependencies || {};
   updatedPackageJson.dependencies['kshana-ink'] = 'file:node_modules/kshana-ink';
   
