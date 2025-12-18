@@ -163,14 +163,17 @@ ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {
 });
 
 ipcMain.handle('project:get-resources-path', async () => {
-  // Get the path to resources (where Test_Images and Test_videos are packaged)
-  // In development: __dirname/../../Test_Images or Test_videos
-  // In packaged: process.resourcesPath/Test_Images or Test_videos
+  // Get the path to resources (where test_image and test_video are packaged)
+  // In development: __dirname/../../ (points to kshana-desktop directory)
+  // In packaged: process.resourcesPath (where extraResources are placed)
   if (app.isPackaged) {
+    // In production, extraResources are placed in process.resourcesPath
     return process.resourcesPath;
   }
-  // In development, return the path relative to main process
-  return path.join(__dirname, '../../');
+  // In development, __dirname is dist/main, so ../../ gives us kshana-desktop
+  // test_image and test_video are in kshana-desktop directory
+  const devPath = path.join(__dirname, '../../');
+  return path.resolve(devPath);
 });
 
 ipcMain.handle(

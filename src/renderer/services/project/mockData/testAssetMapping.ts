@@ -1,54 +1,48 @@
 /**
  * Test Asset Mapping
- * Maps test images and videos from Test_Images/ and Test_videos/ to mock entities
+ * Maps test images and videos from test_image/ and test_video/ to mock entities
  * 
  * This allows the mock data to use real assets for better UI testing and demos.
  */
 
 /**
- * Test image files available in Test_Images/
- * All 10 images are mapped to various entities for comprehensive coverage
+ * Test image files available in test_image/
+ * 8 images (img1.jpg through img8.jpg) mapped to various entities
  */
 export const TEST_IMAGES = {
-  // Character reference images (for Assets view)
-  'alice-chen': 'cute-cat-studio.jpg',
-  'marcus-webb': 'adorable-dog-fantasy-style.jpg',
-  'fatima-hassan': 'close-up-adorable-kitten-couch.jpg',
+  // Character reference images (for Assets view) - 3 images
+  'alice-chen': 'img1.jpg',
+  'marcus-webb': 'img2.jpg',
+  'fatima-hassan': 'img3.jpg',
   
-  // Setting reference images (for Assets view)
-  'dusty-village': 'adorable-cat-lifestyle.jpg',
-  'desert-camp': 'cute-cat-lifestyle.jpg',
-  'underground-tomb': 'adorable-cat-lifestyle (1).jpg',
+  // Setting reference images (for Assets view) - 3 images
+  'dusty-village': 'img4.jpg',
+  'desert-camp': 'img5.jpg',
+  'underground-tomb': 'img6.jpg', // Reuse scene image since underground-tomb doesn't have reference_image_path yet
   
-  // Scene images (for Storyboard, Timeline, and Video Library)
-  // Using all available images for better variety
-  'scene-001': 'close-up-kitten-standing-rock.jpg',
-  'scene-002': 'close-up-kitten-surrounded-by-flowers.jpg',
-  'scene-003': 'cute-cat-lifestyle (1).jpg',
-  'scene-004': 'adorable-cat-lifestyle (1).jpg',
-  'scene-005': 'funny-image-with-dog.jpg',
-  'scene-006': 'cute-cat-lifestyle.jpg',
-  
-  // Additional scene images (for more scenes, versions, or timeline thumbnails)
-  'scene-007': 'close-up-adorable-kitten-couch.jpg',
-  'scene-008': 'adorable-dog-fantasy-style.jpg',
-  'scene-009': 'cute-cat-studio.jpg',
-  'scene-010': 'adorable-cat-lifestyle.jpg',
+  // Scene images (for Storyboard, Timeline, and Video Library) - 3 images
+  // These will cycle/reuse for scenes 001-010
+  'scene-001': 'img6.jpg',
+  'scene-002': 'img7.jpg',
+  'scene-003': 'img8.jpg',
+  'scene-004': 'img1.jpg', // Cycle back to beginning
+  'scene-005': 'img2.jpg',
+  'scene-006': 'img3.jpg',
+  'scene-007': 'img4.jpg',
+  'scene-008': 'img5.jpg',
+  'scene-009': 'img6.jpg',
+  'scene-010': 'img7.jpg',
 } as const;
 
 /**
- * Test video files available in Test_videos/
- * These will be mapped to scene videos
+ * Test video files available in test_video/
+ * 3 videos (vd1.mp4, vd2.mp4, vd3.mp4) mapped to scene videos
+ * Videos will cycle for different scenes and versions
  */
 export const TEST_VIDEOS = [
-  'models_veo-3.1-generate-preview_operations_4upf55002ju4.mp4',
-  'models_veo-3.1-generate-preview_operations_bp77afbln6kp.mp4',
-  'models_veo-3.1-generate-preview_operations_cjxqty7g1kza.mp4',
-  'models_veo-3.1-generate-preview_operations_ctwl17xrl5jr.mp4',
-  'models_veo-3.1-generate-preview_operations_dihc7q31jlya.mp4',
-  'models_veo-3.1-generate-preview_operations_ho5zaa165hqq.mp4',
-  'models_veo-3.1-generate-preview_operations_ptfmmmvntnxo.mp4',
-  'models_veo-3.1-generate-preview_operations_wyu6lyo6jsud.mp4',
+  'vd1.mp4',
+  'vd2.mp4',
+  'vd3.mp4',
 ] as const;
 
 /**
@@ -75,22 +69,24 @@ export function getTestImageForScene(sceneFolder: string): string | undefined {
 /**
  * Gets test video files for scenes
  * Returns videos in order, cycling if there are more scenes than videos
+ * With 3 videos, cycles through: vd1.mp4, vd2.mp4, vd3.mp4
  */
 export function getTestVideoForScene(
   sceneNumber: number,
   version: number = 1,
 ): string {
   // Use scene number and version to select video
-  // This creates variety: different scenes get different videos
-  const videoIndex = ((sceneNumber - 1) * 3 + (version - 1)) % TEST_VIDEOS.length;
+  // This creates variety: different scenes and versions get different videos
+  // Formula: cycle through videos based on scene and version
+  const videoIndex = ((sceneNumber - 1) + (version - 1)) % TEST_VIDEOS.length;
   return TEST_VIDEOS[videoIndex];
 }
 
 /**
  * Resolves a test asset path
- * When in mock mode, paths should point to Test_Images/ or Test_videos/
+ * When in mock mode, paths should point to test_image/ or test_video/
  * 
- * Uses Test_Images/ or Test_videos/ directly (not ../) since they're now
+ * Uses test_image/ or test_video/ directly (not ../) since they're now
  * in the app resources and will be resolved by the path resolver
  */
 export function resolveTestAssetPath(
@@ -98,9 +94,9 @@ export function resolveTestAssetPath(
   filename: string,
 ): string {
   if (assetType === 'image') {
-    return `Test_Images/${filename}`;
+    return `test_image/${filename}`;
   }
-  return `Test_videos/${filename}`;
+  return `test_video/${filename}`;
 }
 
 /**

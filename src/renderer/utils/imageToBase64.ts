@@ -32,7 +32,7 @@ export async function imageToBase64(imagePath: string): Promise<string | null> {
  */
 export function shouldUseBase64(filePath: string, useMockData: boolean): boolean {
   // Use base64 for test images in mock mode
-  if (useMockData && (filePath.includes('Test_Images/') || filePath.includes('Test_videos/'))) {
+  if (useMockData && (filePath.includes('test_image/') || filePath.includes('test_video/'))) {
     return true;
   }
   return false;
