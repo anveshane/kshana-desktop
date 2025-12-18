@@ -16,8 +16,8 @@ jobs:
         id: set_branches
         run: |
           # Hardcoded branch names for now
-          FRONTEND_BRANCH="feature/github-releases-setup"
-          BACKEND_BRANCH="fix/httpx-proxies-compatibility"
+          FRONTEND_BRANCH="fix/version-1"
+          BACKEND_BRANCH="merged-cleanup-fixes"
           echo "FRONTEND_BRANCH=$FRONTEND_BRANCH" >> $GITHUB_OUTPUT
           echo "BACKEND_BRANCH=$BACKEND_BRANCH" >> $GITHUB_OUTPUT
           echo "✓ Using branches: frontend=$FRONTEND_BRANCH, backend=$BACKEND_BRANCH"
@@ -38,12 +38,12 @@ jobs:
           fi
           echo "✓ Token is set (checking access...)"
           
-      - name: Checkout kshana backend
+      - name: Checkout kshana-ink backend
         id: checkout_backend
         uses: actions/checkout@v4
         with:
-          repository: anveshane/kshana
-          path: kshana-backend
+          repository: anveshane/kshana-ink
+          path: kshana-ink
           ref: ${{ steps.set_branches.outputs.BACKEND_BRANCH }}
           token: ${{ secrets.BACKEND_REPO_TOKEN }}
           fetch-depth: 1
@@ -62,19 +62,19 @@ jobs:
           echo ""
           echo "Trying to checkout without specifying branch (uses default)..."
           
-      - name: Checkout kshana backend (fallback to default)
+      - name: Checkout kshana-ink backend (fallback to default)
         if: steps.checkout_backend.outcome == 'failure'
         uses: actions/checkout@v4
         with:
-          repository: anveshane/kshana
-          path: kshana-backend
+          repository: anveshane/kshana-ink
+          path: kshana-ink
           token: ${{ secrets.BACKEND_REPO_TOKEN }}
           fetch-depth: 1
 
       - name: Verify backend checkout succeeded
         run: |
           echo "Checking if backend repo was checked out..."
-          if [ ! -d "kshana-backend" ]; then
+          if [ ! -d "kshana-ink" ]; then
             echo "Error: Backend repo directory not found!"
             echo "Current directory: $(pwd)"
             echo "Contents:"
@@ -83,7 +83,7 @@ jobs:
           fi
           echo "✓ Backend repo directory exists"
           echo "Backend repo contents:"
-          ls -la kshana-backend/ | head -10
+          ls -la kshana-ink/ | head -10
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -92,28 +92,21 @@ jobs:
           cache: 'npm'
           cache-dependency-path: kshana-desktop/package-lock.json
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          python-version: '3.13'
+          version: 10.24.0
+
+      - name: Build kshana-ink
+        run: |
+          cd kshana-ink
+          pnpm install
+          pnpm build
+          echo "✓ kshana-ink built successfully"
 
       - name: Install dependencies
         working-directory: kshana-desktop
         run: npm ci
-
-      - name: Set backend absolute path
-        id: backend_path
-        run: |
-          # Get absolute path of backend repo (works from any directory)
-          BACKEND_PATH=$(cd kshana-backend && pwd)
-          echo "Backend absolute path: $BACKEND_PATH"
-          echo "BACKEND_ABS_PATH=$BACKEND_PATH" >> $GITHUB_OUTPUT
-          echo "✓ Backend path set to $BACKEND_PATH"
-
-      - name: Build backend
-        working-directory: kshana-desktop
-        run: |
-          python3.13 backend-build/build.py --clean --source-path ${{ steps.backend_path.outputs.BACKEND_ABS_PATH }}
 
       - name: Build Electron app
         working-directory: kshana-desktop
