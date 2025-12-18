@@ -85,25 +85,52 @@ jobs:
           echo "Backend repo contents:"
           ls -la kshana-ink/ | head -10
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: kshana-desktop/package-lock.json
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10.24.0
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify directory structure
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Directory contents:"
+          ls -la
+          echo ""
+          echo "kshana-desktop location:"
+          ls -la kshana-desktop/ | head -5
+          echo ""
+          echo "kshana-ink location:"
+          ls -la kshana-ink/ | head -5
+          echo ""
+          echo "Verifying kshana-ink package.json exists:"
+          test -f kshana-ink/package.json && echo "✓ kshana-ink/package.json found" || echo "✗ kshana-ink/package.json NOT found"
+
       - name: Build kshana-ink
         run: |
           cd kshana-ink
+          echo "Building kshana-ink from: $(pwd)"
           pnpm install
           pnpm build
           echo "✓ kshana-ink built successfully"
+          echo "Verifying dist directory exists:"
+          ls -la dist/ | head -10 || echo "✗ dist directory not found"
 
+      - name: Verify kshana-ink path for kshana-desktop
+        run: |
+          echo "Verifying kshana-ink is accessible from kshana-desktop..."
+          cd kshana-desktop
+          echo "From kshana-desktop, checking ../kshana-ink:"
+          ls -la ../kshana-ink/package.json && echo "✓ kshana-ink found at ../kshana-ink" || echo "✗ kshana-ink NOT found at ../kshana-ink"
+          echo ""
+          echo "Current directory structure:"
+          pwd
+          ls -la ../
+          
       - name: Install dependencies
         working-directory: kshana-desktop
         run: npm ci
