@@ -1,10 +1,9 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { rimrafSync } from 'rimraf';
 import webpackPaths from '../configs/webpack.paths';
 
-const { appPath, appPackagePath, appNodeModulesPath } = webpackPaths;
+const { appPath, appPackagePath, appNodeModulesPath, rootPath } = webpackPaths;
 
 // Recursive copy function that excludes certain files/directories
 function copyRecursiveSync(src: string, dest: string, excludes: string[] = []) {
@@ -42,6 +41,36 @@ function copyRecursiveSync(src: string, dest: string, excludes: string[] = []) {
   }
 }
 
+/**
+ * Validate that copied kshana-ink has all required files
+ */
+function validateKshanaInkCopy(kshanaInkPath: string): void {
+  const requiredFiles = [
+    'dist/server/index.js',
+    'dist/core/llm/index.js',
+    'package.json',
+  ];
+
+  const missingFiles: string[] = [];
+
+  for (const file of requiredFiles) {
+    const filePath = path.join(kshanaInkPath, file);
+    if (!fs.existsSync(filePath)) {
+      missingFiles.push(file);
+    }
+  }
+
+  if (missingFiles.length > 0) {
+    throw new Error(
+      `kshana-ink copy validation failed. Missing required files:\n` +
+        missingFiles.map(f => `  - ${f}`).join('\n') +
+        `\n\nPlease ensure kshana-ink is built before packaging.`
+    );
+  }
+
+  console.log('✓ kshana-ink copy validation passed');
+}
+
 // Ensure release/app directory exists
 if (!fs.existsSync(appPath)) {
   fs.mkdirSync(appPath, { recursive: true });
@@ -56,13 +85,20 @@ if (!fs.existsSync(appPackagePath)) {
 // Read package.json to check for dependencies
 const packageJson = JSON.parse(fs.readFileSync(appPackagePath, 'utf-8'));
 
-// If kshana-ink is listed, we need to include its dependencies too
+// Extract kshana-ink source path BEFORE removing it from dependencies
+let kshanaInkSourcePath: string | null = null;
 if (packageJson.dependencies && packageJson.dependencies['kshana-ink']) {
-  const kshanaInkPath = packageJson.dependencies['kshana-ink'].replace('file:', '');
-  const absoluteKshanaInkPath = path.isAbsolute(kshanaInkPath)
-    ? kshanaInkPath
-    : path.resolve(appPath, kshanaInkPath);
+  const kshanaInkDep = packageJson.dependencies['kshana-ink'];
+  kshanaInkSourcePath = kshanaInkDep.replace('file:', '');
   
+  // Resolve absolute path relative to appPath (release/app)
+  // kshanaInkSourcePath is like "../../../kshana-ink" from release/app/package.json
+  // path.resolve handles ../ correctly, resolving relative to appPath
+  const absoluteKshanaInkPath = path.isAbsolute(kshanaInkSourcePath)
+    ? kshanaInkSourcePath
+    : path.resolve(appPath, kshanaInkSourcePath);
+  
+  // Read kshana-ink package.json to merge dependencies
   const kshanaInkPackageJsonPath = path.join(absoluteKshanaInkPath, 'package.json');
   if (fs.existsSync(kshanaInkPackageJsonPath)) {
     try {
@@ -85,17 +121,24 @@ if (packageJson.dependencies && packageJson.dependencies['kshana-ink']) {
           ...filteredDeps,
         };
         
-        // Write updated package.json
-        fs.writeFileSync(
-          appPackagePath,
-          JSON.stringify(packageJson, null, 2) + '\n'
-        );
         console.log('✓ Added kshana-ink dependencies to package.json (CLI-only deps excluded)');
       }
     } catch (err) {
       console.warn(`Warning: Could not read kshana-ink package.json: ${(err as Error).message}`);
     }
   }
+
+  // Remove kshana-ink from dependencies to prevent symlink creation
+  const { 'kshana-ink': removedDep, ...otherDeps } = packageJson.dependencies;
+  packageJson.dependencies = otherDeps;
+  
+  // Write updated package.json (without kshana-ink)
+  fs.writeFileSync(
+    appPackagePath,
+    JSON.stringify(packageJson, null, 2) + '\n'
+  );
+  
+  console.log('✓ Temporarily removed kshana-ink from dependencies (will copy directly)');
 }
 
 const hasDependencies = packageJson.dependencies && Object.keys(packageJson.dependencies).length > 0;
@@ -108,63 +151,70 @@ if (hasDependencies) {
     fs.mkdirSync(appNodeModulesPath, { recursive: true });
   }
 
-  // Run npm install in release/app directory
+  // Run npm install in release/app directory (kshana-ink is NOT in dependencies, so no symlink created)
   try {
     execSync('npm install', {
       cwd: appPath,
       stdio: 'inherit',
     });
     
-    // After installation, if kshana-ink is symlinked, copy it instead
-    const kshanaInkPath = path.join(appNodeModulesPath, 'kshana-ink');
-    if (fs.existsSync(kshanaInkPath)) {
-      try {
-        const stats = fs.lstatSync(kshanaInkPath);
-        if (stats.isSymbolicLink()) {
-          console.log('kshana-ink is symlinked, copying instead...');
-          const targetPath = fs.readlinkSync(kshanaInkPath);
-          const absoluteTargetPath = path.isAbsolute(targetPath)
-            ? targetPath
-            : path.resolve(path.dirname(kshanaInkPath), targetPath);
-          
-          // Remove symlink
-          fs.unlinkSync(kshanaInkPath);
-          
-          // Copy the directory, excluding unnecessary files
-          const excludes = [
-            'node_modules',
-            '.git',
-            'logs',
-            '.kshana',
-            '.env',
-            '.env.local',
-            '.env.*',
-            'src', // We only need the built dist/ directory
-            'tests',
-            'coverage',
-            '.idea',
-            '.vscode',
-            '*.swp',
-            '*.swo',
-            '.DS_Store',
-            'Thumbs.db',
-          ];
-          
-          copyRecursiveSync(absoluteTargetPath, kshanaInkPath, excludes);
-          console.log('✓ kshana-ink copied successfully (symlink replaced with copy)');
-        } else {
-          console.log('✓ kshana-ink is already a directory (not a symlink)');
-        }
-      } catch (err) {
-        console.warn(`Warning: Could not check/copy kshana-ink: ${(err as Error).message}`);
-      }
-    }
-    
-    console.log('App dependencies installed successfully');
+    console.log('✓ App dependencies installed successfully');
   } catch (error) {
     console.error('Failed to install app dependencies:', error);
     process.exit(1);
   }
 } else {
   console.log('No app dependencies to install');
+}
+
+// Copy kshana-ink directly from source (if it was in dependencies)
+if (kshanaInkSourcePath) {
+  const absoluteKshanaInkPath = path.isAbsolute(kshanaInkSourcePath)
+    ? kshanaInkSourcePath
+    : path.resolve(appPath, kshanaInkSourcePath);
+  
+  const kshanaInkDestPath = path.join(appNodeModulesPath, 'kshana-ink');
+  
+  // Verify source exists
+  if (!fs.existsSync(absoluteKshanaInkPath)) {
+    throw new Error(
+      `kshana-ink source not found at ${absoluteKshanaInkPath}. ` +
+        'Please ensure kshana-ink is available at the expected location.'
+    );
+  }
+
+  console.log(`Copying kshana-ink from ${absoluteKshanaInkPath} to ${kshanaInkDestPath}...`);
+  
+  // Remove destination if it exists (from previous runs)
+  if (fs.existsSync(kshanaInkDestPath)) {
+    fs.rmSync(kshanaInkDestPath, { recursive: true, force: true });
+  }
+  
+  // Ensure destination directory exists
+  fs.mkdirSync(kshanaInkDestPath, { recursive: true });
+  
+  // Copy only production artifacts: dist/, package.json, prompts/
+  // Note: prompts/ is already copied to dist/prompts/ during kshana-ink build
+  const itemsToCopy = ['dist', 'package.json'];
+  
+  for (const item of itemsToCopy) {
+    const srcPath = path.join(absoluteKshanaInkPath, item);
+    const destPath = path.join(kshanaInkDestPath, item);
+    
+    if (fs.existsSync(srcPath)) {
+      const stats = fs.statSync(srcPath);
+      if (stats.isDirectory()) {
+        copyRecursiveSync(srcPath, destPath, []);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    } else {
+      console.warn(`Warning: ${item} not found in kshana-ink source at ${srcPath}`);
+    }
+  }
+  
+  console.log('✓ kshana-ink copied successfully (production artifacts only)');
+  
+  // Validate copied files
+  validateKshanaInkCopy(kshanaInkDestPath);
 }
