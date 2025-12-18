@@ -123,25 +123,25 @@ jobs:
       - name: Install dependencies
         working-directory: kshana-desktop
         run: |
-          # Install dependencies first
           npm ci
-          # Remove symlinked kshana-ink and copy the built version
-          echo "Replacing kshana-ink symlink with actual copy..."
-          rm -rf node_modules/kshana-ink
-          cp -r ../kshana-ink node_modules/kshana-ink
-          # Remove source files, keep only dist, package.json, and node_modules
-          cd node_modules/kshana-ink
-          find . -maxdepth 1 -type f ! -name 'package.json' -delete
-          find . -maxdepth 1 -type d ! -name '.' ! -name 'dist' ! -name 'node_modules' -exec rm -rf {} + 2>/dev/null || true
-          echo "✓ kshana-ink copied to node_modules (only dist, package.json, and node_modules kept)"
-          ls -la
+          # Replace symlinked kshana-ink with actual copy (no symlinks)
+          echo "Replacing kshana-ink symlink with actual copy (no symlinks)..."
+          if [ -L "node_modules/kshana-ink" ] || [ -d "node_modules/kshana-ink" ]; then
+            rm -rf node_modules/kshana-ink
+            cp -RL ../kshana-ink node_modules/kshana-ink
+            # Remove source files, keep only dist, package.json, and node_modules
+            cd node_modules/kshana-ink
+            find . -maxdepth 1 -type f ! -name 'package.json' -delete
+            find . -maxdepth 1 -type d ! -name '.' ! -name 'dist' ! -name 'node_modules' -exec rm -rf {} + 2>/dev/null || true
+            cd ../..
+            echo "✓ kshana-ink copied to node_modules (no symlinks)"
+          fi
 
       - name: Build Electron app
         working-directory: kshana-desktop
         run: |
           npx ts-node ./.erb/scripts/clean.js dist
-          npm run build
-          npx electron-builder build --publish always
+          npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
