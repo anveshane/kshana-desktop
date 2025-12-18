@@ -61,9 +61,9 @@ export async function copyVideoToScene(
   const targetPath = `${videoDir}/${targetFileName}`;
   const relativePath = `.kshana/agent/scenes/${sceneFolder}/video/${targetFileName}`;
 
-  // Remove file:// protocol if present
-  const cleanPath = videoPath.replace(/^file:\/\//, '');
-  
+    // Remove file:// protocol if present
+    const cleanPath = videoPath.replace(/^file:\/\//, '');
+    
   console.log(`[videoWorkspace] Copying video to scene folder:`);
   console.log(`  Source: ${videoPath} (cleaned: ${cleanPath})`);
   console.log(`  Target: ${targetPath}`);
@@ -127,22 +127,22 @@ export async function copyVideoToScene(
     
     // Fallback to base64 conversion if direct copy fails
     try {
-      // Read video file as base64
-      const base64DataUri = await window.electron.project.readFileBase64(cleanPath);
-      if (!base64DataUri) {
-        throw new Error(`Failed to read video file: ${cleanPath}`);
-      }
+    // Read video file as base64
+    const base64DataUri = await window.electron.project.readFileBase64(cleanPath);
+    if (!base64DataUri) {
+      throw new Error(`Failed to read video file: ${cleanPath}`);
+    }
 
-      // Extract base64 data from data URI
-      const base64Match = base64DataUri.match(/^data:video\/[^;]+;base64,(.+)$/);
-      if (!base64Match) {
-        throw new Error('Invalid base64 data URI format');
-      }
+    // Extract base64 data from data URI
+    const base64Match = base64DataUri.match(/^data:video\/[^;]+;base64,(.+)$/);
+    if (!base64Match) {
+      throw new Error('Invalid base64 data URI format');
+    }
 
-      const base64Data = base64Match[1];
+    const base64Data = base64Match[1];
 
-      // Write binary file from base64 data
-      await window.electron.project.writeFileBinary(targetPath, base64Data);
+    // Write binary file from base64 data
+    await window.electron.project.writeFileBinary(targetPath, base64Data);
       console.log(`[videoWorkspace] ✓ Successfully wrote video via base64: ${targetPath}`);
       
       // Verify the written file exists

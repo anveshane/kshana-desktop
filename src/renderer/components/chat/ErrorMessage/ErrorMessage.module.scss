@@ -1,0 +1,73 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.error {
+  @include flex-column;
+  padding: $spacing-lg;
+  background-color: rgba($color-error, 0.08);
+  border: 1px solid rgba($color-error, 0.2);
+  border-radius: $radius-md;
+  color: $color-text-primary;
+  margin: $spacing-sm 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.errorIcon {
+  font-size: 24px;
+  margin-bottom: $spacing-sm;
+  color: $color-error;
+}
+
+.errorTitle {
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: $color-error;
+  margin: 0 0 $spacing-xs 0;
+}
+
+.errorMessage {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  margin: 0 0 $spacing-md 0;
+  line-height: $line-height-relaxed;
+}
+
+.errorDetails {
+  text-align: left;
+  margin: $spacing-sm 0;
+  padding: $spacing-sm;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: $radius-sm;
+  overflow: hidden;
+}
+
+.errorDetail {
+  margin: 2px 0;
+  color: rgba($color-text-primary, 0.7);
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  word-break: break-all;
+  line-height: $line-height-compact;
+}
+
+.errorTroubleshooting {
+  margin: $spacing-xs 0;
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  
+  &:first-of-type {
+    margin-top: $spacing-sm;
+    font-weight: $font-weight-medium;
+    color: $color-accent-green;
+  }
+}
+
+.errorFooter {
+  margin-top: $spacing-sm;
+  padding-top: $spacing-sm;
+  border-top: 1px solid rgba($color-text-primary, 0.1);
+  display: flex;
+  justify-content: flex-end;
+}

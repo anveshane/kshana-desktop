@@ -7,8 +7,14 @@ const { execSync } = require('child_process');
  * Ensures kshana-ink is copied to release/app/node_modules before packaging
  */
 
-exports.default = async function beforePack(context) {
-  const appPath = context.appDir;
+module.exports = async function beforePack(context) {
+  // In some environments context.appDir might be undefined, try alternatives
+  const appPath = context.appDir || context.packager.appDir || path.resolve(__dirname, '../../release/app');
+
+  if (!appPath) {
+    throw new Error('[beforePack] Could not determine app directory (context.appDir is undefined)');
+  }
+
   const nodeModulesPath = path.join(appPath, 'node_modules');
   const kshanaInkTargetPath = path.join(nodeModulesPath, 'kshana-ink');
   const distPath = path.join(kshanaInkTargetPath, 'dist');

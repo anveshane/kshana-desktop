@@ -6,6 +6,7 @@ import MessageActions from '../MessageActions';
 import ToolCallCard from '../ToolCallCard';
 import TodoDisplay from '../TodoDisplay';
 import type { TodoItem } from '../TodoDisplay';
+import ErrorMessage from '../ErrorMessage/ErrorMessage';
 import styles from './MessageBubble.module.scss';
 
 interface MessageBubbleProps {
@@ -63,6 +64,53 @@ const MarkdownComponents = {
     <blockquote className={styles.blockquote}>{children}</blockquote>
   ),
 };
+
+function parseErrorMessage(content: string) {
+  const parts = content.split('\n');
+  const title = content.includes('kshana-ink') ? 'Backend Connection Error' : 'System Error';
+  const firstLine = parts[0] || 'An unexpected error occurred';
+
+  // Try to extract the main message
+  const mainMessageMatch = firstLine.match(/^(?:Unable to send message: )?(?:Backend not ready: )?(.+)$/);
+  const message = mainMessageMatch ? mainMessageMatch[1] : firstLine;
+
+  const details: string[] = [];
+  const troubleshooting: string[] = [];
+
+  let currentSection: 'none' | 'details' | 'troubleshooting' = 'none';
+
+  for (let i = 1; i < parts.length; i++) {
+    const line = parts[i].trim();
+    if (!line) continue;
+
+    if (line.includes('Checked:') || line.includes('Contents of') || line.includes('Neither unpacked')) {
+      currentSection = 'details';
+      details.push(line);
+      continue;
+    }
+
+    if (line.includes('Please ensure') || line.includes('Troubleshooting:') || line.includes('Run \'pnpm build\'')) {
+      currentSection = 'troubleshooting';
+      troubleshooting.push(line);
+      continue;
+    }
+
+    if (currentSection === 'details') {
+      details.push(line);
+    } else if (currentSection === 'troubleshooting') {
+      troubleshooting.push(line);
+    } else {
+      // If it looks like a path or diagnostic info, put it in details
+      if (line.startsWith('-') || line.includes('/') || line.includes('\\')) {
+        details.push(line);
+      } else {
+        troubleshooting.push(line);
+      }
+    }
+  }
+
+  return { title, message, details, troubleshooting };
+}
 
 export default function MessageBubble({
   message,
@@ -130,14 +178,13 @@ export default function MessageBubble({
 
   // Handle dispatch_agent (plan) messages with markdown
   const isDispatchAgent = message.meta?.toolName === 'dispatch_agent';
+  const parsedError = isError ? parseErrorMessage(message.content) : null;
 
   return (
     <div
-      className={`${styles.container} ${styles[message.role]} ${
-        isStreaming ? styles.streaming : ''
-      } ${isIntermediate ? styles.intermediate : ''} ${
-        isError ? styles.error : ''
-      }`}
+      className={`${styles.container} ${styles[message.role]} ${isStreaming ? styles.streaming : ''
+        } ${isIntermediate ? styles.intermediate : ''} ${isError ? styles.error : ''
+        }`}
     >
       <div className={styles.header}>
         <span className={styles.role}>{roleLabels[message.role]}</span>
@@ -159,7 +206,16 @@ export default function MessageBubble({
         )}
       </div>
       <div className={styles.body}>
-        {isSystem ? (
+        {isError && parsedError ? (
+          <div className={styles.errorContainer}>
+            <ErrorMessage
+              title={parsedError.title}
+              message={parsedError.message}
+              details={parsedError.details}
+              troubleshooting={parsedError.troubleshooting}
+            />
+          </div>
+        ) : isSystem ? (
           <div className={styles.systemContent}>{message.content}</div>
         ) : isDispatchAgent && message.meta?.result ? (
           // Render plan from dispatch_agent result
