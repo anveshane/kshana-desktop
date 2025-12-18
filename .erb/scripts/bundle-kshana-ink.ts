@@ -83,7 +83,6 @@ async function bundleModules() {
       format: 'esm',
       outfile: path.join(kshanaInkTargetPath, 'server.bundle.mjs'),
       external: ['electron'], // Don't bundle electron
-      packages: 'bundle', // Bundle all node_modules
       minify: true,
       sourcemap: false,
       treeShaking: true,
@@ -107,7 +106,6 @@ async function bundleModules() {
       format: 'esm',
       outfile: path.join(kshanaInkTargetPath, 'llm.bundle.mjs'),
       external: ['electron'],
-      packages: 'bundle',
       minify: true,
       sourcemap: false,
       treeShaking: true,
