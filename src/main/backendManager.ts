@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import net from 'net';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import { app } from 'electron';
 import log from 'electron-log';
 import {
@@ -243,8 +244,8 @@ class BackendManager extends EventEmitter {
 
       // Use absolute paths to the kshana-ink exports
       // This bypasses Node.js module resolution which looks relative to the bundle location
-      const serverModulePath = path.join(nodeModulesDir, 'kshana-ink', 'dist', 'server.js');
-      const llmModulePath = path.join(nodeModulesDir, 'kshana-ink', 'dist', 'core', 'llm.js');
+      const serverModulePath = path.join(nodeModulesDir, 'kshana-ink', 'dist', 'server', 'index.js');
+      const llmModulePath = path.join(nodeModulesDir, 'kshana-ink', 'dist', 'core', 'llm', 'index.js');
 
       log.info(`Loading kshana-ink server from: ${serverModulePath}`);
       log.info(`Loading kshana-ink llm from: ${llmModulePath}`);
@@ -261,8 +262,13 @@ class BackendManager extends EventEmitter {
       // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const dynamicImport = new Function('specifier', 'return import(specifier)');
 
-      const serverModule = await dynamicImport(serverModulePath);
-      const llmModule = await dynamicImport(llmModulePath);
+      // Convert absolute paths to file:// URLs for ES module imports
+      // This is required for Node.js ES modules, especially in production
+      const serverModuleUrl = pathToFileURL(serverModulePath).href;
+      const llmModuleUrl = pathToFileURL(llmModulePath).href;
+
+      const serverModule = await dynamicImport(serverModuleUrl);
+      const llmModule = await dynamicImport(llmModuleUrl);
 
       log.info('Successfully loaded kshana-ink modules');
 
