@@ -120,20 +120,21 @@ jobs:
           echo "Verifying dist directory exists:"
           ls -la dist/ | head -10 || echo "✗ dist directory not found"
 
-      - name: Verify kshana-ink path for kshana-desktop
-        run: |
-          echo "Verifying kshana-ink is accessible from kshana-desktop..."
-          cd kshana-desktop
-          echo "From kshana-desktop, checking ../kshana-ink:"
-          ls -la ../kshana-ink/package.json && echo "✓ kshana-ink found at ../kshana-ink" || echo "✗ kshana-ink NOT found at ../kshana-ink"
-          echo ""
-          echo "Current directory structure:"
-          pwd
-          ls -la ../
-          
       - name: Install dependencies
         working-directory: kshana-desktop
-        run: npm ci
+        run: |
+          # Install dependencies first
+          npm ci
+          # Remove symlinked kshana-ink and copy the built version
+          echo "Replacing kshana-ink symlink with actual copy..."
+          rm -rf node_modules/kshana-ink
+          cp -r ../kshana-ink node_modules/kshana-ink
+          # Remove source files, keep only dist, package.json, and node_modules
+          cd node_modules/kshana-ink
+          find . -maxdepth 1 -type f ! -name 'package.json' -delete
+          find . -maxdepth 1 -type d ! -name '.' ! -name 'dist' ! -name 'node_modules' -exec rm -rf {} + 2>/dev/null || true
+          echo "✓ kshana-ink copied to node_modules (only dist, package.json, and node_modules kept)"
+          ls -la
 
       - name: Build Electron app
         working-directory: kshana-desktop

@@ -188,8 +188,7 @@
     "asar": true,
     "afterSign": ".erb/scripts/notarize.js",
     "asarUnpack": [
-      "**\\*.{node,dll}",
-      "**/node_modules/**/*"
+      "**/*.{node,dll}"
     ],
     "files": [
       "dist",
@@ -205,10 +204,8 @@
       "!**/node_modules/kshana-ink/**/eslint.config.*",
       "!**/node_modules/kshana-ink/**/.gitignore",
       "!**/node_modules/kshana-ink/**/prompts/**",
-      "!**/node_modules/kshana-ink/**/workflows/**"
-    ],
-    "asarUnpack": [
-      "**/*.{node,dll}"
+      "!**/node_modules/kshana-ink/**/workflows/**",
+      "!**/node_modules/kshana-ink/**/.env.example"
     ],
     "mac": {
       "notarize": false,
