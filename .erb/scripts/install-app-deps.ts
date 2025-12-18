@@ -283,6 +283,12 @@ if (!kshanaInkSourcePath || !absoluteKshanaInkPath) {
     }
   }
   
+  // Ensure main field points to production build (not dev DLL)
+  if (!updatedPackageJson.main || updatedPackageJson.main.includes('.erb/dll')) {
+    updatedPackageJson.main = './dist/main/main.js';
+    console.log('✓ Set main entry point to production build: ./dist/main/main.js');
+  }
+  
   updatedPackageJson.dependencies = updatedPackageJson.dependencies || {};
   updatedPackageJson.dependencies['kshana-ink'] = 'file:node_modules/kshana-ink';
   

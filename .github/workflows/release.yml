@@ -155,11 +155,12 @@ jobs:
           
           // Create release/app/package.json without kshana-ink
           // Ensure version is set (required by electron-builder)
+          // For production builds, main should point to dist/main/main.js (not dev DLL)
           const appPkg = {
             name: mainPkg.name,
             version: mainPkg.version || '1.0.0',
             description: mainPkg.description,
-            main: mainPkg.main,
+            main: './dist/main/main.js', // Production main entry point
             dependencies: {}
           };
           
