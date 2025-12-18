@@ -262,6 +262,21 @@ if (!kshanaInkSourcePath || !absoluteKshanaInkPath) {
   
   console.log('✓ kshana-ink copied successfully (production artifacts + dependencies)');
   
+  // Install kshana-ink's dependencies to ensure all transitive dependencies are available
+  // This is necessary because npm hoisting might place dependencies at the app level,
+  // but kshana-ink needs them in its own node_modules for proper module resolution
+  console.log('Installing kshana-ink dependencies...');
+  try {
+    execSync('npm install --production', {
+      cwd: kshanaInkDestPath,
+      stdio: 'inherit',
+    });
+    console.log('✓ kshana-ink dependencies installed successfully');
+  } catch (error) {
+    console.warn(`Warning: Failed to install kshana-ink dependencies: ${(error as Error).message}`);
+    console.warn('  Continuing anyway - dependencies may be available at app level');
+  }
+  
   // Validate copied files
   validateKshanaInkCopy(kshanaInkDestPath);
   
