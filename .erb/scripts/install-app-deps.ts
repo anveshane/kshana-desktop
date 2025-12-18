@@ -234,9 +234,10 @@ if (!kshanaInkSourcePath || !absoluteKshanaInkPath) {
   // Ensure destination directory exists
   fs.mkdirSync(kshanaInkDestPath, { recursive: true });
   
-  // Copy only production artifacts: dist/, package.json, prompts/
+  // Copy production artifacts: dist/, package.json, and node_modules/
   // Note: prompts/ is already copied to dist/prompts/ during kshana-ink build
-  const itemsToCopy = ['dist', 'package.json'];
+  // We need node_modules/ so kshana-ink's dependencies (like fastify) are available at runtime
+  const itemsToCopy = ['dist', 'package.json', 'node_modules'];
   
   for (const item of itemsToCopy) {
     const srcPath = path.join(finalKshanaInkPath, item);
@@ -250,11 +251,16 @@ if (!kshanaInkSourcePath || !absoluteKshanaInkPath) {
         fs.copyFileSync(srcPath, destPath);
       }
     } else {
-      console.warn(`Warning: ${item} not found in kshana-ink source at ${srcPath}`);
+      if (item === 'node_modules') {
+        console.warn(`Warning: node_modules not found in kshana-ink source at ${srcPath}`);
+        console.warn('  This may cause runtime errors. Please ensure kshana-ink dependencies are installed.');
+      } else {
+        console.warn(`Warning: ${item} not found in kshana-ink source at ${srcPath}`);
+      }
     }
   }
   
-  console.log('✓ kshana-ink copied successfully (production artifacts only)');
+  console.log('✓ kshana-ink copied successfully (production artifacts + dependencies)');
   
   // Validate copied files
   validateKshanaInkCopy(kshanaInkDestPath);
