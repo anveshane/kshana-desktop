@@ -7,48 +7,42 @@
 
 /**
  * Test image files available in Test_Images/
- * All 10 images are mapped to various entities for comprehensive coverage
+ * 8 images (img1.jpg through img8.jpg) mapped to various entities
  */
 export const TEST_IMAGES = {
-  // Character reference images (for Assets view)
-  'alice-chen': 'cute-cat-studio.jpg',
-  'marcus-webb': 'adorable-dog-fantasy-style.jpg',
-  'fatima-hassan': 'close-up-adorable-kitten-couch.jpg',
+  // Character reference images (for Assets view) - 3 images
+  'alice-chen': 'img1.jpg',
+  'marcus-webb': 'img2.jpg',
+  'fatima-hassan': 'img3.jpg',
   
-  // Setting reference images (for Assets view)
-  'dusty-village': 'adorable-cat-lifestyle.jpg',
-  'desert-camp': 'cute-cat-lifestyle.jpg',
-  'underground-tomb': 'adorable-cat-lifestyle (1).jpg',
+  // Setting reference images (for Assets view) - 3 images
+  'dusty-village': 'img4.jpg',
+  'desert-camp': 'img5.jpg',
+  'underground-tomb': 'img6.jpg', // Reuse scene image since underground-tomb doesn't have reference_image_path yet
   
-  // Scene images (for Storyboard, Timeline, and Video Library)
-  // Using all available images for better variety
-  'scene-001': 'close-up-kitten-standing-rock.jpg',
-  'scene-002': 'close-up-kitten-surrounded-by-flowers.jpg',
-  'scene-003': 'cute-cat-lifestyle (1).jpg',
-  'scene-004': 'adorable-cat-lifestyle (1).jpg',
-  'scene-005': 'funny-image-with-dog.jpg',
-  'scene-006': 'cute-cat-lifestyle.jpg',
-  
-  // Additional scene images (for more scenes, versions, or timeline thumbnails)
-  'scene-007': 'close-up-adorable-kitten-couch.jpg',
-  'scene-008': 'adorable-dog-fantasy-style.jpg',
-  'scene-009': 'cute-cat-studio.jpg',
-  'scene-010': 'adorable-cat-lifestyle.jpg',
+  // Scene images (for Storyboard, Timeline, and Video Library) - 3 images
+  // These will cycle/reuse for scenes 001-010
+  'scene-001': 'img6.jpg',
+  'scene-002': 'img7.jpg',
+  'scene-003': 'img8.jpg',
+  'scene-004': 'img6.jpg', // Reuse images for additional scenes
+  'scene-005': 'img7.jpg',
+  'scene-006': 'img8.jpg',
+  'scene-007': 'img6.jpg',
+  'scene-008': 'img7.jpg',
+  'scene-009': 'img8.jpg',
+  'scene-010': 'img6.jpg',
 } as const;
 
 /**
  * Test video files available in Test_videos/
- * These will be mapped to scene videos
+ * 3 videos (vd1.mp4, vd2.mp4, vd3.mp4) mapped to scene videos
+ * Videos will cycle for different scenes and versions
  */
 export const TEST_VIDEOS = [
-  'models_veo-3.1-generate-preview_operations_4upf55002ju4.mp4',
-  'models_veo-3.1-generate-preview_operations_bp77afbln6kp.mp4',
-  'models_veo-3.1-generate-preview_operations_cjxqty7g1kza.mp4',
-  'models_veo-3.1-generate-preview_operations_ctwl17xrl5jr.mp4',
-  'models_veo-3.1-generate-preview_operations_dihc7q31jlya.mp4',
-  'models_veo-3.1-generate-preview_operations_ho5zaa165hqq.mp4',
-  'models_veo-3.1-generate-preview_operations_ptfmmmvntnxo.mp4',
-  'models_veo-3.1-generate-preview_operations_wyu6lyo6jsud.mp4',
+  'vd1.mp4',
+  'vd2.mp4',
+  'vd3.mp4',
 ] as const;
 
 /**

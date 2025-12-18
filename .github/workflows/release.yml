@@ -109,6 +109,22 @@ jobs:
           echo ""
           echo "Verifying kshana-ink package.json exists:"
           test -f kshana-ink/package.json && echo "✓ kshana-ink/package.json found" || echo "✗ kshana-ink/package.json NOT found"
+          echo ""
+          echo "Verifying Test_Images and Test_videos folders exist:"
+          if [ -d "kshana-desktop/Test_Images" ]; then
+            echo "✓ Test_Images folder found"
+            echo "  Images: $(ls kshana-desktop/Test_Images/ | wc -l) files"
+            ls kshana-desktop/Test_Images/
+          else
+            echo "✗ Test_Images folder NOT found - images won't load in production!"
+          fi
+          if [ -d "kshana-desktop/Test_videos" ]; then
+            echo "✓ Test_videos folder found"
+            echo "  Videos: $(ls kshana-desktop/Test_videos/*.mp4 2>/dev/null | wc -l) files"
+            ls kshana-desktop/Test_videos/*.mp4 2>/dev/null || echo "  No .mp4 files found"
+          else
+            echo "✗ Test_videos folder NOT found - videos won't load in production!"
+          fi
 
       - name: Build kshana-ink
         run: |
