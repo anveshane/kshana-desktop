@@ -283,3 +283,6 @@ venv.bak/
 src/node_modules  → release/app/node_modules
 
 .kshana
+
+# Generated backend resource directory
+resources/kshana-ink

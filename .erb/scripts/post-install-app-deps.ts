@@ -1,55 +1,16 @@
 /// <reference types="node" />
-import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import webpackPaths from '../configs/webpack.paths';
 
-const { appPath, appPackagePath, appNodeModulesPath } = webpackPaths;
+const { appPath, appPackagePath } = webpackPaths;
 
 /**
- * Post-install script to handle kshana-ink file dependency.
+ * Post-install script for app dependencies.
  * 
- * This script:
- * 1. Copies kshana-ink to release/app/node_modules (dereferencing symlinks)
- * 2. Removes file dependency from release/app/package.json
- * 3. Verifies no symlinks exist (fails build if found)
- * 4. Removes source files, keeps only dist/, package.json, and node_modules
+ * Note: kshana-ink is now handled separately via prepare-backend-resource.ts
+ * and included in extraResources, so it's no longer processed here.
  */
-
-function findSymlinks(dir: string): string[] {
-  const symlinks: string[] = [];
-  
-  function traverse(currentDir: string) {
-    if (!fs.existsSync(currentDir)) {
-      return;
-    }
-    
-    const entries = fs.readdirSync(currentDir);
-    
-    for (const entry of entries) {
-      const fullPath = path.join(currentDir, entry);
-      
-      try {
-        const stats = fs.lstatSync(fullPath);
-        
-        if (stats.isSymbolicLink()) {
-          symlinks.push(fullPath);
-        } else if (stats.isDirectory()) {
-          // Skip node_modules to avoid deep traversal
-          if (entry !== 'node_modules') {
-            traverse(fullPath);
-          }
-        }
-      } catch (err) {
-        // Skip files we can't access
-        continue;
-      }
-    }
-  }
-  
-  traverse(dir);
-  return symlinks;
-}
 
 // Check if release/app exists
 if (!fs.existsSync(appPath)) {
@@ -63,163 +24,5 @@ if (!fs.existsSync(appPackagePath)) {
   process.exit(0);
 }
 
-// Read package.json
-const packageJson = JSON.parse(fs.readFileSync(appPackagePath, 'utf-8'));
-
-// Check if kshana-ink is a file dependency
-const kshanaInkDep = packageJson.dependencies?.['kshana-ink'];
-if (!kshanaInkDep || !kshanaInkDep.startsWith('file:')) {
-  console.log('kshana-ink is not a file dependency, skipping post-install-app-deps');
-  process.exit(0);
-}
-
-console.log('Processing kshana-ink file dependency...');
-
-// Get the source path (relative to release/app)
-const filePath = kshanaInkDep.replace('file:', '');
-let sourcePath = path.isAbsolute(filePath)
-  ? filePath
-  : path.resolve(appPath, filePath);
-
-// Try multiple possible source locations
-const possibleSources = [
-  sourcePath, // Original resolved path
-  path.resolve(appPath, '../../node_modules/kshana-ink'), // Relative to release/app
-  path.resolve(appPath, '../../../node_modules/kshana-ink'), // If release/app is nested
-  path.resolve(appPath, '../../kshana-ink'), // Sibling directory (CI workflow)
-];
-
-// Find the first existing source
-let foundSource: string | null = null;
-for (const possibleSource of possibleSources) {
-  if (fs.existsSync(possibleSource)) {
-    foundSource = possibleSource;
-    console.log(`Found kshana-ink source at: ${foundSource}`);
-    break;
-  }
-}
-
-if (!foundSource) {
-  console.error(`✗ ERROR: kshana-ink source not found. Checked:`);
-  possibleSources.forEach(src => console.error(`  - ${src}`));
-  process.exit(1);
-}
-
-sourcePath = foundSource;
-const kshanaInkTargetPath = path.join(appNodeModulesPath, 'kshana-ink');
-
-// Ensure node_modules exists
-if (!fs.existsSync(appNodeModulesPath)) {
-  fs.mkdirSync(appNodeModulesPath, { recursive: true });
-}
-
-// Remove existing kshana-ink (whether symlink or directory)
-if (fs.existsSync(kshanaInkTargetPath)) {
-  console.log('Removing existing kshana-ink from node_modules...');
-  fs.rmSync(kshanaInkTargetPath, { recursive: true, force: true });
-}
-
-// Copy kshana-ink using cp -RL to dereference symlinks
-console.log(`Copying kshana-ink from ${sourcePath} to ${kshanaInkTargetPath}...`);
-try {
-  execSync(`cp -RL "${sourcePath}" "${kshanaInkTargetPath}"`, {
-    stdio: 'inherit',
-  });
-  console.log('✓ kshana-ink copied successfully');
-} catch (error) {
-  console.error(`✗ ERROR: Failed to copy kshana-ink: ${error}`);
-  process.exit(1);
-}
-
-// Remove source files, keep only dist/, package.json, and node_modules
-console.log('Cleaning up kshana-ink (removing source files)...');
-const entries = fs.readdirSync(kshanaInkTargetPath);
-
-for (const entry of entries) {
-  const fullPath = path.join(kshanaInkTargetPath, entry);
-  
-  // Keep these directories/files
-  if (entry === 'dist' || entry === 'package.json' || entry === 'node_modules') {
-    continue;
-  }
-  
-  try {
-    const stats = fs.lstatSync(fullPath);
-    if (stats.isDirectory()) {
-      fs.rmSync(fullPath, { recursive: true, force: true });
-      console.log(`  Removed directory: ${entry}`);
-    } else if (stats.isFile()) {
-      fs.unlinkSync(fullPath);
-      console.log(`  Removed file: ${entry}`);
-    }
-  } catch (err) {
-    console.warn(`  Warning: Could not remove ${entry}: ${(err as Error).message}`);
-  }
-}
-
-// CRITICAL: Verify no symlinks exist
-console.log('Verifying no symlinks exist in kshana-ink...');
-const symlinks = findSymlinks(kshanaInkTargetPath);
-
-if (symlinks.length > 0) {
-  console.error('✗ ERROR: Symlinks found in kshana-ink!');
-  symlinks.forEach(symlink => {
-    console.error(`  - ${symlink}`);
-  });
-  console.error('Build failed: No symlinks allowed in production builds');
-  process.exit(1);
-} else {
-  console.log('✓ No symlinks found - all files are real copies');
-}
-
-// CRITICAL: Verify dist folder exists and contains required files
-console.log('Verifying kshana-ink dist folder exists...');
-const distPath = path.join(kshanaInkTargetPath, 'dist');
-const serverIndexPath = path.join(distPath, 'server', 'index.js');
-const llmIndexPath = path.join(distPath, 'core', 'llm', 'index.js');
-
-if (!fs.existsSync(distPath)) {
-  console.error('✗ ERROR: dist folder not found in kshana-ink!');
-  console.error(`  Expected at: ${distPath}`);
-  console.error('  Contents of kshana-ink:');
-  try {
-    const contents = fs.readdirSync(kshanaInkTargetPath);
-    contents.forEach(item => console.error(`    - ${item}`));
-  } catch (err) {
-    console.error(`    (Could not read: ${(err as Error).message})`);
-  }
-  console.error('Build failed: kshana-ink must be built before packaging');
-  process.exit(1);
-} else {
-  console.log('✓ dist folder found');
-  
-  if (!fs.existsSync(serverIndexPath)) {
-    console.error(`✗ ERROR: dist/server/index.js not found at: ${serverIndexPath}`);
-    console.error('Build failed: kshana-ink server module missing');
-    process.exit(1);
-  } else {
-    console.log('✓ dist/server/index.js found');
-  }
-  
-  if (!fs.existsSync(llmIndexPath)) {
-    console.error(`✗ ERROR: dist/core/llm/index.js not found at: ${llmIndexPath}`);
-    console.error('Build failed: kshana-ink llm module missing');
-    process.exit(1);
-  } else {
-    console.log('✓ dist/core/llm/index.js found');
-  }
-}
-
-// Remove file dependency from release/app/package.json
-console.log('Updating release/app/package.json to remove file dependency...');
-delete packageJson.dependencies['kshana-ink'];
-
-// Write updated package.json
-fs.writeFileSync(
-  appPackagePath,
-  JSON.stringify(packageJson, null, 2) + '\n'
-);
-console.log('✓ release/app/package.json updated (file dependency removed)');
-
-console.log('✓ post-install-app-deps completed successfully');
+console.log('✓ post-install-app-deps completed (kshana-ink now handled via extraResources)');
 

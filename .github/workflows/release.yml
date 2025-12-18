@@ -140,37 +140,8 @@ jobs:
         working-directory: kshana-desktop
         run: |
           npm ci
-          # Replace symlinked kshana-ink with actual copy (no symlinks)
-          echo "Replacing kshana-ink symlink with actual copy (no symlinks)..."
-          if [ -L "node_modules/kshana-ink" ] || [ -d "node_modules/kshana-ink" ]; then
-            rm -rf node_modules/kshana-ink
-            cp -RL ../kshana-ink node_modules/kshana-ink
-            echo "✓ kshana-ink copied to node_modules (no symlinks)"
-          fi
-          # Verify dist folder exists after copy
-          echo "Verifying kshana-ink dist folder exists..."
-          if [ -d "node_modules/kshana-ink/dist" ]; then
-            echo "✓ dist folder found"
-            echo "  Contents:"
-            ls -la node_modules/kshana-ink/dist/ | head -10
-            if [ -f "node_modules/kshana-ink/dist/server/index.js" ]; then
-              echo "✓ dist/server/index.js found"
-            else
-              echo "✗ ERROR: dist/server/index.js NOT found!"
-              exit 1
-            fi
-            if [ -f "node_modules/kshana-ink/dist/core/llm/index.js" ]; then
-              echo "✓ dist/core/llm/index.js found"
-            else
-              echo "✗ ERROR: dist/core/llm/index.js NOT found!"
-              exit 1
-            fi
-          else
-            echo "✗ ERROR: dist folder NOT found in node_modules/kshana-ink!"
-            echo "  Contents of node_modules/kshana-ink:"
-            ls -la node_modules/kshana-ink/ || echo "  Directory doesn't exist"
-            exit 1
-          fi
+          echo "✓ Dependencies installed"
+          echo "Note: kshana-ink will be prepared by prepare-backend-resource.ts script during build"
 
       - name: Build Electron app
         working-directory: kshana-desktop

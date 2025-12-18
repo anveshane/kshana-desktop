@@ -152,158 +152,58 @@ class BackendManager extends EventEmitter {
         `Starting kshana-ink backend on port ${this.port} with provider ${overrides.llmProvider || 'default'}`,
       );
 
-      // Log module resolution paths for debugging
-      const appPath = app.isPackaged ? app.getAppPath() : __dirname;
-      log.info(`App path: ${appPath}`);
-      log.info(`App is packaged: ${app.isPackaged}`);
-      
-      // In packaged apps, node_modules might be in app.asar or unpacked
-      // Try to resolve the module path for diagnostics
-      try {
-        const Module = require('module');
-        const nodeModulesPath = app.isPackaged
-          ? path.join(process.resourcesPath, 'app.asar', 'node_modules')
-          : path.join(appPath, '../../node_modules');
-        log.info(`Node modules path: ${nodeModulesPath}`);
-        
-        // Check if kshana-ink exists
-        const kshanaInkPath = path.join(nodeModulesPath, 'kshana-ink');
-        const fs = require('fs');
-        if (fs.existsSync(kshanaInkPath)) {
-          log.info(`Found kshana-ink at: ${kshanaInkPath}`);
-        } else {
-          log.warn(`kshana-ink not found at: ${kshanaInkPath}`);
-          // Try unpacked location
-          const unpackedPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'kshana-ink');
-          if (fs.existsSync(unpackedPath)) {
-            log.info(`Found kshana-ink at unpacked location: ${unpackedPath}`);
-          }
-        }
-      } catch (err) {
-        log.warn(`Could not check module paths: ${(err as Error).message}`);
-      }
-
-      // Use dynamic import with package exports
-      // kshana-ink now properly exports subpaths via package.json exports field
+      // Resolve kshana-ink path based on environment
+      // In production: use extraResources (process.resourcesPath/kshana-ink)
+      // In development: use node_modules
       const fs = require('fs');
-
-      // Find the actual node_modules directory for proper module resolution
-      let nodeModulesDir: string;
+      let kshanaInkPath: string;
+      
       if (app.isPackaged) {
-        // In packaged app, try unpacked first (for native modules), then asar
-        const unpackedPath = path.join(
-          process.resourcesPath,
-          'app.asar.unpacked',
-          'node_modules',
-          'kshana-ink',
-        );
-        const unpackedServerPath = path.join(unpackedPath, 'dist', 'server', 'index.js');
-        const asarPath = path.join(
-          process.resourcesPath,
-          'app.asar',
-          'node_modules',
-          'kshana-ink',
-        );
-        const asarServerPath = path.join(asarPath, 'dist', 'server', 'index.js');
-        
-        // Check unpacked location first (where kshana-ink should be due to asarUnpack)
-        if (fs.existsSync(unpackedServerPath)) {
-          log.info(`Found kshana-ink dist files in unpacked location: ${unpackedPath}`);
-          nodeModulesDir = path.join(
-            process.resourcesPath,
-            'app.asar.unpacked',
-            'node_modules',
-          );
-        } else if (fs.existsSync(asarServerPath)) {
-          log.info(`Found kshana-ink dist files in asar location: ${asarPath}`);
-          nodeModulesDir = path.join(
-            process.resourcesPath,
-            'app.asar',
-            'node_modules',
-          );
-        } else {
-          // Neither location has the dist files - provide detailed error
-          const checkedPaths = [
-            `Unpacked: ${unpackedPath}`,
-            `ASAR: ${asarPath}`,
-          ];
-          const unpackedExists = fs.existsSync(unpackedPath);
-          const asarExists = fs.existsSync(asarPath);
-          
-          let errorMsg = `kshana-ink dist files not found. Checked:\n`;
-          checkedPaths.forEach(p => errorMsg += `  - ${p}\n`);
-          
-          if (unpackedExists) {
-            errorMsg += `\nUnpacked directory exists but dist/server/index.js is missing.\n`;
-            errorMsg += `Contents of unpacked kshana-ink:\n`;
-            try {
-              const contents = fs.readdirSync(unpackedPath);
-              contents.forEach((item: string) => errorMsg += `  - ${item}\n`);
-            } catch (err) {
-              errorMsg += `  (Could not read directory: ${(err as Error).message})\n`;
-            }
-          } else if (asarExists) {
-            errorMsg += `\nASAR directory exists but dist/server/index.js is missing.\n`;
-          } else {
-            errorMsg += `\nNeither unpacked nor asar kshana-ink directory found.\n`;
-          }
-          
-          errorMsg += `\nPlease ensure kshana-ink is built (run 'pnpm build' in kshana-ink directory) and included in the app package.`;
-          throw new Error(errorMsg);
-        }
+        // In packaged app, kshana-ink is in extraResources
+        kshanaInkPath = path.join(process.resourcesPath, 'kshana-ink');
+        log.info(`App is packaged, using resources path: ${kshanaInkPath}`);
       } else {
-        // In development, __dirname is .erb/dll, so project root is ../../
-        // Go directly to the project root's node_modules
+        // In development, use node_modules
         const projectRoot = path.resolve(__dirname, '..', '..');
-        const projectNodeModules = path.join(projectRoot, 'node_modules');
-        const kshanaInkPath = path.join(projectNodeModules, 'kshana-ink');
-        
-        if (fs.existsSync(kshanaInkPath)) {
-          nodeModulesDir = projectNodeModules;
-        } else {
-          // Fallback: search up the directory tree
-          let searchDir = __dirname;
-          nodeModulesDir = '';
-          for (let i = 0; i < 5; i += 1) {
-            const candidatePath = path.join(searchDir, 'node_modules', 'kshana-ink');
-            if (fs.existsSync(candidatePath)) {
-              nodeModulesDir = path.join(searchDir, 'node_modules');
-              break;
-            }
-            searchDir = path.dirname(searchDir);
-          }
-        }
-        
-        if (!nodeModulesDir) {
-          throw new Error(
-            'Could not find kshana-ink in node_modules. Please run npm install.',
-          );
-        }
+        kshanaInkPath = path.join(projectRoot, 'node_modules', 'kshana-ink');
+        log.info(`App is in development, using node_modules path: ${kshanaInkPath}`);
       }
 
-      log.info(`Resolved node_modules directory: ${nodeModulesDir}`);
+      // Verify kshana-ink directory exists
+      if (!fs.existsSync(kshanaInkPath)) {
+        let errorMsg = `kshana-ink not found at: ${kshanaInkPath}\n`;
+        if (app.isPackaged) {
+          errorMsg += `\nIn production builds, kshana-ink should be in extraResources.\n`;
+          errorMsg += `Please ensure the prepare-backend-resource script ran successfully before packaging.\n`;
+          errorMsg += `Expected location: resources/kshana-ink (which gets copied to process.resourcesPath/kshana-ink)`;
+        } else {
+          errorMsg += `\nIn development, kshana-ink should be in node_modules.\n`;
+          errorMsg += `Please run: npm install`;
+        }
+        throw new Error(errorMsg);
+      }
+
+      log.info(`Found kshana-ink at: ${kshanaInkPath}`);
 
       // Use absolute paths to the kshana-ink exports
       // This bypasses Node.js module resolution which looks relative to the bundle location
-      const serverModulePath = path.join(nodeModulesDir, 'kshana-ink', 'dist', 'server', 'index.js');
-      const llmModulePath = path.join(nodeModulesDir, 'kshana-ink', 'dist', 'core', 'llm', 'index.js');
+      const serverModulePath = path.join(kshanaInkPath, 'dist', 'server', 'index.js');
+      const llmModulePath = path.join(kshanaInkPath, 'dist', 'core', 'llm', 'index.js');
 
       log.info(`Loading kshana-ink server from: ${serverModulePath}`);
       log.info(`Loading kshana-ink llm from: ${llmModulePath}`);
 
       // Verify files exist with detailed error messages
       if (!fs.existsSync(serverModulePath)) {
-        const kshanaInkDir = path.join(nodeModulesDir, 'kshana-ink');
         let errorMsg = `kshana-ink server module not found at: ${serverModulePath}\n`;
-        errorMsg += `\nNode modules directory: ${nodeModulesDir}\n`;
-        errorMsg += `kshana-ink directory: ${kshanaInkDir}\n`;
+        errorMsg += `\nkshana-ink directory: ${kshanaInkPath}\n`;
         
-        if (fs.existsSync(kshanaInkDir)) {
+        if (fs.existsSync(kshanaInkPath)) {
           errorMsg += `\nContents of kshana-ink directory:\n`;
           try {
-            const contents = fs.readdirSync(kshanaInkDir);
+            const contents = fs.readdirSync(kshanaInkPath);
             contents.forEach((item: string) => {
-              const itemPath = path.join(kshanaInkDir, item);
+              const itemPath = path.join(kshanaInkPath, item);
               const stats = fs.statSync(itemPath);
               errorMsg += `  - ${item} (${stats.isDirectory() ? 'dir' : 'file'})\n`;
             });
@@ -311,14 +211,18 @@ class BackendManager extends EventEmitter {
             errorMsg += `  (Could not read: ${(err as Error).message})\n`;
           }
         } else {
-          errorMsg += `\nkshana-ink directory does not exist at: ${kshanaInkDir}\n`;
+          errorMsg += `\nkshana-ink directory does not exist at: ${kshanaInkPath}\n`;
         }
         
-        errorMsg += `\nPlease run 'pnpm build' in kshana-ink directory to generate dist files.`;
+        if (app.isPackaged) {
+          errorMsg += `\nPlease ensure kshana-ink is built and the prepare-backend-resource script ran successfully.`;
+        } else {
+          errorMsg += `\nPlease run 'pnpm build' in kshana-ink directory to generate dist files.`;
+        }
         throw new Error(errorMsg);
       }
       if (!fs.existsSync(llmModulePath)) {
-        throw new Error(`kshana-ink llm module not found at: ${llmModulePath}. Server module found but llm module missing. Run 'pnpm build' in kshana-ink directory.`);
+        throw new Error(`kshana-ink llm module not found at: ${llmModulePath}. Server module found but llm module missing. ${app.isPackaged ? 'Ensure prepare-backend-resource script ran successfully.' : 'Run "pnpm build" in kshana-ink directory.'}`);
       }
 
       // Use Function constructor to create dynamic import that webpack can't analyze

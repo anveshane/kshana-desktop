@@ -253,17 +253,17 @@ export default function ChatPanel() {
                 prev.map((msg) =>
                   msg.id === toolCall.messageId
                     ? {
-                      ...msg,
-                      meta: {
-                        ...msg.meta,
-                        toolCallId,
-                        toolName,
-                        args,
-                        status: toolStatus === 'error' ? 'error' : 'completed',
-                        result: result ?? error,
-                        duration,
-                      },
-                    }
+                        ...msg,
+                        meta: {
+                          ...msg.meta,
+                          toolCallId,
+                          toolName,
+                          args,
+                          status: toolStatus === 'error' ? 'error' : 'completed',
+                          result: result ?? error,
+                          duration,
+                        },
+                      }
                     : msg,
                 ),
               );
@@ -303,11 +303,11 @@ export default function ChatPanel() {
                 return prev.map((msg, idx) =>
                   idx === prev.length - 1
                     ? {
-                      ...msg,
-                      type: 'agent_response',
-                      content: output,
-                      timestamp: Date.now(),
-                    }
+                        ...msg,
+                        type: 'agent_response',
+                        content: output,
+                        timestamp: Date.now(),
+                      }
                     : msg,
                 );
               }
@@ -361,10 +361,10 @@ export default function ChatPanel() {
                 return prev.map((msg, idx) =>
                   idx === prev.length - 1
                     ? {
-                      ...msg,
-                      content: question,
-                      timestamp: Date.now(),
-                    }
+                        ...msg,
+                        content: question,
+                        timestamp: Date.now(),
+                      }
                     : msg,
                 );
               }
@@ -407,13 +407,13 @@ export default function ChatPanel() {
                 prev.map((msg) =>
                   msg.id === lastTodoMessageIdRef.current
                     ? {
-                      ...msg,
-                      meta: {
-                        ...msg.meta,
-                        todos,
-                      },
-                      timestamp: Date.now(), // Update timestamp for live updates
-                    }
+                        ...msg,
+                        meta: {
+                          ...msg.meta,
+                          todos,
+                        },
+                        timestamp: Date.now(), // Update timestamp for live updates
+                      }
                     : msg,
                 ),
               );
@@ -573,7 +573,7 @@ export default function ChatPanel() {
     try {
       const currentState = await window.electron.backend.getState();
       if (currentState.status !== 'ready') {
-        const errorMsg = currentState.message
+        const errorMsg = currentState.message 
           ? `Backend not ready: ${currentState.message}`
           : `Backend not ready (status: ${currentState.status})`;
         throw new Error(errorMsg);
@@ -620,7 +620,7 @@ export default function ChatPanel() {
 
           if (event.code !== 1000) {
             reconnectTimeoutRef.current = setTimeout(() => {
-              connectWebSocket().catch(() => { });
+              connectWebSocket().catch(() => {});
             }, 3000);
           }
         };
@@ -708,7 +708,7 @@ export default function ChatPanel() {
       }
     };
 
-    bootstrap().catch(() => { });
+    bootstrap().catch(() => {});
 
     const unsubscribeBackend = window.electron.backend.onStateChange(
       (state: BackendState) => {

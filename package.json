@@ -34,7 +34,7 @@
     "lint": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx",
     "lint:fix": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx --fix",
     "package": "ts-node ./.erb/scripts/clean.js dist && ts-node ./.erb/scripts/install-app-deps.ts && npm run build && electron-builder build --publish never && npm run build:dll",
-    "release": "ts-node ./.erb/scripts/clean.js dist && ts-node ./.erb/scripts/install-app-deps.ts && ts-node ./.erb/scripts/post-install-app-deps.ts && npm run build && ts-node ./.erb/scripts/verify-kshana-ink.ts && electron-builder build --publish always",
+    "release": "ts-node ./.erb/scripts/prepare-backend-resource.ts && ts-node ./.erb/scripts/clean.js dist && ts-node ./.erb/scripts/install-app-deps.ts && npm run build && ts-node ./.erb/scripts/verify-kshana-ink.ts && electron-builder build --publish always",
     "rebuild": "electron-rebuild --parallel --types prod,dev,optional --module-dir release/app",
     "prestart": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.main.dev.ts",
     "start": "ts-node ./.erb/scripts/check-port-in-use.js && npm run prestart && npm run start:renderer",
@@ -189,25 +189,12 @@
     "beforePack": ".erb/scripts/before-pack.js",
     "afterSign": ".erb/scripts/notarize.js",
     "asarUnpack": [
-      "**/*.{node,dll}",
-      "**/node_modules/kshana-ink/**"
+      "**/*.{node,dll}"
     ],
     "files": [
       "dist",
       "node_modules",
-      "package.json",
-      "!**/node_modules/kshana-ink/**/.env.example",
-      "!**/node_modules/kshana-ink/**/.env",
-      "!**/node_modules/kshana-ink/**/*.md",
-      "!**/node_modules/kshana-ink/**/src/**",
-      "!**/node_modules/kshana-ink/**/tests/**",
-      "!**/node_modules/kshana-ink/**/test/**",
-      "!**/node_modules/kshana-ink/**/tsconfig.json",
-      "!**/node_modules/kshana-ink/**/eslint.config.*",
-      "!**/node_modules/kshana-ink/**/.gitignore",
-      "!**/node_modules/kshana-ink/**/prompts/**",
-      "!**/node_modules/kshana-ink/**/workflows/**",
-      "!**/node_modules/kshana-ink/**/.env.example"
+      "package.json"
     ],
     "mac": {
       "notarize": false,
@@ -257,7 +244,12 @@
     "extraResources": [
       "./assets/**",
       "./test_image/**",
-      "./test_video/**"
+      "./test_video/**",
+      {
+        "from": "./resources/kshana-ink",
+        "to": "kshana-ink",
+        "filter": ["**/*"]
+      }
     ],
     "publish": {
       "provider": "github",
