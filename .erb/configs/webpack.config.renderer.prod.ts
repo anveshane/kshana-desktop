@@ -154,14 +154,13 @@ const configuration: webpack.Configuration = {
       // Read from root package.json (which exists at build time) and exclude React/React-DOM
       // so they get bundled into the renderer bundle
       const rootPkg = require('../../package.json');
+      // Exclude React, React-DOM, and any React-related libraries from externals
       const deps = Object.keys(rootPkg.dependencies || {}).filter(
-        (dep) => dep !== 'react' && dep !== 'react-dom' && dep !== 'kshana-ink'
+        (dep) => !dep.includes('react') && !dep.includes('lucide') && !dep.includes('remark')
       );
       return [
         ...deps,
-        // Keep kshana-ink and its dependencies externalized (loaded at runtime)
-        'kshana-ink',
-        /^kshana-ink\/.*/,
+        // Keep runtime dependencies external
         'fastify',
         '@fastify/websocket',
         '@fastify/cors',
@@ -180,6 +179,16 @@ const configuration: webpack.Configuration = {
       ];
     }
   })(),
+
+  resolve: {
+    alias: {
+      // Stub kshana-ink in renderer
+      'kshana-ink': false,
+      // Force React resolution to project root
+      'react': path.dirname(require.resolve('react/package.json')),
+      'react-dom': path.dirname(require.resolve('react-dom/package.json')),
+    },
+  },
 };
 
 // Use custom merge to replace externals array instead of concatenating
