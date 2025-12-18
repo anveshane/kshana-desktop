@@ -153,6 +153,44 @@ if (symlinks.length > 0) {
   console.log('✓ No symlinks found - all files are real copies');
 }
 
+// CRITICAL: Verify dist folder exists and contains required files
+console.log('Verifying kshana-ink dist folder exists...');
+const distPath = path.join(kshanaInkTargetPath, 'dist');
+const serverIndexPath = path.join(distPath, 'server', 'index.js');
+const llmIndexPath = path.join(distPath, 'core', 'llm', 'index.js');
+
+if (!fs.existsSync(distPath)) {
+  console.error('✗ ERROR: dist folder not found in kshana-ink!');
+  console.error(`  Expected at: ${distPath}`);
+  console.error('  Contents of kshana-ink:');
+  try {
+    const contents = fs.readdirSync(kshanaInkTargetPath);
+    contents.forEach(item => console.error(`    - ${item}`));
+  } catch (err) {
+    console.error(`    (Could not read: ${(err as Error).message})`);
+  }
+  console.error('Build failed: kshana-ink must be built before packaging');
+  process.exit(1);
+} else {
+  console.log('✓ dist folder found');
+  
+  if (!fs.existsSync(serverIndexPath)) {
+    console.error(`✗ ERROR: dist/server/index.js not found at: ${serverIndexPath}`);
+    console.error('Build failed: kshana-ink server module missing');
+    process.exit(1);
+  } else {
+    console.log('✓ dist/server/index.js found');
+  }
+  
+  if (!fs.existsSync(llmIndexPath)) {
+    console.error(`✗ ERROR: dist/core/llm/index.js not found at: ${llmIndexPath}`);
+    console.error('Build failed: kshana-ink llm module missing');
+    process.exit(1);
+  } else {
+    console.log('✓ dist/core/llm/index.js found');
+  }
+}
+
 // Remove file dependency from release/app/package.json
 console.log('Updating release/app/package.json to remove file dependency...');
 delete packageJson.dependencies['kshana-ink'];

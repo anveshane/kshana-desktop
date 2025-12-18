@@ -61,36 +61,58 @@ export async function copyVideoToScene(
   const targetPath = `${videoDir}/${targetFileName}`;
   const relativePath = `.kshana/agent/scenes/${sceneFolder}/video/${targetFileName}`;
 
-  // Read video as base64 and write as binary (similar to images)
+  // Try direct copy first (more efficient for large video files)
+  // Fallback to base64 if copy fails
   try {
     // Remove file:// protocol if present
     const cleanPath = videoPath.replace(/^file:\/\//, '');
     
-    // Read video file as base64
-    const base64DataUri = await window.electron.project.readFileBase64(cleanPath);
-    if (!base64DataUri) {
-      throw new Error(`Failed to read video file: ${cleanPath}`);
-    }
-
-    // Extract base64 data from data URI
-    const base64Match = base64DataUri.match(/^data:video\/[^;]+;base64,(.+)$/);
-    if (!base64Match) {
-      throw new Error('Invalid base64 data URI format');
-    }
-
-    const base64Data = base64Match[1];
-
-    // Write binary file from base64 data
-    await window.electron.project.writeFileBinary(targetPath, base64Data);
-  } catch (error) {
-    console.warn(`Failed to convert and write video using base64, falling back to copy:`, error);
-    // Fallback to direct copy if base64 conversion fails
-    await window.electron.project.copy(videoPath, videoDir);
-    // Rename if needed
-    const copiedFileName = videoPath.split('/').pop();
+    // Use direct copy for better performance with large video files
+    const copiedPath = await window.electron.project.copy(cleanPath, videoDir);
+    
+    // Rename if needed to match target filename
+    const copiedFileName = copiedPath.split('/').pop();
     if (copiedFileName && copiedFileName !== targetFileName) {
-      const copiedFilePath = `${videoDir}/${copiedFileName}`;
-      await window.electron.project.rename(copiedFilePath, targetFileName);
+      await window.electron.project.rename(copiedPath, targetFileName);
+    }
+    
+    console.log(`[videoWorkspace] Successfully copied video: ${cleanPath} -> ${targetPath}`);
+  } catch (copyError) {
+    console.warn(
+      `[videoWorkspace] Direct copy failed, trying base64 conversion:`,
+      copyError,
+    );
+    
+    // Fallback to base64 conversion if direct copy fails
+    try {
+      // Remove file:// protocol if present
+      const cleanPath = videoPath.replace(/^file:\/\//, '');
+      
+      // Read video file as base64
+      const base64DataUri = await window.electron.project.readFileBase64(cleanPath);
+      if (!base64DataUri) {
+        throw new Error(`Failed to read video file: ${cleanPath}`);
+      }
+
+      // Extract base64 data from data URI
+      const base64Match = base64DataUri.match(/^data:video\/[^;]+;base64,(.+)$/);
+      if (!base64Match) {
+        throw new Error('Invalid base64 data URI format');
+      }
+
+      const base64Data = base64Match[1];
+
+      // Write binary file from base64 data
+      await window.electron.project.writeFileBinary(targetPath, base64Data);
+      console.log(`[videoWorkspace] Successfully wrote video via base64: ${targetPath}`);
+    } catch (base64Error) {
+      console.error(
+        `[videoWorkspace] Both copy methods failed for video: ${videoPath}`,
+        { copyError, base64Error },
+      );
+      throw new Error(
+        `Failed to copy video file: ${copyError instanceof Error ? copyError.message : String(copyError)}`,
+      );
     }
   }
 

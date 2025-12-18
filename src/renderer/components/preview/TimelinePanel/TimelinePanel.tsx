@@ -1201,14 +1201,29 @@ export default function TimelinePanel({
       );
       const relativePath = `videos/${videoFileName}`;
 
+      // Wait a bit to ensure file is fully written and flushed to disk
+      // This is especially important for large video files
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
       // Get video duration
       const video = document.createElement('video');
       video.preload = 'metadata';
-      video.src = `file://${destPath}`;
+      // Use resolved path for better compatibility
+      const resolvedVideoPath = await resolveAssetPathForDisplay(
+        relativePath,
+        projectDirectory,
+        useMockData,
+      );
+      video.src = resolvedVideoPath;
 
       // eslint-disable-next-line compat/compat
       await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Video metadata loading timeout'));
+        }, 10000); // 10 second timeout
+
         video.onloadedmetadata = () => {
+          clearTimeout(timeout);
           const { duration } = video;
 
           setImportedVideos((prev) => [
@@ -1221,16 +1236,21 @@ export default function TimelinePanel({
           ]);
 
           // TODO: Save imported video to asset manifest via ProjectContext
-          console.log('Imported video:', relativePath, duration);
+          console.log('[TimelinePanel] Imported video:', relativePath, duration);
 
           resolve();
         };
-        video.onerror = reject;
+        video.onerror = (err) => {
+          clearTimeout(timeout);
+          console.error('[TimelinePanel] Failed to load imported video:', err);
+          reject(new Error(`Failed to load video: ${video.error?.message || 'Unknown error'}`));
+        };
       });
-    } catch {
+    } catch (error) {
       // Failed to import video
+      console.error('[TimelinePanel] Video import failed:', error);
     }
-  }, [projectDirectory, totalDuration]);
+  }, [projectDirectory, totalDuration, useMockData]);
 
   // Drag handlers removed - not used in unified timeline
 
