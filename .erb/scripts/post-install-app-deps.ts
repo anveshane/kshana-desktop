@@ -77,17 +77,36 @@ console.log('Processing kshana-ink file dependency...');
 
 // Get the source path (relative to release/app)
 const filePath = kshanaInkDep.replace('file:', '');
-const sourcePath = path.isAbsolute(filePath)
+let sourcePath = path.isAbsolute(filePath)
   ? filePath
   : path.resolve(appPath, filePath);
 
-const kshanaInkTargetPath = path.join(appNodeModulesPath, 'kshana-ink');
+// Try multiple possible source locations
+const possibleSources = [
+  sourcePath, // Original resolved path
+  path.resolve(appPath, '../../node_modules/kshana-ink'), // Relative to release/app
+  path.resolve(appPath, '../../../node_modules/kshana-ink'), // If release/app is nested
+  path.resolve(appPath, '../../kshana-ink'), // Sibling directory (CI workflow)
+];
 
-// Check if source exists
-if (!fs.existsSync(sourcePath)) {
-  console.error(`✗ ERROR: kshana-ink source not found at: ${sourcePath}`);
+// Find the first existing source
+let foundSource: string | null = null;
+for (const possibleSource of possibleSources) {
+  if (fs.existsSync(possibleSource)) {
+    foundSource = possibleSource;
+    console.log(`Found kshana-ink source at: ${foundSource}`);
+    break;
+  }
+}
+
+if (!foundSource) {
+  console.error(`✗ ERROR: kshana-ink source not found. Checked:`);
+  possibleSources.forEach(src => console.error(`  - ${src}`));
   process.exit(1);
 }
+
+sourcePath = foundSource;
+const kshanaInkTargetPath = path.join(appNodeModulesPath, 'kshana-ink');
 
 // Ensure node_modules exists
 if (!fs.existsSync(appNodeModulesPath)) {

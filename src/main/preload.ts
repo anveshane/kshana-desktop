@@ -63,6 +63,9 @@ const projectBridge = {
   readTree(dirPath: string): Promise<FileNode> {
     return ipcRenderer.invoke('project:read-tree', dirPath);
   },
+  fileExists(filePath: string): Promise<boolean> {
+    return ipcRenderer.invoke('project:file-exists', filePath);
+  },
   readFile(filePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:read-file', filePath);
   },

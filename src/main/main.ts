@@ -177,6 +177,18 @@ ipcMain.handle('project:get-resources-path', async () => {
 });
 
 ipcMain.handle(
+  'project:file-exists',
+  async (_event, filePath: string): Promise<boolean> => {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+);
+
+ipcMain.handle(
   'project:read-file',
   async (_event, filePath: string): Promise<string | null> => {
     try {

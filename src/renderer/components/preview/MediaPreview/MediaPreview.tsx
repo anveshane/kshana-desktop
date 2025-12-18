@@ -79,41 +79,75 @@ export default function MediaPreview({ file }: MediaPreviewProps) {
     }
   }, [file.path, file.type]);
 
-  // Video error handler
+  // Video error handler with detailed error messages
   const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const videoElement = e.currentTarget;
     const error = videoElement.error;
-    let errorMsg = 'Failed to load video';
+    let errorMsg = 'An error occurred while loading the video file.';
+    let details: string[] = [];
     
     if (error) {
       switch (error.code) {
         case error.MEDIA_ERR_ABORTED:
-          errorMsg = 'Video loading aborted';
+          errorMsg = 'Video loading was aborted.';
+          details.push('The video load was interrupted.');
           break;
         case error.MEDIA_ERR_NETWORK:
-          errorMsg = 'Network error while loading video';
+          errorMsg = 'Network error while loading video.';
+          details.push('Unable to access the video file.');
+          details.push('Check if the file exists and is accessible.');
           break;
         case error.MEDIA_ERR_DECODE:
-          errorMsg = 'Video decoding error';
+          errorMsg = 'Video decoding error.';
+          details.push('The video file may be corrupted or in an unsupported format.');
+          details.push('Try re-exporting or converting the video.');
           break;
         case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-          errorMsg = 'Video format not supported or file not found';
+          errorMsg = 'Video file not found or format not supported.';
+          details.push(`File path: ${file.path}`);
+          details.push(`Resolved URL: ${videoElement.src}`);
+          details.push('The file may have been moved, deleted, or is in an unsupported format.');
+          details.push('Supported formats: MP4, WebM');
           break;
         default:
-          errorMsg = `Video error (code: ${error.code})`;
+          errorMsg = `Video error (code: ${error.code}).`;
+          details.push(`Error code: ${error.code}`);
       }
+    } else {
+      // No error object - likely file not found
+      errorMsg = 'Video file not found or cannot be loaded.';
+      details.push(`File path: ${file.path}`);
+      details.push(`Resolved URL: ${videoElement.src}`);
+      details.push('The file may have been moved or deleted.');
     }
     
-    console.error(`[MediaPreview] Video load error for ${file.path}:`, errorMsg, {
+    // Add troubleshooting suggestions
+    if (details.length > 0) {
+      details.push('');
+      details.push('Troubleshooting:');
+      details.push('• Verify the file exists at the specified path');
+      details.push('• Check file permissions');
+      details.push('• Ensure the video format is supported (MP4, WebM)');
+      details.push('• Try re-importing or copying the video file');
+    }
+    
+    const fullErrorMsg = `${errorMsg}\n\n${details.join('\n')}`;
+    
+    console.error(`[MediaPreview] Video load error for ${file.path}:`, {
+      errorMsg,
+      details,
       src: videoElement.src,
       errorCode: error?.code,
+      filePath: file.path,
+      resolvedUrl: resolvedUrl,
     });
-    setError(errorMsg);
+    
+    setError(fullErrorMsg);
   };
   
   const handleVideoLoadStart = () => {
     setError(null);
-    console.log(`[MediaPreview] Video load started: ${file.path}`);
+    console.log(`[MediaPreview] Video load started: ${file.path} -> ${resolvedUrl}`);
   };
   
   const handleVideoCanPlay = () => {
@@ -137,13 +171,44 @@ export default function MediaPreview({ file }: MediaPreviewProps) {
         );
       case 'video':
         if (error) {
+          // Split error message into lines for better display
+          const errorLines = error.split('\n').filter((line: string) => line.trim());
+          const mainError = errorLines[0] || 'An error occurred while loading the video.';
+          const details = errorLines.slice(1);
+          
           return (
             <div className={styles.error}>
-              <p>{error}</p>
-              <p className={styles.fileName}>{file.name}</p>
-              <p className={styles.fileName} style={{ fontSize: '12px', marginTop: '8px' }}>
-                Path: {file.path}
-              </p>
+              <div className={styles.errorIcon}>⚠️</div>
+              <h3 className={styles.errorTitle}>Video Loading Error</h3>
+              <p className={styles.errorMessage}>{mainError}</p>
+              {details.length > 0 && (
+                <div className={styles.errorDetails}>
+                  {details.map((line: string, index: number) => {
+                    // Style troubleshooting section differently
+                    const isTroubleshooting = line.startsWith('•') || line === 'Troubleshooting:';
+                    return (
+                      <p
+                        key={index}
+                        className={
+                          isTroubleshooting
+                            ? styles.errorTroubleshooting
+                            : styles.errorDetail
+                        }
+                      >
+                        {line}
+                      </p>
+                    );
+                  })}
+                </div>
+              )}
+              <div className={styles.errorFileInfo}>
+                <p className={styles.fileName}>
+                  <strong>File:</strong> {file.name}
+                </p>
+                <p className={styles.fileName} style={{ fontSize: '11px', marginTop: '4px' }}>
+                  <strong>Path:</strong> {file.path}
+                </p>
+              </div>
             </div>
           );
         }

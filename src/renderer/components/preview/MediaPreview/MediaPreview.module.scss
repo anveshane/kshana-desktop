@@ -61,12 +61,74 @@
 .loading,
 .error {
   @include flex-center;
+  @include flex-column;
   height: 100%;
+  padding: $spacing-xl;
   color: $color-text-muted;
   font-size: $font-size-base;
+  text-align: center;
+  max-width: 600px;
+  margin: 0 auto;
 }
 
 .error {
+  color: $color-text-primary;
+  background-color: rgba($color-error, 0.1);
+  border: 1px solid rgba($color-error, 0.3);
+  border-radius: $radius-md;
+}
+
+.errorIcon {
+  font-size: 48px;
+  margin-bottom: $spacing-md;
+}
+
+.errorTitle {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
   color: $color-error;
+  margin: 0 0 $spacing-sm 0;
+}
+
+.errorMessage {
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  margin: 0 0 $spacing-md 0;
+}
+
+.errorDetails {
+  text-align: left;
+  margin: $spacing-md 0;
+  padding: $spacing-md;
+  background-color: rgba($color-text-primary, 0.03);
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
+}
+
+.errorDetail {
+  margin: $spacing-xs 0;
+  color: $color-text-secondary;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  word-break: break-all;
+}
+
+.errorTroubleshooting {
+  margin: $spacing-xs 0;
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  
+  &:first-of-type {
+    margin-top: $spacing-sm;
+    font-weight: $font-weight-medium;
+  }
+}
+
+.errorFileInfo {
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1px solid rgba($color-text-primary, 0.1);
+  text-align: left;
 }
 

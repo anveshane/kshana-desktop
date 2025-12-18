@@ -61,33 +61,72 @@ export async function copyVideoToScene(
   const targetPath = `${videoDir}/${targetFileName}`;
   const relativePath = `.kshana/agent/scenes/${sceneFolder}/video/${targetFileName}`;
 
+  // Remove file:// protocol if present
+  const cleanPath = videoPath.replace(/^file:\/\//, '');
+  
+  console.log(`[videoWorkspace] Copying video to scene folder:`);
+  console.log(`  Source: ${videoPath} (cleaned: ${cleanPath})`);
+  console.log(`  Target: ${targetPath}`);
+  console.log(`  Scene: ${sceneFolder}, Version: ${version}`);
+
+  // Check if source file exists before attempting copy
+  // This prevents silent failures when the file doesn't exist
+  try {
+    // If it's a URL, we can't copy it directly - need to download first
+    if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
+      throw new Error(`Video path is a URL (${cleanPath}). URLs must be downloaded first before copying.`);
+    }
+    
+    // Verify source file exists using file-exists check (more efficient than reading)
+    const sourceExists = await window.electron.project.fileExists(cleanPath);
+    if (!sourceExists) {
+      throw new Error(`Source video file does not exist: ${cleanPath}`);
+    }
+    console.log(`[videoWorkspace] ✓ Source file verified: ${cleanPath}`);
+  } catch (checkError) {
+    const errorMsg = checkError instanceof Error ? checkError.message : String(checkError);
+    console.error(`[videoWorkspace] ✗ Source file check failed: ${errorMsg}`);
+    console.error(`[videoWorkspace]   Original path: ${videoPath}`);
+    console.error(`[videoWorkspace]   Cleaned path: ${cleanPath}`);
+    console.error(`[videoWorkspace]   Target path: ${targetPath}`);
+    throw new Error(
+      `Cannot copy video to workspace: ${errorMsg}\n` +
+      `\nSource: ${cleanPath}` +
+      `\nTarget: ${targetPath}` +
+      `\n\nPlease ensure:` +
+      `\n• The source video file exists at the specified path` +
+      `\n• You have read permissions for the source file` +
+      `\n• The file path is correct and accessible`,
+    );
+  }
+
   // Try direct copy first (more efficient for large video files)
   // Fallback to base64 if copy fails
   try {
-    // Remove file:// protocol if present
-    const cleanPath = videoPath.replace(/^file:\/\//, '');
-    
     // Use direct copy for better performance with large video files
     const copiedPath = await window.electron.project.copy(cleanPath, videoDir);
     
     // Rename if needed to match target filename
     const copiedFileName = copiedPath.split('/').pop();
     if (copiedFileName && copiedFileName !== targetFileName) {
-      await window.electron.project.rename(copiedPath, targetFileName);
+      const finalPath = await window.electron.project.rename(copiedPath, targetFileName);
+      console.log(`[videoWorkspace] Renamed copied video: ${copiedFileName} -> ${targetFileName}`);
+      console.log(`[videoWorkspace] ✓ Successfully copied video: ${cleanPath} -> ${finalPath}`);
+    } else {
+      console.log(`[videoWorkspace] ✓ Successfully copied video: ${cleanPath} -> ${copiedPath}`);
     }
     
-    console.log(`[videoWorkspace] Successfully copied video: ${cleanPath} -> ${targetPath}`);
+    // Verify the copied file exists and has content
+    await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay for file system sync
+    
   } catch (copyError) {
+    const copyErrorMsg = copyError instanceof Error ? copyError.message : String(copyError);
     console.warn(
-      `[videoWorkspace] Direct copy failed, trying base64 conversion:`,
-      copyError,
+      `[videoWorkspace] Direct copy failed (${copyErrorMsg}), trying base64 conversion...`,
     );
     
     // Fallback to base64 conversion if direct copy fails
     try {
-      // Remove file:// protocol if present
-      const cleanPath = videoPath.replace(/^file:\/\//, '');
-      
       // Read video file as base64
       const base64DataUri = await window.electron.project.readFileBase64(cleanPath);
       if (!base64DataUri) {
@@ -104,16 +143,37 @@ export async function copyVideoToScene(
 
       // Write binary file from base64 data
       await window.electron.project.writeFileBinary(targetPath, base64Data);
-      console.log(`[videoWorkspace] Successfully wrote video via base64: ${targetPath}`);
+      console.log(`[videoWorkspace] ✓ Successfully wrote video via base64: ${targetPath}`);
+      
+      // Verify the written file exists
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      
     } catch (base64Error) {
+      const base64ErrorMsg = base64Error instanceof Error ? base64Error.message : String(base64Error);
       console.error(
-        `[videoWorkspace] Both copy methods failed for video: ${videoPath}`,
-        { copyError, base64Error },
+        `[videoWorkspace] ✗ Both copy methods failed for video: ${videoPath}`,
+        { copyError: copyErrorMsg, base64Error: base64ErrorMsg },
       );
       throw new Error(
-        `Failed to copy video file: ${copyError instanceof Error ? copyError.message : String(copyError)}`,
+        `Failed to copy video file to workspace. ` +
+        `Copy error: ${copyErrorMsg}. ` +
+        `Base64 error: ${base64ErrorMsg}. ` +
+        `Source: ${cleanPath}, Target: ${targetPath}`,
       );
     }
+  }
+  
+  // Final verification that target file exists
+  try {
+    const verifyContent = await window.electron.project.readFile(targetPath);
+    if (verifyContent === null) {
+      throw new Error(`Copied video file not found at target: ${targetPath}`);
+    }
+    console.log(`[videoWorkspace] ✓ Verified copied video exists: ${targetPath}`);
+  } catch (verifyError) {
+    const verifyErrorMsg = verifyError instanceof Error ? verifyError.message : String(verifyError);
+    console.error(`[videoWorkspace] ✗ Copy verification failed: ${verifyErrorMsg}`);
+    throw new Error(`Video copy verification failed: ${verifyErrorMsg}`);
   }
 
   // Create metadata file: vN_info.json
