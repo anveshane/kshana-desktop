@@ -9,22 +9,21 @@ import path from 'path';
 
 const projectRoot = path.resolve(__dirname, '../..');
 const kshanaInkPath = path.join(projectRoot, 'resources', 'kshana-ink');
-const distPath = path.join(kshanaInkPath, 'dist');
-const serverIndexPath = path.join(distPath, 'server', 'index.js');
-const llmIndexPath = path.join(distPath, 'core', 'llm', 'index.js');
+const serverBundlePath = path.join(kshanaInkPath, 'server.bundle.mjs');
+const llmBundlePath = path.join(kshanaInkPath, 'llm.bundle.mjs');
 
-console.log('Verifying kshana-ink resource is ready for packaging...');
+console.log('Verifying kshana-ink bundle is ready for packaging...');
 console.log(`Checking: ${kshanaInkPath}`);
 
 if (!fs.existsSync(kshanaInkPath)) {
   console.error(`✗ ERROR: kshana-ink resource not found at: ${kshanaInkPath}`);
-  console.error('  kshana-ink must be prepared in resources/kshana-ink before packaging');
-  console.error('  Run: ts-node ./.erb/scripts/prepare-backend-resource.ts');
+  console.error('  kshana-ink must be bundled in resources/kshana-ink before packaging');
+  console.error('  Run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
   process.exit(1);
 }
 
-if (!fs.existsSync(distPath)) {
-  console.error(`✗ ERROR: kshana-ink dist folder not found at: ${distPath}`);
+if (!fs.existsSync(serverBundlePath)) {
+  console.error(`✗ ERROR: kshana-ink server bundle not found at: ${serverBundlePath}`);
   console.error('  Contents of kshana-ink:');
   try {
     const contents = fs.readdirSync(kshanaInkPath);
@@ -32,21 +31,34 @@ if (!fs.existsSync(distPath)) {
   } catch (err) {
     console.error(`    (Could not read: ${(err as Error).message})`);
   }
+  console.error('\n  Please run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
   process.exit(1);
 }
 
-if (!fs.existsSync(serverIndexPath)) {
-  console.error(`✗ ERROR: kshana-ink server module not found at: ${serverIndexPath}`);
+if (!fs.existsSync(llmBundlePath)) {
+  console.error(`✗ ERROR: kshana-ink LLM bundle not found at: ${llmBundlePath}`);
+  console.error('\n  Please run: ts-node ./.erb/scripts/bundle-kshana-ink.ts');
   process.exit(1);
 }
 
-if (!fs.existsSync(llmIndexPath)) {
-  console.error(`✗ ERROR: kshana-ink llm module not found at: ${llmIndexPath}`);
-  process.exit(1);
-}
+// Calculate bundle sizes
+try {
+  const serverSize = fs.statSync(serverBundlePath).size;
+  const llmSize = fs.statSync(llmBundlePath).size;
+  const totalSize = serverSize + llmSize;
+  const totalMB = (totalSize / (1024 * 1024)).toFixed(2);
+  const serverMB = (serverSize / (1024 * 1024)).toFixed(2);
+  const llmMB = (llmSize / (1024 * 1024)).toFixed(2);
 
-console.log('✓ kshana-ink resource verified and ready for packaging');
-console.log(`  - Directory: ${kshanaInkPath}`);
-console.log(`  - Server: ${serverIndexPath}`);
-console.log(`  - LLM: ${llmIndexPath}`);
+  console.log('✓ kshana-ink bundle verified and ready for packaging');
+  console.log(`  - Directory: ${kshanaInkPath}`);
+  console.log(`  - Server bundle: ${serverBundlePath} (${serverMB} MB)`);
+  console.log(`  - LLM bundle: ${llmBundlePath} (${llmMB} MB)`);
+  console.log(`  - Total size: ${totalMB} MB`);
+} catch (err) {
+  console.log('✓ kshana-ink bundle verified and ready for packaging');
+  console.log(`  - Directory: ${kshanaInkPath}`);
+  console.log(`  - Server bundle: ${serverBundlePath}`);
+  console.log(`  - LLM bundle: ${llmBundlePath}`);
+}
 

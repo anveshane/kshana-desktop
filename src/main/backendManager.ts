@@ -157,7 +157,7 @@ class BackendManager extends EventEmitter {
       // In development: use node_modules
       const fs = require('fs');
       let kshanaInkPath: string;
-      
+
       if (app.isPackaged) {
         // In packaged app, kshana-ink is in extraResources
         kshanaInkPath = path.join(process.resourcesPath, 'kshana-ink');
@@ -179,63 +179,68 @@ class BackendManager extends EventEmitter {
         } else {
           errorMsg += `\nIn development, kshana-ink should be in node_modules.\n`;
           errorMsg += `Please run: npm install`;
-        }
+          }
         throw new Error(errorMsg);
       }
 
       log.info(`Found kshana-ink at: ${kshanaInkPath}`);
 
-      // Use absolute paths to the kshana-ink exports
-      // This bypasses Node.js module resolution which looks relative to the bundle location
-      const serverModulePath = path.join(kshanaInkPath, 'dist', 'server', 'index.js');
-      const llmModulePath = path.join(kshanaInkPath, 'dist', 'core', 'llm', 'index.js');
-
-      log.info(`Loading kshana-ink server from: ${serverModulePath}`);
-      log.info(`Loading kshana-ink llm from: ${llmModulePath}`);
-
-      // Verify files exist with detailed error messages
-      if (!fs.existsSync(serverModulePath)) {
-        let errorMsg = `kshana-ink server module not found at: ${serverModulePath}\n`;
-        errorMsg += `\nkshana-ink directory: ${kshanaInkPath}\n`;
-        
-        if (fs.existsSync(kshanaInkPath)) {
-          errorMsg += `\nContents of kshana-ink directory:\n`;
-          try {
-            const contents = fs.readdirSync(kshanaInkPath);
-            contents.forEach((item: string) => {
-              const itemPath = path.join(kshanaInkPath, item);
-              const stats = fs.statSync(itemPath);
-              errorMsg += `  - ${item} (${stats.isDirectory() ? 'dir' : 'file'})\n`;
-            });
-          } catch (err) {
-            errorMsg += `  (Could not read: ${(err as Error).message})\n`;
-          }
-        } else {
-          errorMsg += `\nkshana-ink directory does not exist at: ${kshanaInkPath}\n`;
-        }
-        
-        if (app.isPackaged) {
-          errorMsg += `\nPlease ensure kshana-ink is built and the prepare-backend-resource script ran successfully.`;
-        } else {
-          errorMsg += `\nPlease run 'pnpm build' in kshana-ink directory to generate dist files.`;
-        }
-        throw new Error(errorMsg);
-      }
-      if (!fs.existsSync(llmModulePath)) {
-        throw new Error(`kshana-ink llm module not found at: ${llmModulePath}. Server module found but llm module missing. ${app.isPackaged ? 'Ensure prepare-backend-resource script ran successfully.' : 'Run "pnpm build" in kshana-ink directory.'}`);
-      }
-
       // Use Function constructor to create dynamic import that webpack can't analyze
       // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const dynamicImport = new Function('specifier', 'return import(specifier)');
 
-      // Convert absolute paths to file:// URLs for ES module imports
-      // This is required for Node.js ES modules, especially in production
-      const serverModuleUrl = pathToFileURL(serverModulePath).href;
-      const llmModuleUrl = pathToFileURL(llmModulePath).href;
+      let serverModule: any;
+      let llmModule: any;
 
-      const serverModule = await dynamicImport(serverModuleUrl);
-      const llmModule = await dynamicImport(llmModuleUrl);
+      // Try bundled version first (production), fallback to dist (development)
+      if (app.isPackaged) {
+        const serverBundlePath = path.join(kshanaInkPath, 'server.bundle.mjs');
+        const llmBundlePath = path.join(kshanaInkPath, 'llm.bundle.mjs');
+
+        if (fs.existsSync(serverBundlePath) && fs.existsSync(llmBundlePath)) {
+          // Use bundled version (production)
+          log.info('Loading bundled kshana-ink modules...');
+          const serverBundleUrl = pathToFileURL(serverBundlePath).href;
+          const llmBundleUrl = pathToFileURL(llmBundlePath).href;
+
+          serverModule = await dynamicImport(serverBundleUrl);
+          llmModule = await dynamicImport(llmBundleUrl);
+          log.info('✓ Bundled modules loaded successfully');
+        } else {
+          // Fallback to dist files if bundles don't exist
+          log.warn('Bundled files not found, falling back to dist files');
+          const serverModulePath = path.join(kshanaInkPath, 'dist', 'server', 'index.js');
+          const llmModulePath = path.join(kshanaInkPath, 'dist', 'core', 'llm', 'index.js');
+
+          if (!fs.existsSync(serverModulePath) || !fs.existsSync(llmModulePath)) {
+            throw new Error(`kshana-ink modules not found. Expected bundled files at:\n  - ${serverBundlePath}\n  - ${llmBundlePath}\nOr dist files at:\n  - ${serverModulePath}\n  - ${llmModulePath}\n\nPlease ensure bundle-kshana-ink.ts script ran successfully.`);
+          }
+
+          const serverModuleUrl = pathToFileURL(serverModulePath).href;
+          const llmModuleUrl = pathToFileURL(llmModulePath).href;
+
+          serverModule = await dynamicImport(serverModuleUrl);
+          llmModule = await dynamicImport(llmModuleUrl);
+        }
+      } else {
+        // Development: use dist files from node_modules
+        const serverModulePath = path.join(kshanaInkPath, 'dist', 'server', 'index.js');
+        const llmModulePath = path.join(kshanaInkPath, 'dist', 'core', 'llm', 'index.js');
+
+        if (!fs.existsSync(serverModulePath)) {
+          throw new Error(`kshana-ink server module not found at: ${serverModulePath}\nPlease run 'pnpm build' in kshana-ink directory.`);
+        }
+        if (!fs.existsSync(llmModulePath)) {
+          throw new Error(`kshana-ink llm module not found at: ${llmModulePath}\nPlease run 'pnpm build' in kshana-ink directory.`);
+        }
+
+        log.info(`Loading kshana-ink from dist files (development mode)`);
+        const serverModuleUrl = pathToFileURL(serverModulePath).href;
+        const llmModuleUrl = pathToFileURL(llmModulePath).href;
+
+        serverModule = await dynamicImport(serverModuleUrl);
+        llmModule = await dynamicImport(llmModuleUrl);
+      }
 
       log.info('Successfully loaded kshana-ink modules');
 
