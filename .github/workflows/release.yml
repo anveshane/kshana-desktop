@@ -198,14 +198,12 @@ jobs:
           echo "✓ Postinstall steps completed"
           echo "Note: kshana-ink will be handled by install-app-deps.ts during package step"
 
-      - name: Build Electron app
+      - name: Build and Publish Electron app
         working-directory: kshana-desktop
         run: |
-          # npm run package will:
-          # 1. Run prepackage (verify-kshana-ink.ts) - verifies source kshana-ink is built
-          # 2. Run install-app-deps.ts - copies kshana-ink to release/app/node_modules/kshana-ink
-          # 3. Build Electron app
-          # 4. Package with electron-builder
-          npm run package
+          # This workflow is triggered by tags (v*), so we use 'npm run release'
+          # which publishes to GitHub Releases automatically via electron-builder
+          echo "Building and publishing release for tag: ${{ github.ref_name }}"
+          npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
