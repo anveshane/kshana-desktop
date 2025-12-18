@@ -1,9 +1,10 @@
+/// <reference types="node" />
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import webpackPaths from '../configs/webpack.paths';
 
-const { appPath } = webpackPaths;
+const { appPath, rootPath } = webpackPaths;
 
 interface VersionInfo {
   branch: string;
@@ -61,9 +62,21 @@ function getGitCommitDate(repoPath: string): string {
  * Verify kshana-ink is built and ready for packaging
  */
 function verifyKshanaInk(sourcePath: string): void {
-  const absoluteSourcePath = path.isAbsolute(sourcePath)
-    ? sourcePath
-    : path.resolve(path.dirname(__dirname), '..', '..', sourcePath);
+  // Resolve relative to kshana-desktop root
+  let absoluteSourcePath: string;
+  if (path.isAbsolute(sourcePath)) {
+    absoluteSourcePath = sourcePath;
+  } else {
+    // Normalize the path - if it starts with ../, resolve relative to parent of projectRoot
+    // Otherwise resolve relative to projectRoot
+    if (sourcePath.startsWith('../')) {
+      // Remove ../ prefix and resolve relative to parent directory
+      const normalizedPath = sourcePath.replace(/^\.\.\//, '');
+      absoluteSourcePath = path.resolve(path.dirname(rootPath), normalizedPath);
+    } else {
+      absoluteSourcePath = path.resolve(rootPath, sourcePath);
+    }
+  }
 
   console.log(`Verifying kshana-ink at: ${absoluteSourcePath}`);
 
@@ -127,9 +140,21 @@ function verifyKshanaInk(sourcePath: string): void {
  * Record version information to .kshana-ink-version.json
  */
 function recordVersionInfo(sourcePath: string): void {
-  const absoluteSourcePath = path.isAbsolute(sourcePath)
-    ? sourcePath
-    : path.resolve(path.dirname(__dirname), '..', '..', sourcePath);
+  // Resolve relative to kshana-desktop root
+  let absoluteSourcePath: string;
+  if (path.isAbsolute(sourcePath)) {
+    absoluteSourcePath = sourcePath;
+  } else {
+    // Normalize the path - if it starts with ../, resolve relative to parent of projectRoot
+    // Otherwise resolve relative to projectRoot
+    if (sourcePath.startsWith('../')) {
+      // Remove ../ prefix and resolve relative to parent directory
+      const normalizedPath = sourcePath.replace(/^\.\.\//, '');
+      absoluteSourcePath = path.resolve(path.dirname(rootPath), normalizedPath);
+    } else {
+      absoluteSourcePath = path.resolve(rootPath, sourcePath);
+    }
+  }
 
   try {
     const branch = getGitBranch(absoluteSourcePath);
@@ -182,9 +207,8 @@ function main() {
 }
 
 // Run if executed directly
-if (require.main === module) {
-  main();
-}
+// This script is meant to be run directly, so we always call main()
+main();
 
 export { verifyKshanaInk, recordVersionInfo };
 

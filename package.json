@@ -189,7 +189,8 @@
     "afterSign": ".erb/scripts/notarize.js",
     "asarUnpack": [
       "**\\*.{node,dll}",
-      "**/node_modules/**/*"
+      "**/node_modules/**/*",
+      "**/node_modules/kshana-ink/**/*"
     ],
     "files": [
       "dist",
