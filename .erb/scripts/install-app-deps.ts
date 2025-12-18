@@ -128,32 +128,32 @@ if (packageJson.dependencies && packageJson.dependencies['kshana-ink']) {
     // Read kshana-ink package.json to merge dependencies
     // Use resolvedPath directly since it's guaranteed to be a string
     const kshanaInkPackageJsonPath = path.join(resolvedPath, 'package.json');
-    if (fs.existsSync(kshanaInkPackageJsonPath)) {
-      try {
-        const kshanaInkPackageJson = JSON.parse(
-          fs.readFileSync(kshanaInkPackageJsonPath, 'utf-8')
+  if (fs.existsSync(kshanaInkPackageJsonPath)) {
+    try {
+      const kshanaInkPackageJson = JSON.parse(
+        fs.readFileSync(kshanaInkPackageJsonPath, 'utf-8')
+      );
+      
+      // Merge kshana-ink's dependencies into app dependencies
+      if (kshanaInkPackageJson.dependencies) {
+        // Exclude CLI-only dependencies (ink and react are now peerDependencies in kshana-ink,
+        // so they won't be in dependencies, but we keep this filter for safety/backward compatibility)
+        const excludedDeps = ['react', 'react-dom', 'ink'];
+        const filteredDeps = Object.fromEntries(
+          Object.entries(kshanaInkPackageJson.dependencies as Record<string, string>)
+            .filter(([key]) => !excludedDeps.includes(key))
         );
         
-        // Merge kshana-ink's dependencies into app dependencies
-        if (kshanaInkPackageJson.dependencies) {
-          // Exclude CLI-only dependencies (ink and react are now peerDependencies in kshana-ink,
-          // so they won't be in dependencies, but we keep this filter for safety/backward compatibility)
-          const excludedDeps = ['react', 'react-dom', 'ink'];
-          const filteredDeps = Object.fromEntries(
-            Object.entries(kshanaInkPackageJson.dependencies as Record<string, string>)
-              .filter(([key]) => !excludedDeps.includes(key))
-          );
-          
-          packageJson.dependencies = {
-            ...packageJson.dependencies,
-            ...filteredDeps,
-          };
-          
-          console.log('✓ Added kshana-ink dependencies to package.json (CLI-only deps excluded)');
-        }
-      } catch (err) {
-        console.warn(`Warning: Could not read kshana-ink package.json: ${(err as Error).message}`);
+        packageJson.dependencies = {
+          ...packageJson.dependencies,
+          ...filteredDeps,
+        };
+        
+        console.log('✓ Added kshana-ink dependencies to package.json (CLI-only deps excluded)');
       }
+    } catch (err) {
+      console.warn(`Warning: Could not read kshana-ink package.json: ${(err as Error).message}`);
+    }
     }
 
     // Remove kshana-ink from dependencies to prevent symlink creation

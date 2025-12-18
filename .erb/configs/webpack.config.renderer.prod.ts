@@ -8,7 +8,7 @@ import HtmlWebpackPlugin from 'html-webpack-plugin';
 import MiniCssExtractPlugin from 'mini-css-extract-plugin';
 import { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer';
 import CssMinimizerPlugin from 'css-minimizer-webpack-plugin';
-import { merge } from 'webpack-merge';
+import { mergeWithCustomize } from 'webpack-merge';
 import TerserPlugin from 'terser-webpack-plugin';
 import baseConfig from './webpack.config.base';
 import webpackPaths from './webpack.paths';
@@ -164,4 +164,12 @@ const configuration: webpack.Configuration = {
   ],
 };
 
-export default merge(baseConfig, configuration);
+// Use custom merge to replace externals array instead of concatenating
+export default mergeWithCustomize({
+  customizeArray: (a, b, key) => {
+    if (key === 'externals') {
+      return b; // Use the renderer config's externals, completely replacing base config's
+    }
+    return undefined; // Use default merge behavior for other arrays
+  },
+})(baseConfig, configuration);
