@@ -149,19 +149,37 @@ const configuration: webpack.Configuration = {
 
   // Override externals from base config - bundle React and React-DOM instead of externalizing
   // This is necessary because React needs to be bundled in the renderer for proper initialization
-  externals: [
-    // Exclude React and React-DOM from externals so they get bundled into the renderer
-    ...Object.keys(require('../../release/app/package.json').dependencies || {}).filter(
-      (dep) => dep !== 'react' && dep !== 'react-dom'
-    ),
-    // Keep kshana-ink and its dependencies externalized (loaded at runtime)
-    'kshana-ink',
-    /^kshana-ink\/.*/,
-    'fastify',
-    '@fastify/websocket',
-    '@fastify/cors',
-    'dotenv',
-  ],
+  externals: (() => {
+    try {
+      // Read from root package.json (which exists at build time) and exclude React/React-DOM
+      // so they get bundled into the renderer bundle
+      const rootPkg = require('../../package.json');
+      const deps = Object.keys(rootPkg.dependencies || {}).filter(
+        (dep) => dep !== 'react' && dep !== 'react-dom' && dep !== 'kshana-ink'
+      );
+      return [
+        ...deps,
+        // Keep kshana-ink and its dependencies externalized (loaded at runtime)
+        'kshana-ink',
+        /^kshana-ink\/.*/,
+        'fastify',
+        '@fastify/websocket',
+        '@fastify/cors',
+        'dotenv',
+      ];
+    } catch (error) {
+      // Fallback: only externalize kshana-ink and its deps if package.json can't be read
+      console.warn('Could not read package.json for externals, using minimal externals list');
+      return [
+        'kshana-ink',
+        /^kshana-ink\/.*/,
+        'fastify',
+        '@fastify/websocket',
+        '@fastify/cors',
+        'dotenv',
+      ];
+    }
+  })(),
 };
 
 // Use custom merge to replace externals array instead of concatenating
