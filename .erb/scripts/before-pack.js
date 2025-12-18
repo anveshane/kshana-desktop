@@ -8,12 +8,36 @@ const { execSync } = require('child_process');
  */
 
 module.exports = async function beforePack(context) {
-  // In some environments context.appDir might be undefined, try alternatives
-  const appPath = context.appDir || context.packager.appDir || path.resolve(__dirname, '../../release/app');
+  // Get app directory from context.packager
+  // beforePack context has: { packager, electronPlatformName, arch, ... }
+  // packager.projectDir points to the project root
+  let appPath;
+  
+  try {
+    if (context.packager && context.packager.projectDir) {
+      // Use projectDir and append release/app (standard electron-builder structure)
+      appPath = path.join(context.packager.projectDir, 'release', 'app');
+    } else {
+      // Fallback: use current working directory
+      appPath = path.resolve(process.cwd(), 'release', 'app');
+    }
 
-  if (!appPath) {
-    throw new Error('[beforePack] Could not determine app directory (context.appDir is undefined)');
+    // Verify appPath is valid
+    if (!appPath || typeof appPath !== 'string') {
+      throw new Error(`Invalid appPath: ${appPath}`);
+    }
+  } catch (error) {
+    console.error('[beforePack] Error determining app directory:', error);
+    console.error('[beforePack] Context keys:', Object.keys(context || {}));
+    if (context.packager) {
+      console.error('[beforePack] Packager keys:', Object.keys(context.packager));
+      console.error('[beforePack] Packager projectDir:', context.packager.projectDir);
+    }
+    console.error('[beforePack] Current working directory:', process.cwd());
+    throw new Error(`[beforePack] Could not determine app directory: ${error.message}`);
   }
+
+  console.log(`[beforePack] Using app directory: ${appPath}`);
 
   const nodeModulesPath = path.join(appPath, 'node_modules');
   const kshanaInkTargetPath = path.join(nodeModulesPath, 'kshana-ink');
