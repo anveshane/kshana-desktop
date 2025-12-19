@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Loader2, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import styles from './ToolCallCard.module.scss';
 
@@ -172,11 +172,16 @@ function renderThinkTool(
       <div className={styles.thinkHeader}>
         <span className={styles.thinkIcon}>💭</span>
         {isExecuting ? (
-          <Loader2 size={14} className={styles.spinner} />
+          <span className={styles.thinkText}>Thinking...</span>
         ) : (
           <span className={styles.thinkText}>{thought || 'Thinking...'}</span>
         )}
       </div>
+      {thought && !isExecuting && (
+        <div className={styles.thinkContent}>
+          <ReactMarkdown>{thought}</ReactMarkdown>
+        </div>
+      )}
     </div>
   );
 }
@@ -199,7 +204,6 @@ function renderDispatchAgentTool(
         {isExecuting ? (
           <>
             <span className={styles.dispatchIcon}>📝</span>
-            <Loader2 size={14} className={styles.spinner} />
             <span className={styles.dispatchText}> Planning...</span>
           </>
         ) : (
@@ -261,7 +265,6 @@ function renderProjectStateTool(
         {isExecuting ? (
           <>
             <span className={styles.projectStateIcon}>{isRead ? '📖' : '📋'}</span>
-            <Loader2 size={14} className={styles.spinner} />
             <span className={styles.projectStateText}>
               {isRead ? 'Reading' : 'Saving'} project state...
             </span>
@@ -332,7 +335,7 @@ export default function ToolCallCard({
   const getStatusIcon = () => {
     switch (status) {
       case 'executing':
-        return <Loader2 size={14} className={styles.statusIconExecuting} />;
+        return null; // No loader/icon for executing status
       case 'completed':
         return <CheckCircle2 size={14} className={styles.statusIconCompleted} />;
       case 'error':
@@ -390,8 +393,10 @@ export default function ToolCallCard({
         <div className={styles.content}>
           {streamingContent && (
             <div className={styles.streamingContent}>
-              <div className={styles.streamingLabel}>Output:</div>
-              <pre className={styles.streamingPre}>{streamingContent}</pre>
+              <div className={styles.streamingLabel}>Thinking:</div>
+              <div className={styles.streamingPre}>
+                <ReactMarkdown>{streamingContent}</ReactMarkdown>
+              </div>
             </div>
           )}
           {status === 'error' && result !== undefined && (
@@ -412,9 +417,9 @@ export default function ToolCallCard({
                     <ReactMarkdown>{String((result as Record<string, unknown>).content)}</ReactMarkdown>
                   </div>
                 ) : (
-                  <pre className={styles.resultContent}>
+              <pre className={styles.resultContent}>
                     {JSON.stringify(result, null, 2)}
-                  </pre>
+              </pre>
                 )
               ) : (
                 <pre className={styles.resultContent}>{String(result)}</pre>

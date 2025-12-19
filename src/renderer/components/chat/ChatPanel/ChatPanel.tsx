@@ -39,18 +39,26 @@ export default function ChatPanel() {
     null,
   );
   const awaitingResponseRef = useRef(false);
-  // Track active tool calls by toolCallId with start time
-  const activeToolCallsRef = useRef<Map<string, { messageId: string; startTime: number }>>(
+  // Track active tool calls by toolName (since server sends empty toolCallId)
+  // Key format: `${toolName}-${sequenceNumber}` to handle multiple calls of same tool
+  const activeToolCallsRef = useRef<Map<string, { messageId: string; startTime: number; toolName: string }>>(
     new Map(),
   );
+  const toolCallSequenceRef = useRef<Map<string, number>>(new Map());
   // Track the last todo message ID for in-place updates
   const lastTodoMessageIdRef = useRef<string | null>(null);
+  // Track the last question message ID to avoid duplicates
+  const lastQuestionMessageIdRef = useRef<string | null>(null);
 
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
       const id = message.id ?? makeId();
       const timestamp = message.timestamp ?? Date.now();
-      setMessages((prev) => [...prev, { ...message, id, timestamp }]);
+      const newMessage = { ...message, id, timestamp };
+      setMessages((prev) => {
+        const updated = [...prev, newMessage];
+        return updated;
+      });
       return id;
     },
     [],
@@ -101,7 +109,9 @@ export default function ChatPanel() {
     lastAssistantIdRef.current = null;
     awaitingResponseRef.current = false;
     activeToolCallsRef.current.clear();
+    toolCallSequenceRef.current.clear();
     lastTodoMessageIdRef.current = null;
+    lastQuestionMessageIdRef.current = null;
     setAgentStatus('idle');
     setStatusMessage('Ready');
     // Backend will send greeting via WebSocket when connection is re-established
@@ -112,24 +122,88 @@ export default function ChatPanel() {
   }, []);
 
   const appendAssistantChunk = useCallback((content: string, type: string, author?: string) => {
-    if (!content) return;
+    // Always process chunks - create message even with empty content to show thinking state
+    const trimmedContent = content || '';
     setMessages((prev) => {
+      // Check if this content is already in a recent tool call result to avoid duplicates
+      // Only check for substantial content (not reasoning/thinking chunks)
+      if (trimmedContent.length > 100 && !trimmedContent.includes('<think>') && !trimmedContent.includes('<think>')) {
+        for (let i = prev.length - 1; i >= Math.max(0, prev.length - 10); i--) {
+          const msg = prev[i];
+          if (msg.type === 'tool_call' && msg.meta?.result) {
+            const resultStr = typeof msg.meta.result === 'string' 
+              ? msg.meta.result 
+              : JSON.stringify(msg.meta.result);
+            // If the tool result contains this exact content (or a large portion), skip it
+            const contentToCheck = trimmedContent.substring(0, Math.min(200, trimmedContent.length));
+            if (resultStr.includes(contentToCheck)) {
+              return prev;
+            }
+          }
+        }
+      }
+
       // Stream chunks into existing message if available
       const streamingTypes = [
         'text_chunk',
         'agent_text',
         'coordinator_response',
-        'stream_chunk', // Add stream_chunk to streaming types
+        'stream_chunk',
       ];
+      // Normalize stream_chunk to agent_text for comparison
+      const normalizedType = type === 'stream_chunk' ? 'agent_text' : type;
+      
+      // Check if we should append to existing message
+      // Only append to assistant messages (thinking), NOT to tool calls
       if (streamingTypes.includes(type) && lastAssistantIdRef.current) {
+        const existingMessage = prev.find((msg) => msg.id === lastAssistantIdRef.current);
+        if (existingMessage && 
+            existingMessage.role === 'assistant' && 
+            existingMessage.type !== 'tool_call' && // Don't append to tool calls
+            (existingMessage.type === 'agent_text' || existingMessage.type === 'stream_chunk' || existingMessage.type === normalizedType)) {
         setIsStreaming(true);
-        return prev.map((message) =>
-          message.id === lastAssistantIdRef.current
-            ? { ...message, content: `${message.content}${content}` }
-            : message,
+          // Append content to existing message
+          return prev.map((message) => {
+            if (message.id === lastAssistantIdRef.current) {
+              const newContent = `${message.content || ''}${trimmedContent}`;
+              return { 
+                ...message, 
+                content: newContent,
+                type: normalizedType, // Update to normalized type
+                // Ensure author is set if not already
+                author: message.author || author,
+                // Update timestamp to show it's active
+                timestamp: Date.now(),
+              };
+            }
+            return message;
+          });
+        }
+      }
+
+      // Check if we already have an empty assistant message we can reuse
+      // But NOT if it's a tool call - tool calls should be separate
+      const lastMessage = prev[prev.length - 1];
+      if (lastMessage && 
+          lastMessage.role === 'assistant' && 
+          lastMessage.type !== 'tool_call' && // Don't reuse tool calls
+          lastMessage.type === normalizedType && 
+          !lastMessage.content) {
+        // Reuse the empty message
+        setIsStreaming(streamingTypes.includes(type));
+        return prev.map((msg) =>
+          msg.id === lastMessage.id
+            ? {
+              ...msg,
+              content: trimmedContent,
+              author: msg.author || author || 'Kshana',
+              timestamp: Date.now(),
+            }
+            : msg,
         );
       }
 
+      // Create new message - always create even if content is empty (shows thinking state)
       const id = makeId();
       lastAssistantIdRef.current = id;
       setIsStreaming(streamingTypes.includes(type));
@@ -138,10 +212,10 @@ export default function ChatPanel() {
         {
           id,
           role: 'assistant',
-          type: type === 'stream_chunk' ? 'agent_text' : type, // Normalize stream_chunk to agent_text for display
-          content,
+          type: normalizedType, // Use normalized type
+          content: trimmedContent,
           timestamp: Date.now(),
-          author, // Pass agent name
+          author: author || 'Kshana', // Default author if not provided
         },
       ];
     });
@@ -202,7 +276,29 @@ export default function ChatPanel() {
             });
           } else if (status === 'busy') {
             setAgentStatus('thinking');
-            setStatusMessage(statusMsg);
+            setStatusMessage(statusMsg || 'Processing...');
+            // Show a thinking message when busy status is received
+            // This will be updated by actual stream_chunk messages when they arrive
+            setMessages((prev) => {
+              // Check if last message is already a thinking/assistant message
+              const lastMsg = prev[prev.length - 1];
+              if (lastMsg && lastMsg.role === 'assistant' && lastMsg.type === 'agent_text' && !lastMsg.content) {
+                // Already have a thinking message, just update timestamp
+                return prev;
+              }
+              // Create new thinking message
+              const thinkingId = makeId();
+              lastAssistantIdRef.current = thinkingId;
+              setIsStreaming(true);
+              return [...prev, {
+                id: thinkingId,
+                role: 'assistant',
+                type: 'agent_text',
+                content: '',
+                author: agentName,
+                timestamp: Date.now(),
+              }];
+            });
           } else if (status === 'completed') {
             setAgentStatus('completed');
             setStatusMessage('Task completed');
@@ -230,18 +326,19 @@ export default function ChatPanel() {
         }
         case 'stream_chunk': {
           // kshana-ink stream_chunk: { content, done }
+          // This represents thinking/reasoning that happens BEFORE tool calls start
           const content = (data.content as string) ?? '';
           const done = (data.done as boolean) ?? false;
 
           setAgentStatus('thinking'); // Agent is generating reasoning/thinking text
 
-          if (content) {
+          // Create/update message with stream chunk content (thinking happens before tool calls)
             appendAssistantChunk(content, 'stream_chunk', agentName);
-          }
+          
           if (done) {
-            lastAssistantIdRef.current = null;
             setIsStreaming(false);
-            // Don't reset to idle here - let tool_call or other status updates handle it
+            // Clear the ref so next stream starts fresh
+            lastAssistantIdRef.current = null;
           }
           break;
         }
@@ -252,23 +349,37 @@ export default function ChatPanel() {
           break;
         }
         case 'tool_call': {
-          // kshana-ink tool_call: { toolName, toolCallId, arguments, status, result?, error? }
+          // Server sends tool_call events: { toolName, toolCallId (empty), arguments, status, result?, error? }
+          // Status: 'started' (from onToolCall) or 'completed'/'error' (from onToolResult)
           const toolName = (data.toolName as string) ?? 'tool';
-          const toolCallId = (data.toolCallId as string) ?? makeId();
           const toolStatus = (data.status as string) ?? 'started';
           const args = (data.arguments as Record<string, unknown>) ?? {};
           const result = data.result;
           const error = data.error;
-          const streamingContent = data.streamingContent as string | undefined;
 
           if (toolStatus === 'started') {
+            // Tool is starting - create new tool call message
+            // Ensure it appears at the bottom by appending after any current thinking messages
             setAgentStatus('executing');
             setStatusMessage(`Running ${toolName}...`);
+            
             const startTime = Date.now();
+            const seq = (toolCallSequenceRef.current.get(toolName) ?? 0) + 1;
+            toolCallSequenceRef.current.set(toolName, seq);
+            const toolKey = `${toolName}-${seq}`;
+            const toolCallId = makeId();
+            
+            // Clear any active assistant message ref so tool call appears as new message
+            // This ensures thinking messages don't append to tool calls, and tool calls don't append to thinking
+            lastAssistantIdRef.current = null;
+            setIsStreaming(false);
+            
+            // Create tool call message - this creates a separate UI (executing status)
+            // It will appear below any existing thinking messages
             const messageId = appendMessage({
-              role: 'system', // Displayed as system/tool card
+              role: 'system',
               type: 'tool_call',
-              content: '', // Empty content, ToolCallCard will render
+              content: '',
               author: agentName,
               meta: {
                 toolCallId,
@@ -278,33 +389,84 @@ export default function ChatPanel() {
                 startTime,
               },
             });
-            activeToolCallsRef.current.set(toolCallId, { messageId, startTime });
+            
+            // Track this tool call by messageId so we can update it when it completes
+            // This allows us to update the correct message even if thinking happens between start and completion
+            activeToolCallsRef.current.set(toolKey, { messageId, startTime, toolName });
           } else if (toolStatus === 'completed' || toolStatus === 'error') {
-            setAgentStatus('thinking'); // Back to thinking after tool
-            const toolCall = activeToolCallsRef.current.get(toolCallId);
+            // Tool completed - find the most recent started tool call with this name
+            setAgentStatus('thinking');
+            
+            // Find the most recent active tool call for this tool name
+            let toolCall: { messageId: string; startTime: number; toolName: string } | undefined;
+            let toolKey: string | undefined;
+            
+            // Search backwards through sequence numbers
+            const maxSeq = toolCallSequenceRef.current.get(toolName) ?? 0;
+            for (let seq = maxSeq; seq > 0; seq--) {
+              const key = `${toolName}-${seq}`;
+              const candidate = activeToolCallsRef.current.get(key);
+              if (candidate) {
+                toolCall = candidate;
+                toolKey = key;
+                break;
+              }
+            }
+            
             if (toolCall) {
               const duration = Date.now() - toolCall.startTime;
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === toolCall.messageId
-                    ? {
-                      ...msg,
+              const toolCallId = makeId();
+              
+              // Clean thinking/reasoning content from result if it exists
+              // Thinking content should already be shown in separate messages before tool call
+              let cleanedResult = result ?? error;
+              const cleanThinkingTags = (text: string): string => {
+                // Remove <think>...</think> or <think>...</think> blocks
+                return text
+                  .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                  .replace(/<think>[\s\S]*?<\/redacted_reasoning>/gi, '')
+                  .replace(/<think[\s\S]*?\/>/gi, '')
+                  .trim();
+              };
+              
+              if (cleanedResult && typeof cleanedResult === 'object' && 'content' in cleanedResult) {
+                const content = cleanedResult.content as string;
+                const cleanedContent = cleanThinkingTags(content);
+                cleanedResult = { ...cleanedResult, content: cleanedContent };
+              } else if (typeof cleanedResult === 'string') {
+                cleanedResult = cleanThinkingTags(cleanedResult);
+              }
+              
+              // Create a NEW message for completed tool call (separate UI from executing)
+              // Don't update the existing executing message - create a new one at the bottom
+              // This ensures both executing and completed states have separate UIs
+              lastAssistantIdRef.current = null; // Ensure it's a new message, not appended to thinking
+              setIsStreaming(false);
+              
+              appendMessage({
+                role: 'system',
+                type: 'tool_call',
+                content: '',
+                author: agentName,
                       meta: {
-                        ...msg.meta,
                         toolCallId,
                         toolName,
-                        args,
+                  args, // Use args from completion event
                         status: toolStatus === 'error' ? 'error' : 'completed',
-                        result: result ?? error,
+                  result: cleanedResult,
                         duration,
                       },
+              });
+              
+              if (toolKey) {
+                activeToolCallsRef.current.delete(toolKey);
                     }
-                    : msg,
-                ),
-              );
-              activeToolCallsRef.current.delete(toolCallId);
             } else {
               // Fallback: create new message if tool call wasn't tracked
+              // Don't append - create as new message below thinking
+              const toolCallId = makeId();
+              lastAssistantIdRef.current = null; // Ensure it's a new message
+              setIsStreaming(false);
               appendMessage({
                 role: 'system',
                 type: 'tool_call',
@@ -316,26 +478,9 @@ export default function ChatPanel() {
                   args,
                   status: toolStatus === 'error' ? 'error' : 'completed',
                   result: result ?? error,
+                  duration: 0,
                 },
               });
-            }
-          } else if (toolStatus === 'util' && streamingContent) { // Custom status for updates
-            // Handle streaming updates for tool calls (if supported)
-            const toolCall = activeToolCallsRef.current.get(toolCallId);
-            if (toolCall) {
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === toolCall.messageId
-                    ? {
-                      ...msg,
-                      meta: {
-                        ...msg.meta,
-                        streamingContent, // Update streaming content
-                      }
-                    }
-                    : msg
-                )
-              );
             }
           }
           break;
@@ -345,16 +490,28 @@ export default function ChatPanel() {
           const output = (data.output as string) ?? '';
           const responseStatus = data.status as string;
           if (output) {
-            // Replace last stream_chunk message if it exists and matches
+            // Replace last assistant message if it exists (could be agent_text or stream_chunk)
+            // to avoid duplicates
             setMessages((prev) => {
-              const lastMessage = prev[prev.length - 1];
-              if (
-                lastMessage &&
-                lastMessage.role === 'assistant' &&
-                (lastMessage.type === 'stream_chunk' || lastMessage.content === output)
-              ) {
+              // Find the last assistant message that's not a question or tool call
+              let lastAssistantIdx = -1;
+              for (let i = prev.length - 1; i >= 0; i--) {
+                const msg = prev[i];
+                if (
+                  msg.role === 'assistant' &&
+                  msg.type !== 'agent_question' &&
+                  msg.type !== 'tool_call' &&
+                  (msg.type === 'agent_text' || msg.type === 'stream_chunk' || msg.type === 'agent_response')
+                ) {
+                  lastAssistantIdx = i;
+                  break;
+                }
+              }
+              
+              if (lastAssistantIdx >= 0 && lastAssistantIdRef.current === prev[lastAssistantIdx].id) {
+                // Update existing message
                 return prev.map((msg, idx) =>
-                  idx === prev.length - 1
+                  idx === lastAssistantIdx
                     ? {
                       ...msg,
                       type: 'agent_response',
@@ -365,6 +522,17 @@ export default function ChatPanel() {
                     : msg,
                 );
               }
+              
+              // Check if output already exists in messages to avoid duplicates
+              const existingMessage = prev.find(
+                (msg) => msg.role === 'assistant' && msg.content === output && msg.type === 'agent_response'
+              );
+              if (existingMessage) {
+                // Already have this exact message, don't create duplicate
+                return prev;
+              }
+              
+              // Create new message only if we don't have a matching one
               const id = makeId();
               lastAssistantIdRef.current = id;
               return [
@@ -410,21 +578,59 @@ export default function ChatPanel() {
             setAgentStatus('waiting');
             setStatusMessage('Waiting for your input');
 
-            // Re-use logic to avoid duplicates if needed, or just append
+            // Update existing question message if it exists to avoid duplicates
+            setMessages((prev) => {
+              if (lastQuestionMessageIdRef.current) {
+                const existingQuestion = prev.find((msg) => msg.id === lastQuestionMessageIdRef.current);
+                if (existingQuestion && existingQuestion.type === 'agent_question') {
+                  // Update existing question
+                  return prev.map((msg) =>
+                    msg.id === lastQuestionMessageIdRef.current
+                      ? {
+                        ...msg,
+                        content: question,
+                        meta: {
+                          options,
+                          questionType,
+                          timeout,
+                          defaultOption,
+                        },
+                        timestamp: Date.now(),
+                      }
+                      : msg,
+                  );
+                }
+              }
+              
+              // Check if the same question already exists
+              const duplicateQuestion = prev.find(
+                (msg) => msg.type === 'agent_question' && msg.content === question
+              );
+              if (duplicateQuestion) {
+                lastQuestionMessageIdRef.current = duplicateQuestion.id;
+                return prev;
+              }
+              
+              // Create new question message
             const id = makeId();
-            lastAssistantIdRef.current = id;
-            appendMessage({
+              lastQuestionMessageIdRef.current = id;
+              return [
+                ...prev,
+                {
               id,
               role: 'assistant',
               type: 'agent_question',
               content: question,
               author: agentName,
+                  timestamp: Date.now(),
               meta: {
                 options,
                 questionType,
                 timeout,
-                defaultOption
-              }
+                    defaultOption,
+                  },
+                },
+              ];
             });
 
             lastAssistantIdRef.current = null;
@@ -470,8 +676,9 @@ export default function ChatPanel() {
         }
         // ... (Keep other legacy cases if needed or just minimal support)
         default:
-          console.log('Unhandled event:', messageType, payload);
-        // appendSystemMessage(`Event: ${messageType}`, 'system');
+          console.warn('[ChatPanel] Unhandled message type:', messageType, payload);
+          // Don't ignore unknown types - log them for debugging
+          break;
       }
     },
     [appendAssistantChunk, appendMessage, appendSystemMessage, agentName],
@@ -541,7 +748,7 @@ export default function ChatPanel() {
             const payload = JSON.parse(event.data);
             handleServerPayload(payload);
           } catch (error) {
-            console.error(error);
+            console.error('[ChatPanel] Error parsing message:', error);
           }
         };
       });
@@ -562,6 +769,9 @@ export default function ChatPanel() {
       awaitingResponseRef.current = false;
       setAgentStatus('thinking');
       setStatusMessage('Thinking...');
+      
+      // Clear question ref since we've responded
+      lastQuestionMessageIdRef.current = null;
 
       // Also append user message for visual feedback
       appendMessage({

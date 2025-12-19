@@ -1,7 +1,6 @@
 import { useMemo, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../../../types/chat';
 import MessageBubble from '../MessageBubble';
-import TypingIndicator from '../TypingIndicator';
 import styles from './MessageList.module.scss';
 
 /* eslint-disable react/require-default-props */
@@ -80,11 +79,6 @@ export default function MessageList({
             onResponse={onResponse}
           />
         ))}
-        {isStreaming && (
-          <div className={styles.typingWrapper}>
-            <TypingIndicator />
-          </div>
-        )}
         <div ref={messagesEndRef} />
       </div>
     </div>

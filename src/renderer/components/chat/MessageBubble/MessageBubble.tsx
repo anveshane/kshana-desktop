@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { ChatMessage } from '../../../types/chat';
 import CodeBlock from '../CodeBlock';
 import MessageActions from '../MessageActions';
@@ -163,6 +164,23 @@ export default function MessageBubble({
   // Handle dispatch_agent (plan) messages with markdown
   const isDispatchAgent = message.meta?.toolName === 'dispatch_agent';
   const agentName = message.author;
+  
+  // Check if message contains only reasoning (should be collapsible when done)
+  // Reasoning messages start with tags like <think>, <think>, etc.
+  const contentStart = message.content.trim().substring(0, 100);
+  // Check if content starts with a reasoning/thinking tag (case-insensitive check in lowercase)
+  const contentStartLower = contentStart.toLowerCase();
+  const hasReasoning = contentStartLower.includes('<think');
+  // Message is "reasoning only" if it starts with a reasoning tag
+  const isReasoningOnly = hasReasoning && contentStartLower.trim().startsWith('<think');
+  const [isReasoningExpanded, setIsReasoningExpanded] = useState(false);
+  
+  // Auto-collapse reasoning messages when done (not streaming)
+  useEffect(() => {
+    if (isReasoningOnly && !isStreaming) {
+      setIsReasoningExpanded(false);
+    }
+  }, [isReasoningOnly, isStreaming]);
 
   return (
     <div
@@ -171,32 +189,32 @@ export default function MessageBubble({
         } ${isGreeting ? styles.greeting : ''}`}
     >
       {!isGreeting && (
-        <div className={styles.header}>
-          {message.role === 'assistant' && agentName ? (
-            <span className={styles.role}>
-              <span className={styles.agentName}>[{agentName}]</span>
-            </span>
-          ) : (
-            <span className={styles.role}>{roleLabels[message.role]}</span>
-          )}
-
-          {message.type && message.type !== 'message' && (
-            <span className={styles.type}>{message.type}</span>
-          )}
-          <span className={styles.time}>
-            {formatter.format(new Date(message.timestamp))}
+      <div className={styles.header}>
+        {message.role === 'assistant' && agentName ? (
+          <span className={styles.role}>
+            <span className={styles.agentName}>[{agentName}]</span>
           </span>
-          {!isSystem && (
-            <div className={styles.actions}>
-              <MessageActions
-                message={message}
-                onRegenerate={onRegenerate}
-                onDelete={onDelete}
-                showRegenerate={message.role === 'assistant' && !isIntermediate}
-              />
-            </div>
-          )}
-        </div>
+        ) : (
+          <span className={styles.role}>{roleLabels[message.role]}</span>
+        )}
+
+        {message.type && message.type !== 'message' && (
+          <span className={styles.type}>{message.type}</span>
+        )}
+        <span className={styles.time}>
+          {formatter.format(new Date(message.timestamp))}
+        </span>
+        {!isSystem && (
+          <div className={styles.actions}>
+            <MessageActions
+              message={message}
+              onRegenerate={onRegenerate}
+              onDelete={onDelete}
+              showRegenerate={message.role === 'assistant' && !isIntermediate}
+            />
+          </div>
+        )}
+      </div>
       )}
       <div className={styles.body}>
         {isGreeting ? (
@@ -218,12 +236,40 @@ export default function MessageBubble({
           >
             {(message.meta.result as Record<string, unknown>)?.plan as string || message.content}
           </ReactMarkdown>
+        ) : isReasoningOnly && !isStreaming ? (
+          // Collapsible reasoning message when done
+          <div className={styles.reasoningContainer}>
+            <button
+              type="button"
+              className={styles.reasoningToggle}
+              onClick={() => setIsReasoningExpanded(!isReasoningExpanded)}
+            >
+              {isReasoningExpanded ? (
+                <ChevronUp size={16} />
+              ) : (
+                <ChevronDown size={16} />
+              )}
+              <span className={styles.reasoningLabel}>
+                {isReasoningExpanded ? 'Hide' : 'Show'} thinking
+              </span>
+            </button>
+            {isReasoningExpanded && (
+              <div className={styles.reasoningContent}>
+                <ReactMarkdown
+                  remarkPlugins={remarkGfm ? [remarkGfm] : []}
+                  components={MarkdownComponents}
+                >
+                  {message.content}
+                </ReactMarkdown>
+              </div>
+            )}
+          </div>
         ) : (
           <ReactMarkdown
             remarkPlugins={remarkGfm ? [remarkGfm] : []}
             components={MarkdownComponents}
           >
-            {message.content}
+            {message.content || (message.role === 'assistant' && isStreaming ? '*Thinking...*' : message.content)}
           </ReactMarkdown>
         )}
       </div>

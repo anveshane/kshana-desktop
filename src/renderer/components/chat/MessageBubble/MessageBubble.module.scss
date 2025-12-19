@@ -224,6 +224,52 @@
   font-style: italic;
 }
 
+.reasoningContainer {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.reasoningToggle {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  background: none;
+  border: none;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  cursor: pointer;
+  padding: $spacing-xs;
+  border-radius: $radius-sm;
+  transition: background-color $transition-fast;
+  
+  &:hover {
+    background-color: rgba($color-text-primary, 0.1);
+    color: $color-text-primary;
+  }
+  
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+.reasoningLabel {
+  font-weight: $font-weight-medium;
+}
+
+.reasoningContent {
+  padding: $spacing-sm;
+  background-color: rgba($color-text-primary, 0.03);
+  border-radius: $radius-sm;
+  border-left: 2px solid $color-accent-blue;
+  max-height: 400px;
+  overflow-y: auto;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  font-family: $font-family-mono;
+  line-height: 1.5;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
