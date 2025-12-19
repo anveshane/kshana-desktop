@@ -1,0 +1,128 @@
+.container {
+    border: 1px solid var(--color-accent-blue, #58a6ff); // Cyan-ish for questions
+    border-radius: 8px;
+    background-color: rgba(88, 166, 255, 0.05);
+    margin-top: 8px;
+    overflow: hidden;
+    font-family: var(--font-mono, monospace);
+    color: var(--color-text-primary, #ffffff);
+}
+
+.header {
+    padding: 8px 12px;
+    background-color: rgba(88, 166, 255, 0.1);
+    border-bottom: 1px solid rgba(88, 166, 255, 0.2);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-accent-blue, #58a6ff);
+}
+
+.icon {
+    width: 16px;
+    height: 16px;
+}
+
+.content {
+    padding: 12px;
+}
+
+.questionText {
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 12px;
+    line-height: 1.5;
+}
+
+.optionsList {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.optionButton {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    border: 1px solid var(--color-border, #30363d);
+    background-color: var(--color-bg-subtle, #21262d);
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: left;
+    color: var(--color-text-secondary, #8b949e);
+    transition: all 0.2s ease;
+    font-size: 13px;
+
+    &:hover {
+        background-color: var(--color-bg-hover, #30363d);
+        color: var(--color-text-primary, #ffffff);
+        border-color: var(--color-accent-blue, #58a6ff);
+    }
+
+    &.confirmed {
+        background-color: rgba(35, 134, 54, 0.15); // Green tint
+        border-color: var(--color-success, #238636);
+        color: var(--color-success, #238636);
+        pointer-events: none;
+    }
+
+    &.rejected {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+}
+
+.optionIndex {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: var(--color-bg-canvas, #0d1117);
+    color: var(--color-text-secondary, #8b949e);
+    font-size: 11px;
+    margin-right: 8px;
+    flex-shrink: 0;
+
+    .optionButton:hover & {
+        color: var(--color-accent-blue, #58a6ff);
+        background-color: var(--color-bg-subtle, #21262d);
+    }
+
+    .confirmed & {
+        background-color: var(--color-success, #238636);
+        color: white;
+    }
+}
+
+.timer {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(88, 166, 255, 0.1);
+    font-size: 12px;
+    color: var(--color-text-secondary, #8b949e);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.timerIcon {
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+
+    100% {
+        opacity: 1;
+    }
+}

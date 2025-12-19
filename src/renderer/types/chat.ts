@@ -6,5 +6,6 @@ export interface ChatMessage {
   type: string;
   content: string;
   timestamp: number;
+  author?: string;
   meta?: Record<string, unknown>;
 }

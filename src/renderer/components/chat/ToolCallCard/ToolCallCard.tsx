@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Loader2, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import styles from './ToolCallCard.module.scss';
@@ -12,6 +12,8 @@ export interface ToolCallCardProps {
   result?: unknown;
   duration?: number;
   toolCallId?: string;
+  agentName?: string;
+  streamingContent?: string;
 }
 
 // Tools with special rendering
@@ -289,8 +291,23 @@ export default function ToolCallCard({
   status = 'executing',
   result,
   duration,
+  agentName,
+  streamingContent,
 }: ToolCallCardProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Always expand if executing, error, needs_confirmation, or has result/streaming content
+  const [isExpanded, setIsExpanded] = useState(
+    status === 'executing' || 
+    status === 'error' || 
+    status === 'needs_confirmation' || 
+    result !== undefined || 
+    streamingContent !== undefined
+  );
+
+  useEffect(() => {
+    if (status === 'executing' || status === 'needs_confirmation' || result !== undefined || streamingContent !== undefined) {
+      setIsExpanded(true);
+    }
+  }, [status, result, streamingContent]);
 
   // Special rendering for think tool
   if (toolName === 'think') {
@@ -358,16 +375,25 @@ export default function ToolCallCard({
           )}
         </button>
         {getStatusIcon()}
-        <span className={styles.toolName}>{displayName}</span>
+        <span className={styles.toolName}>
+          {agentName && <span className={styles.agentName}>[{agentName}] </span>}
+          {displayName}
+        </span>
         {duration !== undefined && status !== 'executing' && (
           <span className={styles.duration}>({formatDuration(duration)})</span>
         )}
       </div>
-      {isExpanded && (
+      <div className={styles.toolCallSummary}>
+        <code className={styles.toolCallCode}>{toolCallStr}</code>
+      </div>
+      {(isExpanded || streamingContent) && (
         <div className={styles.content}>
-          <div className={styles.toolCall}>
-            <code className={styles.toolCallCode}>{toolCallStr}</code>
-          </div>
+          {streamingContent && (
+            <div className={styles.streamingContent}>
+              <div className={styles.streamingLabel}>Output:</div>
+              <pre className={styles.streamingPre}>{streamingContent}</pre>
+            </div>
+          )}
           {status === 'error' && result !== undefined && (
             <div className={styles.errorResult}>
               <span className={styles.errorLabel}>Error:</span>
@@ -379,9 +405,20 @@ export default function ToolCallCard({
           {status === 'completed' && result !== undefined && (
             <div className={styles.result}>
               <span className={styles.resultLabel}>Result:</span>
-              <pre className={styles.resultContent}>
-                {typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result)}
-              </pre>
+              {typeof result === 'object' && result !== null ? (
+                // Check if result has content field (like dispatch_content_agent results)
+                'content' in result && typeof (result as Record<string, unknown>).content === 'string' ? (
+                  <div className={styles.resultContentMarkdown}>
+                    <ReactMarkdown>{String((result as Record<string, unknown>).content)}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <pre className={styles.resultContent}>
+                    {JSON.stringify(result, null, 2)}
+                  </pre>
+                )
+              ) : (
+                <pre className={styles.resultContent}>{String(result)}</pre>
+              )}
             </div>
           )}
         </div>

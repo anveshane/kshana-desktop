@@ -5,14 +5,17 @@ import CodeBlock from '../CodeBlock';
 import MessageActions from '../MessageActions';
 import ToolCallCard from '../ToolCallCard';
 import TodoDisplay from '../TodoDisplay';
+import QuestionPrompt from '../QuestionPrompt';
 import type { TodoItem } from '../TodoDisplay';
 import styles from './MessageBubble.module.scss';
+import { useWorkspace } from '../../../contexts/WorkspaceContext';
 
 interface MessageBubbleProps {
   message: ChatMessage;
   isStreaming?: boolean;
   onRegenerate?: () => void;
   onDelete?: () => void;
+  onResponse?: (response: string) => void;
 }
 
 const roleLabels: Record<ChatMessage['role'], string> = {
@@ -69,6 +72,7 @@ export default function MessageBubble({
   isStreaming = false,
   onRegenerate,
   onDelete,
+  onResponse,
 }: MessageBubbleProps) {
   const [remarkGfm, setRemarkGfm] = useState<any>(null);
 
@@ -90,6 +94,8 @@ export default function MessageBubble({
   const isSystem = message.role === 'system';
   const isToolCall = message.type === 'tool_call';
   const isTodoUpdate = message.type === 'todo_update';
+  const isQuestion = message.type === 'agent_question';
+  const isGreeting = message.type === 'greeting';
 
   // Render tool call card
   if (isToolCall && message.meta) {
@@ -103,16 +109,19 @@ export default function MessageBubble({
     const args = (message.meta.args as Record<string, unknown>) || {};
     const result = message.meta.result;
     const duration = message.meta.duration as number | undefined;
+    const streamingContent = message.meta.streamingContent as string | undefined;
 
     return (
       <div className={`${styles.container} ${styles.system}`}>
         <ToolCallCard
           toolName={toolName}
+          agentName={message.author} // Pass agent name if available
           args={args}
           status={status as 'executing' | 'completed' | 'error' | 'needs_confirmation'}
           result={result}
           duration={duration}
           toolCallId={message.meta.toolCallId as string | undefined}
+          streamingContent={streamingContent}
         />
       </div>
     );
@@ -128,38 +137,78 @@ export default function MessageBubble({
     );
   }
 
+  // Render question prompt
+  if (isQuestion) {
+    const options = (message.meta?.options as string[]) || [];
+    const questionType = (message.meta?.questionType as 'text' | 'confirm' | 'select') || 'text';
+    const timeout = message.meta?.timeout as number | undefined;
+    const defaultOption = message.meta?.defaultOption as string | undefined;
+    const selectedResponse = message.meta?.selectedResponse as string | undefined;
+
+    return (
+      <div className={`${styles.container} ${styles.assistant}`}>
+        <QuestionPrompt
+          question={message.content}
+          options={options}
+          type={questionType}
+          timeoutSeconds={timeout}
+          defaultOption={defaultOption}
+          onSelect={onResponse || (() => { })}
+          selectedResponse={selectedResponse}
+        />
+      </div>
+    );
+  }
+
   // Handle dispatch_agent (plan) messages with markdown
   const isDispatchAgent = message.meta?.toolName === 'dispatch_agent';
+  const agentName = message.author;
 
   return (
     <div
-      className={`${styles.container} ${styles[message.role]} ${
-        isStreaming ? styles.streaming : ''
-      } ${isIntermediate ? styles.intermediate : ''} ${
-        isError ? styles.error : ''
-      }`}
+      className={`${styles.container} ${styles[message.role]} ${isStreaming ? styles.streaming : ''
+        } ${isIntermediate ? styles.intermediate : ''} ${isError ? styles.error : ''
+        } ${isGreeting ? styles.greeting : ''}`}
     >
-      <div className={styles.header}>
-        <span className={styles.role}>{roleLabels[message.role]}</span>
-        {message.type && message.type !== 'message' && (
-          <span className={styles.type}>{message.type}</span>
-        )}
-        <span className={styles.time}>
-          {formatter.format(new Date(message.timestamp))}
-        </span>
-        {!isSystem && (
-          <div className={styles.actions}>
-            <MessageActions
-              message={message}
-              onRegenerate={onRegenerate}
-              onDelete={onDelete}
-              showRegenerate={message.role === 'assistant' && !isIntermediate}
-            />
-          </div>
-        )}
-      </div>
+      {!isGreeting && (
+        <div className={styles.header}>
+          {message.role === 'assistant' && agentName ? (
+            <span className={styles.role}>
+              <span className={styles.agentName}>[{agentName}]</span>
+            </span>
+          ) : (
+            <span className={styles.role}>{roleLabels[message.role]}</span>
+          )}
+
+          {message.type && message.type !== 'message' && (
+            <span className={styles.type}>{message.type}</span>
+          )}
+          <span className={styles.time}>
+            {formatter.format(new Date(message.timestamp))}
+          </span>
+          {!isSystem && (
+            <div className={styles.actions}>
+              <MessageActions
+                message={message}
+                onRegenerate={onRegenerate}
+                onDelete={onDelete}
+                showRegenerate={message.role === 'assistant' && !isIntermediate}
+              />
+            </div>
+          )}
+        </div>
+      )}
       <div className={styles.body}>
-        {isSystem ? (
+        {isGreeting ? (
+          <div className={styles.greetingContent}>
+            <ReactMarkdown
+              remarkPlugins={remarkGfm ? [remarkGfm] : []}
+              components={MarkdownComponents}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        ) : isSystem ? (
           <div className={styles.systemContent}>{message.content}</div>
         ) : isDispatchAgent && message.meta?.result ? (
           // Render plan from dispatch_agent result

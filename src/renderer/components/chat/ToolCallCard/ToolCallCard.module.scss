@@ -167,6 +167,14 @@
   margin: 0;
 }
 
+.resultContentMarkdown {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  padding: $spacing-sm;
+  border-radius: $radius-sm;
+  margin: 0;
+}
+
 // Think tool styles
 .thinkTool {
   padding: $spacing-sm;

@@ -2,47 +2,49 @@
 @import '../../../styles/mixins';
 
 .container {
-  padding: $spacing-md $spacing-lg;
-  border-radius: $radius-lg;
-  margin-bottom: $spacing-xl;
-  transition: all $transition-normal;
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: $spacing-lg;
+  max-width: 100%;
+  animation: fadeIn 0.3s ease-out;
 
   &.user {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid $color-panel-border;
+    align-self: flex-end;
+    border: 1px solid $color-accent-green;
+    background-color: rgba($color-accent-green, 0.05);
+    border-radius: $radius-md;
+    padding: $spacing-md;
+    border-left-width: 4px; // Distinctive CLI user input style
   }
 
   &.assistant {
-    background: transparent;
-    border-left: 2px solid transparent;
-    padding-left: $spacing-lg;
-
-    &.streaming {
-      border-left-color: $color-accent-green;
-    }
+    align-self: flex-start;
   }
 
   &.system {
-    border: 1px dashed $color-panel-border;
-    background: rgba($color-panel-background, 0.5);
-    color: $color-text-secondary;
+    align-self: center;
+    width: 100%;
+    margin: $spacing-md 0;
   }
 
-  &.intermediate {
-    opacity: 0.8;
-    border-left: 2px solid $color-text-muted;
+  &.streaming {
+    .body {
+      opacity: 0.8;
+    }
   }
 
   &.error {
-    border-left-color: $color-error;
-    background: rgba($color-error, 0.1);
+    border: 1px solid $color-error;
+    background-color: rgba($color-error, 0.1);
+    border-radius: $radius-md;
+    padding: $spacing-md;
   }
 
-  &:hover {
-    .actions {
-      opacity: 1;
-    }
+  // Reduce size for intermediate messages
+  &.intermediate {
+    font-size: $font-size-sm;
+    margin-bottom: $spacing-sm;
+    opacity: 0.9;
   }
 }
 
@@ -51,116 +53,185 @@
   align-items: center;
   gap: $spacing-sm;
   margin-bottom: $spacing-sm;
-  font-size: $font-size-sm;
+  font-size: $font-size-xs;
   color: $color-text-secondary;
-  position: relative;
 }
 
 .role {
   font-weight: $font-weight-semibold;
-  color: $color-text-primary;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .type {
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: $font-size-xs;
-  padding: 2px $spacing-sm;
-  border-radius: $radius-full;
-  background: rgba($color-accent-green, 0.1);
-  color: $color-accent-green;
+  background-color: $color-bg-subtle;
+  padding: 2px 6px;
+  border-radius: $radius-sm;
+  font-family: $font-family-mono;
+}
+
+.agentName {
+  color: $color-accent-blue;
+  font-weight: $font-weight-bold;
+  margin-right: 4px;
 }
 
 .time {
   margin-left: auto;
-  font-size: $font-size-xs;
 }
 
 .actions {
-  position: absolute;
-  right: 0;
-  top: 0;
   opacity: 0;
   transition: opacity $transition-fast;
+
+  .container:hover & {
+    opacity: 1;
+  }
 }
 
 .body {
-  color: $color-text-primary;
-  line-height: $line-height-relaxed;
+  line-height: 1.6;
   font-size: $font-size-base;
+  color: $color-text-primary;
+  overflow-wrap: break-word;
 
-  p {
-    margin: 0 0 $spacing-md 0;
+  :global {
+    p {
+      margin-bottom: $spacing-sm;
 
-    &:last-child {
-      margin-bottom: 0;
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+
+    // Additional markdown styles if needed
+  }
+}
+
+.text {
+  white-space: pre-wrap;
+}
+
+.systemContent {
+  color: $color-text-secondary;
+  font-style: italic;
+  font-size: $font-size-sm;
+  text-align: center;
+}
+
+.greeting {
+  border: 1px solid $color-accent-cyan;
+  background: linear-gradient(135deg, rgba($color-accent-cyan, 0.1) 0%, rgba($color-accent-cyan, 0.05) 100%);
+  border-radius: $radius-md;
+  padding: $spacing-lg;
+  margin: $spacing-md 0;
+  text-align: center;
+}
+
+.greetingContent {
+  color: $color-text-primary;
+  font-size: $font-size-base;
+  line-height: 1.6;
+
+  :global {
+    p {
+      margin-bottom: $spacing-md;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+
+    strong {
+      color: $color-accent-cyan;
+      font-weight: $font-weight-bold;
+      display: block;
+      margin-bottom: $spacing-sm;
+      font-size: $font-size-lg;
+    }
+
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: $spacing-md 0 0;
+      text-align: left;
+      display: inline-block;
+    }
+
+    li {
+      padding: $spacing-xs 0;
+      color: $color-text-secondary;
+      font-style: italic;
+      
+      &::before {
+        content: '• ';
+        color: $color-accent-cyan;
+        font-weight: $font-weight-bold;
+        margin-right: $spacing-xs;
+      }
     }
   }
 }
 
-.systemContent {
-  white-space: pre-wrap;
-  font-size: $font-size-sm;
-  color: $color-text-secondary;
+.inlineCode {
+  font-family: $font-family-mono;
+  background-color: rgba($color-text-primary, 0.1);
+  padding: 2px 4px;
+  border-radius: $radius-sm;
+  font-size: 0.9em;
 }
 
-// Markdown styling
-.heading1,
-.heading2,
-.heading3 {
-  margin: $spacing-lg 0 $spacing-md 0;
-  color: $color-text-primary;
-  font-weight: $font-weight-semibold;
+.link {
+  color: $color-accent-blue;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
 .heading1 {
   font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  margin: $spacing-md 0 $spacing-sm;
+  color: $color-text-primary;
 }
 
 .heading2 {
   font-size: $font-size-lg;
+  font-weight: $font-weight-bold;
+  margin: $spacing-md 0 $spacing-sm;
+  color: $color-text-primary;
 }
 
 .heading3 {
   font-size: $font-size-base;
+  font-weight: $font-weight-bold;
+  margin: $spacing-sm 0 $spacing-xs;
+  color: $color-text-primary;
 }
 
 .list {
-  margin: $spacing-md 0;
-  padding-left: $spacing-xl;
-  color: $color-text-primary;
-
-  li {
-    margin: $spacing-xs 0;
-  }
+  margin-left: $spacing-lg;
+  margin-bottom: $spacing-sm;
 }
 
 .blockquote {
-  margin: $spacing-md 0;
-  padding: $spacing-md $spacing-lg;
-  border-left: 3px solid $color-accent-green;
-  background: rgba($color-accent-green, 0.05);
+  border-left: 3px solid $color-panel-border;
+  padding-left: $spacing-md;
+  margin-left: 0;
   color: $color-text-secondary;
   font-style: italic;
 }
 
-.inlineCode {
-  padding: 2px $spacing-xs;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: $radius-sm;
-  font-family: $font-family-mono;
-  font-size: 0.9em;
-  color: $color-accent-green;
-}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
 
-.link {
-  color: $color-accent-green;
-  text-decoration: none;
-  border-bottom: 1px solid transparent;
-  transition: border-color $transition-fast;
-
-  &:hover {
-    border-bottom-color: $color-accent-green;
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
-
