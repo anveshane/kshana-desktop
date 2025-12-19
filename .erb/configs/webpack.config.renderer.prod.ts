@@ -8,7 +8,7 @@ import HtmlWebpackPlugin from 'html-webpack-plugin';
 import MiniCssExtractPlugin from 'mini-css-extract-plugin';
 import { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer';
 import CssMinimizerPlugin from 'css-minimizer-webpack-plugin';
-import { merge } from 'webpack-merge';
+import { mergeWithCustomize } from 'webpack-merge';
 import TerserPlugin from 'terser-webpack-plugin';
 import baseConfig from './webpack.config.base';
 import webpackPaths from './webpack.paths';
@@ -146,6 +146,57 @@ const configuration: webpack.Configuration = {
       'process.type': '"renderer"',
     }),
   ],
+
+  // Override externals from base config - bundle React and React-DOM instead of externalizing
+  // This is necessary because React needs to be bundled in the renderer for proper initialization
+  externals: (() => {
+    try {
+      // Read from root package.json (which exists at build time) and exclude React/React-DOM
+      // so they get bundled into the renderer bundle
+      const rootPkg = require('../../package.json');
+      // Exclude React, React-DOM, and any React-related libraries from externals
+      const deps = Object.keys(rootPkg.dependencies || {}).filter(
+        (dep) => !dep.includes('react') && !dep.includes('lucide') && !dep.includes('remark')
+      );
+      return [
+        ...deps,
+        // Keep runtime dependencies external
+        'fastify',
+        '@fastify/websocket',
+        '@fastify/cors',
+        'dotenv',
+      ];
+    } catch (error) {
+      // Fallback: only externalize kshana-ink and its deps if package.json can't be read
+      console.warn('Could not read package.json for externals, using minimal externals list');
+      return [
+        'kshana-ink',
+        /^kshana-ink\/.*/,
+        'fastify',
+        '@fastify/websocket',
+        '@fastify/cors',
+        'dotenv',
+      ];
+    }
+  })(),
+
+  resolve: {
+    alias: {
+      // Stub kshana-ink in renderer
+      'kshana-ink': false,
+      // Force React resolution to project root
+      'react': path.dirname(require.resolve('react/package.json')),
+      'react-dom': path.dirname(require.resolve('react-dom/package.json')),
+    },
+  },
 };
 
-export default merge(baseConfig, configuration);
+// Use custom merge to replace externals array instead of concatenating
+export default mergeWithCustomize({
+  customizeArray: (a, b, key) => {
+    if (key === 'externals') {
+      return b; // Use the renderer config's externals, completely replacing base config's
+    }
+    return undefined; // Use default merge behavior for other arrays
+  },
+})(baseConfig, configuration);

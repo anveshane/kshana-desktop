@@ -283,3 +283,6 @@ venv.bak/
 src/node_modules  → release/app/node_modules
 
 .kshana
+
+# kshana-ink version tracking (generated file)
+release/app/.kshana-ink-version.json

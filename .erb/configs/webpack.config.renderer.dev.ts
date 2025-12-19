@@ -138,12 +138,12 @@ const configuration: webpack.Configuration = {
     ...(skipDLLs
       ? []
       : [
-          new webpack.DllReferencePlugin({
-            context: webpackPaths.dllPath,
-            manifest: require(manifest),
-            sourceType: 'var',
-          }),
-        ]),
+        new webpack.DllReferencePlugin({
+          context: webpackPaths.dllPath,
+          manifest: require(manifest),
+          sourceType: 'var',
+        }),
+      ]),
 
     new webpack.NoEmitOnErrorsPlugin(),
 
@@ -226,6 +226,16 @@ const configuration: webpack.Configuration = {
         })
         .on('error', (spawnError) => console.error(spawnError));
       return middlewares;
+    },
+  },
+
+  resolve: {
+    alias: {
+      // Stub kshana-ink in renderer
+      'kshana-ink': false,
+      // Force React resolution to project root
+      'react': path.dirname(require.resolve('react/package.json')),
+      'react-dom': path.dirname(require.resolve('react-dom/package.json')),
     },
   },
 };

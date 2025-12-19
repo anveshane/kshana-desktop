@@ -1,5 +1,6 @@
 {
   "name": "kshana-desktop",
+  "version": "1.0.0",
   "description": "Desktop application for Kshana video generation platform",
   "keywords": [
     "kshana",
@@ -29,9 +30,10 @@
     "build:dll": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.renderer.dev.dll.ts",
     "build:main": "cross-env NODE_ENV=production TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.main.prod.ts",
     "build:renderer": "cross-env NODE_ENV=production TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.renderer.prod.ts",
-    "postinstall": "ts-node .erb/scripts/check-native-dep.js && electron-builder install-app-deps && npm run build:dll",
+    "postinstall": "ts-node .erb/scripts/check-native-dep.js && node .erb/scripts/conditional-install-app-deps.js && npm run build:dll",
     "lint": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx",
     "lint:fix": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx --fix",
+    "prepackage": "ts-node ./.erb/scripts/verify-kshana-ink.ts",
     "package": "ts-node ./.erb/scripts/clean.js dist && ts-node ./.erb/scripts/install-app-deps.ts && npm run build && electron-builder build --publish never && npm run build:dll",
     "release": "ts-node ./.erb/scripts/clean.js dist && ts-node ./.erb/scripts/install-app-deps.ts && npm run build && electron-builder build --publish always",
     "rebuild": "electron-rebuild --parallel --types prod,dev,optional --module-dir release/app",
@@ -188,7 +190,8 @@
     "afterSign": ".erb/scripts/notarize.js",
     "asarUnpack": [
       "**\\*.{node,dll}",
-      "**/node_modules/**/*"
+      "**/node_modules/**/*",
+      "**/node_modules/kshana-ink/**/*"
     ],
     "files": [
       "dist",

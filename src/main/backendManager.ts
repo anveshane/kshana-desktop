@@ -191,23 +191,45 @@ class BackendManager extends EventEmitter {
       let nodeModulesDir: string;
       if (app.isPackaged) {
         // In packaged app, try unpacked first (for native modules), then asar
-        const unpackedPath = path.join(
+        const unpackedKshanaInkPath = path.join(
           process.resourcesPath,
           'app.asar.unpacked',
           'node_modules',
           'kshana-ink',
         );
-        if (fs.existsSync(unpackedPath)) {
+        const asarKshanaInkPath = path.join(
+          process.resourcesPath,
+          'app.asar',
+          'node_modules',
+          'kshana-ink',
+        );
+        
+        log.info(`Checking unpacked path: ${unpackedKshanaInkPath}`);
+        log.info(`Checking ASAR path: ${asarKshanaInkPath}`);
+        log.info(`Unpacked exists: ${fs.existsSync(unpackedKshanaInkPath)}`);
+        log.info(`ASAR exists: ${fs.existsSync(asarKshanaInkPath)}`);
+        
+        if (fs.existsSync(unpackedKshanaInkPath)) {
           nodeModulesDir = path.join(
             process.resourcesPath,
             'app.asar.unpacked',
             'node_modules',
           );
-        } else {
+          log.info('Using unpacked node_modules directory');
+        } else if (fs.existsSync(asarKshanaInkPath)) {
           nodeModulesDir = path.join(
             process.resourcesPath,
             'app.asar',
             'node_modules',
+          );
+          log.warn('Using ASAR node_modules directory (kshana-ink should be unpacked!)');
+        } else {
+          // Neither path exists - provide helpful error
+          throw new Error(
+            `kshana-ink not found in packaged app.\n` +
+            `Checked unpacked: ${unpackedKshanaInkPath}\n` +
+            `Checked ASAR: ${asarKshanaInkPath}\n` +
+            `Please ensure kshana-ink is copied to release/app/node_modules/kshana-ink before packaging.`
           );
         }
       } else {
