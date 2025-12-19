@@ -207,3 +207,31 @@ jobs:
           npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Release Notes
+        working-directory: kshana-desktop
+        run: |
+          # Hardcoded release notes for v1.0.0
+          RELEASE_NOTES="Kshana Desktop is an AI-powered video generation application that transforms your story ideas into videos. Simply describe your story, plot, or chapter, and Kshana guides you through creating characters, scenes, images, and finally your complete video. Available for macOS, this desktop app provides an intuitive chat interface where you can interact with the AI to bring your creative vision to life."
+          
+          # Wait a moment for electron-builder to finish creating the release
+          sleep 5
+          
+          # Get the release ID for the tag
+          RELEASE_ID=$(gh api repos/anveshane/kshana-desktop/releases/tags/${{ github.ref_name }} --jq '.id' 2>/dev/null || echo "")
+          
+          if [ -n "$RELEASE_ID" ] && [ "$RELEASE_ID" != "null" ]; then
+            echo "Updating release $RELEASE_ID with release notes..."
+            # Update the release with the notes
+            echo "$RELEASE_NOTES" > /tmp/release_notes.txt
+            gh api repos/anveshane/kshana-desktop/releases/$RELEASE_ID \
+              --method PATCH \
+              --field body=@/tmp/release_notes.txt \
+              --field tag_name="${{ github.ref_name }}"
+            echo "✓ Release notes updated successfully"
+          else
+            echo "⚠ Could not find release ID for tag ${{ github.ref_name }}"
+            echo "Release may still be creating, this is normal if electron-builder just finished"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
