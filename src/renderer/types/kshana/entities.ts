@@ -245,4 +245,3 @@ export function createDefaultSceneRef(sceneNumber: number): SceneRef {
     regeneration_count: 0,
   };
 }
-

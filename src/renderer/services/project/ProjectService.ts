@@ -24,10 +24,7 @@ import {
   createDefaultContextIndex,
   createAssetInfo,
 } from '../../types/kshana';
-import {
-  createMockKshanaProject,
-  createEmptyKshanaProject,
-} from './mockData';
+import { createMockKshanaProject, createEmptyKshanaProject } from './mockData';
 import { generateMockProjectStructure } from './mockData/generateMockStructure';
 
 /**
@@ -55,7 +52,9 @@ export interface ProjectValidation {
  */
 export class ProjectService {
   private projectDirectory: string | null = null;
+
   private currentProject: KshanaProject | null = null;
+
   private useMockData: boolean = false;
 
   /**
@@ -150,7 +149,10 @@ export class ProjectService {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to create mock project',
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Failed to create mock project',
         };
       }
     }
@@ -437,7 +439,9 @@ export class ProjectService {
     await window.electron.project.writeFile(path, content);
   }
 
-  private async readManifest(directory: string): Promise<KshanaManifest | null> {
+  private async readManifest(
+    directory: string,
+  ): Promise<KshanaManifest | null> {
     return this.readJSON<KshanaManifest>(
       `${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`,
     );
@@ -448,7 +452,10 @@ export class ProjectService {
     manifest: KshanaManifest,
   ): Promise<void> {
     manifest.updated_at = new Date().toISOString();
-    await this.writeJSON(`${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`, manifest);
+    await this.writeJSON(
+      `${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`,
+      manifest,
+    );
   }
 
   private async readAgentState(
@@ -531,7 +538,10 @@ export class ProjectService {
       let basePath = directory;
       for (const part of parts) {
         if (part) {
-          const newPath = await window.electron.project.createFolder(basePath, part);
+          const newPath = await window.electron.project.createFolder(
+            basePath,
+            part,
+          );
           // Use the returned normalized path for the next iteration
           // This ensures we don't accumulate path errors or duplicates
           if (newPath) {
@@ -554,4 +564,3 @@ export class ProjectService {
 export const projectService = new ProjectService();
 
 export default projectService;
-

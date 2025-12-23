@@ -142,9 +142,12 @@ ipcMain.handle('project:select-video-file', async () => {
   return result.filePaths[0];
 });
 
-ipcMain.handle('project:read-tree', async (_event, dirPath: string) => {
-  return fileSystemManager.readDirectory(dirPath);
-});
+ipcMain.handle(
+  'project:read-tree',
+  async (_event, dirPath: string, depth?: number) => {
+    return fileSystemManager.readDirectory(dirPath, depth);
+  },
+);
 
 ipcMain.handle('project:watch-directory', async (_event, dirPath: string) => {
   fileSystemManager.watchDirectory(dirPath);

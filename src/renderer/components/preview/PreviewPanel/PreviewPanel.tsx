@@ -48,16 +48,18 @@ export default function PreviewPanel() {
   const { timelineState, scenes: projectScenes } = useProject();
 
   // Initialize activeVersions from timelineState with migration support
-  const [activeVersions, setActiveVersions] = useState<Record<number, SceneVersions>>(
-    () => {
-      const versions: Record<number, SceneVersions> = {};
-      if (timelineState?.active_versions) {
-        Object.entries(timelineState.active_versions).forEach(([folder, versionData]) => {
+  const [activeVersions, setActiveVersions] = useState<
+    Record<number, SceneVersions>
+  >(() => {
+    const versions: Record<number, SceneVersions> = {};
+    if (timelineState?.active_versions) {
+      Object.entries(timelineState.active_versions).forEach(
+        ([folder, versionData]) => {
           // Extract scene number from folder name (e.g., "scene-001" -> 1)
           const match = folder.match(/scene-(\d+)/);
           if (match) {
             const sceneNumber = parseInt(match[1], 10);
-            
+
             // Handle migration from old format (number) to new format (SceneVersions)
             if (typeof versionData === 'number') {
               // Old format: treat as video version
@@ -67,29 +69,31 @@ export default function PreviewPanel() {
               versions[sceneNumber] = versionData;
             }
           }
-        });
-      }
-      return versions;
-    },
-  );
+        },
+      );
+    }
+    return versions;
+  });
 
   // Update activeVersions when timelineState changes (with migration)
   useEffect(() => {
     if (timelineState?.active_versions) {
       const versions: Record<number, SceneVersions> = {};
-      Object.entries(timelineState.active_versions).forEach(([folder, versionData]) => {
-        const match = folder.match(/scene-(\d+)/);
-        if (match) {
-          const sceneNumber = parseInt(match[1], 10);
-          
-          // Handle migration from old format (number) to new format (SceneVersions)
-          if (typeof versionData === 'number') {
-            versions[sceneNumber] = { video: versionData };
-          } else if (versionData && typeof versionData === 'object') {
-            versions[sceneNumber] = versionData;
+      Object.entries(timelineState.active_versions).forEach(
+        ([folder, versionData]) => {
+          const match = folder.match(/scene-(\d+)/);
+          if (match) {
+            const sceneNumber = parseInt(match[1], 10);
+
+            // Handle migration from old format (number) to new format (SceneVersions)
+            if (typeof versionData === 'number') {
+              versions[sceneNumber] = { video: versionData };
+            } else if (versionData && typeof versionData === 'object') {
+              versions[sceneNumber] = versionData;
+            }
           }
-        }
-      });
+        },
+      );
       setActiveVersions(versions);
     }
   }, [timelineState?.active_versions]);

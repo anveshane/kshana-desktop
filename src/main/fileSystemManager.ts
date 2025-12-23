@@ -43,7 +43,7 @@ class FileSystemManager extends EventEmitter {
     return IGNORED_PATTERNS.some((pattern) => pattern.test(filePath));
   }
 
-  async readDirectory(dirPath: string): Promise<FileNode> {
+  async readDirectory(dirPath: string, depth: number = 1): Promise<FileNode> {
     const stats = await fs.promises.stat(dirPath);
     const name = path.basename(dirPath);
 
@@ -57,27 +57,52 @@ class FileSystemManager extends EventEmitter {
       };
     }
 
-    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-    const children: FileNode[] = [];
+    // If depth is 0, return directory node without reading children
+    // but ensure it's marked as a directory
+    if (depth <= 0) {
+      return {
+        name,
+        path: dirPath,
+        type: 'directory',
+        // children undefined implies not loaded
+      };
+    }
 
-    for (const entry of entries) {
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+
+    // Process entries in parallel
+    const childrenRequest = entries.map(async (entry) => {
       const entryPath = path.join(dirPath, entry.name);
 
-      if (this.shouldIgnore(entryPath)) continue;
+      if (this.shouldIgnore(entryPath)) return null;
 
       if (entry.isDirectory()) {
-        const childNode = await this.readDirectory(entryPath);
-        children.push(childNode);
-      } else {
-        const ext = path.extname(entry.name);
-        children.push({
+        // Only recurse if we have remaining depth
+        if (depth > 1) {
+          return this.readDirectory(entryPath, depth - 1);
+        }
+        // Otherwise return directory node directly (avoids redundant fs.stat)
+        return {
           name: entry.name,
           path: entryPath,
-          type: 'file',
-          extension: ext,
-        });
+          type: 'directory' as const,
+          // children undefined implies not loaded
+        };
       }
-    }
+      const ext = path.extname(entry.name);
+      // We know it's a file, no need to stat again
+      return {
+        name: entry.name,
+        path: entryPath,
+        type: 'file' as const,
+        extension: ext,
+      };
+    });
+
+    const results = await Promise.all(childrenRequest);
+
+    // Filter out nulls (ignored files) and sort
+    const children = results.filter((node): node is FileNode => node !== null);
 
     // Sort: directories first, then files, both alphabetically
     children.sort((a, b) => {
@@ -105,7 +130,7 @@ class FileSystemManager extends EventEmitter {
       ignored: IGNORED_PATTERNS,
       persistent: true,
       ignoreInitial: true,
-      depth: 10,
+      depth: 3, // Reduced from 10 to prevent massive watching overhead
     });
 
     const emitChange = (type: FileChangeEvent['type'], filePath: string) => {

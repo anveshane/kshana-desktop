@@ -39,6 +39,7 @@ export interface WorkspaceActions {
     service: keyof ConnectionState,
     status: ConnectionStatus,
   ) => void;
+  loadDirectory: (path: string) => Promise<void>;
 }
 
 export type WorkspaceContextType = WorkspaceState & WorkspaceActions;

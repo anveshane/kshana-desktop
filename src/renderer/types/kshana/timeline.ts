@@ -168,9 +168,10 @@ export function setActiveVersion(
   // Handle migration from old format (number) to new format (SceneVersions)
   if (typeof current === 'number') {
     // Old format: migrate to new format
-    updated = assetType === 'video' 
-      ? { video: version, image: current } // Preserve old video version as image if needed
-      : { image: version, video: current }; // Preserve old video version
+    updated =
+      assetType === 'video'
+        ? { video: version, image: current } // Preserve old video version as image if needed
+        : { image: version, video: current }; // Preserve old video version
   } else if (current && typeof current === 'object') {
     // New format: update specific asset type
     updated = { ...current, [assetType]: version };
@@ -198,17 +199,16 @@ export function getActiveVersion(
   assetType: 'image' | 'video' = 'video',
 ): number {
   const versions = state.active_versions[sceneFolder];
-  
+
   // Handle old format (number) - treat as video version
   if (typeof versions === 'number') {
     return assetType === 'video' ? versions : 1;
   }
-  
+
   // Handle new format (SceneVersions)
   if (versions && typeof versions === 'object') {
     return versions[assetType] ?? 1;
   }
-  
+
   return 1;
 }
-

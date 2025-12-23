@@ -35,11 +35,7 @@ export interface TimelineData {
  * Single source of truth for timeline calculations
  */
 export function useTimelineData(): TimelineData {
-  const {
-    isLoaded,
-    scenes: projectScenes,
-    assetManifest,
-  } = useProject();
+  const { isLoaded, scenes: projectScenes, assetManifest } = useProject();
 
   // Convert SceneRef from ProjectContext to StoryboardScene format
   const scenes: StoryboardScene[] = useMemo(() => {
@@ -67,7 +63,8 @@ export function useTimelineData(): TimelineData {
       // Check if scene has approved video (highest priority)
       if (scene.video_approval_status === 'approved' && scene.video_path) {
         map[scene.scene_number] = {
-          artifact_id: scene.video_artifact_id || `scene-${scene.scene_number}-video`,
+          artifact_id:
+            scene.video_artifact_id || `scene-${scene.scene_number}-video`,
           artifact_type: 'video',
           scene_number: scene.scene_number,
           file_path: scene.video_path,
@@ -75,10 +72,14 @@ export function useTimelineData(): TimelineData {
             ? new Date(scene.video_approved_at).toISOString()
             : new Date().toISOString(),
         };
-      } else if (scene.image_approval_status === 'approved' && scene.image_path) {
+      } else if (
+        scene.image_approval_status === 'approved' &&
+        scene.image_path
+      ) {
         // Fallback to image if no video
         map[scene.scene_number] = {
-          artifact_id: scene.image_artifact_id || `scene-${scene.scene_number}-image`,
+          artifact_id:
+            scene.image_artifact_id || `scene-${scene.scene_number}-image`,
           artifact_type: 'image',
           scene_number: scene.scene_number,
           file_path: scene.image_path,
@@ -98,7 +99,9 @@ export function useTimelineData(): TimelineData {
 
     // Filter for video-related asset types
     return assetManifest.assets
-      .filter((asset) => asset.type === 'scene_video' || asset.type === 'final_video')
+      .filter(
+        (asset) => asset.type === 'scene_video' || asset.type === 'final_video',
+      )
       .map((asset) => ({
         artifact_id: asset.id,
         artifact_type: 'video',
@@ -144,7 +147,7 @@ export function useTimelineData(): TimelineData {
     sceneBlocks.forEach((block) => {
       const sceneLabel =
         block.scene.name || `Scene ${block.scene.scene_number}`;
-      
+
       if (block.artifact && block.artifact.artifact_type === 'video') {
         // Scene has video - add as video item
         items.push({
@@ -240,4 +243,3 @@ export function useTimelineData(): TimelineData {
     totalDuration,
   };
 }
-

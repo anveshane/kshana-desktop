@@ -41,9 +41,9 @@ export default function ChatPanel() {
   const awaitingResponseRef = useRef(false);
   // Track active tool calls by toolName (since server sends empty toolCallId)
   // Key format: `${toolName}-${sequenceNumber}` to handle multiple calls of same tool
-  const activeToolCallsRef = useRef<Map<string, { messageId: string; startTime: number; toolName: string }>>(
-    new Map(),
-  );
+  const activeToolCallsRef = useRef<
+    Map<string, { messageId: string; startTime: number; toolName: string }>
+  >(new Map());
   const toolCallSequenceRef = useRef<Map<string, number>>(new Map());
   // Track the last todo message ID for in-place updates
   const lastTodoMessageIdRef = useRef<string | null>(null);
@@ -121,105 +121,128 @@ export default function ChatPanel() {
     setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
   }, []);
 
-  const appendAssistantChunk = useCallback((content: string, type: string, author?: string) => {
-    // Always process chunks - create message even with empty content to show thinking state
-    const trimmedContent = content || '';
-    setMessages((prev) => {
-      // Check if this content is already in a recent tool call result to avoid duplicates
-      // Only check for substantial content (not reasoning/thinking chunks)
-      if (trimmedContent.length > 100 && !trimmedContent.includes('<think>') && !trimmedContent.includes('<think>')) {
-        for (let i = prev.length - 1; i >= Math.max(0, prev.length - 10); i--) {
-          const msg = prev[i];
-          if (msg.type === 'tool_call' && msg.meta?.result) {
-            const resultStr = typeof msg.meta.result === 'string' 
-              ? msg.meta.result 
-              : JSON.stringify(msg.meta.result);
-            // If the tool result contains this exact content (or a large portion), skip it
-            const contentToCheck = trimmedContent.substring(0, Math.min(200, trimmedContent.length));
-            if (resultStr.includes(contentToCheck)) {
-              return prev;
+  const appendAssistantChunk = useCallback(
+    (content: string, type: string, author?: string) => {
+      // Always process chunks - create message even with empty content to show thinking state
+      const trimmedContent = content || '';
+      setMessages((prev) => {
+        // Check if this content is already in a recent tool call result to avoid duplicates
+        // Only check for substantial content (not reasoning/thinking chunks)
+        if (
+          trimmedContent.length > 100 &&
+          !trimmedContent.includes('<think>') &&
+          !trimmedContent.includes('<think>')
+        ) {
+          for (
+            let i = prev.length - 1;
+            i >= Math.max(0, prev.length - 10);
+            i--
+          ) {
+            const msg = prev[i];
+            if (msg.type === 'tool_call' && msg.meta?.result) {
+              const resultStr =
+                typeof msg.meta.result === 'string'
+                  ? msg.meta.result
+                  : JSON.stringify(msg.meta.result);
+              // If the tool result contains this exact content (or a large portion), skip it
+              const contentToCheck = trimmedContent.substring(
+                0,
+                Math.min(200, trimmedContent.length),
+              );
+              if (resultStr.includes(contentToCheck)) {
+                return prev;
+              }
             }
           }
         }
-      }
 
-      // Stream chunks into existing message if available
-      const streamingTypes = [
-        'text_chunk',
-        'agent_text',
-        'coordinator_response',
-        'stream_chunk',
-      ];
-      // Normalize stream_chunk to agent_text for comparison
-      const normalizedType = type === 'stream_chunk' ? 'agent_text' : type;
-      
-      // Check if we should append to existing message
-      // Only append to assistant messages (thinking), NOT to tool calls
-      if (streamingTypes.includes(type) && lastAssistantIdRef.current) {
-        const existingMessage = prev.find((msg) => msg.id === lastAssistantIdRef.current);
-        if (existingMessage && 
-            existingMessage.role === 'assistant' && 
+        // Stream chunks into existing message if available
+        const streamingTypes = [
+          'text_chunk',
+          'agent_text',
+          'coordinator_response',
+          'stream_chunk',
+        ];
+        // Normalize stream_chunk to agent_text for comparison
+        const normalizedType = type === 'stream_chunk' ? 'agent_text' : type;
+
+        // Check if we should append to existing message
+        // Only append to assistant messages (thinking), NOT to tool calls
+        if (streamingTypes.includes(type) && lastAssistantIdRef.current) {
+          const existingMessage = prev.find(
+            (msg) => msg.id === lastAssistantIdRef.current,
+          );
+          if (
+            existingMessage &&
+            existingMessage.role === 'assistant' &&
             existingMessage.type !== 'tool_call' && // Don't append to tool calls
-            (existingMessage.type === 'agent_text' || existingMessage.type === 'stream_chunk' || existingMessage.type === normalizedType)) {
-        setIsStreaming(true);
-          // Append content to existing message
-          return prev.map((message) => {
-            if (message.id === lastAssistantIdRef.current) {
-              const newContent = `${message.content || ''}${trimmedContent}`;
-              return { 
-                ...message, 
-                content: newContent,
-                type: normalizedType, // Update to normalized type
-                // Ensure author is set if not already
-                author: message.author || author,
-                // Update timestamp to show it's active
-                timestamp: Date.now(),
-              };
-            }
-            return message;
-          });
+            (existingMessage.type === 'agent_text' ||
+              existingMessage.type === 'stream_chunk' ||
+              existingMessage.type === normalizedType)
+          ) {
+            setIsStreaming(true);
+            // Append content to existing message
+            return prev.map((message) => {
+              if (message.id === lastAssistantIdRef.current) {
+                const newContent = `${message.content || ''}${trimmedContent}`;
+                return {
+                  ...message,
+                  content: newContent,
+                  type: normalizedType, // Update to normalized type
+                  // Ensure author is set if not already
+                  author: message.author || author,
+                  // Update timestamp to show it's active
+                  timestamp: Date.now(),
+                };
+              }
+              return message;
+            });
+          }
         }
-      }
 
-      // Check if we already have an empty assistant message we can reuse
-      // But NOT if it's a tool call - tool calls should be separate
-      const lastMessage = prev[prev.length - 1];
-      if (lastMessage && 
-          lastMessage.role === 'assistant' && 
+        // Check if we already have an empty assistant message we can reuse
+        // But NOT if it's a tool call - tool calls should be separate
+        const lastMessage = prev[prev.length - 1];
+        if (
+          lastMessage &&
+          lastMessage.role === 'assistant' &&
           lastMessage.type !== 'tool_call' && // Don't reuse tool calls
-          lastMessage.type === normalizedType && 
-          !lastMessage.content) {
-        // Reuse the empty message
-        setIsStreaming(streamingTypes.includes(type));
-        return prev.map((msg) =>
-          msg.id === lastMessage.id
-            ? {
-              ...msg,
-              content: trimmedContent,
-              author: msg.author || author || 'Kshana',
-              timestamp: Date.now(),
-            }
-            : msg,
-        );
-      }
+          lastMessage.type === normalizedType &&
+          !lastMessage.content
+        ) {
+          // Reuse the empty message
+          setIsStreaming(streamingTypes.includes(type));
+          return prev.map((msg) =>
+            msg.id === lastMessage.id
+              ? {
+                  ...msg,
+                  content: trimmedContent,
+                  author: msg.author || author || 'Kshana',
+                  timestamp: Date.now(),
+                }
+              : msg,
+          );
+        }
 
-      // Create new message - always create even if content is empty (shows thinking state)
-      const id = makeId();
-      lastAssistantIdRef.current = id;
-      setIsStreaming(streamingTypes.includes(type));
-      return [
-        ...prev,
-        {
-          id,
-          role: 'assistant',
-          type: normalizedType, // Use normalized type
-          content: trimmedContent,
-          timestamp: Date.now(),
-          author: author || 'Kshana', // Default author if not provided
-        },
-      ];
-    });
-  }, []);
+        // Create new message - always create even if content is empty (shows thinking state)
+        const id = makeId();
+        lastAssistantIdRef.current = id;
+        setIsStreaming(streamingTypes.includes(type));
+        return [
+          ...prev,
+          {
+            id,
+            role: 'assistant',
+            type: normalizedType, // Use normalized type
+            content: trimmedContent,
+            timestamp: Date.now(),
+            author: author || 'Kshana', // Default author if not provided
+          },
+        ];
+      });
+    },
+    [],
+  );
 
   const disconnectWebSocket = useCallback(() => {
     if (wsRef.current) {
@@ -243,7 +266,10 @@ export default function ChatPanel() {
       const messageType = payload.type as string;
 
       // Extract optional agent name logic (if provided by backend)
-      const currentAgentName = (data.agentName as string) ?? (payload.agentName as string) ?? agentName;
+      const currentAgentName =
+        (data.agentName as string) ??
+        (payload.agentName as string) ??
+        agentName;
       if (currentAgentName !== agentName) {
         setAgentName(currentAgentName);
       }
@@ -251,7 +277,10 @@ export default function ChatPanel() {
       switch (messageType) {
         case 'status': {
           // kshana-ink status: { status: 'connected' | 'ready' | 'busy' | 'completed' | 'error', message?: string }
-          const statusMsg = (data.message as string) ?? (data.status as string) ?? 'Status update';
+          const statusMsg =
+            (data.message as string) ??
+            (data.status as string) ??
+            'Status update';
           const status = data.status as string;
 
           if (status === 'connected') {
@@ -259,9 +288,7 @@ export default function ChatPanel() {
             setStatusMessage('Connected');
             // Initial greeting logic with example prompts
             setMessages((prev) => {
-              const hasGreeting = prev.some(
-                (msg) => msg.type === 'greeting',
-              );
+              const hasGreeting = prev.some((msg) => msg.type === 'greeting');
               if (hasGreeting) return prev;
               return [
                 ...prev,
@@ -269,7 +296,8 @@ export default function ChatPanel() {
                   id: makeId(),
                   role: 'system',
                   type: 'greeting',
-                  content: 'Welcome to Kshana! Describe your story idea and I\'ll help you create a video.\n\n**Example prompts:**\n\n* "A story about a robot learning to dance"\n* "Create a video about a magical forest adventure"\n* "An epic tale of a knight and a dragon"',
+                  content:
+                    'Welcome to Kshana! Describe your story idea and I\'ll help you create a video.\n\n**Example prompts:**\n\n* "A story about a robot learning to dance"\n* "Create a video about a magical forest adventure"\n* "An epic tale of a knight and a dragon"',
                   timestamp: Date.now(),
                 },
               ];
@@ -282,7 +310,12 @@ export default function ChatPanel() {
             setMessages((prev) => {
               // Check if last message is already a thinking/assistant message
               const lastMsg = prev[prev.length - 1];
-              if (lastMsg && lastMsg.role === 'assistant' && lastMsg.type === 'agent_text' && !lastMsg.content) {
+              if (
+                lastMsg &&
+                lastMsg.role === 'assistant' &&
+                lastMsg.type === 'agent_text' &&
+                !lastMsg.content
+              ) {
                 // Already have a thinking message, just update timestamp
                 return prev;
               }
@@ -290,14 +323,17 @@ export default function ChatPanel() {
               const thinkingId = makeId();
               lastAssistantIdRef.current = thinkingId;
               setIsStreaming(true);
-              return [...prev, {
-                id: thinkingId,
-                role: 'assistant',
-                type: 'agent_text',
-                content: '',
-                author: agentName,
-                timestamp: Date.now(),
-              }];
+              return [
+                ...prev,
+                {
+                  id: thinkingId,
+                  role: 'assistant',
+                  type: 'agent_text',
+                  content: '',
+                  author: agentName,
+                  timestamp: Date.now(),
+                },
+              ];
             });
           } else if (status === 'completed') {
             setAgentStatus('completed');
@@ -313,7 +349,11 @@ export default function ChatPanel() {
         case 'progress': {
           // kshana-ink progress: { iteration, maxIterations, status }
           const { iteration, maxIterations, status: progressStatus } = data;
-          const percent = maxIterations ? Math.round(((iteration as number) / (maxIterations as number)) * 100) : 0;
+          const percent = maxIterations
+            ? Math.round(
+                ((iteration as number) / (maxIterations as number)) * 100,
+              )
+            : 0;
           const details = [
             progressStatus ? `${progressStatus}` : null,
             percent ? `Progress: ${percent}%` : null,
@@ -333,8 +373,8 @@ export default function ChatPanel() {
           setAgentStatus('thinking'); // Agent is generating reasoning/thinking text
 
           // Create/update message with stream chunk content (thinking happens before tool calls)
-            appendAssistantChunk(content, 'stream_chunk', agentName);
-          
+          appendAssistantChunk(content, 'stream_chunk', agentName);
+
           if (done) {
             setIsStreaming(false);
             // Clear the ref so next stream starts fresh
@@ -354,26 +394,26 @@ export default function ChatPanel() {
           const toolName = (data.toolName as string) ?? 'tool';
           const toolStatus = (data.status as string) ?? 'started';
           const args = (data.arguments as Record<string, unknown>) ?? {};
-          const result = data.result;
-          const error = data.error;
+          const { result } = data;
+          const { error } = data;
 
           if (toolStatus === 'started') {
             // Tool is starting - create new tool call message
             // Ensure it appears at the bottom by appending after any current thinking messages
             setAgentStatus('executing');
             setStatusMessage(`Running ${toolName}...`);
-            
+
             const startTime = Date.now();
             const seq = (toolCallSequenceRef.current.get(toolName) ?? 0) + 1;
             toolCallSequenceRef.current.set(toolName, seq);
             const toolKey = `${toolName}-${seq}`;
             const toolCallId = makeId();
-            
+
             // Clear any active assistant message ref so tool call appears as new message
             // This ensures thinking messages don't append to tool calls, and tool calls don't append to thinking
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
-            
+
             // Create tool call message - this creates a separate UI (executing status)
             // It will appear below any existing thinking messages
             const messageId = appendMessage({
@@ -389,18 +429,24 @@ export default function ChatPanel() {
                 startTime,
               },
             });
-            
+
             // Track this tool call by messageId so we can update it when it completes
             // This allows us to update the correct message even if thinking happens between start and completion
-            activeToolCallsRef.current.set(toolKey, { messageId, startTime, toolName });
+            activeToolCallsRef.current.set(toolKey, {
+              messageId,
+              startTime,
+              toolName,
+            });
           } else if (toolStatus === 'completed' || toolStatus === 'error') {
             // Tool completed - find the most recent started tool call with this name
             setAgentStatus('thinking');
-            
+
             // Find the most recent active tool call for this tool name
-            let toolCall: { messageId: string; startTime: number; toolName: string } | undefined;
+            let toolCall:
+              | { messageId: string; startTime: number; toolName: string }
+              | undefined;
             let toolKey: string | undefined;
-            
+
             // Search backwards through sequence numbers
             const maxSeq = toolCallSequenceRef.current.get(toolName) ?? 0;
             for (let seq = maxSeq; seq > 0; seq--) {
@@ -412,11 +458,11 @@ export default function ChatPanel() {
                 break;
               }
             }
-            
+
             if (toolCall) {
               const duration = Date.now() - toolCall.startTime;
               const toolCallId = makeId();
-              
+
               // Clean thinking/reasoning content from result if it exists
               // Thinking content should already be shown in separate messages before tool call
               let cleanedResult = result ?? error;
@@ -428,39 +474,43 @@ export default function ChatPanel() {
                   .replace(/<think[\s\S]*?\/>/gi, '')
                   .trim();
               };
-              
-              if (cleanedResult && typeof cleanedResult === 'object' && 'content' in cleanedResult) {
+
+              if (
+                cleanedResult &&
+                typeof cleanedResult === 'object' &&
+                'content' in cleanedResult
+              ) {
                 const content = cleanedResult.content as string;
                 const cleanedContent = cleanThinkingTags(content);
                 cleanedResult = { ...cleanedResult, content: cleanedContent };
               } else if (typeof cleanedResult === 'string') {
                 cleanedResult = cleanThinkingTags(cleanedResult);
               }
-              
+
               // Create a NEW message for completed tool call (separate UI from executing)
               // Don't update the existing executing message - create a new one at the bottom
               // This ensures both executing and completed states have separate UIs
               lastAssistantIdRef.current = null; // Ensure it's a new message, not appended to thinking
               setIsStreaming(false);
-              
+
               appendMessage({
                 role: 'system',
                 type: 'tool_call',
                 content: '',
                 author: agentName,
-                      meta: {
-                        toolCallId,
-                        toolName,
+                meta: {
+                  toolCallId,
+                  toolName,
                   args, // Use args from completion event
-                        status: toolStatus === 'error' ? 'error' : 'completed',
+                  status: toolStatus === 'error' ? 'error' : 'completed',
                   result: cleanedResult,
-                        duration,
-                      },
+                  duration,
+                },
               });
-              
+
               if (toolKey) {
                 activeToolCallsRef.current.delete(toolKey);
-                    }
+              }
             } else {
               // Fallback: create new message if tool call wasn't tracked
               // Don't append - create as new message below thinking
@@ -501,37 +551,45 @@ export default function ChatPanel() {
                   msg.role === 'assistant' &&
                   msg.type !== 'agent_question' &&
                   msg.type !== 'tool_call' &&
-                  (msg.type === 'agent_text' || msg.type === 'stream_chunk' || msg.type === 'agent_response')
+                  (msg.type === 'agent_text' ||
+                    msg.type === 'stream_chunk' ||
+                    msg.type === 'agent_response')
                 ) {
                   lastAssistantIdx = i;
                   break;
                 }
               }
-              
-              if (lastAssistantIdx >= 0 && lastAssistantIdRef.current === prev[lastAssistantIdx].id) {
+
+              if (
+                lastAssistantIdx >= 0 &&
+                lastAssistantIdRef.current === prev[lastAssistantIdx].id
+              ) {
                 // Update existing message
                 return prev.map((msg, idx) =>
                   idx === lastAssistantIdx
                     ? {
-                      ...msg,
-                      type: 'agent_response',
-                      content: output,
-                      timestamp: Date.now(),
-                      author: agentName,
-                    }
+                        ...msg,
+                        type: 'agent_response',
+                        content: output,
+                        timestamp: Date.now(),
+                        author: agentName,
+                      }
                     : msg,
                 );
               }
-              
+
               // Check if output already exists in messages to avoid duplicates
               const existingMessage = prev.find(
-                (msg) => msg.role === 'assistant' && msg.content === output && msg.type === 'agent_response'
+                (msg) =>
+                  msg.role === 'assistant' &&
+                  msg.content === output &&
+                  msg.type === 'agent_response',
               );
               if (existingMessage) {
                 // Already have this exact message, don't create duplicate
                 return prev;
               }
-              
+
               // Create new message only if we don't have a matching one
               const id = makeId();
               lastAssistantIdRef.current = id;
@@ -557,7 +615,10 @@ export default function ChatPanel() {
           } else if (responseStatus === 'error') {
             setAgentStatus('error');
             setStatusMessage('Error');
-            appendSystemMessage('An error occurred while processing your request.', 'error');
+            appendSystemMessage(
+              'An error occurred while processing your request.',
+              'error',
+            );
           }
           break;
         }
@@ -565,10 +626,15 @@ export default function ChatPanel() {
           // kshana-ink agent_question: { question, options?, timeout?, defaultOption?, questionType? }
           // options can be string[] or Array<{ label: string; description?: string }>
           const question = (data.question as string) ?? '';
-          const rawOptions = data.options as string[] | Array<{ label: string; description?: string }> | undefined;
+          const rawOptions = data.options as
+            | string[]
+            | Array<{ label: string; description?: string }>
+            | undefined;
           // Extract labels if options are objects, otherwise use as-is
-          const options = rawOptions 
-            ? rawOptions.map((opt) => (typeof opt === 'string' ? opt : opt.label))
+          const options = rawOptions
+            ? rawOptions.map((opt) =>
+                typeof opt === 'string' ? opt : opt.label,
+              )
             : undefined;
           const questionType = (data.questionType as string) ?? 'text'; // text, confirm, select
           const timeout = (data.timeout as number) ?? undefined;
@@ -581,52 +647,58 @@ export default function ChatPanel() {
             // Update existing question message if it exists to avoid duplicates
             setMessages((prev) => {
               if (lastQuestionMessageIdRef.current) {
-                const existingQuestion = prev.find((msg) => msg.id === lastQuestionMessageIdRef.current);
-                if (existingQuestion && existingQuestion.type === 'agent_question') {
+                const existingQuestion = prev.find(
+                  (msg) => msg.id === lastQuestionMessageIdRef.current,
+                );
+                if (
+                  existingQuestion &&
+                  existingQuestion.type === 'agent_question'
+                ) {
                   // Update existing question
                   return prev.map((msg) =>
                     msg.id === lastQuestionMessageIdRef.current
                       ? {
-                        ...msg,
-                        content: question,
-                        meta: {
-                          options,
-                          questionType,
-                          timeout,
-                          defaultOption,
-                        },
-                        timestamp: Date.now(),
-                      }
+                          ...msg,
+                          content: question,
+                          meta: {
+                            options,
+                            questionType,
+                            timeout,
+                            defaultOption,
+                          },
+                          timestamp: Date.now(),
+                        }
                       : msg,
                   );
                 }
               }
-              
+
               // Check if the same question already exists
               const duplicateQuestion = prev.find(
-                (msg) => msg.type === 'agent_question' && msg.content === question
+                (msg) =>
+                  msg.type === 'agent_question' && msg.content === question,
               );
               if (duplicateQuestion) {
                 lastQuestionMessageIdRef.current = duplicateQuestion.id;
                 return prev;
               }
-              
+
               // Create new question message
-            const id = makeId();
+              const id = makeId();
               lastQuestionMessageIdRef.current = id;
               return [
                 ...prev,
                 {
-              id,
-              role: 'assistant',
-              type: 'agent_question',
-              content: question,
-              author: agentName,
+                  id,
+                  role: 'assistant',
+                  type: 'agent_question',
+                  content: question,
+                  author: agentName,
                   timestamp: Date.now(),
-              meta: {
-                options,
-                questionType,
-                timeout,
+                  meta: {
+                    options,
+                    questionType,
+                    timeout,
                     defaultOption,
                   },
                 },
@@ -648,10 +720,10 @@ export default function ChatPanel() {
                 prev.map((msg) =>
                   msg.id === lastTodoMessageIdRef.current
                     ? {
-                      ...msg,
-                      meta: { ...msg.meta, todos },
-                      timestamp: Date.now(),
-                    }
+                        ...msg,
+                        meta: { ...msg.meta, todos },
+                        timestamp: Date.now(),
+                      }
                     : msg,
                 ),
               );
@@ -676,7 +748,11 @@ export default function ChatPanel() {
         }
         // ... (Keep other legacy cases if needed or just minimal support)
         default:
-          console.warn('[ChatPanel] Unhandled message type:', messageType, payload);
+          console.warn(
+            '[ChatPanel] Unhandled message type:',
+            messageType,
+            payload,
+          );
           // Don't ignore unknown types - log them for debugging
           break;
       }
@@ -738,7 +814,7 @@ export default function ChatPanel() {
           wsRef.current = null;
           if (event.code !== 1000) {
             reconnectTimeoutRef.current = setTimeout(() => {
-              connectWebSocket().catch(() => { });
+              connectWebSocket().catch(() => {});
             }, 3000);
           }
         };
@@ -758,31 +834,36 @@ export default function ChatPanel() {
     }
   }, [handleServerPayload, setConnectionStatus, projectDirectory]);
 
-  const sendResponse = useCallback(async (content: string) => {
-    // Used for clicking options in QuestionPrompt
-    try {
-      const socket = await connectWebSocket();
-      socket.send(JSON.stringify({
-        type: 'user_response',
-        data: { response: content },
-      }));
-      awaitingResponseRef.current = false;
-      setAgentStatus('thinking');
-      setStatusMessage('Thinking...');
-      
-      // Clear question ref since we've responded
-      lastQuestionMessageIdRef.current = null;
+  const sendResponse = useCallback(
+    async (content: string) => {
+      // Used for clicking options in QuestionPrompt
+      try {
+        const socket = await connectWebSocket();
+        socket.send(
+          JSON.stringify({
+            type: 'user_response',
+            data: { response: content },
+          }),
+        );
+        awaitingResponseRef.current = false;
+        setAgentStatus('thinking');
+        setStatusMessage('Thinking...');
 
-      // Also append user message for visual feedback
-      appendMessage({
-        role: 'user',
-        type: 'message',
-        content,
-      });
-    } catch (error) {
-      console.error('Failed to send response', error);
-    }
-  }, [appendMessage, connectWebSocket]);
+        // Clear question ref since we've responded
+        lastQuestionMessageIdRef.current = null;
+
+        // Also append user message for visual feedback
+        appendMessage({
+          role: 'user',
+          type: 'message',
+          content,
+        });
+      } catch (error) {
+        console.error('Failed to send response', error);
+      }
+    },
+    [appendMessage, connectWebSocket],
+  );
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -799,16 +880,20 @@ export default function ChatPanel() {
         const socket = await connectWebSocket();
 
         if (awaitingResponseRef.current) {
-          socket.send(JSON.stringify({
-            type: 'user_response',
-            data: { response: content },
-          }));
+          socket.send(
+            JSON.stringify({
+              type: 'user_response',
+              data: { response: content },
+            }),
+          );
           awaitingResponseRef.current = false;
         } else {
-          socket.send(JSON.stringify({
-            type: 'start_task',
-            data: { task: content },
-          }));
+          socket.send(
+            JSON.stringify({
+              type: 'start_task',
+              data: { task: content },
+            }),
+          );
         }
       } catch (error) {
         appendSystemMessage(
@@ -828,17 +913,23 @@ export default function ChatPanel() {
         connectWebSocket().catch(() => undefined);
       }
     };
-    bootstrap().catch(() => { });
+    bootstrap().catch(() => {});
 
     const unsubscribeBackend = window.electron.backend.onStateChange(
       (state: BackendState) => {
         if (state.status === 'error' && state.message) {
           appendSystemMessage(`Backend error: ${state.message}`, 'error');
-        } else if (state.status === 'ready' && !connectingRef.current && !wsRef.current) {
+        } else if (
+          state.status === 'ready' &&
+          !connectingRef.current &&
+          !wsRef.current
+        ) {
           connectingRef.current = true;
           connectWebSocket()
             .catch(() => undefined)
-            .finally(() => { connectingRef.current = false; });
+            .finally(() => {
+              connectingRef.current = false;
+            });
         }
       },
     );
@@ -860,7 +951,7 @@ export default function ChatPanel() {
       try {
         const state = await window.electron.backend.getState();
         if (state.status === 'ready') await connectWebSocket();
-      } catch { }
+      } catch {}
     };
     reconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -883,7 +974,11 @@ export default function ChatPanel() {
       </div>
 
       {/* New Status Bar */}
-      <StatusBar agentName={agentName} status={agentStatus} message={statusMessage} />
+      <StatusBar
+        agentName={agentName}
+        status={agentStatus}
+        message={statusMessage}
+      />
 
       <div className={styles.messages}>
         <MessageList

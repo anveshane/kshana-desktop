@@ -80,4 +80,3 @@ export function createDefaultManifest(
     kshana_version: kshanaVersion,
   };
 }
-

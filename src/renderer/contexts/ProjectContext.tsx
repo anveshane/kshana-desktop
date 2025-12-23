@@ -107,13 +107,19 @@ interface ProjectActions {
   updateZoom: (level: number) => void;
 
   /** Set active version for a scene */
-  setActiveVersion: (sceneFolder: string, assetType: 'image' | 'video', version: number) => void;
+  setActiveVersion: (
+    sceneFolder: string,
+    assetType: 'image' | 'video',
+    version: number,
+  ) => void;
 
   /** Update timeline markers */
   updateMarkers: (markers: KshanaTimelineState['markers']) => void;
 
   /** Update imported clips */
-  updateImportedClips: (importedClips: KshanaTimelineState['imported_clips']) => void;
+  updateImportedClips: (
+    importedClips: KshanaTimelineState['imported_clips'],
+  ) => void;
 
   /** Add an asset to the asset manifest */
   addAsset: (assetInfo: AssetInfo) => Promise<boolean>;
@@ -148,7 +154,9 @@ interface ProjectComputed {
 /**
  * Full project context type
  */
-export type ProjectContextType = ProjectState & ProjectActions & ProjectComputed;
+export type ProjectContextType = ProjectState &
+  ProjectActions &
+  ProjectComputed;
 
 /**
  * Initial state
@@ -220,7 +228,12 @@ export function ProjectProvider({
 
     // Auto-load with mock data when opening any project directory
     const loadWithMockData = async () => {
-      setState((prev) => ({ ...prev, isLoading: true, error: null, useMockData: true }));
+      setState((prev) => ({
+        ...prev,
+        isLoading: true,
+        error: null,
+        useMockData: true,
+      }));
       projectService.setUseMockData(true);
 
       const result = await projectService.openProject(projectDirectory);
@@ -255,33 +268,36 @@ export function ProjectProvider({
   }, [projectDirectory]);
 
   // Load project from directory
-  const loadProject = useCallback(async (directory: string): Promise<boolean> => {
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+  const loadProject = useCallback(
+    async (directory: string): Promise<boolean> => {
+      setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
-    const result = await projectService.openProject(directory);
+      const result = await projectService.openProject(directory);
 
-    if (result.success) {
-      const project = result.data;
+      if (result.success) {
+        const project = result.data;
+        setState((prev) => ({
+          ...prev,
+          isLoaded: true,
+          isLoading: false,
+          error: null,
+          manifest: project.manifest,
+          agentState: project.agentState,
+          assetManifest: project.assetManifest,
+          timelineState: project.timelineState,
+          contextIndex: project.contextIndex,
+        }));
+        return true;
+      }
       setState((prev) => ({
         ...prev,
-        isLoaded: true,
         isLoading: false,
-        error: null,
-        manifest: project.manifest,
-        agentState: project.agentState,
-        assetManifest: project.assetManifest,
-        timelineState: project.timelineState,
-        contextIndex: project.contextIndex,
+        error: result.error,
       }));
-      return true;
-    }
-    setState((prev) => ({
-      ...prev,
-      isLoading: false,
-      error: result.error,
-    }));
-    return false;
-  }, []);
+      return false;
+    },
+    [],
+  );
 
   // Create new project
   const createProject = useCallback(
@@ -424,9 +440,10 @@ export function ProjectProvider({
         // Handle migration from old format (number) to new format (SceneVersions)
         if (typeof current === 'number') {
           // Old format: migrate to new format
-          updated = assetType === 'video' 
-            ? { video: version, image: current } // Preserve old video version as image if needed
-            : { image: version, video: current }; // Preserve old video version
+          updated =
+            assetType === 'video'
+              ? { video: version, image: current } // Preserve old video version as image if needed
+              : { image: version, video: current }; // Preserve old video version
         } else if (current && typeof current === 'object') {
           // New format: update specific asset type
           updated = { ...current, [assetType]: version };
@@ -473,32 +490,36 @@ export function ProjectProvider({
   );
 
   // Add asset to manifest
-  const addAsset = useCallback(async (assetInfo: AssetInfo): Promise<boolean> => {
-    const result = await projectService.addAssetToManifest(assetInfo);
-    if (result.success) {
-      setState((prev) => {
-        if (!prev.assetManifest) return prev;
-        // Check if asset already exists
-        const existingIndex = prev.assetManifest.assets.findIndex(
-          (asset) => asset.id === assetInfo.id,
-        );
-        const newAssets = existingIndex >= 0
-          ? prev.assetManifest.assets.map((asset, index) =>
-              index === existingIndex ? assetInfo : asset,
-            )
-          : [...prev.assetManifest.assets, assetInfo];
-        return {
-          ...prev,
-          assetManifest: {
-            ...prev.assetManifest,
-            assets: newAssets,
-          },
-        };
-      });
-      return true;
-    }
-    return false;
-  }, []);
+  const addAsset = useCallback(
+    async (assetInfo: AssetInfo): Promise<boolean> => {
+      const result = await projectService.addAssetToManifest(assetInfo);
+      if (result.success) {
+        setState((prev) => {
+          if (!prev.assetManifest) return prev;
+          // Check if asset already exists
+          const existingIndex = prev.assetManifest.assets.findIndex(
+            (asset) => asset.id === assetInfo.id,
+          );
+          const newAssets =
+            existingIndex >= 0
+              ? prev.assetManifest.assets.map((asset, index) =>
+                  index === existingIndex ? assetInfo : asset,
+                )
+              : [...prev.assetManifest.assets, assetInfo];
+          return {
+            ...prev,
+            assetManifest: {
+              ...prev.assetManifest,
+              assets: newAssets,
+            },
+          };
+        });
+        return true;
+      }
+      return false;
+    },
+    [],
+  );
 
   // Auto-save timeline state with debouncing
   useEffect(() => {
@@ -531,7 +552,9 @@ export function ProjectProvider({
       const completedPhases = phases.filter(
         (p) => p.status === 'completed',
       ).length;
-      completionPercentage = Math.round((completedPhases / phases.length) * 100);
+      completionPercentage = Math.round(
+        (completedPhases / phases.length) * 100,
+      );
     }
 
     return {
@@ -632,7 +655,11 @@ export function useProjectTimeline(): {
   timelineState: KshanaTimelineState;
   updatePlayhead: (seconds: number) => void;
   updateZoom: (level: number) => void;
-  setActiveVersion: (sceneFolder: string, assetType: 'image' | 'video', version: number) => void;
+  setActiveVersion: (
+    sceneFolder: string,
+    assetType: 'image' | 'video',
+    version: number,
+  ) => void;
 } {
   const { timelineState, updatePlayhead, updateZoom, setActiveVersion } =
     useProject();
@@ -640,4 +667,3 @@ export function useProjectTimeline(): {
 }
 
 export default ProjectContext;
-

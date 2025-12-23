@@ -159,4 +159,3 @@ export function getMarkerStats(markers: KshanaTimelineMarker[]): {
     error: markers.filter((m) => m.status === 'error').length,
   };
 }
-

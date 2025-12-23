@@ -103,4 +103,3 @@ export function getContextEntriesBySource(
 ): StoredContextMeta[] {
   return Object.values(index).filter((entry) => entry.source === source);
 }
-

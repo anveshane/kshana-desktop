@@ -13,9 +13,12 @@ export async function imageToBase64(imagePath: string): Promise<string | null> {
   try {
     // Remove file:// protocol if present
     const cleanPath = imagePath.replace(/^file:\/\//, '');
-    
+
     // Read file as base64 using IPC
-    if (typeof window !== 'undefined' && window.electron?.project?.readFileBase64) {
+    if (
+      typeof window !== 'undefined' &&
+      window.electron?.project?.readFileBase64
+    ) {
       const base64 = await window.electron.project.readFileBase64(cleanPath);
       return base64;
     }
@@ -30,11 +33,16 @@ export async function imageToBase64(imagePath: string): Promise<string | null> {
  * Checks if an image should be converted to base64
  * For test images in mock mode, we prefer base64 for reliability
  */
-export function shouldUseBase64(filePath: string, useMockData: boolean): boolean {
+export function shouldUseBase64(
+  filePath: string,
+  useMockData: boolean,
+): boolean {
   // Use base64 for test images in mock mode
-  if (useMockData && (filePath.includes('test_image/') || filePath.includes('test_video/'))) {
+  if (
+    useMockData &&
+    (filePath.includes('test_image/') || filePath.includes('test_video/'))
+  ) {
     return true;
   }
   return false;
 }
-

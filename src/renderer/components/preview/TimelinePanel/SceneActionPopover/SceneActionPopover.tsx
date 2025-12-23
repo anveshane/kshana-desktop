@@ -171,4 +171,3 @@ export default function SceneActionPopover({
     </div>
   );
 }
-

@@ -21,18 +21,15 @@ import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimeline } from '../../../contexts/TimelineContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
-import { useTimelineData, type TimelineItem } from '../../../hooks/useTimelineData';
+import {
+  useTimelineData,
+  type TimelineItem,
+} from '../../../hooks/useTimelineData';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import { setActiveVideoVersion } from '../../../utils/videoWorkspace';
-import type {
-  Artifact,
-  TimelineMarker,
-} from '../../../types/projectState';
-import type {
-  KshanaTimelineMarker,
-  ImportedClip,
-} from '../../../types/kshana';
+import type { Artifact, TimelineMarker } from '../../../types/projectState';
+import type { KshanaTimelineMarker, ImportedClip } from '../../../types/kshana';
 import type { SceneVersions } from '../../../types/kshana/timeline';
 import { PROJECT_PATHS, createAssetInfo } from '../../../types/kshana';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
@@ -55,10 +52,19 @@ interface TimelineItemComponentProps {
   editedSceneName: string;
   sceneFolder?: string;
   activeVersions?: Record<number, SceneVersions>; // sceneNumber -> { image?: number, video?: number }
-  onSceneDragStart: (e: React.DragEvent<HTMLDivElement>, sceneNumber: number) => void;
+  onSceneDragStart: (
+    e: React.DragEvent<HTMLDivElement>,
+    sceneNumber: number,
+  ) => void;
   onSceneDragEnd: () => void;
-  onSceneBlockClick: (e: React.MouseEvent<HTMLDivElement>, sceneNumber: number) => void;
-  onVideoBlockClick: (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => void;
+  onSceneBlockClick: (
+    e: React.MouseEvent<HTMLDivElement>,
+    sceneNumber: number,
+  ) => void;
+  onVideoBlockClick: (
+    e: React.MouseEvent<HTMLDivElement>,
+    item: TimelineItem,
+  ) => void;
   onNameChange: (sceneNumber: number, name: string) => void;
   onEditedNameChange: (name: string) => void;
   onEditingCancel: () => void;
@@ -92,7 +98,11 @@ function TimelineItemComponent({
 
   // Construct version-specific video path if active version is set
   const videoVersionPath = useMemo(() => {
-    if (item.sceneNumber && activeVersions[item.sceneNumber]?.video && sceneFolder) {
+    if (
+      item.sceneNumber &&
+      activeVersions[item.sceneNumber]?.video &&
+      sceneFolder
+    ) {
       const version = activeVersions[item.sceneNumber].video!;
       return `.kshana/agent/scenes/${sceneFolder}/video/v${version}.mp4`;
     }
@@ -162,7 +172,13 @@ function TimelineItemComponent({
     } else {
       setImagePath(null);
     }
-  }, [imageVersionPath, item.artifact?.file_path, item.artifact?.artifact_type, projectDirectory, useMockData]);
+  }, [
+    imageVersionPath,
+    item.artifact?.file_path,
+    item.artifact?.artifact_type,
+    projectDirectory,
+    useMockData,
+  ]);
 
   if (item.type === 'video' && videoPath) {
     return (
@@ -192,11 +208,7 @@ function TimelineItemComponent({
   let thumbnailElement: React.ReactNode;
   if (imagePath) {
     thumbnailElement = (
-      <img
-        src={imagePath}
-        alt={item.label}
-        className={styles.sceneThumbnail}
-      />
+      <img src={imagePath} alt={item.label} className={styles.sceneThumbnail} />
     );
   } else if (videoPath) {
     thumbnailElement = (
@@ -294,9 +306,7 @@ function TimelineItemComponent({
         </div>
       )}
       {item.scene && (
-        <div className={styles.sceneDescription}>
-          {item.scene.description}
-        </div>
+        <div className={styles.sceneDescription}>{item.scene.description}</div>
       )}
       {item.scene && sceneFolder && onViewDetails && (
         <div className={styles.sceneFooter}>
@@ -386,12 +396,8 @@ export default function TimelinePanel({
   } = useProject();
 
   // Use unified timeline data hook
-  const {
-    scenes,
-    timelineItems,
-    artifactsByScene,
-    importedVideoArtifacts,
-  } = useTimelineData();
+  const { scenes, timelineItems, artifactsByScene, importedVideoArtifacts } =
+    useTimelineData();
 
   // Initialize zoom level from timeline state
   const [zoomLevel, setZoomLevel] = useState(timelineState.zoom_level);
@@ -590,15 +596,17 @@ export default function TimelinePanel({
   }, [projectScenes]);
 
   // Load active versions from timeline state or use external prop (with migration)
-  const [internalActiveVersions, setInternalActiveVersions] = useState<Record<number, SceneVersions>>(
-    () => {
-      const versions: Record<number, SceneVersions> = {};
-      Object.entries(timelineState.active_versions).forEach(([folder, versionData]) => {
+  const [internalActiveVersions, setInternalActiveVersions] = useState<
+    Record<number, SceneVersions>
+  >(() => {
+    const versions: Record<number, SceneVersions> = {};
+    Object.entries(timelineState.active_versions).forEach(
+      ([folder, versionData]) => {
         // Extract scene number from folder name (e.g., "scene-001" -> 1)
         const match = folder.match(/scene-(\d+)/);
         if (match) {
           const sceneNumber = parseInt(match[1], 10);
-          
+
           // Handle migration from old format (number) to new format (SceneVersions)
           if (typeof versionData === 'number') {
             versions[sceneNumber] = { video: versionData };
@@ -606,10 +614,10 @@ export default function TimelinePanel({
             versions[sceneNumber] = versionData;
           }
         }
-      });
-      return versions;
-    },
-  );
+      },
+    );
+    return versions;
+  });
 
   // Use external activeVersions if provided, otherwise use internal state
   const activeVersions = externalActiveVersions ?? internalActiveVersions;
@@ -619,26 +627,38 @@ export default function TimelinePanel({
   useEffect(() => {
     if (!projectDirectory || useMockData) return;
 
-    Object.entries(activeVersions).forEach(async ([sceneNumber, sceneVersions]) => {
-      const sceneFolder = sceneFoldersByNumber[parseInt(sceneNumber, 10)];
-      if (sceneFolder && sceneVersions) {
-        // Update timeline state active_versions for both image and video
-        if (sceneVersions.image !== undefined) {
-          setActiveVersion(sceneFolder, 'image', sceneVersions.image);
-        }
-        if (sceneVersions.video !== undefined) {
-          setActiveVersion(sceneFolder, 'video', sceneVersions.video);
-          
-          // Update current.txt file for video version
-          try {
-            await setActiveVideoVersion(projectDirectory, sceneFolder, sceneVersions.video);
-          } catch (error) {
-            console.error('Failed to update current.txt:', error);
+    Object.entries(activeVersions).forEach(
+      async ([sceneNumber, sceneVersions]) => {
+        const sceneFolder = sceneFoldersByNumber[parseInt(sceneNumber, 10)];
+        if (sceneFolder && sceneVersions) {
+          // Update timeline state active_versions for both image and video
+          if (sceneVersions.image !== undefined) {
+            setActiveVersion(sceneFolder, 'image', sceneVersions.image);
+          }
+          if (sceneVersions.video !== undefined) {
+            setActiveVersion(sceneFolder, 'video', sceneVersions.video);
+
+            // Update current.txt file for video version
+            try {
+              await setActiveVideoVersion(
+                projectDirectory,
+                sceneFolder,
+                sceneVersions.video,
+              );
+            } catch (error) {
+              console.error('Failed to update current.txt:', error);
+            }
           }
         }
-      }
-    });
-  }, [activeVersions, projectDirectory, useMockData, sceneFoldersByNumber, setActiveVersion]);
+      },
+    );
+  }, [
+    activeVersions,
+    projectDirectory,
+    useMockData,
+    sceneFoldersByNumber,
+    setActiveVersion,
+  ]);
   const {
     selectedScenes,
     selectScene,
@@ -727,7 +747,8 @@ export default function TimelinePanel({
         } else {
           const scene = scenes.find((s) => s.scene_number === sceneNumber);
           setMarkdownContent(
-            `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${scene?.description || 'No details available.'
+            `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
+              scene?.description || 'No details available.'
             }`,
           );
         }
@@ -735,7 +756,8 @@ export default function TimelinePanel({
         console.error('Failed to load scene markdown:', error);
         const scene = scenes.find((s) => s.scene_number === sceneNumber);
         setMarkdownContent(
-          `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${scene?.description || 'No details available.'
+          `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
+            scene?.description || 'No details available.'
           }`,
         );
       } finally {
@@ -779,7 +801,7 @@ export default function TimelinePanel({
       const sceneEndTime =
         sceneBlocks.length > 0
           ? sceneBlocks[sceneBlocks.length - 1].startTime +
-          sceneBlocks[sceneBlocks.length - 1].duration
+            sceneBlocks[sceneBlocks.length - 1].duration
           : 0;
       let currentTime = sceneEndTime;
       const videos = importedVideoArtifacts.map((artifact) => {
@@ -1077,7 +1099,7 @@ export default function TimelinePanel({
             sceneBlocks.length,
             null, // projectState no longer needed
             projectDirectory,
-            () => { }, // No-op function for state update
+            () => {}, // No-op function for state update
           );
         }
       } else {
@@ -1091,7 +1113,7 @@ export default function TimelinePanel({
             dropInsertIndex,
             null, // projectState no longer needed
             projectDirectory,
-            () => { }, // No-op function for state update
+            () => {}, // No-op function for state update
           );
         }
       }
@@ -1351,7 +1373,13 @@ export default function TimelinePanel({
             },
           ]);
 
-          console.log('Imported video:', relativePath, duration, 'saved to manifest:', saved);
+          console.log(
+            'Imported video:',
+            relativePath,
+            duration,
+            'saved to manifest:',
+            saved,
+          );
 
           resolve();
         };
@@ -1677,11 +1705,11 @@ export default function TimelinePanel({
                         const width = secondsToPixels(item.duration, zoomLevel);
                         const isSelected = Boolean(
                           item.scene &&
-                          selectedScenes.has(item.scene.scene_number),
+                            selectedScenes.has(item.scene.scene_number),
                         );
                         const isSceneDragging = Boolean(
                           item.scene &&
-                          draggedSceneNumber === item.scene.scene_number,
+                            draggedSceneNumber === item.scene.scene_number,
                         );
 
                         const sceneFolder = item.scene

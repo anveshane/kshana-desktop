@@ -149,4 +149,3 @@ export function getLatestAsset(
     current.version > latest.version ? current : latest,
   );
 }
-

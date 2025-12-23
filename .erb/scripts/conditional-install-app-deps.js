@@ -1,7 +1,9 @@
 // Conditionally run electron-builder install-app-deps
 // Skip in CI environments since install-app-deps.ts handles it
 if (process.env.CI) {
-  console.log('Skipping electron-builder install-app-deps in CI (handled by install-app-deps.ts)');
+  console.log(
+    'Skipping electron-builder install-app-deps in CI (handled by install-app-deps.ts)',
+  );
   process.exit(0);
 }
 
@@ -40,7 +42,7 @@ if (fs.existsSync(appPackagePath)) {
     version: mainPackageJson.version || '1.0.0',
     description: mainPackageJson.description || '',
     main: './dist/main/main.js',
-    dependencies: {}
+    dependencies: {},
   };
 }
 
@@ -59,7 +61,7 @@ if (!appPackageJson.main) {
 // to prevent it from trying to resolve the file: path
 appPackageJson.dependencies = appPackageJson.dependencies || {};
 if (mainPackageJson.dependencies) {
-  Object.keys(mainPackageJson.dependencies).forEach(dep => {
+  Object.keys(mainPackageJson.dependencies).forEach((dep) => {
     if (dep !== 'kshana-ink') {
       appPackageJson.dependencies[dep] = mainPackageJson.dependencies[dep];
     }
@@ -69,13 +71,15 @@ if (mainPackageJson.dependencies) {
 // Remove kshana-ink if it exists (from previous runs)
 if (appPackageJson.dependencies['kshana-ink']) {
   delete appPackageJson.dependencies['kshana-ink'];
-  console.log('✓ Removed kshana-ink from release/app/package.json (will be handled separately)');
+  console.log(
+    '✓ Removed kshana-ink from release/app/package.json (will be handled separately)',
+  );
 }
 
 // Write updated package.json (without kshana-ink)
 fs.writeFileSync(
   appPackagePath,
-  JSON.stringify(appPackageJson, null, 2) + '\n'
+  `${JSON.stringify(appPackageJson, null, 2)}\n`,
 );
 
 // Now run electron-builder install-app-deps
@@ -88,4 +92,3 @@ try {
   console.error('electron-builder install-app-deps failed:', error.message);
   process.exit(1);
 }
-

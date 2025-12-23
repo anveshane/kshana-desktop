@@ -53,9 +53,7 @@ function VideoCard({
           />
         )}
         {artifact.scene_number && (
-          <div className={styles.sceneBadge}>
-            Scene {artifact.scene_number}
-          </div>
+          <div className={styles.sceneBadge}>Scene {artifact.scene_number}</div>
         )}
       </div>
       <div className={styles.videoInfo}>
@@ -73,7 +71,6 @@ function VideoCard({
     </div>
   );
 }
-
 
 interface VideoLibraryViewProps {
   playbackTime: number;
@@ -105,14 +102,10 @@ export default function VideoLibraryView({
     });
     return map;
   }, [projectScenes]);
-  
+
   // Use unified timeline data hook
-  const {
-    scenes,
-    timelineItems,
-    videoArtifacts,
-    totalDuration,
-  } = useTimelineData();
+  const { scenes, timelineItems, videoArtifacts, totalDuration } =
+    useTimelineData();
 
   const [currentItemIndex, setCurrentItemIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -209,7 +202,9 @@ export default function VideoLibraryView({
   }, [currentScene, activeVersions, assetManifest]);
 
   // Resolve and store the display-ready image path
-  const [resolvedSceneImagePath, setResolvedSceneImagePath] = useState<string | null>(null);
+  const [resolvedSceneImagePath, setResolvedSceneImagePath] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     if (!sceneImagePath || !projectDirectory) {
@@ -217,15 +212,13 @@ export default function VideoLibraryView({
       return;
     }
 
-    resolveAssetPathForDisplay(
-      sceneImagePath,
-      projectDirectory,
-      useMockData,
-    ).then((resolved) => {
-      setResolvedSceneImagePath(resolved);
-    }).catch(() => {
-      setResolvedSceneImagePath(null);
-    });
+    resolveAssetPathForDisplay(sceneImagePath, projectDirectory, useMockData)
+      .then((resolved) => {
+        setResolvedSceneImagePath(resolved);
+      })
+      .catch(() => {
+        setResolvedSceneImagePath(null);
+      });
   }, [sceneImagePath, projectDirectory, useMockData]);
 
   // Handle video play/pause
@@ -347,7 +340,6 @@ export default function VideoLibraryView({
     },
     [handleSeek],
   );
-
 
   // Resolved video path state
   const [currentVideoPath, setCurrentVideoPath] = useState<string>('');
@@ -488,10 +480,7 @@ export default function VideoLibraryView({
 
   // Initialize to first item when timeline loads
   useEffect(() => {
-    if (
-      timelineItems.length > 0 &&
-      currentItemIndex >= timelineItems.length
-    ) {
+    if (timelineItems.length > 0 && currentItemIndex >= timelineItems.length) {
       setCurrentItemIndex(0);
       onPlaybackTimeChange(0);
     } else if (timelineItems.length > 0 && currentItemIndex < 0) {
@@ -561,7 +550,10 @@ export default function VideoLibraryView({
 
     const itemEndTime = currentItem.startTime + currentItem.duration;
     // If playbackTime has reached or passed the end of the current scene, move to next item
-    if (playbackTime >= itemEndTime && currentItemIndex < timelineItems.length - 1) {
+    if (
+      playbackTime >= itemEndTime &&
+      currentItemIndex < timelineItems.length - 1
+    ) {
       const nextIndex = currentItemIndex + 1;
       setCurrentItemIndex(nextIndex);
       onPlaybackTimeChange(timelineItems[nextIndex].startTime);
@@ -739,7 +731,9 @@ export default function VideoLibraryView({
                 <h3 className={styles.sceneTitle}>
                   Scene {currentScene.scene_number}
                   {currentScene.name && (
-                    <span className={styles.sceneName}>: {currentScene.name}</span>
+                    <span className={styles.sceneName}>
+                      : {currentScene.name}
+                    </span>
                   )}
                 </h3>
               </div>
@@ -774,11 +768,13 @@ export default function VideoLibraryView({
                     <strong>Mood:</strong> {currentScene.mood}
                   </div>
                 )}
-                {currentScene.characters && currentScene.characters.length > 0 && (
-                  <div className={styles.sceneMetaItem}>
-                    <strong>Characters:</strong> {currentScene.characters.join(', ')}
-                  </div>
-                )}
+                {currentScene.characters &&
+                  currentScene.characters.length > 0 && (
+                    <div className={styles.sceneMetaItem}>
+                      <strong>Characters:</strong>{' '}
+                      {currentScene.characters.join(', ')}
+                    </div>
+                  )}
               </div>
             </div>
           ) : timelineItems.length === 0 ? (

@@ -143,4 +143,3 @@ export function createMockSettings(): SettingData[] {
       : undefined,
   }));
 }
-
