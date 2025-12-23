@@ -9,6 +9,7 @@ import MediaPreview from '../MediaPreview/MediaPreview';
 import StoryboardView from '../StoryboardView/StoryboardView';
 import AssetsView from '../AssetsView/AssetsView';
 import VideoLibraryView from '../VideoLibraryView/VideoLibraryView';
+import PlansView from '../PlansView/PlansView';
 import TimelinePanel from '../TimelinePanel/TimelinePanel';
 import SettingsPanel from '../../SettingsPanel';
 import styles from './PreviewPanel.module.scss';
@@ -220,10 +221,7 @@ export default function PreviewPanel() {
               onPlaybackStateChange={setIsPlaying}
             />
           )}
-          {activeTab === 'preview' && selectedFile && (
-            <MediaPreview file={selectedFile} />
-          )}
-          {activeTab === 'preview' && !selectedFile && <PreviewPlaceholder />}
+          {activeTab === 'preview' && <PlansView />}
         </div>
 
         {projectDirectory && (
