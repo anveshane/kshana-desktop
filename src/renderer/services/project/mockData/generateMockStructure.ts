@@ -28,6 +28,7 @@ import { resolveTestAssetPathToAbsolute } from '../../../utils/pathResolver';
 import { getSceneVideoVersions } from './mockAssets';
 import { createMockAssetManifest } from './mockAssets';
 import { copyVideoToScene, setActiveVideoVersion } from '../../../utils/videoWorkspace';
+import { PROJECT_PATHS } from '../../../types/kshana';
 
 /**
  * Generates the complete mock project structure
@@ -38,6 +39,8 @@ import { copyVideoToScene, setActiveVideoVersion } from '../../../utils/videoWor
 export async function generateMockProjectStructure(
   projectDirectory: string,
 ): Promise<void> {
+  // Note: .kshana/agent structure is already created by ProjectService.createProjectStructure
+  // before this function is called, so we don't need to create it again here
   const agentPath = `${projectDirectory}/.kshana/agent`;
   const charactersPath = `${agentPath}/characters`;
   const settingsPath = `${agentPath}/settings`;
@@ -46,13 +49,9 @@ export async function generateMockProjectStructure(
   const plansPath = `${agentPath}/plans`;
 
   try {
-    // Create base directories
-    await window.electron.project.createFolder(projectDirectory, '.kshana/agent');
-    await window.electron.project.createFolder(agentPath, 'characters');
-    await window.electron.project.createFolder(agentPath, 'settings');
-    await window.electron.project.createFolder(agentPath, 'props');
-    await window.electron.project.createFolder(agentPath, 'scenes');
-    await window.electron.project.createFolder(agentPath, 'plans');
+    // Note: All subdirectories (characters, settings, props, scenes, plans) are already
+    // created by ProjectService.createProjectStructure before this function is called.
+    // We don't need to create them again - just use the existing paths.
 
     // Generate character files
     await generateCharacterFiles(charactersPath);
