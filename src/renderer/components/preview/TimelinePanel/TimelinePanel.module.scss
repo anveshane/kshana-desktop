@@ -194,6 +194,7 @@
   position: relative;
   min-height: 100%;
   padding-bottom: $spacing-sm;
+  margin-left: 10px;
 }
 
 .timeRuler {
@@ -208,10 +209,20 @@
 .timeMarker {
   position: absolute;
   top: 0;
+  bottom: 0;
+  /* Extend to fill height if needed, though parent is fixed height */
   height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
+  transform: translateX(-50%);
+  /* Center the marker on the exact time coordinate */
+
+  /* Special handling for the start (00:00:00) marker to prevent it being cut off */
+  &:first-child {
+    transform: none;
+    align-items: flex-start;
+  }
 }
 
 .timeMarkerLine {

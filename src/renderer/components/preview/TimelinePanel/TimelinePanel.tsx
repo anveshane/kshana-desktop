@@ -851,12 +851,15 @@ export default function TimelinePanel({
     currentPosition,
   ]);
 
+  // Offset for the timeline content margin
+  const TIMELINE_OFFSET = 10;
+
   // Calculate position from mouse event
   const calculatePositionFromMouse = useCallback(
     (clientX: number): number => {
       if (!tracksRef.current) return currentPosition;
       const rect = tracksRef.current.getBoundingClientRect();
-      const x = clientX - rect.left + scrollLeft;
+      const x = clientX - rect.left + scrollLeft - TIMELINE_OFFSET;
       const seconds = pixelsToSeconds(x, zoomLevel);
       return Math.max(0, Math.min(totalDuration, seconds));
     },
@@ -957,7 +960,7 @@ export default function TimelinePanel({
       if (!tracksRef.current || !sceneBlocks.length) return null;
 
       const rect = tracksRef.current.getBoundingClientRect();
-      const x = clientX - rect.left + scrollLeft;
+      const x = clientX - rect.left + scrollLeft - TIMELINE_OFFSET;
       const position = pixelsToSeconds(x, zoomLevel);
 
       // Find which scene index to insert before/after
