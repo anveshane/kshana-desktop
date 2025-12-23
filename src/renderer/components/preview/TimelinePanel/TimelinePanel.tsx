@@ -56,6 +56,7 @@ interface TimelineItemComponentProps {
   onSceneDragStart: (e: React.DragEvent<HTMLDivElement>, sceneNumber: number) => void;
   onSceneDragEnd: () => void;
   onSceneBlockClick: (e: React.MouseEvent<HTMLDivElement>, sceneNumber: number) => void;
+  onVideoBlockClick: (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => void;
   onNameChange: (sceneNumber: number, name: string) => void;
   onEditedNameChange: (name: string) => void;
   onEditingCancel: () => void;
@@ -76,6 +77,7 @@ function TimelineItemComponent({
   onSceneDragStart,
   onSceneDragEnd,
   onSceneBlockClick,
+  onVideoBlockClick,
   onNameChange,
   onEditedNameChange,
   onEditingCancel,
@@ -123,11 +125,15 @@ function TimelineItemComponent({
 
   if (item.type === 'video' && videoPath) {
     return (
+      // eslint-disable-next-line jsx-a11y/click-events-have-key-events
       <div
-        className={styles.videoBlock}
+        className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
         style={{
           left: `${left}px`,
           width: `${width}px`,
+        }}
+        onClick={(e) => {
+          onVideoBlockClick(e, item);
         }}
       >
         <video
@@ -331,7 +337,7 @@ export default function TimelinePanel({
     updateImportedClips,
     addAsset,
   } = useProject();
-  
+
   // Use unified timeline data hook
   const {
     scenes,
@@ -339,7 +345,7 @@ export default function TimelinePanel({
     artifactsByScene,
     importedVideoArtifacts,
   } = useTimelineData();
-  
+
   // Initialize zoom level from timeline state
   const [zoomLevel, setZoomLevel] = useState(timelineState.zoom_level);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -454,12 +460,12 @@ export default function TimelinePanel({
       duration: clip.duration_seconds,
       startTime: clip.start_time_seconds,
     }));
-    
+
     // Compare with current state to avoid unnecessary updates
     setImportedVideos((current) => {
       const currentVideosStr = JSON.stringify(current);
       const newVideosStr = JSON.stringify(importedClips);
-      
+
       if (currentVideosStr !== newVideosStr) {
         isUpdatingFromExternalRef.current = true;
         return importedClips;
@@ -469,7 +475,7 @@ export default function TimelinePanel({
   }, [timelineState.imported_clips]);
 
   // Sync imported videos to timeline state when they change locally
-  
+
   useEffect(() => {
     // Skip if this update came from external source
     if (isUpdatingFromExternalRef.current) {
@@ -483,7 +489,7 @@ export default function TimelinePanel({
       duration_seconds: video.duration,
       start_time_seconds: video.startTime,
     }));
-    
+
     // Compare with current timeline state to avoid unnecessary updates
     const currentClipsStr = JSON.stringify(
       timelineState.imported_clips.map((c) => ({
@@ -499,7 +505,7 @@ export default function TimelinePanel({
         startTime: c.start_time_seconds,
       })),
     );
-    
+
     if (currentClipsStr !== newClipsStr) {
       updateImportedClips(kshanaClips);
     }
@@ -529,7 +535,7 @@ export default function TimelinePanel({
   const sceneFoldersByNumber = useMemo(() => {
     const map: Record<number, string> = {};
     if (!projectScenes || projectScenes.length === 0) return map;
-    
+
     projectScenes.forEach((scene) => {
       map[scene.scene_number] = scene.folder;
     });
@@ -561,7 +567,7 @@ export default function TimelinePanel({
       if (sceneFolder) {
         // Update timeline state active_versions
         setActiveVersion(sceneFolder, version);
-        
+
         // Update current.txt file
         try {
           await setActiveVideoVersion(projectDirectory, sceneFolder, version);
@@ -659,8 +665,7 @@ export default function TimelinePanel({
         } else {
           const scene = scenes.find((s) => s.scene_number === sceneNumber);
           setMarkdownContent(
-            `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
-              scene?.description || 'No details available.'
+            `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${scene?.description || 'No details available.'
             }`,
           );
         }
@@ -668,8 +673,7 @@ export default function TimelinePanel({
         console.error('Failed to load scene markdown:', error);
         const scene = scenes.find((s) => s.scene_number === sceneNumber);
         setMarkdownContent(
-          `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
-            scene?.description || 'No details available.'
+          `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${scene?.description || 'No details available.'
           }`,
         );
       } finally {
@@ -713,7 +717,7 @@ export default function TimelinePanel({
       const sceneEndTime =
         sceneBlocks.length > 0
           ? sceneBlocks[sceneBlocks.length - 1].startTime +
-            sceneBlocks[sceneBlocks.length - 1].duration
+          sceneBlocks[sceneBlocks.length - 1].duration
           : 0;
       let currentTime = sceneEndTime;
       const videos = importedVideoArtifacts.map((artifact) => {
@@ -1003,13 +1007,13 @@ export default function TimelinePanel({
         // Dropping at the end
         const lastScene = sceneBlocks[sceneBlocks.length - 1];
         if (lastScene) {
-        await reorderScenes(
-          draggedSceneNumber,
-          sceneBlocks.length,
-          null, // projectState no longer needed
-          projectDirectory,
-          () => {}, // No-op function for state update
-        );
+          await reorderScenes(
+            draggedSceneNumber,
+            sceneBlocks.length,
+            null, // projectState no longer needed
+            projectDirectory,
+            () => { }, // No-op function for state update
+          );
         }
       } else {
         // Find the index of the dragged scene in sceneBlocks
@@ -1022,7 +1026,7 @@ export default function TimelinePanel({
             dropInsertIndex,
             null, // projectState no longer needed
             projectDirectory,
-            () => {}, // No-op function for state update
+            () => { }, // No-op function for state update
           );
         }
       }
@@ -1074,6 +1078,28 @@ export default function TimelinePanel({
     [draggedSceneNumber, selectedScenes, selectScene, popoverSceneNumber],
   );
 
+  // Handle video block click
+  const handleVideoBlockClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
+      // Don't handle if we're dragging
+      if (draggedSceneNumber !== null) {
+        return;
+      }
+
+      e.stopPropagation();
+      e.preventDefault();
+
+      // If video has an associated scene, treat it like a scene click
+      if (item.scene) {
+        handleSceneBlockClick(e, item.scene.scene_number);
+      } else {
+        // For videos without scenes (imported videos), seek to the video's start position
+        setCurrentPosition(item.startTime);
+      }
+    },
+    [draggedSceneNumber, handleSceneBlockClick, setCurrentPosition],
+  );
+
   // Handle timeline area scrubbing (click and drag)
   const handleTimelineMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1085,6 +1111,11 @@ export default function TimelinePanel({
 
       // Don't start scrubbing if clicking on a scene block (it has its own handler)
       if (target.closest(`.${styles.sceneBlock}`)) {
+        return;
+      }
+
+      // Don't start scrubbing if clicking on a video block (it has its own handler)
+      if (target.closest(`.${styles.videoBlock}`)) {
         return;
       }
 
@@ -1603,6 +1634,7 @@ export default function TimelinePanel({
                             onSceneDragStart={handleSceneDragStart}
                             onSceneDragEnd={handleSceneDragEnd}
                             onSceneBlockClick={handleSceneBlockClick}
+                            onVideoBlockClick={handleVideoBlockClick}
                             onNameChange={handleNameChange}
                             onEditedNameChange={setEditedSceneName}
                             onViewDetails={handleViewSceneDetails}

@@ -193,7 +193,7 @@
 .timelineContent {
   position: relative;
   min-height: 100%;
-  padding-left: $spacing-sm;
+  padding-bottom: $spacing-sm;
 }
 
 .timeRuler {
@@ -423,6 +423,22 @@
   transition: all $transition-fast;
   display: flex;
   flex-direction: column;
+  user-select: none;
+
+  &:hover {
+    border-color: $color-accent-cyan;
+    border-width: 2px;
+    box-shadow: 0 0 12px rgba($color-accent-cyan, 0.4);
+    background-color: rgba($color-accent-cyan, 0.15);
+    transform: translateY(-1px);
+  }
+
+  &.selected {
+    border-color: $color-accent-green;
+    border-width: 2px;
+    box-shadow: 0 0 12px rgba($color-accent-green, 0.5);
+    background-color: rgba($color-accent-green, 0.1);
+  }
 }
 
 .videoThumbnail {
@@ -453,4 +469,3 @@
   color: $color-text-muted;
   font-size: $font-size-sm;
 }
-
