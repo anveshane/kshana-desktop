@@ -44,7 +44,10 @@ export default function AssetsView() {
       description: char.visual_description,
       appearance: char.visual_description,
       // CharacterData uses reference_image_approval_status and reference_image_path
-      imagePath: char.reference_image_approval_status === 'approved' ? char.reference_image_path : undefined,
+      imagePath:
+        char.reference_image_approval_status === 'approved'
+          ? char.reference_image_path
+          : undefined,
     }));
   }, [isLoaded, projectCharacters]);
 
@@ -60,7 +63,10 @@ export default function AssetsView() {
       description: setting.visual_description,
       atmosphere: setting.visual_description, // Settings use visual_description for atmosphere
       // SettingData uses reference_image_approval_status and reference_image_path
-      imagePath: setting.reference_image_approval_status === 'approved' ? setting.reference_image_path : undefined,
+      imagePath:
+        setting.reference_image_approval_status === 'approved'
+          ? setting.reference_image_path
+          : undefined,
     }));
   }, [isLoaded, projectSettings]);
 

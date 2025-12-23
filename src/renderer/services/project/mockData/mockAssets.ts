@@ -3,7 +3,11 @@
  * All assets for the "Desert Survival Story" project
  */
 
-import type { AssetManifest, AssetInfo, AssetType } from '../../../types/kshana';
+import type {
+  AssetManifest,
+  AssetInfo,
+  AssetType,
+} from '../../../types/kshana';
 import {
   getTestImageForCharacter,
   getTestImageForSetting,
@@ -457,4 +461,3 @@ export function getSceneVideoVersions(
     )
     .sort((a, b) => a.version - b.version);
 }
-

@@ -43,7 +43,6 @@ import {
   getAssetsGroupedByType,
   getSceneVideoVersions,
 } from './mockAssets';
-export { generateMockProjectStructure } from './generateMockStructure';
 import {
   createMockTimelineState,
   createEmptyTimelineState,
@@ -58,6 +57,8 @@ import {
   getTotalContextSize,
   getContextEntriesSorted,
 } from './mockContext';
+
+export { generateMockProjectStructure } from './generateMockStructure';
 
 // Re-export individual mock creators
 export {
@@ -175,4 +176,3 @@ export function getMockProjectSummary(): {
 export function isMockProject(projectId: string): boolean {
   return projectId === MOCK_PROJECT_ID;
 }
-

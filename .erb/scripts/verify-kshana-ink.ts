@@ -24,7 +24,9 @@ function getGitBranch(repoPath: string): string {
     }).trim();
     return branch;
   } catch (error) {
-    throw new Error(`Failed to get git branch for ${repoPath}: ${(error as Error).message}`);
+    throw new Error(
+      `Failed to get git branch for ${repoPath}: ${(error as Error).message}`,
+    );
   }
 }
 
@@ -39,7 +41,9 @@ function getGitCommit(repoPath: string): string {
     }).trim();
     return commit;
   } catch (error) {
-    throw new Error(`Failed to get git commit for ${repoPath}: ${(error as Error).message}`);
+    throw new Error(
+      `Failed to get git commit for ${repoPath}: ${(error as Error).message}`,
+    );
   }
 }
 
@@ -54,7 +58,9 @@ function getGitCommitDate(repoPath: string): string {
     }).trim();
     return date;
   } catch (error) {
-    throw new Error(`Failed to get git commit date for ${repoPath}: ${(error as Error).message}`);
+    throw new Error(
+      `Failed to get git commit date for ${repoPath}: ${(error as Error).message}`,
+    );
   }
 }
 
@@ -98,7 +104,12 @@ function verifyKshanaInk(sourcePath: string): void {
   }
 
   // Verify dist/server/index.js exists
-  const serverIndexPath = path.join(absoluteSourcePath, 'dist', 'server', 'index.js');
+  const serverIndexPath = path.join(
+    absoluteSourcePath,
+    'dist',
+    'server',
+    'index.js',
+  );
   if (!fs.existsSync(serverIndexPath)) {
     throw new Error(
       `kshana-ink is not built. Missing: ${serverIndexPath}\n` +
@@ -107,7 +118,13 @@ function verifyKshanaInk(sourcePath: string): void {
   }
 
   // Verify dist/core/llm/index.js exists
-  const llmIndexPath = path.join(absoluteSourcePath, 'dist', 'core', 'llm', 'index.js');
+  const llmIndexPath = path.join(
+    absoluteSourcePath,
+    'dist',
+    'core',
+    'llm',
+    'index.js',
+  );
   if (!fs.existsSync(llmIndexPath)) {
     throw new Error(
       `kshana-ink is not built. Missing: ${llmIndexPath}\n` +
@@ -174,7 +191,10 @@ function recordVersionInfo(sourcePath: string): void {
     }
 
     const versionFilePath = path.join(appPath, '.kshana-ink-version.json');
-    fs.writeFileSync(versionFilePath, JSON.stringify(versionInfo, null, 2) + '\n');
+    fs.writeFileSync(
+      versionFilePath,
+      `${JSON.stringify(versionInfo, null, 2)}\n`,
+    );
 
     console.log('✓ Version information recorded:');
     console.log(`  - Branch: ${branch}`);
@@ -182,7 +202,9 @@ function recordVersionInfo(sourcePath: string): void {
     console.log(`  - Date: ${date}`);
     console.log(`  - Saved to: ${versionFilePath}`);
   } catch (error) {
-    console.warn(`Warning: Could not record version info: ${(error as Error).message}`);
+    console.warn(
+      `Warning: Could not record version info: ${(error as Error).message}`,
+    );
     // Don't fail the build if version recording fails
   }
 }
@@ -211,4 +233,3 @@ function main() {
 main();
 
 export { verifyKshanaInk, recordVersionInfo };
-

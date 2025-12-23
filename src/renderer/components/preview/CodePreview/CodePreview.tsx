@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import styles from './CodePreview.module.scss';
 
 // Import CodeMirror modules - use standard imports
 import { EditorState } from '@codemirror/state';
@@ -14,17 +13,20 @@ import { json } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { yaml } from '@codemirror/lang-yaml';
 import { oneDark } from '@codemirror/theme-one-dark';
+import styles from './CodePreview.module.scss';
 
 // Check if CodeMirror is available - handle case where imports might fail
 let codemirrorAvailable = false;
 try {
   // Safely check if EditorView exists and has the required properties
   // Use optional chaining to avoid errors if EditorView is undefined
-  if (typeof EditorView !== 'undefined' && 
-      EditorView !== null && 
-      typeof EditorState !== 'undefined' && 
-      EditorState !== null &&
-      EditorView?.updateListener !== undefined) {
+  if (
+    typeof EditorView !== 'undefined' &&
+    EditorView !== null &&
+    typeof EditorState !== 'undefined' &&
+    EditorState !== null &&
+    EditorView?.updateListener !== undefined
+  ) {
     codemirrorAvailable = true;
   }
 } catch (err) {
@@ -88,13 +90,16 @@ function PlainTextEditor({
     setIsDirty(false);
   }, [content]);
 
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newContent = e.target.value;
-    setCurrentContent(newContent);
-    const dirty = newContent !== originalContentRef.current;
-    setIsDirty(dirty);
-    onDirtyChange?.(dirty);
-  }, [onDirtyChange]);
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const newContent = e.target.value;
+      setCurrentContent(newContent);
+      const dirty = newContent !== originalContentRef.current;
+      setIsDirty(dirty);
+      onDirtyChange?.(dirty);
+    },
+    [onDirtyChange],
+  );
 
   const saveFile = useCallback(async () => {
     if (!filePath) return;
@@ -210,8 +215,12 @@ export default function CodePreview({
 
     // Check if CodeMirror is actually available before trying to use it
     // Specifically check for EditorView.updateListener which is needed
-    if (!codemirrorAvailable || !EditorView || !EditorState || 
-        typeof EditorView.updateListener === 'undefined') {
+    if (
+      !codemirrorAvailable ||
+      !EditorView ||
+      !EditorState ||
+      typeof EditorView.updateListener === 'undefined'
+    ) {
       setError('FALLBACK_TO_PLAINTEXT');
       return;
     }

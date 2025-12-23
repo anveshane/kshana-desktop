@@ -13,8 +13,16 @@ interface PlanFile {
 const PLAN_FILES: PlanFile[] = [
   { name: 'plot.md', displayName: 'Plot Summary', path: 'plans/plot.md' },
   { name: 'story.md', displayName: 'Full Story', path: 'plans/story.md' },
-  { name: 'scenes.md', displayName: 'Scene Breakdown', path: 'plans/scenes.md' },
-  { name: 'full_script.md', displayName: 'Full Script', path: 'plans/full_script.md' },
+  {
+    name: 'scenes.md',
+    displayName: 'Scene Breakdown',
+    path: 'plans/scenes.md',
+  },
+  {
+    name: 'full_script.md',
+    displayName: 'Full Script',
+    path: 'plans/full_script.md',
+  },
 ];
 
 export default function PlansView() {
@@ -26,37 +34,42 @@ export default function PlansView() {
 
   const effectiveProjectDir = projectDirectory || '/mock';
 
-  const loadPlanFile = useCallback(async (plan: PlanFile) => {
-    setSelectedPlan(plan);
-    setIsLoadingPlan(true);
-    setError(null);
-    
-    const planPath = `${effectiveProjectDir}/.kshana/agent/${plan.path}`;
-    
-    try {
-      const content = await window.electron.project.readFile(planPath);
-      if (content !== null) {
-        setPlanContent(content);
-      } else {
-        setPlanContent(`# ${plan.displayName}\n\nContent not available.`);
-      }
-    } catch (err) {
-      console.error('Failed to load plan file:', err);
-      setError('Failed to load plan file');
-      setPlanContent(`# ${plan.displayName}\n\nFailed to load content.`);
-    } finally {
-      setIsLoadingPlan(false);
-    }
-  }, [effectiveProjectDir]);
+  const loadPlanFile = useCallback(
+    async (plan: PlanFile) => {
+      setSelectedPlan(plan);
+      setIsLoadingPlan(true);
+      setError(null);
 
-  const handlePlanClick = useCallback((plan: PlanFile) => {
-    loadPlanFile(plan);
-  }, [loadPlanFile]);
+      const planPath = `${effectiveProjectDir}/.kshana/agent/${plan.path}`;
+
+      try {
+        const content = await window.electron.project.readFile(planPath);
+        if (content !== null) {
+          setPlanContent(content);
+        } else {
+          setPlanContent(`# ${plan.displayName}\n\nContent not available.`);
+        }
+      } catch (err) {
+        console.error('Failed to load plan file:', err);
+        setError('Failed to load plan file');
+        setPlanContent(`# ${plan.displayName}\n\nFailed to load content.`);
+      } finally {
+        setIsLoadingPlan(false);
+      }
+    },
+    [effectiveProjectDir],
+  );
+
+  const handlePlanClick = useCallback(
+    (plan: PlanFile) => {
+      loadPlanFile(plan);
+    },
+    [loadPlanFile],
+  );
 
   // Load first plan by default if no project directory
   useEffect(() => {
     if (!projectDirectory) {
-      return;
     }
     // Don't auto-load, let user select
   }, [projectDirectory]);
@@ -112,4 +125,3 @@ export default function PlansView() {
     </div>
   );
 }
-

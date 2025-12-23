@@ -16,6 +16,26 @@ import type {
 } from '../types/workspace';
 import type { FileNode } from '../../shared/fileSystemTypes';
 
+// Helper to find and update a node in the tree
+const updateNodeInTree = (
+  root: FileNode,
+  path: string,
+  children: FileNode[],
+): FileNode => {
+  if (root.path === path) {
+    return { ...root, children, type: 'directory' };
+  }
+  if (root.children) {
+    return {
+      ...root,
+      children: root.children.map((child) =>
+        updateNodeInTree(child, path, children),
+      ),
+    };
+  }
+  return root;
+};
+
 const initialState: WorkspaceState = {
   projectDirectory: null,
   projectName: null,
@@ -58,9 +78,12 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
     const unsubscribe = window.electron.project.onFileChange(() => {
       // Refresh file tree on any change
+      // Refresh file tree on any change - shallow refresh of root
       window.electron.project
-        .readTree(state.projectDirectory!)
+        .readTree(state.projectDirectory!, 1)
         .then((tree: FileNode) => {
+          // TODO: Ideally we should merge with existing tree to preserve expanded folders
+          // For now, we just refresh root to prevent freezing, UI will need to re-expand
           setState((prev) => ({ ...prev, fileTree: tree }));
           return tree;
         })
@@ -73,7 +96,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const openProject = useCallback(async (path: string) => {
     setState((prev) => ({ ...prev, isLoading: true }));
     try {
-      const tree = await window.electron.project.readTree(path);
+      // Read only first level to prevent freeze
+      const tree = await window.electron.project.readTree(path, 1);
       const projectName = path.split('/').pop() || path;
 
       // Start watching the directory
@@ -141,6 +165,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     try {
       const tree = await window.electron.project.readTree(
         state.projectDirectory,
+        1,
       );
       setState((prev) => ({ ...prev, fileTree: tree }));
     } catch {
@@ -168,6 +193,32 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     }
   }, [openProject]);
 
+  const loadDirectory = useCallback(async (path: string) => {
+    try {
+      // Read specific directory (depth 1)
+      const node = await window.electron.project.readTree(path, 1);
+
+      setState((prev) => {
+        if (!prev.fileTree) return prev;
+
+        // If we loaded the root (unlikely via this method), just replace
+        if (prev.fileTree.path === path) {
+          return { ...prev, fileTree: node };
+        }
+
+        // Otherwise graft the new children into the existing tree
+        const newTree = updateNodeInTree(
+          prev.fileTree,
+          path,
+          node.children || [],
+        );
+        return { ...prev, fileTree: newTree };
+      });
+    } catch (err) {
+      console.error('Failed to load directory:', err);
+    }
+  }, []);
+
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -194,6 +245,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       removeFromActiveContext,
       refreshFileTree,
       setConnectionStatus,
+      loadDirectory,
     }),
     [
       state,
@@ -204,6 +256,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       removeFromActiveContext,
       refreshFileTree,
       setConnectionStatus,
+      loadDirectory,
     ],
   );
 

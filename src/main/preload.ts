@@ -60,8 +60,8 @@ const projectBridge = {
   selectVideoFile(): Promise<string | null> {
     return ipcRenderer.invoke('project:select-video-file');
   },
-  readTree(dirPath: string): Promise<FileNode> {
-    return ipcRenderer.invoke('project:read-tree', dirPath);
+  readTree(dirPath: string, depth?: number): Promise<FileNode> {
+    return ipcRenderer.invoke('project:read-tree', dirPath, depth);
   },
   readFile(filePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:read-file', filePath);
@@ -73,7 +73,11 @@ const projectBridge = {
     return ipcRenderer.invoke('project:write-file', filePath, content);
   },
   writeFileBinary(filePath: string, base64Data: string): Promise<void> {
-    return ipcRenderer.invoke('project:write-file-binary', filePath, base64Data);
+    return ipcRenderer.invoke(
+      'project:write-file-binary',
+      filePath,
+      base64Data,
+    );
   },
   createFile(basePath: string, relativePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:create-file', basePath, relativePath);

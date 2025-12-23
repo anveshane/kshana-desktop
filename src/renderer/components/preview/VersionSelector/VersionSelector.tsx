@@ -18,7 +18,11 @@ interface VersionSelectorProps {
     duration: number;
   }>;
   activeVersions?: Record<number, SceneVersions>; // sceneNumber -> { image?: number, video?: number }
-  onVersionSelect?: (sceneNumber: number, assetType: 'image' | 'video', version: number) => void;
+  onVersionSelect?: (
+    sceneNumber: number,
+    assetType: 'image' | 'video',
+    version: number,
+  ) => void;
 }
 
 export default function VersionSelector({
@@ -36,7 +40,7 @@ export default function VersionSelector({
 
     return sceneBlocks.map((block) => {
       const sceneNumber = block.scene.scene_number;
-      
+
       // Filter assets for this scene by type
       const imageAssets = assetManifest.assets.filter(
         (asset) =>
@@ -81,20 +85,29 @@ export default function VersionSelector({
       <div className={styles.versionsList}>
         {sceneVersions.map((sceneVersion) => {
           // Only show scenes that have at least one version (image or video)
-          if (sceneVersion.imageVersions.length === 0 && sceneVersion.videoVersions.length === 0) {
+          if (
+            sceneVersion.imageVersions.length === 0 &&
+            sceneVersion.videoVersions.length === 0
+          ) {
             return null;
           }
 
-          const activeVersionsForScene = activeVersions[sceneVersion.sceneNumber] || {};
-          const activeImageVersion = activeVersionsForScene.image ?? sceneVersion.imageVersions[0];
-          const activeVideoVersion = activeVersionsForScene.video ?? sceneVersion.videoVersions[0];
+          const activeVersionsForScene =
+            activeVersions[sceneVersion.sceneNumber] || {};
+          const activeImageVersion =
+            activeVersionsForScene.image ?? sceneVersion.imageVersions[0];
+          const activeVideoVersion =
+            activeVersionsForScene.video ?? sceneVersion.videoVersions[0];
 
           return (
-            <div key={sceneVersion.sceneNumber} className={styles.sceneVersions}>
+            <div
+              key={sceneVersion.sceneNumber}
+              className={styles.sceneVersions}
+            >
               <div className={styles.sceneLabel}>
                 SCN_{String(sceneVersion.sceneNumber).padStart(2, '0')}
               </div>
-              
+
               {/* Image Versions */}
               {sceneVersion.imageVersions.length > 0 && (
                 <div className={styles.assetTypeSection}>
@@ -111,7 +124,11 @@ export default function VersionSelector({
                           type="button"
                           className={`${styles.versionBadge} ${isActive ? styles.active : ''}`}
                           onClick={() =>
-                            handleVersionClick(sceneVersion.sceneNumber, 'image', version)
+                            handleVersionClick(
+                              sceneVersion.sceneNumber,
+                              'image',
+                              version,
+                            )
                           }
                           title={`Scene ${sceneVersion.sceneNumber} - Image Version ${version}`}
                         >
@@ -139,7 +156,11 @@ export default function VersionSelector({
                           type="button"
                           className={`${styles.versionBadge} ${isActive ? styles.active : ''}`}
                           onClick={() =>
-                            handleVersionClick(sceneVersion.sceneNumber, 'video', version)
+                            handleVersionClick(
+                              sceneVersion.sceneNumber,
+                              'video',
+                              version,
+                            )
                           }
                           title={`Scene ${sceneVersion.sceneNumber} - Video Version ${version}`}
                         >
@@ -157,4 +178,3 @@ export default function VersionSelector({
     </div>
   );
 }
-

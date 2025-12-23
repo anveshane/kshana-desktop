@@ -24,7 +24,15 @@ const STATUS_ICONS: Record<TodoStatus, { icon: string; className: string }> = {
   cancelled: { icon: '✗', className: styles.statusCancelled },
 };
 
-function TodoItem({ todo, index, compact }: { todo: TodoItem; index: number; compact?: boolean }) {
+function TodoItem({
+  todo,
+  index,
+  compact,
+}: {
+  todo: TodoItem;
+  index: number;
+  compact?: boolean;
+}) {
   const status = (todo.status || 'pending') as TodoStatus;
   const statusConfig = STATUS_ICONS[status];
   const indent = todo.depth || 0;
@@ -34,7 +42,11 @@ function TodoItem({ todo, index, compact }: { todo: TodoItem; index: number; com
     return (
       <div className={styles.todoItem}>
         <span className={statusConfig.className}>{statusConfig.icon}</span>
-        <span className={status === 'pending' ? styles.todoContentDimmed : styles.todoContent}>
+        <span
+          className={
+            status === 'pending' ? styles.todoContentDimmed : styles.todoContent
+          }
+        >
           {' '}
           {content}
         </span>
@@ -44,12 +56,16 @@ function TodoItem({ todo, index, compact }: { todo: TodoItem; index: number; com
 
   return (
     <div className={styles.todoItem}>
-      <span className={styles.todoIndex}>{String(index + 1).padStart(2, ' ')}.</span>
+      <span className={styles.todoIndex}>
+        {String(index + 1).padStart(2, ' ')}.
+      </span>
       <span className={styles.todoIndent}>{'  '.repeat(indent)}</span>
       <span className={statusConfig.className}>{statusConfig.icon}</span>
       <span
         className={
-          status === 'pending' || status === 'cancelled' ? styles.todoContentDimmed : styles.todoContent
+          status === 'pending' || status === 'cancelled'
+            ? styles.todoContentDimmed
+            : styles.todoContent
         }
       >
         {' '}
@@ -59,7 +75,10 @@ function TodoItem({ todo, index, compact }: { todo: TodoItem; index: number; com
   );
 }
 
-export default function TodoDisplay({ todos, compact = false }: TodoDisplayProps) {
+export default function TodoDisplay({
+  todos,
+  compact = false,
+}: TodoDisplayProps) {
   const visibleTodos = todos.filter((t) => t.task || t.content);
 
   if (visibleTodos.length === 0) {
@@ -70,9 +89,15 @@ export default function TodoDisplay({ todos, compact = false }: TodoDisplayProps
     );
   }
 
-  const completedCount = visibleTodos.filter((t) => t.status === 'completed').length;
-  const pendingCount = visibleTodos.filter((t) => t.status === 'pending').length;
-  const inProgressCount = visibleTodos.filter((t) => t.status === 'in_progress').length;
+  const completedCount = visibleTodos.filter(
+    (t) => t.status === 'completed',
+  ).length;
+  const pendingCount = visibleTodos.filter(
+    (t) => t.status === 'pending',
+  ).length;
+  const inProgressCount = visibleTodos.filter(
+    (t) => t.status === 'in_progress',
+  ).length;
   const currentTask = visibleTodos.find((t) => t.status === 'in_progress');
 
   return (
@@ -83,10 +108,16 @@ export default function TodoDisplay({ todos, compact = false }: TodoDisplayProps
           Todos ({completedCount}/{visibleTodos.length})
         </span>
         {inProgressCount > 0 && (
-          <span className={styles.headerInProgress}> • {inProgressCount} in progress</span>
+          <span className={styles.headerInProgress}>
+            {' '}
+            • {inProgressCount} in progress
+          </span>
         )}
         {pendingCount > 0 && (
-          <span className={styles.headerPending}> • {pendingCount} pending</span>
+          <span className={styles.headerPending}>
+            {' '}
+            • {pendingCount} pending
+          </span>
         )}
       </div>
       {!compact && currentTask && (
@@ -96,10 +127,14 @@ export default function TodoDisplay({ todos, compact = false }: TodoDisplayProps
       )}
       <div className={styles.todoList}>
         {visibleTodos.map((todo, i) => (
-          <TodoItem key={todo.id || i} todo={todo} index={i} compact={compact} />
+          <TodoItem
+            key={todo.id || i}
+            todo={todo}
+            index={i}
+            compact={compact}
+          />
         ))}
       </div>
     </div>
   );
 }
-

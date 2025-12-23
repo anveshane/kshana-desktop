@@ -108,9 +108,11 @@ export default function MessageBubble({
     }
     const status = (message.meta.status as string) || 'executing';
     const args = (message.meta.args as Record<string, unknown>) || {};
-    const result = message.meta.result;
+    const { result } = message.meta;
     const duration = message.meta.duration as number | undefined;
-    const streamingContent = message.meta.streamingContent as string | undefined;
+    const streamingContent = message.meta.streamingContent as
+      | string
+      | undefined;
 
     return (
       <div className={`${styles.container} ${styles.system}`}>
@@ -118,7 +120,9 @@ export default function MessageBubble({
           toolName={toolName}
           agentName={message.author} // Pass agent name if available
           args={args}
-          status={status as 'executing' | 'completed' | 'error' | 'needs_confirmation'}
+          status={
+            status as 'executing' | 'completed' | 'error' | 'needs_confirmation'
+          }
           result={result}
           duration={duration}
           toolCallId={message.meta.toolCallId as string | undefined}
@@ -141,10 +145,13 @@ export default function MessageBubble({
   // Render question prompt
   if (isQuestion) {
     const options = (message.meta?.options as string[]) || [];
-    const questionType = (message.meta?.questionType as 'text' | 'confirm' | 'select') || 'text';
+    const questionType =
+      (message.meta?.questionType as 'text' | 'confirm' | 'select') || 'text';
     const timeout = message.meta?.timeout as number | undefined;
     const defaultOption = message.meta?.defaultOption as string | undefined;
-    const selectedResponse = message.meta?.selectedResponse as string | undefined;
+    const selectedResponse = message.meta?.selectedResponse as
+      | string
+      | undefined;
 
     return (
       <div className={`${styles.container} ${styles.assistant}`}>
@@ -154,7 +161,7 @@ export default function MessageBubble({
           type={questionType}
           timeoutSeconds={timeout}
           defaultOption={defaultOption}
-          onSelect={onResponse || (() => { })}
+          onSelect={onResponse || (() => {})}
           selectedResponse={selectedResponse}
         />
       </div>
@@ -164,7 +171,7 @@ export default function MessageBubble({
   // Handle dispatch_agent (plan) messages with markdown
   const isDispatchAgent = message.meta?.toolName === 'dispatch_agent';
   const agentName = message.author;
-  
+
   // Check if message contains only reasoning (should be collapsible when done)
   // Reasoning messages start with tags like <think>, <think>, etc.
   const contentStart = message.content.trim().substring(0, 100);
@@ -172,9 +179,10 @@ export default function MessageBubble({
   const contentStartLower = contentStart.toLowerCase();
   const hasReasoning = contentStartLower.includes('<think');
   // Message is "reasoning only" if it starts with a reasoning tag
-  const isReasoningOnly = hasReasoning && contentStartLower.trim().startsWith('<think');
+  const isReasoningOnly =
+    hasReasoning && contentStartLower.trim().startsWith('<think');
   const [isReasoningExpanded, setIsReasoningExpanded] = useState(false);
-  
+
   // Auto-collapse reasoning messages when done (not streaming)
   useEffect(() => {
     if (isReasoningOnly && !isStreaming) {
@@ -184,37 +192,39 @@ export default function MessageBubble({
 
   return (
     <div
-      className={`${styles.container} ${styles[message.role]} ${isStreaming ? styles.streaming : ''
-        } ${isIntermediate ? styles.intermediate : ''} ${isError ? styles.error : ''
-        } ${isGreeting ? styles.greeting : ''}`}
+      className={`${styles.container} ${styles[message.role]} ${
+        isStreaming ? styles.streaming : ''
+      } ${isIntermediate ? styles.intermediate : ''} ${
+        isError ? styles.error : ''
+      } ${isGreeting ? styles.greeting : ''}`}
     >
       {!isGreeting && (
-      <div className={styles.header}>
-        {message.role === 'assistant' && agentName ? (
-          <span className={styles.role}>
-            <span className={styles.agentName}>[{agentName}]</span>
-          </span>
-        ) : (
-          <span className={styles.role}>{roleLabels[message.role]}</span>
-        )}
+        <div className={styles.header}>
+          {message.role === 'assistant' && agentName ? (
+            <span className={styles.role}>
+              <span className={styles.agentName}>[{agentName}]</span>
+            </span>
+          ) : (
+            <span className={styles.role}>{roleLabels[message.role]}</span>
+          )}
 
-        {message.type && message.type !== 'message' && (
-          <span className={styles.type}>{message.type}</span>
-        )}
-        <span className={styles.time}>
-          {formatter.format(new Date(message.timestamp))}
-        </span>
-        {!isSystem && (
-          <div className={styles.actions}>
-            <MessageActions
-              message={message}
-              onRegenerate={onRegenerate}
-              onDelete={onDelete}
-              showRegenerate={message.role === 'assistant' && !isIntermediate}
-            />
-          </div>
-        )}
-      </div>
+          {message.type && message.type !== 'message' && (
+            <span className={styles.type}>{message.type}</span>
+          )}
+          <span className={styles.time}>
+            {formatter.format(new Date(message.timestamp))}
+          </span>
+          {!isSystem && (
+            <div className={styles.actions}>
+              <MessageActions
+                message={message}
+                onRegenerate={onRegenerate}
+                onDelete={onDelete}
+                showRegenerate={message.role === 'assistant' && !isIntermediate}
+              />
+            </div>
+          )}
+        </div>
       )}
       <div className={styles.body}>
         {isGreeting ? (
@@ -234,7 +244,8 @@ export default function MessageBubble({
             remarkPlugins={remarkGfm ? [remarkGfm] : []}
             components={MarkdownComponents}
           >
-            {(message.meta.result as Record<string, unknown>)?.plan as string || message.content}
+            {((message.meta.result as Record<string, unknown>)
+              ?.plan as string) || message.content}
           </ReactMarkdown>
         ) : isReasoningOnly && !isStreaming ? (
           // Collapsible reasoning message when done
@@ -269,7 +280,10 @@ export default function MessageBubble({
             remarkPlugins={remarkGfm ? [remarkGfm] : []}
             components={MarkdownComponents}
           >
-            {message.content || (message.role === 'assistant' && isStreaming ? '*Thinking...*' : message.content)}
+            {message.content ||
+              (message.role === 'assistant' && isStreaming
+                ? '*Thinking...*'
+                : message.content)}
           </ReactMarkdown>
         )}
       </div>

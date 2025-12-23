@@ -1,7 +1,7 @@
 /**
  * Test Asset Mapping
  * Maps test images and videos from test_image/ and test_video/ to mock entities
- * 
+ *
  * This allows the mock data to use real assets for better UI testing and demos.
  */
 
@@ -14,12 +14,12 @@ export const TEST_IMAGES = {
   'alice-chen': 'img1.jpg',
   'marcus-webb': 'img2.jpg',
   'fatima-hassan': 'img3.jpg',
-  
+
   // Setting reference images (for Assets view) - 3 images
   'dusty-village': 'img4.jpg',
   'desert-camp': 'img5.jpg',
   'underground-tomb': 'img6.jpg', // Reuse scene image since underground-tomb doesn't have reference_image_path yet
-  
+
   // Scene images (for Storyboard, Timeline, and Video Library) - 3 images
   // These will cycle/reuse for scenes 001-010
   'scene-001': 'img6.jpg',
@@ -39,11 +39,7 @@ export const TEST_IMAGES = {
  * 3 videos (vd1.mp4, vd2.mp4, vd3.mp4) mapped to scene videos
  * Videos will cycle for different scenes and versions
  */
-export const TEST_VIDEOS = [
-  'vd1.mp4',
-  'vd2.mp4',
-  'vd3.mp4',
-] as const;
+export const TEST_VIDEOS = ['vd1.mp4', 'vd2.mp4', 'vd3.mp4'] as const;
 
 /**
  * Gets the test image path for a character slug
@@ -78,14 +74,14 @@ export function getTestVideoForScene(
   // Use scene number and version to select video
   // This creates variety: different scenes and versions get different videos
   // Formula: cycle through videos based on scene and version
-  const videoIndex = ((sceneNumber - 1) + (version - 1)) % TEST_VIDEOS.length;
+  const videoIndex = (sceneNumber - 1 + (version - 1)) % TEST_VIDEOS.length;
   return TEST_VIDEOS[videoIndex];
 }
 
 /**
  * Resolves a test asset path
  * When in mock mode, paths should point to test_image/ or test_video/
- * 
+ *
  * Uses test_image/ or test_video/ directly (not ../) since they're now
  * in the app resources and will be resolved by the path resolver
  */
@@ -116,7 +112,7 @@ export function resolveMockAssetPath(
 ): string {
   // For mock data, we want to use test assets
   // The path should be relative to workspace root
-  
+
   switch (assetType) {
     case 'character_ref':
       if (options?.entity_slug) {
@@ -126,7 +122,7 @@ export function resolveMockAssetPath(
         }
       }
       break;
-      
+
     case 'setting_ref':
       if (options?.entity_slug) {
         const testImage = getTestImageForSetting(options.entity_slug);
@@ -135,7 +131,7 @@ export function resolveMockAssetPath(
         }
       }
       break;
-      
+
     case 'scene_image':
       if (options?.scene_folder) {
         const testImage = getTestImageForScene(options.scene_folder);
@@ -144,7 +140,7 @@ export function resolveMockAssetPath(
         }
       }
       break;
-      
+
     case 'scene_video':
       if (options?.scene_number) {
         const testVideo = getTestVideoForScene(
@@ -155,8 +151,7 @@ export function resolveMockAssetPath(
       }
       break;
   }
-  
+
   // Fallback to original path if no test asset mapping found
   return originalPath;
 }
-

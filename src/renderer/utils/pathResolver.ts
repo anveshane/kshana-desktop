@@ -18,10 +18,13 @@ async function getResourcesPath(): Promise<string> {
   if (cachedResourcesPath) {
     return cachedResourcesPath;
   }
-  
+
   try {
     // Use IPC to get resources path from main process
-    if (typeof window !== 'undefined' && window.electron?.project?.getResourcesPath) {
+    if (
+      typeof window !== 'undefined' &&
+      window.electron?.project?.getResourcesPath
+    ) {
       const resourcesPath = await window.electron.project.getResourcesPath();
       if (resourcesPath && resourcesPath.trim()) {
         cachedResourcesPath = resourcesPath.trim();
@@ -31,7 +34,7 @@ async function getResourcesPath(): Promise<string> {
   } catch (error) {
     console.warn('[PathResolver] Failed to get resources path via IPC:', error);
   }
-  
+
   // Fallback: try environment variable
   if (typeof process !== 'undefined' && process.env.WORKSPACE_ROOT) {
     const workspaceRoot = process.env.WORKSPACE_ROOT.trim();
@@ -40,9 +43,11 @@ async function getResourcesPath(): Promise<string> {
       return cachedResourcesPath;
     }
   }
-  
+
   // Last resort: return empty string to avoid hardcoded paths
-  console.warn('[PathResolver] Could not determine resources path - using fallback');
+  console.warn(
+    '[PathResolver] Could not determine resources path - using fallback',
+  );
   cachedResourcesPath = '';
   return cachedResourcesPath;
 }
@@ -52,7 +57,7 @@ async function getResourcesPath(): Promise<string> {
  */
 export function isTestAssetPath(path: string): boolean {
   if (!path) return false;
-  
+
   const normalized = path.replace(/\\/g, '/');
   const segments = normalized.split('/');
   // Check if any segment is a test asset folder
@@ -68,7 +73,7 @@ function parseTestAssetPath(
   path: string,
 ): { folder: string; filename: string } | null {
   const normalized = path.replace(/\\/g, '/');
-  
+
   // Split into segments and find the first test folder segment
   const segments = normalized.split('/');
   for (let i = 0; i < segments.length; i++) {
@@ -81,7 +86,7 @@ function parseTestAssetPath(
       }
     }
   }
-  
+
   return null;
 }
 
@@ -96,33 +101,37 @@ export async function resolveTestAssetPathToAbsolute(
     console.warn('[PathResolver] Cannot resolve empty test asset path');
     return '';
   }
-  
+
   // Handle file:// URLs
   if (testAssetPath.startsWith('file://')) {
     return testAssetPath.slice(7);
   }
-  
+
   // If already absolute, normalize and return
   if (testAssetPath.startsWith('/') || /^[A-Za-z]:/.test(testAssetPath)) {
     return testAssetPath.replace(/\\/g, '/');
   }
-  
+
   // Parse test asset path
   const parsed = parseTestAssetPath(testAssetPath);
   if (!parsed) {
-    console.warn(`[PathResolver] Invalid test asset path format: ${testAssetPath}`);
+    console.warn(
+      `[PathResolver] Invalid test asset path format: ${testAssetPath}`,
+    );
     return '';
   }
-  
+
   const { folder, filename } = parsed;
-  
+
   // Get resources path
   const resourcesPath = await getResourcesPath();
   if (!resourcesPath) {
-    console.warn('[PathResolver] Cannot resolve test asset path: resources path not available');
+    console.warn(
+      '[PathResolver] Cannot resolve test asset path: resources path not available',
+    );
     return '';
   }
-  
+
   // Join resources path, folder, and filename
   const absolutePath = [resourcesPath, folder, filename]
     .filter(Boolean)
@@ -145,14 +154,14 @@ export async function resolveAssetPathForDisplay(
   if (!assetPath || !assetPath.trim()) {
     return '';
   }
-  
+
   const trimmedPath = assetPath.trim();
-  
+
   // If it's already a file:// URL, return as-is
   if (trimmedPath.startsWith('file://')) {
     return trimmedPath;
   }
-  
+
   // ALWAYS resolve test asset paths to resources path in production or if detected
   // This ensures bundled assets load correctly even if useMockData is false
   if (isTestAssetPath(trimmedPath)) {
@@ -160,42 +169,47 @@ export async function resolveAssetPathForDisplay(
     if (absolutePath) {
       const result = `file://${absolutePath}`;
       if (assetPath.endsWith('.mp4')) {
-        console.log(`[PathResolver] Resolved test video: ${assetPath} -> ${result}`);
+        console.log(
+          `[PathResolver] Resolved test video: ${assetPath} -> ${result}`,
+        );
       }
       return result;
     }
     // If resolution failed, fall through to project directory resolution
   }
-  
+
   // If assetPath is already absolute, use it directly
   if (trimmedPath.startsWith('/') || /^[A-Za-z]:/.test(trimmedPath)) {
     return `file://${trimmedPath.replace(/\\/g, '/')}`;
   }
-  
+
   // Otherwise, construct path relative to project directory
   if (projectDirectory && projectDirectory.trim()) {
     const normalizedProjectDir = projectDirectory.trim().replace(/\\/g, '/');
-    
+
     // Handle paths that already start with .kshana
     if (trimmedPath.startsWith('.kshana/')) {
       return `file://${normalizedProjectDir}/${trimmedPath}`;
     }
-    
+
     // Handle paths relative to .kshana/agent/ (e.g., characters/alice-chen/image.png)
     if (trimmedPath.match(/^(characters|settings|props|plans|scenes)\//)) {
       return `file://${normalizedProjectDir}/.kshana/agent/${trimmedPath}`;
     }
-    
+
     // Handle other relative paths
     const result = `file://${normalizedProjectDir}/${trimmedPath}`;
     if (assetPath.endsWith('.mp4')) {
-      console.log(`[PathResolver] Resolved project video: ${assetPath} -> ${result}`);
+      console.log(
+        `[PathResolver] Resolved project video: ${assetPath} -> ${result}`,
+      );
     }
     return result;
   }
-  
+
   // Fallback: treat as absolute path (may fail, but better than nothing)
-  console.warn(`[PathResolver] No project directory provided for relative path: ${trimmedPath}`);
+  console.warn(
+    `[PathResolver] No project directory provided for relative path: ${trimmedPath}`,
+  );
   return `file://${trimmedPath.replace(/\\/g, '/')}`;
 }
-

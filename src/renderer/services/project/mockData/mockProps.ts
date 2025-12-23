@@ -151,4 +151,3 @@ export function getPropBySlug(slug: string): PropData | undefined {
 export function getPropById(id: string): PropData | undefined {
   return MOCK_PROPS.find((prop) => prop.id === id);
 }
-
