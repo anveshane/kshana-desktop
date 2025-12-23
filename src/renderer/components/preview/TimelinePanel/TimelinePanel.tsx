@@ -1429,12 +1429,14 @@ export default function TimelinePanel({
 
   // Calculate timeline width based on total duration (ensure minimum width)
   const minDuration = Math.max(totalDuration, 10); // At least 10 seconds
-  const timelineWidth = secondsToPixels(minDuration, zoomLevel);
+  // Round up to next multiple of 5 for better visibility (e.g., 38s -> 40s)
+  const maxMarkerTime = Math.ceil(minDuration / 5) * 5;
+  const timelineWidth = secondsToPixels(maxMarkerTime, zoomLevel);
   const playheadPosition = secondsToPixels(currentPosition, zoomLevel);
 
   // Generate time markers for ruler
   const timeMarkers: number[] = [];
-  for (let i = 0; i <= Math.ceil(minDuration); i += 5) {
+  for (let i = 0; i <= maxMarkerTime; i += 5) {
     timeMarkers.push(i);
   }
 
