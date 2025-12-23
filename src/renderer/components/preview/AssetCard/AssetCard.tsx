@@ -1,11 +1,13 @@
 /* eslint-disable react/require-default-props */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { User, MapPin, Package, Image as ImageIcon, FileText } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { generateSlug } from '../../../utils/slug';
+import { extractKeyValuePairs } from '../../../utils/markdownPreview';
 import MarkdownPreview from '../MarkdownPreview';
 import styles from './AssetCard.module.scss';
 
@@ -83,6 +85,14 @@ export default function AssetCard({
 
   const hasImage = fullImagePath && !imageError;
 
+  // Extract key-value pairs from markdown description for display
+  const keyValuePairs = useMemo(() => {
+    if (!description) return [];
+    const pairs = extractKeyValuePairs(description, 3); // Show max 3 pairs
+    // Filter out pairs with empty values
+    return pairs.filter(pair => pair.key && pair.value);
+  }, [description]);
+
   // Determine markdown file path based on asset type
   const getMarkdownPath = useCallback((): string => {
     const basePath = effectiveProjectDir || '/mock';
@@ -156,7 +166,31 @@ export default function AssetCard({
 
         <div className={styles.content}>
         <h4 className={styles.name}>{name}</h4>
-        {description && <p className={styles.description}>{description}</p>}
+        {description && (
+          <div className={styles.description}>
+            {keyValuePairs.length > 0 ? (
+              keyValuePairs.map((pair, index) => (
+                <div key={index} className={styles.keyValuePair}>
+                  <span className={styles.keyLabel}>{pair.key}:</span>
+                  <span className={styles.valueText}>{pair.value}</span>
+                </div>
+              ))
+            ) : (
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <span className={styles.markdownText}>{children}</span>,
+                  strong: ({ children }) => <span className={styles.boldText}>{children}</span>,
+                  em: ({ children }) => <span className={styles.italicText}>{children}</span>,
+                  li: ({ children }) => <div className={styles.listItem}>{children}</div>,
+                  ul: ({ children }) => <div className={styles.listContainer}>{children}</div>,
+                }}
+                disallowedElements={['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ol', 'blockquote', 'code', 'pre', 'hr']}
+              >
+                {description}
+              </ReactMarkdown>
+            )}
+          </div>
+        )}
 
         {metadata && Object.keys(metadata).length > 0 && (
           <div className={styles.metadata}>

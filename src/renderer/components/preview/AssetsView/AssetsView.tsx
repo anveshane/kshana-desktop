@@ -162,9 +162,6 @@ export default function AssetsView() {
                   description={loc.description}
                   imagePath={loc.imagePath}
                   projectDirectory={effectiveProjectDir}
-                  metadata={{
-                    Atmosphere: loc.atmosphere,
-                  }}
                 />
               ))
             ) : (
