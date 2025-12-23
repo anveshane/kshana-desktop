@@ -83,6 +83,7 @@ export type {
   ClipTrim,
   MarkerStatus,
   TrackType,
+  SceneVersions,
 } from './timeline';
 
 export {

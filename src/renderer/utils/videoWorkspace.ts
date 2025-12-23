@@ -214,18 +214,20 @@ export async function listVideoVersions(
   const videoDir = `${projectDirectory}/.kshana/agent/scenes/${sceneFolder}/video`;
 
   try {
-    // List directory contents (if API exists)
-    // For now, we'll check versions sequentially up to a reasonable limit
+    // Check versions sequentially - readFile returns null for missing files, doesn't throw
     const versions: number[] = [];
     for (let v = 1; v <= 100; v += 1) {
-      try {
-        const videoPath = `${videoDir}/v${v}.mp4`;
-        await window.electron.project.readFile(videoPath); // Check if exists
-        versions.push(v);
-      } catch {
-        // Version doesn't exist, stop checking
+      const videoPath = `${videoDir}/v${v}.mp4`;
+      const fileContent = await window.electron.project.readFile(videoPath);
+      
+      // readFile returns null if file doesn't exist
+      if (fileContent === null) {
+        // No more versions found, stop checking
         break;
       }
+      
+      // File exists, add version
+      versions.push(v);
     }
     return versions;
   } catch {

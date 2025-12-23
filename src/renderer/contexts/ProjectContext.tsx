@@ -27,6 +27,7 @@ import type {
   SceneRef,
   AssetInfo,
 } from '../types/kshana';
+import type { SceneVersions } from '../types/kshana/timeline';
 import { DEFAULT_TIMELINE_STATE } from '../types/kshana';
 import { projectService } from '../services/project';
 import { useWorkspace } from './WorkspaceContext';
@@ -106,7 +107,7 @@ interface ProjectActions {
   updateZoom: (level: number) => void;
 
   /** Set active version for a scene */
-  setActiveVersion: (sceneFolder: string, version: number) => void;
+  setActiveVersion: (sceneFolder: string, assetType: 'image' | 'video', version: number) => void;
 
   /** Update timeline markers */
   updateMarkers: (markers: KshanaTimelineState['markers']) => void;
@@ -413,19 +414,38 @@ export function ProjectProvider({
     }));
   }, []);
 
-  // Set active version with auto-save
+  // Set active version with auto-save (supports both image and video)
   const setActiveVersion = useCallback(
-    (sceneFolder: string, version: number) => {
-      setState((prev) => ({
-        ...prev,
-        timelineState: {
-          ...prev.timelineState,
-          active_versions: {
-            ...prev.timelineState.active_versions,
-            [sceneFolder]: version,
+    (sceneFolder: string, assetType: 'image' | 'video', version: number) => {
+      setState((prev) => {
+        const current = prev.timelineState.active_versions[sceneFolder];
+        let updated: SceneVersions;
+
+        // Handle migration from old format (number) to new format (SceneVersions)
+        if (typeof current === 'number') {
+          // Old format: migrate to new format
+          updated = assetType === 'video' 
+            ? { video: version, image: current } // Preserve old video version as image if needed
+            : { image: version, video: current }; // Preserve old video version
+        } else if (current && typeof current === 'object') {
+          // New format: update specific asset type
+          updated = { ...current, [assetType]: version };
+        } else {
+          // No existing version: create new
+          updated = { [assetType]: version };
+        }
+
+        return {
+          ...prev,
+          timelineState: {
+            ...prev.timelineState,
+            active_versions: {
+              ...prev.timelineState.active_versions,
+              [sceneFolder]: updated,
+            },
           },
-        },
-      }));
+        };
+      });
     },
     [],
   );
@@ -612,7 +632,7 @@ export function useProjectTimeline(): {
   timelineState: KshanaTimelineState;
   updatePlayhead: (seconds: number) => void;
   updateZoom: (level: number) => void;
-  setActiveVersion: (sceneFolder: string, version: number) => void;
+  setActiveVersion: (sceneFolder: string, assetType: 'image' | 'video', version: number) => void;
 } {
   const { timelineState, updatePlayhead, updateZoom, setActiveVersion } =
     useProject();

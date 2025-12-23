@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Settings } from 'lucide-react';
 import type { AppSettings } from '../../../../shared/settingsTypes';
 import type { BackendEnvOverrides } from '../../../../shared/backendTypes';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import { useProject } from '../../../contexts/ProjectContext';
 import { useBackendHealth } from '../../../hooks/useBackendHealth';
+import type { SceneVersions } from '../../../types/kshana/timeline';
 import PreviewPlaceholder from '../PreviewPlaceholder/PreviewPlaceholder';
 import MediaPreview from '../MediaPreview/MediaPreview';
 import StoryboardView from '../StoryboardView/StoryboardView';
@@ -43,6 +45,54 @@ export default function PreviewPanel() {
   );
 
   const { selectedFile, connectionState, projectDirectory } = useWorkspace();
+  const { timelineState, scenes: projectScenes } = useProject();
+
+  // Initialize activeVersions from timelineState with migration support
+  const [activeVersions, setActiveVersions] = useState<Record<number, SceneVersions>>(
+    () => {
+      const versions: Record<number, SceneVersions> = {};
+      if (timelineState?.active_versions) {
+        Object.entries(timelineState.active_versions).forEach(([folder, versionData]) => {
+          // Extract scene number from folder name (e.g., "scene-001" -> 1)
+          const match = folder.match(/scene-(\d+)/);
+          if (match) {
+            const sceneNumber = parseInt(match[1], 10);
+            
+            // Handle migration from old format (number) to new format (SceneVersions)
+            if (typeof versionData === 'number') {
+              // Old format: treat as video version
+              versions[sceneNumber] = { video: versionData };
+            } else if (versionData && typeof versionData === 'object') {
+              // New format: use as-is
+              versions[sceneNumber] = versionData;
+            }
+          }
+        });
+      }
+      return versions;
+    },
+  );
+
+  // Update activeVersions when timelineState changes (with migration)
+  useEffect(() => {
+    if (timelineState?.active_versions) {
+      const versions: Record<number, SceneVersions> = {};
+      Object.entries(timelineState.active_versions).forEach(([folder, versionData]) => {
+        const match = folder.match(/scene-(\d+)/);
+        if (match) {
+          const sceneNumber = parseInt(match[1], 10);
+          
+          // Handle migration from old format (number) to new format (SceneVersions)
+          if (typeof versionData === 'number') {
+            versions[sceneNumber] = { video: versionData };
+          } else if (versionData && typeof versionData === 'object') {
+            versions[sceneNumber] = versionData;
+          }
+        }
+      });
+      setActiveVersions(versions);
+    }
+  }, [timelineState?.active_versions]);
 
   // Playback loop - advance playbackTime when playing
   // VideoLibraryView and TimelinePanel will handle stopping at the end
@@ -219,6 +269,8 @@ export default function PreviewPanel() {
               isDragging={isDragging}
               onPlaybackTimeChange={setPlaybackTime}
               onPlaybackStateChange={setIsPlaying}
+              activeVersions={activeVersions}
+              projectScenes={projectScenes}
             />
           )}
           {activeTab === 'preview' && <PlansView />}
@@ -242,6 +294,8 @@ export default function PreviewPanel() {
               onSeek={setPlaybackTime}
               onPlayPause={setIsPlaying}
               onDragStateChange={setIsDragging}
+              activeVersions={activeVersions}
+              onActiveVersionsChange={setActiveVersions}
             />
           </div>
         )}

@@ -73,6 +73,16 @@ export interface ImportedClip {
 }
 
 /**
+ * Active versions for a scene (image and/or video)
+ */
+export interface SceneVersions {
+  /** Active image version number */
+  image?: number;
+  /** Active video version number */
+  video?: number;
+}
+
+/**
  * Timeline state persistence
  */
 export interface TimelineState {
@@ -85,8 +95,8 @@ export interface TimelineState {
   /** Current zoom level (1.0 = 100%) */
   zoom_level: number;
 
-  /** Active video version for each scene (scene folder -> version number) */
-  active_versions: Record<string, number>;
+  /** Active versions for each scene (scene folder -> { image?: number, video?: number }) */
+  active_versions: Record<string, SceneVersions | number>;
 
   /** Timeline markers for prompt-based generation */
   markers: TimelineMarker[];
@@ -144,28 +154,61 @@ export function createImportedClip(
 
 /**
  * Updates the active version for a scene
+ * Supports both old format (number) and new format (SceneVersions)
  */
 export function setActiveVersion(
   state: TimelineState,
   sceneFolder: string,
+  assetType: 'image' | 'video',
   version: number,
 ): TimelineState {
+  const current = state.active_versions[sceneFolder];
+  let updated: SceneVersions;
+
+  // Handle migration from old format (number) to new format (SceneVersions)
+  if (typeof current === 'number') {
+    // Old format: migrate to new format
+    updated = assetType === 'video' 
+      ? { video: version, image: current } // Preserve old video version as image if needed
+      : { image: version, video: current }; // Preserve old video version
+  } else if (current && typeof current === 'object') {
+    // New format: update specific asset type
+    updated = { ...current, [assetType]: version };
+  } else {
+    // No existing version: create new
+    updated = { [assetType]: version };
+  }
+
   return {
     ...state,
     active_versions: {
       ...state.active_versions,
-      [sceneFolder]: version,
+      [sceneFolder]: updated,
     },
   };
 }
 
 /**
  * Gets the active version for a scene (defaults to 1)
+ * Supports both old format (number) and new format (SceneVersions)
  */
 export function getActiveVersion(
   state: TimelineState,
   sceneFolder: string,
+  assetType: 'image' | 'video' = 'video',
 ): number {
-  return state.active_versions[sceneFolder] ?? 1;
+  const versions = state.active_versions[sceneFolder];
+  
+  // Handle old format (number) - treat as video version
+  if (typeof versions === 'number') {
+    return assetType === 'video' ? versions : 1;
+  }
+  
+  // Handle new format (SceneVersions)
+  if (versions && typeof versions === 'object') {
+    return versions[assetType] ?? 1;
+  }
+  
+  return 1;
 }
 
