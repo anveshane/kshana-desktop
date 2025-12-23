@@ -25,6 +25,7 @@ import type {
   CharacterData,
   SettingData,
   SceneRef,
+  AssetInfo,
 } from '../types/kshana';
 import { DEFAULT_TIMELINE_STATE } from '../types/kshana';
 import { projectService } from '../services/project';
@@ -112,6 +113,9 @@ interface ProjectActions {
 
   /** Update imported clips */
   updateImportedClips: (importedClips: KshanaTimelineState['imported_clips']) => void;
+
+  /** Add an asset to the asset manifest */
+  addAsset: (assetInfo: AssetInfo) => Promise<boolean>;
 }
 
 /**
@@ -448,6 +452,34 @@ export function ProjectProvider({
     [],
   );
 
+  // Add asset to manifest
+  const addAsset = useCallback(async (assetInfo: AssetInfo): Promise<boolean> => {
+    const result = await projectService.addAssetToManifest(assetInfo);
+    if (result.success) {
+      setState((prev) => {
+        if (!prev.assetManifest) return prev;
+        // Check if asset already exists
+        const existingIndex = prev.assetManifest.assets.findIndex(
+          (asset) => asset.id === assetInfo.id,
+        );
+        const newAssets = existingIndex >= 0
+          ? prev.assetManifest.assets.map((asset, index) =>
+              index === existingIndex ? assetInfo : asset,
+            )
+          : [...prev.assetManifest.assets, assetInfo];
+        return {
+          ...prev,
+          assetManifest: {
+            ...prev.assetManifest,
+            assets: newAssets,
+          },
+        };
+      });
+      return true;
+    }
+    return false;
+  }, []);
+
   // Auto-save timeline state with debouncing
   useEffect(() => {
     if (!state.isLoaded || state.useMockData) return;
@@ -511,6 +543,7 @@ export function ProjectProvider({
       setActiveVersion,
       updateMarkers,
       updateImportedClips,
+      addAsset,
     }),
     [
       state,
@@ -528,6 +561,7 @@ export function ProjectProvider({
       setActiveVersion,
       updateMarkers,
       updateImportedClips,
+      addAsset,
     ],
   );
 

@@ -33,6 +33,7 @@ import type {
   KshanaTimelineMarker,
   ImportedClip,
 } from '../../../types/kshana';
+import { PROJECT_PATHS, createAssetInfo } from '../../../types/kshana';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
 import SceneActionPopover from './SceneActionPopover';
@@ -328,6 +329,7 @@ export default function TimelinePanel({
     setActiveVersion,
     updateMarkers,
     updateImportedClips,
+    addAsset,
   } = useProject();
   
   // Use unified timeline data hook
@@ -1180,7 +1182,7 @@ export default function TimelinePanel({
     }
   }, []);
 
-  // Handle video import - copy to videos folder
+  // Handle video import - copy to videos/imported folder
   const handleImportVideo = useCallback(async () => {
     if (!projectDirectory) return;
 
@@ -1188,18 +1190,26 @@ export default function TimelinePanel({
       const videoPath = await window.electron.project.selectVideoFile();
       if (!videoPath) return;
 
-      // Create videos folder if it doesn't exist
-      const videosFolder = `${projectDirectory}/videos`;
-      await window.electron.project.createFolder(projectDirectory, 'videos');
+      // Create videos/imported folder structure if it doesn't exist
+      // Similar to ProjectService.createProjectStructure - create nested folders
+      const parts = PROJECT_PATHS.VIDEOS_IMPORTED.split('/');
+      let basePath = projectDirectory;
+      for (const part of parts) {
+        if (part) {
+          await window.electron.project.createFolder(basePath, part);
+          basePath = `${basePath}/${part}`;
+        }
+      }
+      const videosFolder = basePath;
 
-      // Copy video to videos folder
+      // Copy video to videos/imported folder
       const videoFileName =
         videoPath.split('/').pop() || `video-${Date.now()}.mp4`;
       const destPath = await window.electron.project.copy(
         videoPath,
         videosFolder,
       );
-      const relativePath = `videos/${videoFileName}`;
+      const relativePath = `${PROJECT_PATHS.VIDEOS_IMPORTED}/${videoFileName}`;
 
       // Get video duration
       const video = document.createElement('video');
@@ -1208,9 +1218,34 @@ export default function TimelinePanel({
 
       // eslint-disable-next-line compat/compat
       await new Promise<void>((resolve, reject) => {
-        video.onloadedmetadata = () => {
+        video.onloadedmetadata = async () => {
           const { duration } = video;
 
+          // Generate unique asset ID
+          const assetId = `imported-video-${Date.now()}-${videoFileName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+
+          // Create asset info for the manifest
+          const assetInfo = createAssetInfo(
+            assetId,
+            'final_video',
+            relativePath,
+            1,
+            {
+              metadata: {
+                imported: true,
+                duration,
+                title: videoFileName,
+              },
+            },
+          );
+
+          // Save to asset manifest
+          const saved = await addAsset(assetInfo);
+          if (!saved) {
+            console.error('Failed to save imported video to asset manifest');
+          }
+
+          // Update local state and timeline state
           setImportedVideos((prev) => [
             ...prev,
             {
@@ -1220,8 +1255,7 @@ export default function TimelinePanel({
             },
           ]);
 
-          // TODO: Save imported video to asset manifest via ProjectContext
-          console.log('Imported video:', relativePath, duration);
+          console.log('Imported video:', relativePath, duration, 'saved to manifest:', saved);
 
           resolve();
         };
@@ -1230,7 +1264,7 @@ export default function TimelinePanel({
     } catch {
       // Failed to import video
     }
-  }, [projectDirectory, totalDuration]);
+  }, [projectDirectory, totalDuration, addAsset]);
 
   // Drag handlers removed - not used in unified timeline
 

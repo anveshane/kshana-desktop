@@ -47,14 +47,10 @@ export async function copyVideoToScene(
   const videoDir = `${projectDirectory}/.kshana/agent/scenes/${sceneFolder}/video`;
 
   // Ensure video directory exists
-  const dirParts = videoDir.split('/');
-  let currentPath = projectDirectory;
-  for (const part of dirParts.slice(1)) {
-    if (part) {
-      await window.electron.project.createFolder(currentPath, part);
-      currentPath = `${currentPath}/${part}`;
-    }
-  }
+  // Ensure video directory exists
+  // We use the relative path from project directory to avoid absolute path splitting issues
+  const relativeVideoDir = `.kshana/agent/scenes/${sceneFolder}/video`;
+  await window.electron.project.createFolder(projectDirectory, relativeVideoDir);
 
   // Construct target filename: vN.mp4
   const targetFileName = `v${version}.mp4`;
@@ -65,7 +61,7 @@ export async function copyVideoToScene(
   try {
     // Remove file:// protocol if present
     const cleanPath = videoPath.replace(/^file:\/\//, '');
-    
+
     // Read video file as base64
     const base64DataUri = await window.electron.project.readFileBase64(cleanPath);
     if (!base64DataUri) {
@@ -134,14 +130,10 @@ export async function setActiveVideoVersion(
   const fileName = `v${version}.mp4`;
 
   // Ensure video directory exists
-  const dirParts = videoDir.split('/');
-  let currentPath = projectDirectory;
-  for (const part of dirParts.slice(1)) {
-    if (part) {
-      await window.electron.project.createFolder(currentPath, part);
-      currentPath = `${currentPath}/${part}`;
-    }
-  }
+  // Ensure video directory exists
+  // We use the relative path from project directory to avoid absolute path splitting issues
+  const relativeVideoDir = `.kshana/agent/scenes/${sceneFolder}/video`;
+  await window.electron.project.createFolder(projectDirectory, relativeVideoDir);
 
   // Write current.txt with version filename
   await window.electron.project.writeFile(currentTxtPath, fileName);
