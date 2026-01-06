@@ -57,6 +57,28 @@
   margin-bottom: $spacing-xs;
 }
 
+.assetTypeSection {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-xs;
+}
+
+.assetTypeLabel {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  color: $color-text-secondary;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  
+  svg {
+    opacity: 0.7;
+  }
+}
+
 .versionBadges {
   display: flex;
   flex-direction: column;

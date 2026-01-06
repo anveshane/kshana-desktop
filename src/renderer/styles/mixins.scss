@@ -102,6 +102,20 @@
   }
 }
 
+// Secondary button
+@mixin button-secondary {
+  @include button-base;
+  background-color: transparent;
+  color: $color-text-secondary;
+  border: 1px solid $color-panel-border;
+  
+  &:hover:not(:disabled) {
+    background-color: rgba($color-text-primary, 0.1);
+    color: $color-text-primary;
+    border-color: $color-text-secondary;
+  }
+}
+
 // Ghost button
 @mixin button-ghost {
   @include button-base;

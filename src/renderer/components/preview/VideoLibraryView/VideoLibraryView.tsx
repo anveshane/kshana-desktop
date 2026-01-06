@@ -7,58 +7,69 @@ import React, {
 } from 'react';
 import { Film, Play, Calendar, Pause } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
-import type {
-  ProjectState,
-  Artifact,
-  StoryboardScene,
-} from '../../../types/projectState';
+import { useProject } from '../../../contexts/ProjectContext';
+import { useTimelineData } from '../../../hooks/useTimelineData';
+import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
+import type { Artifact } from '../../../types/projectState';
+import type { SceneRef } from '../../../types/kshana/entities';
+import type { SceneVersions } from '../../../types/kshana/timeline';
 import styles from './VideoLibraryView.module.scss';
 
-// Mock scenes for when no project state exists (same as TimelinePanel)
-const MOCK_SCENES: StoryboardScene[] = [
-  {
-    scene_number: 1,
-    description:
-      'A young boy is seen lying in the ground, looking up at the sky. The lighting suggests late afternoon golden hour.',
-    duration: 5,
-    shot_type: 'Mid Shot',
-    lighting: 'Golden Hour',
-  },
-  {
-    scene_number: 2,
-    description:
-      'The boy stands up abruptly and kicks the soccer ball with significant force towards the horizon. Dust particles float.',
-    duration: 3,
-    shot_type: 'Low Angle',
-    lighting: 'Action',
-  },
-  {
-    scene_number: 3,
-    description:
-      "The Exchange - A mysterious figure's hand, covered in a ragged glove, hands over a metallic data drive in the rain.",
-    duration: 8,
-    shot_type: 'Close Up',
-    lighting: 'Night',
-  },
-  {
-    scene_number: 4,
-    description:
-      'Escape sequence - The protagonist flees on a high-speed bike through neon-lit streets. Blurring lights create streaks.',
-    duration: 12,
-    shot_type: 'Tracking',
-    lighting: 'Speed',
-  },
-];
+// Video Card Component
+interface VideoCardProps {
+  artifact: Artifact;
+  formatDate: (dateString: string) => string;
+  projectDirectory: string | null;
+  useMockData: boolean;
+}
 
-interface TimelineItem {
-  id: string;
-  type: 'video' | 'scene';
-  startTime: number;
-  duration: number;
-  artifact?: Artifact;
-  scene?: StoryboardScene;
-  path?: string;
-  label: string;
+function VideoCard({
+  artifact,
+  formatDate,
+  projectDirectory,
+  useMockData,
+}: VideoCardProps) {
+  const [videoPath, setVideoPath] = useState<string>('');
+
+  useEffect(() => {
+    resolveAssetPathForDisplay(
+      artifact.file_path,
+      projectDirectory,
+      useMockData,
+    ).then((resolved) => {
+      setVideoPath(resolved);
+    });
+  }, [artifact.file_path, projectDirectory, useMockData]);
+
+  return (
+    <div className={styles.videoCard}>
+      <div className={styles.videoThumbnail}>
+        {videoPath && (
+          <video
+            src={videoPath}
+            className={styles.video}
+            preload="metadata"
+            muted
+          />
+        )}
+        {artifact.scene_number && (
+          <div className={styles.sceneBadge}>Scene {artifact.scene_number}</div>
+        )}
+      </div>
+      <div className={styles.videoInfo}>
+        <div className={styles.videoTitle}>
+          {(artifact.metadata?.title as string) ||
+            `Video ${artifact.artifact_id.slice(-8)}`}
+        </div>
+        <div className={styles.videoMeta}>
+          <div className={styles.metaItem}>
+            <Calendar size={12} />
+            <span>{formatDate(artifact.created_at)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 interface VideoLibraryViewProps {
@@ -67,6 +78,8 @@ interface VideoLibraryViewProps {
   isDragging?: boolean;
   onPlaybackTimeChange: (time: number) => void;
   onPlaybackStateChange: (playing: boolean) => void;
+  activeVersions?: Record<number, SceneVersions>; // sceneNumber -> { image?: number, video?: number }
+  projectScenes?: SceneRef[];
 }
 
 export default function VideoLibraryView({
@@ -75,174 +88,29 @@ export default function VideoLibraryView({
   isDragging = false,
   onPlaybackTimeChange,
   onPlaybackStateChange,
+  activeVersions = {},
+  projectScenes = [],
 }: VideoLibraryViewProps) {
   const { projectDirectory } = useWorkspace();
-  const [projectState, setProjectState] = useState<ProjectState | null>(null);
-  const [loading, setLoading] = useState(false);
+  const { isLoading, useMockData, assetManifest } = useProject();
+
+  // Create scene folder map
+  const sceneFoldersByNumber = useMemo(() => {
+    const map: Record<number, string> = {};
+    projectScenes.forEach((scene) => {
+      map[scene.scene_number] = scene.folder;
+    });
+    return map;
+  }, [projectScenes]);
+
+  // Use unified timeline data hook
+  const { scenes, timelineItems, videoArtifacts, totalDuration } =
+    useTimelineData();
+
   const [currentItemIndex, setCurrentItemIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const currentVideoPathRef = useRef<string | null>(null);
   const isSeekingRef = useRef(false);
-
-  // Load project state
-  const loadProjectState = useCallback(async () => {
-    if (!projectDirectory) return;
-
-    setLoading(true);
-    try {
-      const stateFilePath = `${projectDirectory}/.kshana/project.json`;
-      const content = await window.electron.project.readFile(stateFilePath);
-      if (content) {
-        const state = JSON.parse(content) as ProjectState;
-        setProjectState(state);
-      } else {
-        setProjectState(null);
-      }
-    } catch {
-      setProjectState(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectDirectory]);
-
-  useEffect(() => {
-    loadProjectState();
-  }, [loadProjectState]);
-
-  // Subscribe to file changes to reload project state when videos are imported
-  useEffect(() => {
-    if (!projectDirectory) return undefined;
-
-    const unsubscribe = window.electron.project.onFileChange((event) => {
-      // Reload project state when project.json changes (e.g., after video import)
-      if (event.path.endsWith('project.json') || event.path.includes('/videos/')) {
-        loadProjectState();
-      }
-    });
-
-    return unsubscribe;
-  }, [projectDirectory, loadProjectState]);
-
-  // Get video artifacts
-  const videoArtifacts: Artifact[] =
-    projectState?.artifacts.filter(
-      (artifact) => artifact.artifact_type === 'video',
-    ) || [];
-
-  // Get scenes and artifacts for timeline
-  // Use mock scenes if no project state exists (same as TimelinePanel)
-  const scenes: StoryboardScene[] =
-    projectState?.storyboard_outline?.scenes || MOCK_SCENES;
-
-  const { artifactsByScene, importedVideoArtifacts } = useMemo(() => {
-    const artifactsBySceneMap: Record<number, Artifact> = {};
-    const importedVideoArtifactsList: Artifact[] = [];
-
-    if (projectState?.artifacts) {
-      projectState.artifacts.forEach((artifact) => {
-        if (
-          artifact.scene_number &&
-          (artifact.artifact_type === 'image' ||
-            artifact.artifact_type === 'video')
-        ) {
-          if (
-            !artifactsBySceneMap[artifact.scene_number] ||
-            artifact.artifact_type === 'video'
-          ) {
-            artifactsBySceneMap[artifact.scene_number] = artifact;
-          }
-        }
-        if (artifact.artifact_type === 'video' && artifact.metadata?.imported) {
-          importedVideoArtifactsList.push(artifact);
-        }
-      });
-    }
-
-    return {
-      artifactsByScene: artifactsBySceneMap,
-      importedVideoArtifacts: importedVideoArtifactsList,
-    };
-  }, [projectState?.artifacts]);
-
-  // Calculate scene blocks (used for timeline items)
-  const sceneBlocks = useMemo(() => {
-    let currentTime = 0;
-    return scenes.map((scene) => {
-      const startTime = currentTime;
-      const duration = scene.duration || 5;
-      currentTime += duration;
-      return {
-        scene,
-        startTime,
-        duration,
-        artifact: artifactsByScene[scene.scene_number],
-      };
-    });
-  }, [scenes, artifactsByScene]);
-
-  // Create unified timeline items - combine all videos and scenes (same logic as TimelinePanel)
-  // ALL scenes from storyboard are included, regardless of artifacts
-  const timelineItems: TimelineItem[] = useMemo(() => {
-    const items: TimelineItem[] = [];
-
-    // Add ALL scene blocks from storyboard - every scene appears on timeline
-    sceneBlocks.forEach((block) => {
-      const sceneLabel =
-        block.scene.name || `Scene ${block.scene.scene_number}`;
-      if (block.artifact && block.artifact.artifact_type === 'video') {
-        // Scene has video - add as video item
-        items.push({
-          id: `scene-video-${block.scene.scene_number}`,
-          type: 'video',
-          startTime: block.startTime,
-          duration: block.duration,
-          artifact: block.artifact,
-          scene: block.scene,
-          path: block.artifact.file_path,
-          label: sceneLabel,
-        });
-      } else {
-        // Scene without video - add as scene item (will show placeholder or image)
-        items.push({
-          id: `scene-${block.scene.scene_number}`,
-          type: 'scene',
-          startTime: block.startTime,
-          duration: block.duration,
-          scene: block.scene,
-          artifact: block.artifact,
-          label: sceneLabel,
-        });
-      }
-    });
-
-    // Calculate scene end time for positioning imported videos
-    const sceneEndTime =
-      sceneBlocks.length > 0
-        ? sceneBlocks[sceneBlocks.length - 1].startTime +
-          sceneBlocks[sceneBlocks.length - 1].duration
-        : 0;
-
-    // Add imported videos (they go after all scenes)
-    let importedVideoTime = sceneEndTime;
-    importedVideoArtifacts.forEach((artifact, index) => {
-      const duration = (artifact.metadata?.duration as number) || 5;
-      items.push({
-        id: `imported-${index}`,
-        type: 'video',
-        startTime: importedVideoTime,
-        duration,
-        artifact,
-        path: artifact.file_path,
-        label: 'Imported',
-      });
-      importedVideoTime += duration;
-    });
-
-    // Sort timeline items by startTime to ensure correct order
-    items.sort((a, b) => a.startTime - b.startTime);
-
-    return items;
-  }, [sceneBlocks, importedVideoArtifacts]);
 
   // Format date
   const formatDate = (dateString: string): string => {
@@ -267,13 +135,6 @@ export default function VideoLibraryView({
     const secs = Math.floor(seconds % 60);
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
-
-  // Calculate total duration from all timeline items
-  const totalDuration = useMemo(() => {
-    if (timelineItems.length === 0) return 0;
-    const lastItem = timelineItems[timelineItems.length - 1];
-    return lastItem.startTime + lastItem.duration;
-  }, [timelineItems]);
 
   // Get current item from timeline (can be video or scene)
   const currentItem = timelineItems[currentItemIndex] || null;
@@ -304,6 +165,61 @@ export default function VideoLibraryView({
     // If past all scenes, return last scene
     return scenes[scenes.length - 1] || null;
   }, [playbackTime, scenes, currentItem]);
+
+  // Resolve scene image path from asset manifest (respecting active versions)
+  const sceneImagePath = useMemo(() => {
+    if (!currentScene || !assetManifest?.assets) return null;
+
+    const sceneNumber = currentScene.scene_number;
+    const activeImageVersion = activeVersions[sceneNumber]?.image;
+
+    // Find image asset matching scene number and version
+    if (activeImageVersion !== undefined) {
+      const imageAsset = assetManifest.assets.find(
+        (asset) =>
+          asset.type === 'scene_image' &&
+          asset.scene_number === sceneNumber &&
+          asset.version === activeImageVersion,
+      );
+      if (imageAsset) {
+        return imageAsset.path;
+      }
+    }
+
+    // Fallback: find latest image asset for this scene
+    const imageAssets = assetManifest.assets.filter(
+      (asset) =>
+        asset.type === 'scene_image' && asset.scene_number === sceneNumber,
+    );
+    if (imageAssets.length > 0) {
+      // Sort by version descending to get latest
+      const sorted = imageAssets.sort((a, b) => b.version - a.version);
+      return sorted[0].path;
+    }
+
+    // Final fallback: use scene.image_path if available
+    return currentScene.image_path || null;
+  }, [currentScene, activeVersions, assetManifest]);
+
+  // Resolve and store the display-ready image path
+  const [resolvedSceneImagePath, setResolvedSceneImagePath] = useState<
+    string | null
+  >(null);
+
+  useEffect(() => {
+    if (!sceneImagePath || !projectDirectory) {
+      setResolvedSceneImagePath(null);
+      return;
+    }
+
+    resolveAssetPathForDisplay(sceneImagePath, projectDirectory, useMockData)
+      .then((resolved) => {
+        setResolvedSceneImagePath(resolved);
+      })
+      .catch(() => {
+        setResolvedSceneImagePath(null);
+      });
+  }, [sceneImagePath, projectDirectory, useMockData]);
 
   // Handle video play/pause
   const handlePlayPause = useCallback(() => {
@@ -425,26 +341,63 @@ export default function VideoLibraryView({
     [handleSeek],
   );
 
-  // Update video source when current video changes
-  // Don't switch videos during dragging - wait until drag ends
+  // Resolved video path state
+  const [currentVideoPath, setCurrentVideoPath] = useState<string>('');
+
+  // Construct version-specific path if active version is set
+  const versionPath = useMemo(() => {
+    if (
+      currentVideo?.sceneNumber &&
+      activeVersions[currentVideo.sceneNumber]?.video &&
+      sceneFoldersByNumber[currentVideo.sceneNumber]
+    ) {
+      const version = activeVersions[currentVideo.sceneNumber].video!;
+      const sceneFolder = sceneFoldersByNumber[currentVideo.sceneNumber];
+      return `.kshana/agent/scenes/${sceneFolder}/video/v${version}.mp4`;
+    }
+    return currentVideo?.path;
+  }, [
+    currentVideo?.sceneNumber,
+    currentVideo?.path,
+    activeVersions,
+    sceneFoldersByNumber,
+  ]);
+
+  // Resolve video path when current video or version changes
   useEffect(() => {
-    if (!currentVideo || !videoRef.current || !projectDirectory || isDragging) {
+    if (!versionPath) {
+      setCurrentVideoPath('');
       return;
     }
 
-    const videoPath = `file://${projectDirectory}/${currentVideo.path}`;
+    resolveAssetPathForDisplay(
+      versionPath,
+      projectDirectory || null,
+      useMockData,
+    ).then((resolved) => {
+      setCurrentVideoPath(resolved);
+    });
+  }, [versionPath, projectDirectory, useMockData]);
+
+  // Update video source when current video changes
+  // Don't switch videos during dragging - wait until drag ends
+  useEffect(() => {
+    if (!currentVideo || !videoRef.current || !currentVideoPath || isDragging) {
+      return;
+    }
+
     const videoElement = videoRef.current;
 
     // Only update if source actually changed to prevent flickering
-    if (currentVideoPathRef.current !== videoPath) {
+    if (currentVideoPathRef.current !== currentVideoPath) {
       const wasPlaying = !videoElement.paused;
-      currentVideoPathRef.current = videoPath;
+      currentVideoPathRef.current = currentVideoPath;
 
       // Pause current video before changing source
       videoElement.pause();
 
       // Set new source
-      videoElement.src = videoPath;
+      videoElement.src = currentVideoPath;
       videoElement.currentTime = 0;
 
       // Wait for video to be ready before playing
@@ -476,7 +429,7 @@ export default function VideoLibraryView({
         videoElement.removeEventListener('loadeddata', handleLoadedData);
       };
     }
-  }, [currentVideo, projectDirectory, isPlaying, isDragging]);
+  }, [currentVideo, currentVideoPath, isPlaying, isDragging]);
 
   // Update current item index based on playbackTime - works for both videos and scenes
   // This ensures scenes without videos are also tracked during playback
@@ -527,10 +480,7 @@ export default function VideoLibraryView({
 
   // Initialize to first item when timeline loads
   useEffect(() => {
-    if (
-      timelineItems.length > 0 &&
-      currentItemIndex >= timelineItems.length
-    ) {
+    if (timelineItems.length > 0 && currentItemIndex >= timelineItems.length) {
       setCurrentItemIndex(0);
       onPlaybackTimeChange(0);
     } else if (timelineItems.length > 0 && currentItemIndex < 0) {
@@ -600,7 +550,10 @@ export default function VideoLibraryView({
 
     const itemEndTime = currentItem.startTime + currentItem.duration;
     // If playbackTime has reached or passed the end of the current scene, move to next item
-    if (playbackTime >= itemEndTime && currentItemIndex < timelineItems.length - 1) {
+    if (
+      playbackTime >= itemEndTime &&
+      currentItemIndex < timelineItems.length - 1
+    ) {
       const nextIndex = currentItemIndex + 1;
       setCurrentItemIndex(nextIndex);
       onPlaybackTimeChange(timelineItems[nextIndex].startTime);
@@ -622,7 +575,8 @@ export default function VideoLibraryView({
     onPlaybackStateChange,
   ]);
 
-  if (!projectDirectory) {
+  // Show empty state if no project and not using mock data
+  if (!projectDirectory && !useMockData) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>
@@ -634,7 +588,7 @@ export default function VideoLibraryView({
     );
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className={styles.container}>
         <div className={styles.loading}>Loading video library...</div>
@@ -665,39 +619,15 @@ export default function VideoLibraryView({
             </div>
           ) : (
             <div className={styles.videoGrid}>
-              {videoArtifacts.map((artifact) => {
-                const videoPath = `file://${projectDirectory}/${artifact.file_path}`;
-
-                return (
-                  <div key={artifact.artifact_id} className={styles.videoCard}>
-                    <div className={styles.videoThumbnail}>
-                      <video
-                        src={videoPath}
-                        className={styles.video}
-                        preload="metadata"
-                        muted
-                      />
-                      {artifact.scene_number && (
-                        <div className={styles.sceneBadge}>
-                          Scene {artifact.scene_number}
-                        </div>
-                      )}
-                    </div>
-                    <div className={styles.videoInfo}>
-                      <div className={styles.videoTitle}>
-                        {(artifact.metadata?.title as string) ||
-                          `Video ${artifact.artifact_id.slice(-8)}`}
-                      </div>
-                      <div className={styles.videoMeta}>
-                        <div className={styles.metaItem}>
-                          <Calendar size={12} />
-                          <span>{formatDate(artifact.created_at)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {videoArtifacts.map((artifact) => (
+                <VideoCard
+                  key={artifact.artifact_id}
+                  artifact={artifact}
+                  formatDate={formatDate}
+                  projectDirectory={projectDirectory || null}
+                  useMockData={useMockData}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -745,10 +675,23 @@ export default function VideoLibraryView({
           ) : timelineItems.length > 0 ? (
             /* Show controls even when no video - for scene playback */
             <div className={styles.videoPlayer}>
-              <div className={styles.scenePlaceholder}>
+              <div
+                className={`${styles.scenePlaceholder} ${
+                  resolvedSceneImagePath ? styles.hasBackgroundImage : ''
+                }`}
+                style={
+                  resolvedSceneImagePath
+                    ? {
+                        backgroundImage: `url(${resolvedSceneImagePath})`,
+                      }
+                    : undefined
+                }
+              >
                 {currentItem && currentItem.type === 'scene' && (
                   <div className={styles.scenePlaceholderContent}>
-                    <Film size={64} className={styles.scenePlaceholderIcon} />
+                    {!resolvedSceneImagePath && (
+                      <Film size={64} className={styles.scenePlaceholderIcon} />
+                    )}
                     <h3>{currentItem.label}</h3>
                     {currentItem.scene?.description && (
                       <p className={styles.scenePlaceholderDescription}>
@@ -788,7 +731,9 @@ export default function VideoLibraryView({
                 <h3 className={styles.sceneTitle}>
                   Scene {currentScene.scene_number}
                   {currentScene.name && (
-                    <span className={styles.sceneName}>: {currentScene.name}</span>
+                    <span className={styles.sceneName}>
+                      : {currentScene.name}
+                    </span>
                   )}
                 </h3>
               </div>
@@ -823,11 +768,13 @@ export default function VideoLibraryView({
                     <strong>Mood:</strong> {currentScene.mood}
                   </div>
                 )}
-                {currentScene.characters && currentScene.characters.length > 0 && (
-                  <div className={styles.sceneMetaItem}>
-                    <strong>Characters:</strong> {currentScene.characters.join(', ')}
-                  </div>
-                )}
+                {currentScene.characters &&
+                  currentScene.characters.length > 0 && (
+                    <div className={styles.sceneMetaItem}>
+                      <strong>Characters:</strong>{' '}
+                      {currentScene.characters.join(', ')}
+                    </div>
+                  )}
               </div>
             </div>
           ) : timelineItems.length === 0 ? (

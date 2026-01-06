@@ -1,18 +1,22 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { ChatMessage } from '../../../types/chat';
 import CodeBlock from '../CodeBlock';
 import MessageActions from '../MessageActions';
 import ToolCallCard from '../ToolCallCard';
 import TodoDisplay from '../TodoDisplay';
+import QuestionPrompt from '../QuestionPrompt';
 import type { TodoItem } from '../TodoDisplay';
 import styles from './MessageBubble.module.scss';
+import { useWorkspace } from '../../../contexts/WorkspaceContext';
 
 interface MessageBubbleProps {
   message: ChatMessage;
   isStreaming?: boolean;
   onRegenerate?: () => void;
   onDelete?: () => void;
+  onResponse?: (response: string) => void;
 }
 
 const roleLabels: Record<ChatMessage['role'], string> = {
@@ -69,6 +73,7 @@ export default function MessageBubble({
   isStreaming = false,
   onRegenerate,
   onDelete,
+  onResponse,
 }: MessageBubbleProps) {
   const [remarkGfm, setRemarkGfm] = useState<any>(null);
 
@@ -90,6 +95,8 @@ export default function MessageBubble({
   const isSystem = message.role === 'system';
   const isToolCall = message.type === 'tool_call';
   const isTodoUpdate = message.type === 'todo_update';
+  const isQuestion = message.type === 'agent_question';
+  const isGreeting = message.type === 'greeting';
 
   // Render tool call card
   if (isToolCall && message.meta) {
@@ -101,18 +108,25 @@ export default function MessageBubble({
     }
     const status = (message.meta.status as string) || 'executing';
     const args = (message.meta.args as Record<string, unknown>) || {};
-    const result = message.meta.result;
+    const { result } = message.meta;
     const duration = message.meta.duration as number | undefined;
+    const streamingContent = message.meta.streamingContent as
+      | string
+      | undefined;
 
     return (
       <div className={`${styles.container} ${styles.system}`}>
         <ToolCallCard
           toolName={toolName}
+          agentName={message.author} // Pass agent name if available
           args={args}
-          status={status as 'executing' | 'completed' | 'error' | 'needs_confirmation'}
+          status={
+            status as 'executing' | 'completed' | 'error' | 'needs_confirmation'
+          }
           result={result}
           duration={duration}
           toolCallId={message.meta.toolCallId as string | undefined}
+          streamingContent={streamingContent}
         />
       </div>
     );
@@ -128,8 +142,53 @@ export default function MessageBubble({
     );
   }
 
+  // Render question prompt
+  if (isQuestion) {
+    const options = (message.meta?.options as string[]) || [];
+    const questionType =
+      (message.meta?.questionType as 'text' | 'confirm' | 'select') || 'text';
+    const timeout = message.meta?.timeout as number | undefined;
+    const defaultOption = message.meta?.defaultOption as string | undefined;
+    const selectedResponse = message.meta?.selectedResponse as
+      | string
+      | undefined;
+
+    return (
+      <div className={`${styles.container} ${styles.assistant}`}>
+        <QuestionPrompt
+          question={message.content}
+          options={options}
+          type={questionType}
+          timeoutSeconds={timeout}
+          defaultOption={defaultOption}
+          onSelect={onResponse || (() => {})}
+          selectedResponse={selectedResponse}
+        />
+      </div>
+    );
+  }
+
   // Handle dispatch_agent (plan) messages with markdown
   const isDispatchAgent = message.meta?.toolName === 'dispatch_agent';
+  const agentName = message.author;
+
+  // Check if message contains only reasoning (should be collapsible when done)
+  // Reasoning messages start with tags like <think>, <think>, etc.
+  const contentStart = message.content.trim().substring(0, 100);
+  // Check if content starts with a reasoning/thinking tag (case-insensitive check in lowercase)
+  const contentStartLower = contentStart.toLowerCase();
+  const hasReasoning = contentStartLower.includes('<think');
+  // Message is "reasoning only" if it starts with a reasoning tag
+  const isReasoningOnly =
+    hasReasoning && contentStartLower.trim().startsWith('<think');
+  const [isReasoningExpanded, setIsReasoningExpanded] = useState(false);
+
+  // Auto-collapse reasoning messages when done (not streaming)
+  useEffect(() => {
+    if (isReasoningOnly && !isStreaming) {
+      setIsReasoningExpanded(false);
+    }
+  }, [isReasoningOnly, isStreaming]);
 
   return (
     <div
@@ -137,29 +196,47 @@ export default function MessageBubble({
         isStreaming ? styles.streaming : ''
       } ${isIntermediate ? styles.intermediate : ''} ${
         isError ? styles.error : ''
-      }`}
+      } ${isGreeting ? styles.greeting : ''}`}
     >
-      <div className={styles.header}>
-        <span className={styles.role}>{roleLabels[message.role]}</span>
-        {message.type && message.type !== 'message' && (
-          <span className={styles.type}>{message.type}</span>
-        )}
-        <span className={styles.time}>
-          {formatter.format(new Date(message.timestamp))}
-        </span>
-        {!isSystem && (
-          <div className={styles.actions}>
-            <MessageActions
-              message={message}
-              onRegenerate={onRegenerate}
-              onDelete={onDelete}
-              showRegenerate={message.role === 'assistant' && !isIntermediate}
-            />
-          </div>
-        )}
-      </div>
+      {!isGreeting && (
+        <div className={styles.header}>
+          {message.role === 'assistant' && agentName ? (
+            <span className={styles.role}>
+              <span className={styles.agentName}>[{agentName}]</span>
+            </span>
+          ) : (
+            <span className={styles.role}>{roleLabels[message.role]}</span>
+          )}
+
+          {message.type && message.type !== 'message' && (
+            <span className={styles.type}>{message.type}</span>
+          )}
+          <span className={styles.time}>
+            {formatter.format(new Date(message.timestamp))}
+          </span>
+          {!isSystem && (
+            <div className={styles.actions}>
+              <MessageActions
+                message={message}
+                onRegenerate={onRegenerate}
+                onDelete={onDelete}
+                showRegenerate={message.role === 'assistant' && !isIntermediate}
+              />
+            </div>
+          )}
+        </div>
+      )}
       <div className={styles.body}>
-        {isSystem ? (
+        {isGreeting ? (
+          <div className={styles.greetingContent}>
+            <ReactMarkdown
+              remarkPlugins={remarkGfm ? [remarkGfm] : []}
+              components={MarkdownComponents}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        ) : isSystem ? (
           <div className={styles.systemContent}>{message.content}</div>
         ) : isDispatchAgent && message.meta?.result ? (
           // Render plan from dispatch_agent result
@@ -167,14 +244,46 @@ export default function MessageBubble({
             remarkPlugins={remarkGfm ? [remarkGfm] : []}
             components={MarkdownComponents}
           >
-            {(message.meta.result as Record<string, unknown>)?.plan as string || message.content}
+            {((message.meta.result as Record<string, unknown>)
+              ?.plan as string) || message.content}
           </ReactMarkdown>
+        ) : isReasoningOnly && !isStreaming ? (
+          // Collapsible reasoning message when done
+          <div className={styles.reasoningContainer}>
+            <button
+              type="button"
+              className={styles.reasoningToggle}
+              onClick={() => setIsReasoningExpanded(!isReasoningExpanded)}
+            >
+              {isReasoningExpanded ? (
+                <ChevronUp size={16} />
+              ) : (
+                <ChevronDown size={16} />
+              )}
+              <span className={styles.reasoningLabel}>
+                {isReasoningExpanded ? 'Hide' : 'Show'} thinking
+              </span>
+            </button>
+            {isReasoningExpanded && (
+              <div className={styles.reasoningContent}>
+                <ReactMarkdown
+                  remarkPlugins={remarkGfm ? [remarkGfm] : []}
+                  components={MarkdownComponents}
+                >
+                  {message.content}
+                </ReactMarkdown>
+              </div>
+            )}
+          </div>
         ) : (
           <ReactMarkdown
             remarkPlugins={remarkGfm ? [remarkGfm] : []}
             components={MarkdownComponents}
           >
-            {message.content}
+            {message.content ||
+              (message.role === 'assistant' && isStreaming
+                ? '*Thinking...*'
+                : message.content)}
           </ReactMarkdown>
         )}
       </div>

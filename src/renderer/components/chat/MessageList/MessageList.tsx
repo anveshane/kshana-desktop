@@ -1,7 +1,6 @@
 import { useMemo, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../../../types/chat';
 import MessageBubble from '../MessageBubble';
-import TypingIndicator from '../TypingIndicator';
 import styles from './MessageList.module.scss';
 
 /* eslint-disable react/require-default-props */
@@ -10,6 +9,7 @@ interface MessageListProps {
   isStreaming?: boolean;
   onRegenerate?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
+  onResponse?: (response: string) => void;
 }
 /* eslint-enable react/require-default-props */
 
@@ -18,6 +18,7 @@ export default function MessageList({
   isStreaming = false,
   onRegenerate = undefined,
   onDelete = undefined,
+  onResponse = undefined,
 }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -75,13 +76,9 @@ export default function MessageList({
               onRegenerate ? () => onRegenerate(message.id) : undefined
             }
             onDelete={onDelete ? () => onDelete(message.id) : undefined}
+            onResponse={onResponse}
           />
         ))}
-        {isStreaming && (
-          <div className={styles.typingWrapper}>
-            <TypingIndicator />
-          </div>
-        )}
         <div ref={messagesEndRef} />
       </div>
     </div>

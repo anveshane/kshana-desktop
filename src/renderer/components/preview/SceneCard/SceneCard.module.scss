@@ -92,6 +92,34 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: $spacing-sm;
+  padding-top: $spacing-sm;
+  margin-top: $spacing-sm;
+  border-top: 1px solid $color-panel-border;
+}
+
+.viewDetailsButton {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background: none;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    color: $color-text-primary;
+    border-color: $color-accent-cyan;
+    background-color: rgba($color-accent-cyan, 0.1);
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
 }
 
 .status {

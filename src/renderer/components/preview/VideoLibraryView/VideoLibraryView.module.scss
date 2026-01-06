@@ -66,6 +66,14 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: all $transition-fast;
+  cursor: pointer;
+
+  &:hover {
+    border-color: rgba($color-accent-green, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
 }
 
 .videoThumbnail {
@@ -93,6 +101,8 @@
   font-size: $font-size-xs;
   font-weight: $font-weight-semibold;
   border-radius: $radius-sm;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .videoInfo {
@@ -220,28 +230,45 @@
 
 .seekBar {
   flex: 1;
-  height: 4px;
-  background-color: rgba($color-text-primary, 0.3);
+  height: 6px;
+  background-color: rgba($color-text-primary, 0.2);
   border-radius: $radius-full;
   outline: none;
   cursor: pointer;
+  transition: height $transition-fast;
+
+  &:hover {
+    height: 8px;
+  }
 
   &::-webkit-slider-thumb {
     appearance: none;
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     background-color: $color-accent-green;
     border-radius: $radius-full;
     cursor: pointer;
+    transition: transform $transition-fast;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+
+    &:hover {
+      transform: scale(1.2);
+    }
   }
 
   &::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     background-color: $color-accent-green;
     border-radius: $radius-full;
     cursor: pointer;
     border: none;
+    transition: transform $transition-fast;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+
+    &:hover {
+      transform: scale(1.2);
+    }
   }
 }
 
@@ -268,11 +295,13 @@
   top: $spacing-md;
   left: $spacing-md;
   padding: $spacing-xs $spacing-sm;
-  background-color: rgba(0, 0, 0, 0.7);
+  background-color: rgba(0, 0, 0, 0.75);
   color: $color-text-primary;
   font-size: $font-size-xs;
   font-weight: $font-weight-semibold;
   border-radius: $radius-sm;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .importedBadge {
@@ -283,18 +312,34 @@
 .scenePlaceholder {
   width: 100%;
   height: 100%;
-  @include flex-center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   background-color: rgba($color-background-dark, 0.5);
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
   border: 2px dashed $color-panel-border;
+  position: relative;
+
+  &.hasBackgroundImage {
+    justify-content: flex-end;
+    padding-bottom: $spacing-lg;
+  }
 }
 
 .scenePlaceholderContent {
-  @include flex-center;
   @include flex-column;
-  gap: $spacing-md;
+  @include flex-center;
+  gap: $spacing-sm;
   text-align: center;
-  padding: $spacing-lg;
+  padding: $spacing-md $spacing-lg;
   max-width: 600px;
+  background-color: rgba($color-background-dark, 0.75);
+  border-radius: $radius-md;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 .scenePlaceholderIcon {

@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import type { FileNode } from '../../../../shared/fileSystemTypes';
 import { getFileType } from '../../../../shared/fileSystemTypes';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
@@ -12,7 +12,8 @@ interface FileTreeProps {
 }
 
 export default function FileTree({ root }: FileTreeProps) {
-  const { selectFile, addToActiveContext, refreshFileTree } = useWorkspace();
+  const { selectFile, addToActiveContext, refreshFileTree, loadDirectory } =
+    useWorkspace();
   const {
     selectedPaths,
     focusedPath,
@@ -53,6 +54,26 @@ export default function FileTree({ root }: FileTreeProps) {
     };
     setFlatNodes(buildFlatList(root));
   }, [root, expandedPaths, setFlatNodes]);
+
+  // Load content for expanded directories that haven't been loaded yet
+  useEffect(() => {
+    // Check root first (though it should be loaded)
+    if (root.type === 'directory' && !root.children) {
+      loadDirectory(root.path);
+      return;
+    }
+
+    // Check visible nodes
+    flatNodes.forEach((node) => {
+      if (
+        node.type === 'directory' &&
+        expandedPaths.has(node.path) &&
+        !node.children
+      ) {
+        loadDirectory(node.path);
+      }
+    });
+  }, [expandedPaths, flatNodes, root, loadDirectory]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback(

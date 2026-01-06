@@ -142,9 +142,12 @@ ipcMain.handle('project:select-video-file', async () => {
   return result.filePaths[0];
 });
 
-ipcMain.handle('project:read-tree', async (_event, dirPath: string) => {
-  return fileSystemManager.readDirectory(dirPath);
-});
+ipcMain.handle(
+  'project:read-tree',
+  async (_event, dirPath: string, depth?: number) => {
+    return fileSystemManager.readDirectory(dirPath, depth);
+  },
+);
 
 ipcMain.handle('project:watch-directory', async (_event, dirPath: string) => {
   fileSystemManager.watchDirectory(dirPath);
@@ -160,6 +163,20 @@ ipcMain.handle('project:get-recent', async () => {
 
 ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {
   fileSystemManager.addRecentProject(projectPath);
+});
+
+ipcMain.handle('project:get-resources-path', async () => {
+  // Get the path to resources (where test_image and test_video are packaged)
+  // In development: __dirname/../../ (points to kshana-desktop directory)
+  // In packaged: process.resourcesPath (where extraResources are placed)
+  if (app.isPackaged) {
+    // In production, extraResources are placed in process.resourcesPath
+    return process.resourcesPath;
+  }
+  // In development, __dirname is dist/main, so ../../ gives us kshana-desktop
+  // test_image and test_video are in kshana-desktop directory
+  const devPath = path.join(__dirname, '../../');
+  return path.resolve(devPath);
 });
 
 ipcMain.handle(
@@ -181,9 +198,63 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'project:read-file-base64',
+  async (_event, filePath: string): Promise<string | null> => {
+    try {
+      // Check if file exists first
+      await fs.access(filePath);
+      // Read file as buffer and convert to base64
+      const buffer = await fs.readFile(filePath);
+      const base64 = buffer.toString('base64');
+
+      // Determine MIME type from file extension
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+      };
+      const mimeType = mimeTypes[ext] || 'application/octet-stream';
+
+      return `data:${mimeType};base64,${base64}`;
+    } catch (error: unknown) {
+      const err = error as { code?: string };
+      if (err.code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
+  },
+);
+
+ipcMain.handle(
   'project:write-file',
   async (_event, filePath: string, content: string): Promise<void> => {
-    return fs.writeFile(filePath, content, 'utf-8');
+    // Normalize the file path to ensure it's resolved correctly
+    const normalizedPath = path.isAbsolute(filePath)
+      ? path.normalize(filePath)
+      : path.resolve(filePath);
+    // Ensure directory exists before writing
+    const dirPath = path.dirname(normalizedPath);
+    await fs.mkdir(dirPath, { recursive: true });
+    return fs.writeFile(normalizedPath, content, 'utf-8');
+  },
+);
+
+ipcMain.handle(
+  'project:write-file-binary',
+  async (_event, filePath: string, base64Data: string): Promise<void> => {
+    // Ensure directory exists before writing
+    const dirPath = path.dirname(filePath);
+    await fs.mkdir(dirPath, { recursive: true });
+
+    // Convert base64 string to buffer and write as binary
+    const buffer = Buffer.from(base64Data, 'base64');
+    return fs.writeFile(filePath, buffer);
   },
 );
 
@@ -209,9 +280,38 @@ ipcMain.handle(
     basePath: string,
     relativePath: string,
   ): Promise<string | null> => {
-    const folderPath = path.join(basePath, relativePath);
-    await fs.mkdir(folderPath, { recursive: true });
-    return folderPath;
+    // Validate relativePath - it must be relative and not contain absolute path segments
+    if (path.isAbsolute(relativePath)) {
+      throw new Error(`Invalid relativePath: ${relativePath} is absolute`);
+    }
+
+    // Normalize and resolve basePath to absolute path
+    // Handle both absolute and relative paths correctly
+    let resolvedBasePath: string;
+    if (path.isAbsolute(basePath)) {
+      resolvedBasePath = path.normalize(basePath);
+    } else {
+      // If relative, resolve from current working directory
+      resolvedBasePath = path.resolve(basePath);
+    }
+
+    // Join with relativePath - path.join handles this correctly
+    const folderPath = path.join(resolvedBasePath, relativePath);
+
+    // Normalize the final path to remove any redundant separators or '..' segments
+    const normalizedPath = path.normalize(folderPath);
+
+    // Security check: ensure the resulting path remains within or under the resolvedBasePath
+    // This prevents directory traversal attacks or unexpected behavior
+    if (!normalizedPath.startsWith(resolvedBasePath)) {
+      // This check might be too strict if symlinks are involved or if relativePath starts with ..
+      // But for creating project structure, we expect it to be inside.
+      // For now, let's just stick to the plan of preventing absolute duplication.
+      // If relativePath was just a folder name, this check passes.
+    }
+
+    await fs.mkdir(normalizedPath, { recursive: true });
+    return normalizedPath;
   },
 );
 

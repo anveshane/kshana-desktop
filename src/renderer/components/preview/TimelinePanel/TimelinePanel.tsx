@@ -15,57 +15,317 @@ import {
   Upload,
   Scissors,
   Edit2,
+  FileText,
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import { useProject } from '../../../contexts/ProjectContext';
 import { useTimeline } from '../../../contexts/TimelineContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
-import type {
-  ProjectState,
-  StoryboardScene,
-  Artifact,
-  TimelineMarker,
-} from '../../../types/projectState';
+import {
+  useTimelineData,
+  type TimelineItem,
+} from '../../../hooks/useTimelineData';
+import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
+import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
+import { setActiveVideoVersion } from '../../../utils/videoWorkspace';
+import type { Artifact, TimelineMarker } from '../../../types/projectState';
+import type { KshanaTimelineMarker, ImportedClip } from '../../../types/kshana';
+import type { SceneVersions } from '../../../types/kshana/timeline';
+import { PROJECT_PATHS, createAssetInfo } from '../../../types/kshana';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
 import SceneActionPopover from './SceneActionPopover';
 import VersionSelector from '../VersionSelector';
+import MarkdownPreview from '../MarkdownPreview';
 import styles from './TimelinePanel.module.scss';
 
-// Mock scenes for when no project state exists (same as StoryboardView)
-const MOCK_SCENES: StoryboardScene[] = [
-  {
-    scene_number: 1,
-    description:
-      'A young boy is seen lying in the ground, looking up at the sky. The lighting suggests late afternoon golden hour.',
-    duration: 5,
-    shot_type: 'Mid Shot',
-    lighting: 'Golden Hour',
-  },
-  {
-    scene_number: 2,
-    description:
-      'The boy stands up abruptly and kicks the soccer ball with significant force towards the horizon. Dust particles float.',
-    duration: 3,
-    shot_type: 'Low Angle',
-    lighting: 'Action',
-  },
-  {
-    scene_number: 3,
-    description:
-      "The Exchange - A mysterious figure's hand, covered in a ragged glove, hands over a metallic data drive in the rain.",
-    duration: 8,
-    shot_type: 'Close Up',
-    lighting: 'Night',
-  },
-  {
-    scene_number: 4,
-    description:
-      'Escape sequence - The protagonist flees on a high-speed bike through neon-lit streets. Blurring lights create streaks.',
-    duration: 12,
-    shot_type: 'Tracking',
-    lighting: 'Speed',
-  },
-];
+// Timeline Item Component for proper hook usage
+interface TimelineItemComponentProps {
+  item: TimelineItem;
+  left: number;
+  width: number;
+  projectDirectory: string | null;
+  useMockData: boolean;
+  isSelected: boolean;
+  isSceneDragging: boolean;
+  editingSceneNumber: number | null;
+  editedSceneName: string;
+  sceneFolder?: string;
+  activeVersions?: Record<number, SceneVersions>; // sceneNumber -> { image?: number, video?: number }
+  onSceneDragStart: (
+    e: React.DragEvent<HTMLDivElement>,
+    sceneNumber: number,
+  ) => void;
+  onSceneDragEnd: () => void;
+  onSceneBlockClick: (
+    e: React.MouseEvent<HTMLDivElement>,
+    sceneNumber: number,
+  ) => void;
+  onVideoBlockClick: (
+    e: React.MouseEvent<HTMLDivElement>,
+    item: TimelineItem,
+  ) => void;
+  onNameChange: (sceneNumber: number, name: string) => void;
+  onEditedNameChange: (name: string) => void;
+  onEditingCancel: () => void;
+  onViewDetails?: (sceneNumber: number, sceneFolder: string) => void;
+}
+
+function TimelineItemComponent({
+  item,
+  left,
+  width,
+  projectDirectory,
+  useMockData,
+  isSelected,
+  isSceneDragging,
+  editingSceneNumber,
+  editedSceneName,
+  sceneFolder,
+  activeVersions = {},
+  onSceneDragStart,
+  onSceneDragEnd,
+  onSceneBlockClick,
+  onVideoBlockClick,
+  onNameChange,
+  onEditedNameChange,
+  onEditingCancel,
+  onViewDetails,
+}: TimelineItemComponentProps) {
+  const { assetManifest } = useProject();
+  const [videoPath, setVideoPath] = useState<string | null>(null);
+  const [imagePath, setImagePath] = useState<string | null>(null);
+
+  // Construct version-specific video path if active version is set
+  const videoVersionPath = useMemo(() => {
+    if (
+      item.sceneNumber &&
+      activeVersions[item.sceneNumber]?.video &&
+      sceneFolder
+    ) {
+      const version = activeVersions[item.sceneNumber].video!;
+      return `.kshana/agent/scenes/${sceneFolder}/video/v${version}.mp4`;
+    }
+    return item.path;
+  }, [item.sceneNumber, item.path, activeVersions, sceneFolder]);
+
+  // Construct version-specific image path from asset manifest (source of truth)
+  const imageVersionPath = useMemo(() => {
+    if (
+      item.sceneNumber &&
+      activeVersions[item.sceneNumber]?.image &&
+      assetManifest?.assets
+    ) {
+      const version = activeVersions[item.sceneNumber].image!;
+      // Find the image asset with matching scene number and version
+      const imageAsset = assetManifest.assets.find(
+        (asset) =>
+          asset.type === 'scene_image' &&
+          asset.scene_number === item.sceneNumber &&
+          asset.version === version,
+      );
+      if (imageAsset) {
+        return imageAsset.path;
+      }
+    }
+    return item.artifact?.file_path;
+  }, [
+    item.sceneNumber,
+    item.artifact?.file_path,
+    activeVersions,
+    assetManifest,
+  ]);
+
+  useEffect(() => {
+    if (videoVersionPath) {
+      resolveAssetPathForDisplay(
+        videoVersionPath,
+        projectDirectory,
+        useMockData,
+      ).then((resolved) => {
+        setVideoPath(resolved);
+      });
+    } else {
+      setVideoPath(null);
+    }
+  }, [videoVersionPath, projectDirectory, useMockData]);
+
+  useEffect(() => {
+    if (item.artifact && item.artifact.artifact_type === 'image') {
+      const pathToResolve = imageVersionPath || item.artifact.file_path;
+      resolveAssetPathForDisplay(
+        pathToResolve,
+        projectDirectory,
+        useMockData,
+      ).then(async (resolved) => {
+        // For test images in mock mode, try to convert to base64
+        if (shouldUseBase64(resolved, useMockData)) {
+          const base64 = await imageToBase64(resolved);
+          if (base64) {
+            setImagePath(base64);
+            return;
+          }
+        }
+        // Fallback to file:// path
+        setImagePath(resolved);
+      });
+    } else {
+      setImagePath(null);
+    }
+  }, [
+    imageVersionPath,
+    item.artifact?.file_path,
+    item.artifact?.artifact_type,
+    projectDirectory,
+    useMockData,
+  ]);
+
+  if (item.type === 'video' && videoPath) {
+    return (
+      // eslint-disable-next-line jsx-a11y/click-events-have-key-events
+      <div
+        className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          onVideoBlockClick(e, item);
+        }}
+      >
+        <video
+          src={videoPath}
+          className={styles.videoThumbnail}
+          preload="metadata"
+          muted
+        />
+        <div className={styles.videoLabel}>{item.label}</div>
+      </div>
+    );
+  }
+
+  // Scene block (with or without image)
+  let thumbnailElement: React.ReactNode;
+  if (imagePath) {
+    thumbnailElement = (
+      <img src={imagePath} alt={item.label} className={styles.sceneThumbnail} />
+    );
+  } else if (videoPath) {
+    thumbnailElement = (
+      <video
+        src={videoPath}
+        className={styles.sceneThumbnail}
+        preload="metadata"
+        muted
+      />
+    );
+  } else {
+    thumbnailElement = <div className={styles.scenePlaceholder} />;
+  }
+
+  return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events
+    <div
+      className={`${styles.sceneBlock} ${isSelected ? styles.selected : ''} ${isSceneDragging ? styles.dragging : ''}`}
+      style={{
+        left: `${left}px`,
+        width: `${width}px`,
+      }}
+      draggable={!!item.scene}
+      onDragStart={(e) => {
+        if (item.scene) {
+          onSceneDragStart(e, item.scene.scene_number);
+        }
+      }}
+      onDragEnd={onSceneDragEnd}
+      onClick={(e) => {
+        if (item.scene) {
+          onSceneBlockClick(e, item.scene.scene_number);
+        }
+      }}
+    >
+      {thumbnailElement}
+      {item.scene && editingSceneNumber === item.scene.scene_number ? (
+        <div className={styles.sceneNameEdit}>
+          <input
+            type="text"
+            value={editedSceneName}
+            onChange={(e) => onEditedNameChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                onNameChange(item.scene!.scene_number, editedSceneName);
+                onEditingCancel();
+              } else if (e.key === 'Escape') {
+                onEditingCancel();
+              }
+            }}
+            onBlur={() => {
+              onNameChange(item.scene!.scene_number, editedSceneName);
+              onEditingCancel();
+            }}
+            onFocus={(e) => {
+              // Prevent browser from scrolling to input
+              e.target.scrollIntoView({
+                behavior: 'instant',
+                block: 'nearest',
+                inline: 'nearest',
+              });
+            }}
+            className={styles.sceneNameInput}
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+            onClick={(e) => e.stopPropagation()}
+            placeholder={`Scene ${item.scene.scene_number}`}
+          />
+        </div>
+      ) : (
+        <div
+          className={styles.sceneId}
+          onDoubleClick={(e) => {
+            if (item.scene) {
+              e.stopPropagation();
+              // This will be handled by parent component
+            }
+          }}
+          title="Double-click to edit name"
+        >
+          {item.label}
+          {item.scene && (
+            <button
+              type="button"
+              className={styles.sceneNameEditButton}
+              onClick={(e) => {
+                e.stopPropagation();
+                // This will be handled by parent component
+              }}
+              title="Edit scene name"
+            >
+              <Edit2 size={10} />
+            </button>
+          )}
+        </div>
+      )}
+      {item.scene && (
+        <div className={styles.sceneDescription}>{item.scene.description}</div>
+      )}
+      {item.scene && sceneFolder && onViewDetails && (
+        <div className={styles.sceneFooter}>
+          <button
+            type="button"
+            className={styles.viewDetailsButton}
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewDetails(item.scene!.scene_number, sceneFolder);
+            }}
+            title="View details"
+          >
+            <FileText size={10} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Format time as HH:MM:SS:FF (hours:minutes:seconds:frames)
 const formatTime = (seconds: number): string => {
@@ -102,6 +362,10 @@ interface TimelinePanelProps {
   onPlayPause?: (playing: boolean) => void;
   // eslint-disable-next-line react/require-default-props
   onDragStateChange?: (dragging: boolean) => void;
+  // eslint-disable-next-line react/require-default-props
+  activeVersions?: Record<number, SceneVersions>;
+  // eslint-disable-next-line react/require-default-props
+  onActiveVersionsChange?: (versions: Record<number, SceneVersions>) => void;
 }
 
 export default function TimelinePanel({
@@ -113,19 +377,58 @@ export default function TimelinePanel({
   onSeek,
   onPlayPause,
   onDragStateChange,
+  activeVersions: externalActiveVersions,
+  onActiveVersionsChange,
 }: TimelinePanelProps) {
   const { projectDirectory } = useWorkspace();
-  const [projectState, setProjectState] = useState<ProjectState | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(1);
+  const {
+    isLoading,
+    useMockData,
+    scenes: projectScenes,
+    timelineState,
+    saveTimelineState,
+    updatePlayhead,
+    updateZoom,
+    setActiveVersion,
+    updateMarkers,
+    updateImportedClips,
+    addAsset,
+  } = useProject();
+
+  // Use unified timeline data hook
+  const { scenes, timelineItems, artifactsByScene, importedVideoArtifacts } =
+    useTimelineData();
+
+  // Initialize zoom level from timeline state
+  const [zoomLevel, setZoomLevel] = useState(timelineState.zoom_level);
   const [scrollLeft, setScrollLeft] = useState(0);
 
+  // Sync zoom level to timeline state
+  useEffect(() => {
+    updateZoom(zoomLevel);
+  }, [zoomLevel, updateZoom]);
+
   // Use external playback state if provided, otherwise use internal state
-  const [internalPlaybackTime, setInternalPlaybackTime] = useState(0);
+  // Initialize from timeline state if available
+  const [internalPlaybackTime, setInternalPlaybackTime] = useState(
+    timelineState.playhead_seconds,
+  );
   const [internalIsPlaying, setInternalIsPlaying] = useState(false);
 
   const currentPosition = externalPlaybackTime ?? internalPlaybackTime;
   const isPlaying = externalIsPlaying ?? internalIsPlaying;
+
+  // Sync playhead position to timeline state (debounced)
+  useEffect(() => {
+    if (!externalPlaybackTime) {
+      // Only sync if using internal state
+      const timeoutId = setTimeout(() => {
+        updatePlayhead(currentPosition);
+      }, 100); // Debounce 100ms for playhead updates
+      return () => clearTimeout(timeoutId);
+    }
+    return undefined;
+  }, [currentPosition, externalPlaybackTime, updatePlayhead]);
 
   const setCurrentPosition = useCallback(
     (value: number | ((prev: number) => number)) => {
@@ -151,7 +454,116 @@ export default function TimelinePanel({
     },
     [onPlayPause, isPlaying],
   );
-  const [markers, setMarkers] = useState<TimelineMarker[]>([]);
+  // Helper functions to convert between marker formats
+  const convertKshanaMarkerToLocal = useCallback(
+    (marker: KshanaTimelineMarker): TimelineMarker => ({
+      id: marker.id,
+      position: marker.position_seconds,
+      prompt: marker.prompt,
+      status: marker.status,
+      generatedArtifactId: marker.generated_artifact_id,
+      createdAt: marker.created_at,
+    }),
+    [],
+  );
+
+  const convertLocalMarkerToKshana = useCallback(
+    (marker: TimelineMarker): KshanaTimelineMarker => ({
+      id: marker.id,
+      position_seconds: marker.position,
+      prompt: marker.prompt,
+      status: marker.status,
+      generated_artifact_id: marker.generatedArtifactId,
+      created_at: marker.createdAt,
+    }),
+    [],
+  );
+
+  // Load markers and imported clips from timeline state on mount
+  const [markers, setMarkers] = useState<TimelineMarker[]>(() => {
+    return timelineState.markers.map(convertKshanaMarkerToLocal);
+  });
+
+  // Sync markers to timeline state when they change
+  useEffect(() => {
+    const kshanaMarkers = markers.map(convertLocalMarkerToKshana);
+    updateMarkers(kshanaMarkers);
+  }, [markers, convertLocalMarkerToKshana, updateMarkers]);
+
+  // Imported videos state - kept for local video import functionality
+  const [importedVideos, setImportedVideos] = useState<
+    Array<{ path: string; duration: number; startTime: number }>
+  >(() => {
+    // Initialize from timeline state
+    return timelineState.imported_clips.map((clip) => ({
+      path: clip.path,
+      duration: clip.duration_seconds,
+      startTime: clip.start_time_seconds,
+    }));
+  });
+
+  // Use a ref to track if we're updating from external source to prevent loops
+  const isUpdatingFromExternalRef = useRef(false);
+
+  // Load imported clips from timeline state when it changes externally
+  // Only update if the data actually changed to prevent infinite loops
+  useEffect(() => {
+    const importedClips = timelineState.imported_clips.map((clip) => ({
+      path: clip.path,
+      duration: clip.duration_seconds,
+      startTime: clip.start_time_seconds,
+    }));
+
+    // Compare with current state to avoid unnecessary updates
+    setImportedVideos((current) => {
+      const currentVideosStr = JSON.stringify(current);
+      const newVideosStr = JSON.stringify(importedClips);
+
+      if (currentVideosStr !== newVideosStr) {
+        isUpdatingFromExternalRef.current = true;
+        return importedClips;
+      }
+      return current;
+    });
+  }, [timelineState.imported_clips]);
+
+  // Sync imported videos to timeline state when they change locally
+
+  useEffect(() => {
+    // Skip if this update came from external source
+    if (isUpdatingFromExternalRef.current) {
+      isUpdatingFromExternalRef.current = false;
+      return;
+    }
+
+    const kshanaClips: ImportedClip[] = importedVideos.map((video, index) => ({
+      id: video.path || `imported-${index}`,
+      path: video.path,
+      duration_seconds: video.duration,
+      start_time_seconds: video.startTime,
+    }));
+
+    // Compare with current timeline state to avoid unnecessary updates
+    const currentClipsStr = JSON.stringify(
+      timelineState.imported_clips.map((c) => ({
+        path: c.path,
+        duration: c.duration_seconds,
+        startTime: c.start_time_seconds,
+      })),
+    );
+    const newClipsStr = JSON.stringify(
+      kshanaClips.map((c) => ({
+        path: c.path,
+        duration: c.duration_seconds,
+        startTime: c.start_time_seconds,
+      })),
+    );
+
+    if (currentClipsStr !== newClipsStr) {
+      updateImportedClips(kshanaClips);
+    }
+  }, [importedVideos, updateImportedClips, timelineState.imported_clips]);
+
   const [markerPromptOpen, setMarkerPromptOpen] = useState(false);
   const [markerPromptPosition, setMarkerPromptPosition] = useState<
     number | null
@@ -163,16 +575,90 @@ export default function TimelinePanel({
     x: number;
     y: number;
   } | null>(null);
+  const [previewSceneNumber, setPreviewSceneNumber] = useState<number | null>(
+    null,
+  );
+  const [markdownContent, setMarkdownContent] = useState<string>('');
+  const [isLoadingMarkdown, setIsLoadingMarkdown] = useState(false);
   const [editingSceneNumber, setEditingSceneNumber] = useState<number | null>(
     null,
   );
   const [editedSceneName, setEditedSceneName] = useState<string>('');
-  const [importedVideos, setImportedVideos] = useState<
-    Array<{ path: string; duration: number; startTime: number }>
-  >([]);
-  const [activeVersions, setActiveVersions] = useState<Record<number, number>>(
-    {},
-  );
+  // Create scene folder map for markdown preview and version management
+  const sceneFoldersByNumber = useMemo(() => {
+    const map: Record<number, string> = {};
+    if (!projectScenes || projectScenes.length === 0) return map;
+
+    projectScenes.forEach((scene) => {
+      map[scene.scene_number] = scene.folder;
+    });
+    return map;
+  }, [projectScenes]);
+
+  // Load active versions from timeline state or use external prop (with migration)
+  const [internalActiveVersions, setInternalActiveVersions] = useState<
+    Record<number, SceneVersions>
+  >(() => {
+    const versions: Record<number, SceneVersions> = {};
+    Object.entries(timelineState.active_versions).forEach(
+      ([folder, versionData]) => {
+        // Extract scene number from folder name (e.g., "scene-001" -> 1)
+        const match = folder.match(/scene-(\d+)/);
+        if (match) {
+          const sceneNumber = parseInt(match[1], 10);
+
+          // Handle migration from old format (number) to new format (SceneVersions)
+          if (typeof versionData === 'number') {
+            versions[sceneNumber] = { video: versionData };
+          } else if (versionData && typeof versionData === 'object') {
+            versions[sceneNumber] = versionData;
+          }
+        }
+      },
+    );
+    return versions;
+  });
+
+  // Use external activeVersions if provided, otherwise use internal state
+  const activeVersions = externalActiveVersions ?? internalActiveVersions;
+  const setActiveVersions = onActiveVersionsChange ?? setInternalActiveVersions;
+
+  // Sync active versions to timeline state when they change
+  useEffect(() => {
+    if (!projectDirectory || useMockData) return;
+
+    Object.entries(activeVersions).forEach(
+      async ([sceneNumber, sceneVersions]) => {
+        const sceneFolder = sceneFoldersByNumber[parseInt(sceneNumber, 10)];
+        if (sceneFolder && sceneVersions) {
+          // Update timeline state active_versions for both image and video
+          if (sceneVersions.image !== undefined) {
+            setActiveVersion(sceneFolder, 'image', sceneVersions.image);
+          }
+          if (sceneVersions.video !== undefined) {
+            setActiveVersion(sceneFolder, 'video', sceneVersions.video);
+
+            // Update current.txt file for video version
+            try {
+              await setActiveVideoVersion(
+                projectDirectory,
+                sceneFolder,
+                sceneVersions.video,
+              );
+            } catch (error) {
+              console.error('Failed to update current.txt:', error);
+            }
+          }
+        }
+      },
+    );
+  }, [
+    activeVersions,
+    projectDirectory,
+    useMockData,
+    sceneFoldersByNumber,
+    setActiveVersion,
+  ]);
   const {
     selectedScenes,
     selectScene,
@@ -219,31 +705,6 @@ export default function TimelinePanel({
 
   const { sendTimelineMarker } = useTimelineWebSocket(handleMarkerUpdate);
 
-  // Load project state
-  const loadProjectState = useCallback(async () => {
-    if (!projectDirectory) return;
-
-    setLoading(true);
-    try {
-      const stateFilePath = `${projectDirectory}/.kshana/project.json`;
-      const content = await window.electron.project.readFile(stateFilePath);
-      if (content) {
-        const state = JSON.parse(content) as ProjectState;
-        setProjectState(state);
-      } else {
-        setProjectState(null);
-      }
-    } catch {
-      setProjectState(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectDirectory]);
-
-  useEffect(() => {
-    loadProjectState();
-  }, [loadProjectState]);
-
   // Restore scroll position when exiting edit mode
   useEffect(() => {
     if (
@@ -264,110 +725,54 @@ export default function TimelinePanel({
   // Handle scene name change
   const handleNameChange = useCallback(
     async (sceneNumber: number, name: string) => {
-      if (!projectDirectory || !projectState) return;
+      // TODO: Implement name change via ProjectContext
+      console.log('Name change:', sceneNumber, name);
+    },
+    [],
+  );
 
-      // Update local state immediately (optimistic update)
-      const updatedScenes = (projectState.storyboard_outline?.scenes || []).map(
-        (scene) =>
-          scene.scene_number === sceneNumber
-            ? { ...scene, name: name || undefined }
-            : scene,
-      );
+  // Load markdown content when preview is opened
+  const handleViewSceneDetails = useCallback(
+    async (sceneNumber: number, sceneFolder: string) => {
+      setPreviewSceneNumber(sceneNumber);
+      setIsLoadingMarkdown(true);
 
-      const updatedState: ProjectState = {
-        ...projectState,
-        storyboard_outline: projectState.storyboard_outline
-          ? {
-              ...projectState.storyboard_outline,
-              scenes: updatedScenes,
-            }
-          : {
-              scenes: updatedScenes,
-            },
-      };
+      const basePath = projectDirectory || '/mock';
+      const markdownPath = `${basePath}/.kshana/agent/scenes/${sceneFolder}/scene.md`;
 
-      // Update local state immediately to avoid flickering
-      setProjectState(updatedState);
-
-      // Restore scroll position after state update
-      if (scrollPositionBeforeEditRef.current !== null && tracksRef.current) {
-        // Use requestAnimationFrame to ensure DOM has updated
-        requestAnimationFrame(() => {
-          if (
-            tracksRef.current &&
-            scrollPositionBeforeEditRef.current !== null
-          ) {
-            tracksRef.current.scrollLeft = scrollPositionBeforeEditRef.current;
-            scrollPositionBeforeEditRef.current = null;
-          }
-        });
-      }
-
-      // Save to project.json in the background
       try {
-        const stateFilePath = `${projectDirectory}/.kshana/project.json`;
-        await window.electron.project.writeFile(
-          stateFilePath,
-          JSON.stringify(updatedState, null, 2),
+        const content = await window.electron.project.readFile(markdownPath);
+        if (content !== null) {
+          setMarkdownContent(content);
+        } else {
+          const scene = scenes.find((s) => s.scene_number === sceneNumber);
+          setMarkdownContent(
+            `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
+              scene?.description || 'No details available.'
+            }`,
+          );
+        }
+      } catch (error) {
+        console.error('Failed to load scene markdown:', error);
+        const scene = scenes.find((s) => s.scene_number === sceneNumber);
+        setMarkdownContent(
+          `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
+            scene?.description || 'No details available.'
+          }`,
         );
-      } catch {
-        // If save fails, reload from disk to restore previous state
-        await loadProjectState();
+      } finally {
+        setIsLoadingMarkdown(false);
       }
     },
-    [projectDirectory, projectState, loadProjectState],
+    [projectDirectory, scenes],
   );
 
-  // Get scenes and artifacts - memoized to prevent infinite loops
-  // Use mock scenes if no project state exists (same as StoryboardView)
-  const scenes: StoryboardScene[] = useMemo(
-    () => projectState?.storyboard_outline?.scenes || MOCK_SCENES,
-    [projectState?.storyboard_outline?.scenes],
-  );
+  const handleClosePreview = useCallback(() => {
+    setPreviewSceneNumber(null);
+    setMarkdownContent('');
+  }, []);
 
-  const { artifactsByScene, importedVideoArtifacts } = useMemo(() => {
-    const artifactsBySceneMap: Record<number, Artifact> = {};
-    const importedVideoArtifactsList: Artifact[] = [];
-
-    if (projectState?.artifacts) {
-      projectState.artifacts.forEach((artifact) => {
-        if (
-          artifact.scene_number &&
-          (artifact.artifact_type === 'image' ||
-            artifact.artifact_type === 'video')
-        ) {
-          // Use video if available, otherwise image
-          if (
-            !artifactsBySceneMap[artifact.scene_number] ||
-            artifact.artifact_type === 'video'
-          ) {
-            artifactsBySceneMap[artifact.scene_number] = artifact;
-          }
-        }
-        // Track imported videos separately
-        if (artifact.artifact_type === 'video' && artifact.metadata?.imported) {
-          importedVideoArtifactsList.push(artifact);
-        }
-      });
-    }
-
-    return {
-      artifactsByScene: artifactsBySceneMap,
-      importedVideoArtifacts: importedVideoArtifactsList,
-    };
-  }, [projectState?.artifacts]);
-
-  // Get all video artifacts (both scene videos and imported videos)
-  const allVideoArtifacts: Artifact[] = useMemo(
-    () =>
-      projectState?.artifacts.filter(
-        (artifact) => artifact.artifact_type === 'video',
-      ) || [],
-    [projectState?.artifacts],
-  );
-
-  // Calculate scene blocks (used for rendering and context)
-  // ALL scenes from storyboard are included, regardless of artifacts
+  // Calculate scene blocks for marker context and version selector
   const sceneBlocks = useMemo(() => {
     let currentTime = 0;
     return scenes.map((scene) => {
@@ -383,130 +788,22 @@ export default function TimelinePanel({
     });
   }, [scenes, artifactsByScene]);
 
-  // Create unified timeline items - combine all videos and scenes
-  interface TimelineItem {
-    id: string;
-    type: 'video' | 'scene';
-    startTime: number;
-    duration: number;
-    artifact?: Artifact;
-    scene?: StoryboardScene;
-    path?: string;
-    label: string;
-  }
+  // Calculate total duration from timeline items
+  const totalDuration = useMemo(() => {
+    if (timelineItems.length === 0) return 10;
+    const lastItem = timelineItems[timelineItems.length - 1];
+    return Math.max(lastItem.startTime + lastItem.duration, 10);
+  }, [timelineItems]);
 
-  const timelineItems: TimelineItem[] = useMemo(() => {
-    const items: TimelineItem[] = [];
-
-    // Add ALL scene blocks from storyboard - every scene appears on timeline
-    sceneBlocks.forEach((block) => {
-      const sceneLabel =
-        block.scene.name || `Scene ${block.scene.scene_number}`;
-      if (block.artifact && block.artifact.artifact_type === 'video') {
-        // Scene has video - add as video item
-        items.push({
-          id: `scene-video-${block.scene.scene_number}`,
-          type: 'video',
-          startTime: block.startTime,
-          duration: block.duration,
-          artifact: block.artifact,
-          scene: block.scene,
-          path: block.artifact.file_path,
-          label: sceneLabel,
-        });
-      } else {
-        // Scene without video - add as scene item (will show placeholder or image)
-        items.push({
-          id: `scene-${block.scene.scene_number}`,
-          type: 'scene',
-          startTime: block.startTime,
-          duration: block.duration,
-          scene: block.scene,
-          artifact: block.artifact,
-          label: sceneLabel,
-        });
-      }
-    });
-
-    // Calculate scene end time for positioning imported videos
-    const sceneEndTime =
-      sceneBlocks.length > 0
-        ? sceneBlocks[sceneBlocks.length - 1].startTime +
-          sceneBlocks[sceneBlocks.length - 1].duration
-        : 0;
-
-    // Add imported videos (they go after all scenes)
-    let importedVideoTime = sceneEndTime;
-    importedVideos.forEach((video, index) => {
-      items.push({
-        id: `imported-${index}`,
-        type: 'video',
-        startTime: importedVideoTime,
-        duration: video.duration,
-        path: video.path,
-        label: 'Imported',
-      });
-      importedVideoTime += video.duration;
-    });
-
-    // Add other video artifacts that don't have scene numbers
-    let orphanVideoTime = importedVideoTime;
-    allVideoArtifacts.forEach((artifact) => {
-      if (!artifact.scene_number && !artifact.metadata?.imported) {
-        const duration = (artifact.metadata?.duration as number) || 5;
-        items.push({
-          id: artifact.artifact_id,
-          type: 'video',
-          startTime: orphanVideoTime,
-          duration,
-          artifact,
-          path: artifact.file_path,
-          label: `VID_${artifact.artifact_id.slice(-6)}`,
-        });
-        orphanVideoTime += duration;
-      }
-    });
-
-    // Sort timeline items by startTime to ensure correct order
-    items.sort((a, b) => a.startTime - b.startTime);
-
-    return items;
-  }, [sceneBlocks, importedVideos, allVideoArtifacts]);
-
-  // Calculate total duration from all timeline items
-  const totalDuration =
-    timelineItems.length > 0
-      ? Math.max(
-          ...timelineItems.map((item) => item.startTime + item.duration),
-          10,
-        )
-      : 10;
-
-  // Calculate scene blocks for marker context - memoized
-  const sceneBlocksForMarkers = useMemo(() => {
-    let currentTime = 0;
-    return scenes.map((scene) => {
-      const startTime = currentTime;
-      const duration = scene.duration || 5;
-      currentTime += duration;
-      return {
-        scene,
-        startTime,
-        duration,
-        artifact: artifactsByScene[scene.scene_number],
-      };
-    });
-  }, [scenes, artifactsByScene]);
-
-  // Calculate scene duration for imported videos positioning
-  const sceneDurationForImports = useMemo(() => {
-    return scenes.reduce((acc, scene) => acc + (scene.duration || 5), 0);
-  }, [scenes]);
-
-  // Load imported videos from project state
+  // Load imported videos from asset manifest (for local video import feature)
   useEffect(() => {
-    if (projectState && importedVideoArtifacts.length > 0) {
-      let currentTime = sceneDurationForImports;
+    if (importedVideoArtifacts.length > 0) {
+      const sceneEndTime =
+        sceneBlocks.length > 0
+          ? sceneBlocks[sceneBlocks.length - 1].startTime +
+            sceneBlocks[sceneBlocks.length - 1].duration
+          : 0;
+      let currentTime = sceneEndTime;
       const videos = importedVideoArtifacts.map((artifact) => {
         const startTime = currentTime;
         const duration = (artifact.metadata?.duration as number) || 5;
@@ -518,11 +815,11 @@ export default function TimelinePanel({
         };
       });
       setImportedVideos(videos);
-    } else if (projectState && importedVideoArtifacts.length === 0) {
-      // Clear imported videos if none in project state
+    } else {
+      // Clear imported videos if none
       setImportedVideos([]);
     }
-  }, [projectState, sceneDurationForImports, importedVideoArtifacts]);
+  }, [importedVideoArtifacts, sceneBlocks]);
 
   // Timeline click handler removed - no longer opens marker prompt
   // Marker functionality can be accessed via keyboard shortcut or toolbar button
@@ -552,13 +849,13 @@ export default function TimelinePanel({
       // Send to backend via WebSocket
       try {
         // Get current scene context
-        const currentScene = sceneBlocksForMarkers.find(
+        const currentScene = sceneBlocks.find(
           (block) =>
             position >= block.startTime &&
             position < block.startTime + block.duration,
         );
 
-        const previousScenes = sceneBlocksForMarkers
+        const previousScenes = sceneBlocks
           .filter((block) => block.startTime + block.duration <= position)
           .map((block) => ({
             scene_number: block.scene.scene_number,
@@ -583,7 +880,7 @@ export default function TimelinePanel({
         );
       }
     },
-    [sceneBlocksForMarkers, sendTimelineMarker],
+    [sceneBlocks, sendTimelineMarker],
   );
 
   // Open marker popover at current playhead position (keyboard shortcut)
@@ -610,13 +907,9 @@ export default function TimelinePanel({
     if (isPlaying) {
       playheadIntervalRef.current = setInterval(() => {
         const next = currentPosition + 0.1; // Update every 100ms
-        const maxDuration = Math.max(
-          totalDuration,
-          ...importedVideos.map((v) => v.startTime + v.duration),
-        );
-        if (next >= maxDuration) {
+        if (next >= totalDuration) {
           setIsPlaying(false);
-          setCurrentPosition(maxDuration);
+          setCurrentPosition(totalDuration);
         } else {
           setCurrentPosition(next);
         }
@@ -635,7 +928,6 @@ export default function TimelinePanel({
   }, [
     isPlaying,
     totalDuration,
-    importedVideos,
     externalPlaybackTime,
     externalIsPlaying,
     setCurrentPosition,
@@ -643,20 +935,19 @@ export default function TimelinePanel({
     currentPosition,
   ]);
 
+  // Offset for the timeline content margin
+  const TIMELINE_OFFSET = 10;
+
   // Calculate position from mouse event
   const calculatePositionFromMouse = useCallback(
     (clientX: number): number => {
       if (!tracksRef.current) return currentPosition;
       const rect = tracksRef.current.getBoundingClientRect();
-      const x = clientX - rect.left + scrollLeft;
+      const x = clientX - rect.left + scrollLeft - TIMELINE_OFFSET;
       const seconds = pixelsToSeconds(x, zoomLevel);
-      const maxDuration = Math.max(
-        totalDuration,
-        ...importedVideos.map((v) => v.startTime + v.duration),
-      );
-      return Math.max(0, Math.min(maxDuration, seconds));
+      return Math.max(0, Math.min(totalDuration, seconds));
     },
-    [scrollLeft, zoomLevel, totalDuration, importedVideos, currentPosition],
+    [scrollLeft, zoomLevel, totalDuration, currentPosition],
   );
 
   // Handle playhead drag start
@@ -753,7 +1044,7 @@ export default function TimelinePanel({
       if (!tracksRef.current || !sceneBlocks.length) return null;
 
       const rect = tracksRef.current.getBoundingClientRect();
-      const x = clientX - rect.left + scrollLeft;
+      const x = clientX - rect.left + scrollLeft - TIMELINE_OFFSET;
       const position = pixelsToSeconds(x, zoomLevel);
 
       // Find which scene index to insert before/after
@@ -806,9 +1097,9 @@ export default function TimelinePanel({
           await reorderScenes(
             draggedSceneNumber,
             sceneBlocks.length,
-            projectState,
+            null, // projectState no longer needed
             projectDirectory,
-            setProjectState,
+            () => {}, // No-op function for state update
           );
         }
       } else {
@@ -820,9 +1111,9 @@ export default function TimelinePanel({
           await reorderScenes(
             draggedSceneNumber,
             dropInsertIndex,
-            projectState,
+            null, // projectState no longer needed
             projectDirectory,
-            setProjectState,
+            () => {}, // No-op function for state update
           );
         }
       }
@@ -834,9 +1125,7 @@ export default function TimelinePanel({
       dropInsertIndex,
       sceneBlocks,
       reorderScenes,
-      projectState,
       projectDirectory,
-      setProjectState,
       endDrag,
     ],
   );
@@ -876,6 +1165,28 @@ export default function TimelinePanel({
     [draggedSceneNumber, selectedScenes, selectScene, popoverSceneNumber],
   );
 
+  // Handle video block click
+  const handleVideoBlockClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
+      // Don't handle if we're dragging
+      if (draggedSceneNumber !== null) {
+        return;
+      }
+
+      e.stopPropagation();
+      e.preventDefault();
+
+      // If video has an associated scene, treat it like a scene click
+      if (item.scene) {
+        handleSceneBlockClick(e, item.scene.scene_number);
+      } else {
+        // For videos without scenes (imported videos), seek to the video's start position
+        setCurrentPosition(item.startTime);
+      }
+    },
+    [draggedSceneNumber, handleSceneBlockClick, setCurrentPosition],
+  );
+
   // Handle timeline area scrubbing (click and drag)
   const handleTimelineMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -887,6 +1198,11 @@ export default function TimelinePanel({
 
       // Don't start scrubbing if clicking on a scene block (it has its own handler)
       if (target.closest(`.${styles.sceneBlock}`)) {
+        return;
+      }
+
+      // Don't start scrubbing if clicking on a video block (it has its own handler)
+      if (target.closest(`.${styles.videoBlock}`)) {
         return;
       }
 
@@ -984,7 +1300,7 @@ export default function TimelinePanel({
     }
   }, []);
 
-  // Handle video import - copy to videos folder
+  // Handle video import - copy to videos/imported folder
   const handleImportVideo = useCallback(async () => {
     if (!projectDirectory) return;
 
@@ -992,18 +1308,26 @@ export default function TimelinePanel({
       const videoPath = await window.electron.project.selectVideoFile();
       if (!videoPath) return;
 
-      // Create videos folder if it doesn't exist
-      const videosFolder = `${projectDirectory}/videos`;
-      await window.electron.project.createFolder(projectDirectory, 'videos');
+      // Create videos/imported folder structure if it doesn't exist
+      // Similar to ProjectService.createProjectStructure - create nested folders
+      const parts = PROJECT_PATHS.VIDEOS_IMPORTED.split('/');
+      let basePath = projectDirectory;
+      for (const part of parts) {
+        if (part) {
+          await window.electron.project.createFolder(basePath, part);
+          basePath = `${basePath}/${part}`;
+        }
+      }
+      const videosFolder = basePath;
 
-      // Copy video to videos folder
+      // Copy video to videos/imported folder
       const videoFileName =
         videoPath.split('/').pop() || `video-${Date.now()}.mp4`;
       const destPath = await window.electron.project.copy(
         videoPath,
         videosFolder,
       );
-      const relativePath = `videos/${videoFileName}`;
+      const relativePath = `${PROJECT_PATHS.VIDEOS_IMPORTED}/${videoFileName}`;
 
       // Get video duration
       const video = document.createElement('video');
@@ -1012,9 +1336,34 @@ export default function TimelinePanel({
 
       // eslint-disable-next-line compat/compat
       await new Promise<void>((resolve, reject) => {
-        video.onloadedmetadata = () => {
+        video.onloadedmetadata = async () => {
           const { duration } = video;
 
+          // Generate unique asset ID
+          const assetId = `imported-video-${Date.now()}-${videoFileName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+
+          // Create asset info for the manifest
+          const assetInfo = createAssetInfo(
+            assetId,
+            'final_video',
+            relativePath,
+            1,
+            {
+              metadata: {
+                imported: true,
+                duration,
+                title: videoFileName,
+              },
+            },
+          );
+
+          // Save to asset manifest
+          const saved = await addAsset(assetInfo);
+          if (!saved) {
+            console.error('Failed to save imported video to asset manifest');
+          }
+
+          // Update local state and timeline state
           setImportedVideos((prev) => [
             ...prev,
             {
@@ -1024,61 +1373,13 @@ export default function TimelinePanel({
             },
           ]);
 
-          // Save to project state as artifact
-          const artifact: Artifact = {
-            artifact_id: `imported-video-${Date.now()}`,
-            artifact_type: 'video',
-            file_path: relativePath,
-            metadata: {
-              imported: true,
-              original_path: videoPath,
-              duration,
-            },
-            created_at: new Date().toISOString(),
-          };
-
-          // Create or update project state
-          const updatedState: ProjectState = projectState
-            ? {
-                ...projectState,
-                artifacts: [...(projectState.artifacts || []), artifact],
-              }
-            : {
-                // Create new project state if none exists
-                project_id: `proj-${Date.now()}`,
-                project_name: projectDirectory?.split('/').pop() || 'Untitled',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                phase: 'initial',
-                characters: {},
-                locations: {},
-                artifacts: [artifact],
-                character_assets: {},
-                setting_assets: {},
-                character_details: {},
-              };
-
-          // Ensure .kshana directory exists and save state
-          const kshanaDir = `${projectDirectory}/.kshana`;
-          const stateFilePath = `${kshanaDir}/project.json`;
-
-          // Create .kshana folder if needed, then write project.json
-          window.electron.project
-            .createFolder(projectDirectory!, '.kshana')
-            .then(() =>
-              window.electron.project.writeFile(
-                stateFilePath,
-                JSON.stringify(updatedState, null, 2),
-              ),
-            )
-            .then(() => {
-              setProjectState(updatedState);
-              return undefined;
-            })
-            .catch(() => {
-              // Failed to save project state
-              return undefined;
-            });
+          console.log(
+            'Imported video:',
+            relativePath,
+            duration,
+            'saved to manifest:',
+            saved,
+          );
 
           resolve();
         };
@@ -1087,13 +1388,13 @@ export default function TimelinePanel({
     } catch {
       // Failed to import video
     }
-  }, [projectDirectory, totalDuration, projectState]);
+  }, [projectDirectory, totalDuration, addAsset]);
 
   // Drag handlers removed - not used in unified timeline
 
   // Handle scene split at playhead
   const handleSplitScene = useCallback(() => {
-    const currentSceneIndex = sceneBlocksForMarkers.findIndex(
+    const currentSceneIndex = sceneBlocks.findIndex(
       (block) =>
         currentPosition >= block.startTime &&
         currentPosition < block.startTime + block.duration,
@@ -1103,7 +1404,7 @@ export default function TimelinePanel({
       return;
     }
 
-    const block = sceneBlocksForMarkers[currentSceneIndex];
+    const block = sceneBlocks[currentSceneIndex];
     const splitTime = currentPosition - block.startTime;
 
     if (splitTime > 0 && splitTime < block.duration) {
@@ -1119,7 +1420,7 @@ export default function TimelinePanel({
       //   duration: block.duration - splitTime,
       // };
     }
-  }, [currentPosition, sceneBlocksForMarkers]);
+  }, [currentPosition, sceneBlocks]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1195,7 +1496,8 @@ export default function TimelinePanel({
     setIsPlaying,
   ]);
 
-  if (!projectDirectory) {
+  // Show empty state if no project and not using mock data
+  if (!projectDirectory && !useMockData) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>
@@ -1205,7 +1507,7 @@ export default function TimelinePanel({
     );
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className={styles.container}>
         <div className={styles.loading}>Loading timeline...</div>
@@ -1213,14 +1515,18 @@ export default function TimelinePanel({
     );
   }
 
+  const effectiveProjectDir = projectDirectory || '/mock';
+
   // Calculate timeline width based on total duration (ensure minimum width)
   const minDuration = Math.max(totalDuration, 10); // At least 10 seconds
-  const timelineWidth = secondsToPixels(minDuration, zoomLevel);
+  // Round up to next multiple of 5 for better visibility (e.g., 38s -> 40s)
+  const maxMarkerTime = Math.ceil(minDuration / 5) * 5;
+  const timelineWidth = secondsToPixels(maxMarkerTime, zoomLevel);
   const playheadPosition = secondsToPixels(currentPosition, zoomLevel);
 
   // Generate time markers for ruler
   const timeMarkers: number[] = [];
-  for (let i = 0; i <= Math.ceil(minDuration); i += 5) {
+  for (let i = 0; i <= maxMarkerTime; i += 5) {
     timeMarkers.push(i);
   }
 
@@ -1307,10 +1613,13 @@ export default function TimelinePanel({
             <VersionSelector
               sceneBlocks={sceneBlocks}
               activeVersions={activeVersions}
-              onVersionSelect={(sceneNumber, version) => {
+              onVersionSelect={(sceneNumber, assetType, version) => {
                 setActiveVersions((prev) => ({
                   ...prev,
-                  [sceneNumber]: version,
+                  [sceneNumber]: {
+                    ...prev[sceneNumber],
+                    [assetType]: version,
+                  },
                 }));
               }}
             />
@@ -1394,206 +1703,56 @@ export default function TimelinePanel({
                       {timelineItems.map((item) => {
                         const left = secondsToPixels(item.startTime, zoomLevel);
                         const width = secondsToPixels(item.duration, zoomLevel);
-                        const videoPath = item.path
-                          ? `file://${projectDirectory}/${item.path}`
-                          : null;
-                        const imagePath =
-                          item.artifact &&
-                          item.artifact.artifact_type === 'image'
-                            ? `file://${projectDirectory}/${item.artifact.file_path}`
-                            : null;
-
-                        if (item.type === 'video' && videoPath) {
-                          return (
-                            <div
-                              key={item.id}
-                              className={styles.videoBlock}
-                              style={{
-                                left: `${left}px`,
-                                width: `${width}px`,
-                              }}
-                            >
-                              <video
-                                src={videoPath}
-                                className={styles.videoThumbnail}
-                                preload="metadata"
-                                muted
-                              />
-                              <div className={styles.videoLabel}>
-                                {item.label}
-                              </div>
-                            </div>
-                          );
-                        }
-
-                        // Scene block (with or without image)
-                        let thumbnailElement: React.ReactNode;
-                        if (imagePath) {
-                          thumbnailElement = (
-                            <img
-                              src={imagePath}
-                              alt={item.label}
-                              className={styles.sceneThumbnail}
-                            />
-                          );
-                        } else if (videoPath) {
-                          thumbnailElement = (
-                            <video
-                              src={videoPath}
-                              className={styles.sceneThumbnail}
-                              preload="metadata"
-                              muted
-                            />
-                          );
-                        } else {
-                          thumbnailElement = (
-                            <div className={styles.scenePlaceholder} />
-                          );
-                        }
-
-                        const isSelected =
+                        const isSelected = Boolean(
                           item.scene &&
-                          selectedScenes.has(item.scene.scene_number);
-                        const isSceneDragging =
+                            selectedScenes.has(item.scene.scene_number),
+                        );
+                        const isSceneDragging = Boolean(
                           item.scene &&
-                          draggedSceneNumber === item.scene.scene_number;
+                            draggedSceneNumber === item.scene.scene_number,
+                        );
+
+                        const sceneFolder = item.scene
+                          ? sceneFoldersByNumber[item.scene.scene_number]
+                          : undefined;
 
                         return (
-                          // eslint-disable-next-line jsx-a11y/click-events-have-key-events
-                          <div
+                          <TimelineItemComponent
                             key={item.id}
-                            className={`${styles.sceneBlock} ${isSelected ? styles.selected : ''} ${isSceneDragging ? styles.dragging : ''}`}
-                            style={{
-                              left: `${left}px`,
-                              width: `${width}px`,
-                            }}
-                            draggable={!!item.scene}
-                            onDragStart={(e) => {
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            useMockData={useMockData}
+                            isSelected={isSelected}
+                            isSceneDragging={isSceneDragging}
+                            editingSceneNumber={editingSceneNumber}
+                            editedSceneName={editedSceneName}
+                            sceneFolder={sceneFolder}
+                            activeVersions={activeVersions}
+                            onSceneDragStart={handleSceneDragStart}
+                            onSceneDragEnd={handleSceneDragEnd}
+                            onSceneBlockClick={handleSceneBlockClick}
+                            onVideoBlockClick={handleVideoBlockClick}
+                            onNameChange={handleNameChange}
+                            onEditedNameChange={setEditedSceneName}
+                            onViewDetails={handleViewSceneDetails}
+                            onEditingCancel={() => {
+                              // Restore scroll position on cancel
+                              if (
+                                scrollPositionBeforeEditRef.current !== null &&
+                                tracksRef.current
+                              ) {
+                                tracksRef.current.scrollLeft =
+                                  scrollPositionBeforeEditRef.current;
+                                scrollPositionBeforeEditRef.current = null;
+                              }
+                              setEditingSceneNumber(null);
                               if (item.scene) {
-                                handleSceneDragStart(
-                                  e,
-                                  item.scene.scene_number,
-                                );
+                                setEditedSceneName(item.scene.name || '');
                               }
                             }}
-                            onDragEnd={handleSceneDragEnd}
-                            onClick={(e) => {
-                              if (item.scene) {
-                                handleSceneBlockClick(
-                                  e,
-                                  item.scene.scene_number,
-                                );
-                              }
-                            }}
-                          >
-                            {thumbnailElement}
-                            {item.scene &&
-                            editingSceneNumber === item.scene.scene_number ? (
-                              <div className={styles.sceneNameEdit}>
-                                <input
-                                  type="text"
-                                  value={editedSceneName}
-                                  onChange={(e) =>
-                                    setEditedSceneName(e.target.value)
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      handleNameChange(
-                                        item.scene!.scene_number,
-                                        editedSceneName,
-                                      );
-                                      setEditingSceneNumber(null);
-                                    } else if (e.key === 'Escape') {
-                                      // Restore scroll position on cancel
-                                      if (
-                                        scrollPositionBeforeEditRef.current !==
-                                          null &&
-                                        tracksRef.current
-                                      ) {
-                                        tracksRef.current.scrollLeft =
-                                          scrollPositionBeforeEditRef.current;
-                                        scrollPositionBeforeEditRef.current =
-                                          null;
-                                      }
-                                      setEditingSceneNumber(null);
-                                      setEditedSceneName(
-                                        item.scene!.name || '',
-                                      );
-                                    }
-                                  }}
-                                  onBlur={() => {
-                                    handleNameChange(
-                                      item.scene!.scene_number,
-                                      editedSceneName,
-                                    );
-                                    setEditingSceneNumber(null);
-                                  }}
-                                  onFocus={(e) => {
-                                    // Prevent browser from scrolling to input
-                                    e.target.scrollIntoView({
-                                      behavior: 'instant',
-                                      block: 'nearest',
-                                      inline: 'nearest',
-                                    });
-                                  }}
-                                  className={styles.sceneNameInput}
-                                  // eslint-disable-next-line jsx-a11y/no-autofocus
-                                  autoFocus
-                                  onClick={(e) => e.stopPropagation()}
-                                  placeholder={`Scene ${item.scene.scene_number}`}
-                                />
-                              </div>
-                            ) : (
-                              <div
-                                className={styles.sceneId}
-                                onDoubleClick={(e) => {
-                                  if (item.scene) {
-                                    e.stopPropagation();
-                                    // Save scroll position before editing
-                                    if (tracksRef.current) {
-                                      scrollPositionBeforeEditRef.current =
-                                        tracksRef.current.scrollLeft;
-                                    }
-                                    setEditingSceneNumber(
-                                      item.scene.scene_number,
-                                    );
-                                    setEditedSceneName(item.scene.name || '');
-                                  }
-                                }}
-                                title="Double-click to edit name"
-                              >
-                                {item.label}
-                                {item.scene && (
-                                  <button
-                                    type="button"
-                                    className={styles.sceneNameEditButton}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      // Save scroll position before editing
-                                      if (tracksRef.current) {
-                                        scrollPositionBeforeEditRef.current =
-                                          tracksRef.current.scrollLeft;
-                                      }
-                                      setEditingSceneNumber(
-                                        item.scene!.scene_number,
-                                      );
-                                      setEditedSceneName(
-                                        item.scene!.name || '',
-                                      );
-                                    }}
-                                    title="Edit scene name"
-                                  >
-                                    <Edit2 size={10} />
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                            {item.scene && (
-                              <div className={styles.sceneDescription}>
-                                {item.scene.description}
-                              </div>
-                            )}
-                          </div>
+                          />
                         );
                       })}
 
@@ -1680,6 +1839,22 @@ export default function TimelinePanel({
                 const unusedParams = { sceneNum, prompt };
                 return unusedParams;
               }}
+            />
+          )}
+
+          {previewSceneNumber !== null && (
+            <MarkdownPreview
+              isOpen={previewSceneNumber !== null}
+              title={
+                scenes.find((s) => s.scene_number === previewSceneNumber)
+                  ?.name || `Scene ${previewSceneNumber}`
+              }
+              content={
+                isLoadingMarkdown
+                  ? 'Loading...'
+                  : markdownContent || 'Loading...'
+              }
+              onClose={handleClosePreview}
             />
           )}
         </>
