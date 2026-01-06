@@ -156,7 +156,10 @@ const configuration: webpack.Configuration = {
       const rootPkg = require('../../package.json');
       // Exclude React, React-DOM, and any React-related libraries from externals
       const deps = Object.keys(rootPkg.dependencies || {}).filter(
-        (dep) => !dep.includes('react') && !dep.includes('lucide') && !dep.includes('remark')
+        (dep) =>
+          !dep.includes('react') &&
+          !dep.includes('lucide') &&
+          !dep.includes('remark'),
       );
       return [
         ...deps,
@@ -168,7 +171,9 @@ const configuration: webpack.Configuration = {
       ];
     } catch (error) {
       // Fallback: only externalize kshana-ink and its deps if package.json can't be read
-      console.warn('Could not read package.json for externals, using minimal externals list');
+      console.warn(
+        'Could not read package.json for externals, using minimal externals list',
+      );
       return [
         'kshana-ink',
         /^kshana-ink\/.*/,
@@ -185,7 +190,7 @@ const configuration: webpack.Configuration = {
       // Stub kshana-ink in renderer
       'kshana-ink': false,
       // Force React resolution to project root
-      'react': path.dirname(require.resolve('react/package.json')),
+      react: path.dirname(require.resolve('react/package.json')),
       'react-dom': path.dirname(require.resolve('react-dom/package.json')),
     },
   },

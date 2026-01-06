@@ -167,6 +167,14 @@
   margin: 0;
 }
 
+.resultContentMarkdown {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  padding: $spacing-sm;
+  border-radius: $radius-sm;
+  margin: 0;
+}
+
 // Think tool styles
 .thinkTool {
   padding: $spacing-sm;
@@ -198,6 +206,26 @@
 .thinkText {
   font-style: italic;
   color: $color-text-primary;
+}
+
+.thinkContent {
+  margin-top: $spacing-sm;
+  padding-left: $spacing-md;
+  padding-top: $spacing-sm;
+  border-top: 1px solid rgba($color-panel-border, 0.3);
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  line-height: 1.6;
+  
+  :global {
+    p {
+      margin-bottom: $spacing-xs;
+      
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+  }
 }
 
 // Dispatch agent tool styles
@@ -313,5 +341,47 @@
 
 .projectStateItem {
   margin-bottom: $spacing-xs;
+}
+
+// Streaming content styles
+.streamingContent {
+  margin-top: $spacing-sm;
+  padding: $spacing-sm;
+  background: rgba($color-accent-blue, 0.05);
+  border-radius: $radius-sm;
+  border-left: 2px solid $color-accent-blue;
+}
+
+.streamingLabel {
+  font-weight: $font-weight-semibold;
+  color: $color-accent-blue;
+  font-size: $font-size-xs;
+  margin-bottom: $spacing-xs;
+}
+
+.streamingPre {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  line-height: 1.6;
+  white-space: normal;
+  word-wrap: break-word;
+  
+  :global {
+    p {
+      margin-bottom: $spacing-xs;
+      
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+    
+    code {
+      font-family: $font-family-mono;
+      background-color: rgba($color-text-primary, 0.1);
+      padding: 2px 4px;
+      border-radius: $radius-sm;
+      font-size: 0.9em;
+    }
+  }
 }
 

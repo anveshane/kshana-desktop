@@ -40,7 +40,7 @@ export default function StoryboardView() {
   const sceneFoldersByNumber = useMemo(() => {
     const map: Record<number, string> = {};
     if (!isLoaded || projectScenes.length === 0) return map;
-    
+
     for (const scene of projectScenes) {
       map[scene.scene_number] = scene.folder;
     }
@@ -57,7 +57,8 @@ export default function StoryboardView() {
       // Check if scene has an approved image and use the actual image_path
       if (scene.image_approval_status === 'approved' && scene.image_path) {
         map[scene.scene_number] = {
-          artifact_id: scene.image_artifact_id || `scene-${scene.scene_number}-image`,
+          artifact_id:
+            scene.image_artifact_id || `scene-${scene.scene_number}-image`,
           artifact_type: 'image',
           scene_number: scene.scene_number,
           file_path: scene.image_path, // Use the actual image_path from scene data

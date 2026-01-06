@@ -21,18 +21,17 @@ import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimeline } from '../../../contexts/TimelineContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
-import { useTimelineData, type TimelineItem } from '../../../hooks/useTimelineData';
+import {
+  useTimelineData,
+  type TimelineItem,
+} from '../../../hooks/useTimelineData';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import { setActiveVideoVersion } from '../../../utils/videoWorkspace';
-import type {
-  Artifact,
-  TimelineMarker,
-} from '../../../types/projectState';
-import type {
-  KshanaTimelineMarker,
-  ImportedClip,
-} from '../../../types/kshana';
+import type { Artifact, TimelineMarker } from '../../../types/projectState';
+import type { KshanaTimelineMarker, ImportedClip } from '../../../types/kshana';
+import type { SceneVersions } from '../../../types/kshana/timeline';
+import { PROJECT_PATHS, createAssetInfo } from '../../../types/kshana';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
 import SceneActionPopover from './SceneActionPopover';
@@ -52,9 +51,20 @@ interface TimelineItemComponentProps {
   editingSceneNumber: number | null;
   editedSceneName: string;
   sceneFolder?: string;
-  onSceneDragStart: (e: React.DragEvent<HTMLDivElement>, sceneNumber: number) => void;
+  activeVersions?: Record<number, SceneVersions>; // sceneNumber -> { image?: number, video?: number }
+  onSceneDragStart: (
+    e: React.DragEvent<HTMLDivElement>,
+    sceneNumber: number,
+  ) => void;
   onSceneDragEnd: () => void;
-  onSceneBlockClick: (e: React.MouseEvent<HTMLDivElement>, sceneNumber: number) => void;
+  onSceneBlockClick: (
+    e: React.MouseEvent<HTMLDivElement>,
+    sceneNumber: number,
+  ) => void;
+  onVideoBlockClick: (
+    e: React.MouseEvent<HTMLDivElement>,
+    item: TimelineItem,
+  ) => void;
   onNameChange: (sceneNumber: number, name: string) => void;
   onEditedNameChange: (name: string) => void;
   onEditingCancel: () => void;
@@ -72,21 +82,64 @@ function TimelineItemComponent({
   editingSceneNumber,
   editedSceneName,
   sceneFolder,
+  activeVersions = {},
   onSceneDragStart,
   onSceneDragEnd,
   onSceneBlockClick,
+  onVideoBlockClick,
   onNameChange,
   onEditedNameChange,
   onEditingCancel,
   onViewDetails,
 }: TimelineItemComponentProps) {
+  const { assetManifest } = useProject();
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [imagePath, setImagePath] = useState<string | null>(null);
 
+  // Construct version-specific video path if active version is set
+  const videoVersionPath = useMemo(() => {
+    if (
+      item.sceneNumber &&
+      activeVersions[item.sceneNumber]?.video &&
+      sceneFolder
+    ) {
+      const version = activeVersions[item.sceneNumber].video!;
+      return `.kshana/agent/scenes/${sceneFolder}/video/v${version}.mp4`;
+    }
+    return item.path;
+  }, [item.sceneNumber, item.path, activeVersions, sceneFolder]);
+
+  // Construct version-specific image path from asset manifest (source of truth)
+  const imageVersionPath = useMemo(() => {
+    if (
+      item.sceneNumber &&
+      activeVersions[item.sceneNumber]?.image &&
+      assetManifest?.assets
+    ) {
+      const version = activeVersions[item.sceneNumber].image!;
+      // Find the image asset with matching scene number and version
+      const imageAsset = assetManifest.assets.find(
+        (asset) =>
+          asset.type === 'scene_image' &&
+          asset.scene_number === item.sceneNumber &&
+          asset.version === version,
+      );
+      if (imageAsset) {
+        return imageAsset.path;
+      }
+    }
+    return item.artifact?.file_path;
+  }, [
+    item.sceneNumber,
+    item.artifact?.file_path,
+    activeVersions,
+    assetManifest,
+  ]);
+
   useEffect(() => {
-    if (item.path) {
+    if (videoVersionPath) {
       resolveAssetPathForDisplay(
-        item.path,
+        videoVersionPath,
         projectDirectory,
         useMockData,
       ).then((resolved) => {
@@ -95,12 +148,13 @@ function TimelineItemComponent({
     } else {
       setVideoPath(null);
     }
-  }, [item.path, projectDirectory, useMockData]);
+  }, [videoVersionPath, projectDirectory, useMockData]);
 
   useEffect(() => {
     if (item.artifact && item.artifact.artifact_type === 'image') {
+      const pathToResolve = imageVersionPath || item.artifact.file_path;
       resolveAssetPathForDisplay(
-        item.artifact.file_path,
+        pathToResolve,
         projectDirectory,
         useMockData,
       ).then(async (resolved) => {
@@ -118,15 +172,25 @@ function TimelineItemComponent({
     } else {
       setImagePath(null);
     }
-  }, [item.artifact?.file_path, projectDirectory, useMockData]);
+  }, [
+    imageVersionPath,
+    item.artifact?.file_path,
+    item.artifact?.artifact_type,
+    projectDirectory,
+    useMockData,
+  ]);
 
   if (item.type === 'video' && videoPath) {
     return (
+      // eslint-disable-next-line jsx-a11y/click-events-have-key-events
       <div
-        className={styles.videoBlock}
+        className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
         style={{
           left: `${left}px`,
           width: `${width}px`,
+        }}
+        onClick={(e) => {
+          onVideoBlockClick(e, item);
         }}
       >
         <video
@@ -144,11 +208,7 @@ function TimelineItemComponent({
   let thumbnailElement: React.ReactNode;
   if (imagePath) {
     thumbnailElement = (
-      <img
-        src={imagePath}
-        alt={item.label}
-        className={styles.sceneThumbnail}
-      />
+      <img src={imagePath} alt={item.label} className={styles.sceneThumbnail} />
     );
   } else if (videoPath) {
     thumbnailElement = (
@@ -246,9 +306,7 @@ function TimelineItemComponent({
         </div>
       )}
       {item.scene && (
-        <div className={styles.sceneDescription}>
-          {item.scene.description}
-        </div>
+        <div className={styles.sceneDescription}>{item.scene.description}</div>
       )}
       {item.scene && sceneFolder && onViewDetails && (
         <div className={styles.sceneFooter}>
@@ -304,6 +362,10 @@ interface TimelinePanelProps {
   onPlayPause?: (playing: boolean) => void;
   // eslint-disable-next-line react/require-default-props
   onDragStateChange?: (dragging: boolean) => void;
+  // eslint-disable-next-line react/require-default-props
+  activeVersions?: Record<number, SceneVersions>;
+  // eslint-disable-next-line react/require-default-props
+  onActiveVersionsChange?: (versions: Record<number, SceneVersions>) => void;
 }
 
 export default function TimelinePanel({
@@ -315,6 +377,8 @@ export default function TimelinePanel({
   onSeek,
   onPlayPause,
   onDragStateChange,
+  activeVersions: externalActiveVersions,
+  onActiveVersionsChange,
 }: TimelinePanelProps) {
   const { projectDirectory } = useWorkspace();
   const {
@@ -328,16 +392,13 @@ export default function TimelinePanel({
     setActiveVersion,
     updateMarkers,
     updateImportedClips,
+    addAsset,
   } = useProject();
-  
+
   // Use unified timeline data hook
-  const {
-    scenes,
-    timelineItems,
-    artifactsByScene,
-    importedVideoArtifacts,
-  } = useTimelineData();
-  
+  const { scenes, timelineItems, artifactsByScene, importedVideoArtifacts } =
+    useTimelineData();
+
   // Initialize zoom level from timeline state
   const [zoomLevel, setZoomLevel] = useState(timelineState.zoom_level);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -452,12 +513,12 @@ export default function TimelinePanel({
       duration: clip.duration_seconds,
       startTime: clip.start_time_seconds,
     }));
-    
+
     // Compare with current state to avoid unnecessary updates
     setImportedVideos((current) => {
       const currentVideosStr = JSON.stringify(current);
       const newVideosStr = JSON.stringify(importedClips);
-      
+
       if (currentVideosStr !== newVideosStr) {
         isUpdatingFromExternalRef.current = true;
         return importedClips;
@@ -467,7 +528,7 @@ export default function TimelinePanel({
   }, [timelineState.imported_clips]);
 
   // Sync imported videos to timeline state when they change locally
-  
+
   useEffect(() => {
     // Skip if this update came from external source
     if (isUpdatingFromExternalRef.current) {
@@ -481,7 +542,7 @@ export default function TimelinePanel({
       duration_seconds: video.duration,
       start_time_seconds: video.startTime,
     }));
-    
+
     // Compare with current timeline state to avoid unnecessary updates
     const currentClipsStr = JSON.stringify(
       timelineState.imported_clips.map((c) => ({
@@ -497,7 +558,7 @@ export default function TimelinePanel({
         startTime: c.start_time_seconds,
       })),
     );
-    
+
     if (currentClipsStr !== newClipsStr) {
       updateImportedClips(kshanaClips);
     }
@@ -527,48 +588,77 @@ export default function TimelinePanel({
   const sceneFoldersByNumber = useMemo(() => {
     const map: Record<number, string> = {};
     if (!projectScenes || projectScenes.length === 0) return map;
-    
+
     projectScenes.forEach((scene) => {
       map[scene.scene_number] = scene.folder;
     });
     return map;
   }, [projectScenes]);
 
-  // Load active versions from timeline state
-  const [activeVersions, setActiveVersions] = useState<Record<number, number>>(
-    () => {
-      const versions: Record<number, number> = {};
-      Object.entries(timelineState.active_versions).forEach(([folder, version]) => {
+  // Load active versions from timeline state or use external prop (with migration)
+  const [internalActiveVersions, setInternalActiveVersions] = useState<
+    Record<number, SceneVersions>
+  >(() => {
+    const versions: Record<number, SceneVersions> = {};
+    Object.entries(timelineState.active_versions).forEach(
+      ([folder, versionData]) => {
         // Extract scene number from folder name (e.g., "scene-001" -> 1)
         const match = folder.match(/scene-(\d+)/);
         if (match) {
           const sceneNumber = parseInt(match[1], 10);
-          versions[sceneNumber] = version;
+
+          // Handle migration from old format (number) to new format (SceneVersions)
+          if (typeof versionData === 'number') {
+            versions[sceneNumber] = { video: versionData };
+          } else if (versionData && typeof versionData === 'object') {
+            versions[sceneNumber] = versionData;
+          }
         }
-      });
-      return versions;
-    },
-  );
+      },
+    );
+    return versions;
+  });
+
+  // Use external activeVersions if provided, otherwise use internal state
+  const activeVersions = externalActiveVersions ?? internalActiveVersions;
+  const setActiveVersions = onActiveVersionsChange ?? setInternalActiveVersions;
 
   // Sync active versions to timeline state when they change
   useEffect(() => {
     if (!projectDirectory || useMockData) return;
 
-    Object.entries(activeVersions).forEach(async ([sceneNumber, version]) => {
-      const sceneFolder = sceneFoldersByNumber[parseInt(sceneNumber, 10)];
-      if (sceneFolder) {
-        // Update timeline state active_versions
-        setActiveVersion(sceneFolder, version);
-        
-        // Update current.txt file
-        try {
-          await setActiveVideoVersion(projectDirectory, sceneFolder, version);
-        } catch (error) {
-          console.error('Failed to update current.txt:', error);
+    Object.entries(activeVersions).forEach(
+      async ([sceneNumber, sceneVersions]) => {
+        const sceneFolder = sceneFoldersByNumber[parseInt(sceneNumber, 10)];
+        if (sceneFolder && sceneVersions) {
+          // Update timeline state active_versions for both image and video
+          if (sceneVersions.image !== undefined) {
+            setActiveVersion(sceneFolder, 'image', sceneVersions.image);
+          }
+          if (sceneVersions.video !== undefined) {
+            setActiveVersion(sceneFolder, 'video', sceneVersions.video);
+
+            // Update current.txt file for video version
+            try {
+              await setActiveVideoVersion(
+                projectDirectory,
+                sceneFolder,
+                sceneVersions.video,
+              );
+            } catch (error) {
+              console.error('Failed to update current.txt:', error);
+            }
+          }
         }
-      }
-    });
-  }, [activeVersions, projectDirectory, useMockData, sceneFoldersByNumber, setActiveVersion]);
+      },
+    );
+  }, [
+    activeVersions,
+    projectDirectory,
+    useMockData,
+    sceneFoldersByNumber,
+    setActiveVersion,
+  ]);
   const {
     selectedScenes,
     selectScene,
@@ -845,12 +935,15 @@ export default function TimelinePanel({
     currentPosition,
   ]);
 
+  // Offset for the timeline content margin
+  const TIMELINE_OFFSET = 10;
+
   // Calculate position from mouse event
   const calculatePositionFromMouse = useCallback(
     (clientX: number): number => {
       if (!tracksRef.current) return currentPosition;
       const rect = tracksRef.current.getBoundingClientRect();
-      const x = clientX - rect.left + scrollLeft;
+      const x = clientX - rect.left + scrollLeft - TIMELINE_OFFSET;
       const seconds = pixelsToSeconds(x, zoomLevel);
       return Math.max(0, Math.min(totalDuration, seconds));
     },
@@ -951,7 +1044,7 @@ export default function TimelinePanel({
       if (!tracksRef.current || !sceneBlocks.length) return null;
 
       const rect = tracksRef.current.getBoundingClientRect();
-      const x = clientX - rect.left + scrollLeft;
+      const x = clientX - rect.left + scrollLeft - TIMELINE_OFFSET;
       const position = pixelsToSeconds(x, zoomLevel);
 
       // Find which scene index to insert before/after
@@ -1001,13 +1094,13 @@ export default function TimelinePanel({
         // Dropping at the end
         const lastScene = sceneBlocks[sceneBlocks.length - 1];
         if (lastScene) {
-        await reorderScenes(
-          draggedSceneNumber,
-          sceneBlocks.length,
-          null, // projectState no longer needed
-          projectDirectory,
-          () => {}, // No-op function for state update
-        );
+          await reorderScenes(
+            draggedSceneNumber,
+            sceneBlocks.length,
+            null, // projectState no longer needed
+            projectDirectory,
+            () => {}, // No-op function for state update
+          );
         }
       } else {
         // Find the index of the dragged scene in sceneBlocks
@@ -1072,6 +1165,28 @@ export default function TimelinePanel({
     [draggedSceneNumber, selectedScenes, selectScene, popoverSceneNumber],
   );
 
+  // Handle video block click
+  const handleVideoBlockClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
+      // Don't handle if we're dragging
+      if (draggedSceneNumber !== null) {
+        return;
+      }
+
+      e.stopPropagation();
+      e.preventDefault();
+
+      // If video has an associated scene, treat it like a scene click
+      if (item.scene) {
+        handleSceneBlockClick(e, item.scene.scene_number);
+      } else {
+        // For videos without scenes (imported videos), seek to the video's start position
+        setCurrentPosition(item.startTime);
+      }
+    },
+    [draggedSceneNumber, handleSceneBlockClick, setCurrentPosition],
+  );
+
   // Handle timeline area scrubbing (click and drag)
   const handleTimelineMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1083,6 +1198,11 @@ export default function TimelinePanel({
 
       // Don't start scrubbing if clicking on a scene block (it has its own handler)
       if (target.closest(`.${styles.sceneBlock}`)) {
+        return;
+      }
+
+      // Don't start scrubbing if clicking on a video block (it has its own handler)
+      if (target.closest(`.${styles.videoBlock}`)) {
         return;
       }
 
@@ -1180,7 +1300,7 @@ export default function TimelinePanel({
     }
   }, []);
 
-  // Handle video import - copy to videos folder
+  // Handle video import - copy to videos/imported folder
   const handleImportVideo = useCallback(async () => {
     if (!projectDirectory) return;
 
@@ -1188,18 +1308,26 @@ export default function TimelinePanel({
       const videoPath = await window.electron.project.selectVideoFile();
       if (!videoPath) return;
 
-      // Create videos folder if it doesn't exist
-      const videosFolder = `${projectDirectory}/videos`;
-      await window.electron.project.createFolder(projectDirectory, 'videos');
+      // Create videos/imported folder structure if it doesn't exist
+      // Similar to ProjectService.createProjectStructure - create nested folders
+      const parts = PROJECT_PATHS.VIDEOS_IMPORTED.split('/');
+      let basePath = projectDirectory;
+      for (const part of parts) {
+        if (part) {
+          await window.electron.project.createFolder(basePath, part);
+          basePath = `${basePath}/${part}`;
+        }
+      }
+      const videosFolder = basePath;
 
-      // Copy video to videos folder
+      // Copy video to videos/imported folder
       const videoFileName =
         videoPath.split('/').pop() || `video-${Date.now()}.mp4`;
       const destPath = await window.electron.project.copy(
         videoPath,
         videosFolder,
       );
-      const relativePath = `videos/${videoFileName}`;
+      const relativePath = `${PROJECT_PATHS.VIDEOS_IMPORTED}/${videoFileName}`;
 
       // Get video duration
       const video = document.createElement('video');
@@ -1208,9 +1336,34 @@ export default function TimelinePanel({
 
       // eslint-disable-next-line compat/compat
       await new Promise<void>((resolve, reject) => {
-        video.onloadedmetadata = () => {
+        video.onloadedmetadata = async () => {
           const { duration } = video;
 
+          // Generate unique asset ID
+          const assetId = `imported-video-${Date.now()}-${videoFileName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+
+          // Create asset info for the manifest
+          const assetInfo = createAssetInfo(
+            assetId,
+            'final_video',
+            relativePath,
+            1,
+            {
+              metadata: {
+                imported: true,
+                duration,
+                title: videoFileName,
+              },
+            },
+          );
+
+          // Save to asset manifest
+          const saved = await addAsset(assetInfo);
+          if (!saved) {
+            console.error('Failed to save imported video to asset manifest');
+          }
+
+          // Update local state and timeline state
           setImportedVideos((prev) => [
             ...prev,
             {
@@ -1220,8 +1373,13 @@ export default function TimelinePanel({
             },
           ]);
 
-          // TODO: Save imported video to asset manifest via ProjectContext
-          console.log('Imported video:', relativePath, duration);
+          console.log(
+            'Imported video:',
+            relativePath,
+            duration,
+            'saved to manifest:',
+            saved,
+          );
 
           resolve();
         };
@@ -1230,7 +1388,7 @@ export default function TimelinePanel({
     } catch {
       // Failed to import video
     }
-  }, [projectDirectory, totalDuration]);
+  }, [projectDirectory, totalDuration, addAsset]);
 
   // Drag handlers removed - not used in unified timeline
 
@@ -1361,12 +1519,14 @@ export default function TimelinePanel({
 
   // Calculate timeline width based on total duration (ensure minimum width)
   const minDuration = Math.max(totalDuration, 10); // At least 10 seconds
-  const timelineWidth = secondsToPixels(minDuration, zoomLevel);
+  // Round up to next multiple of 5 for better visibility (e.g., 38s -> 40s)
+  const maxMarkerTime = Math.ceil(minDuration / 5) * 5;
+  const timelineWidth = secondsToPixels(maxMarkerTime, zoomLevel);
   const playheadPosition = secondsToPixels(currentPosition, zoomLevel);
 
   // Generate time markers for ruler
   const timeMarkers: number[] = [];
-  for (let i = 0; i <= Math.ceil(minDuration); i += 5) {
+  for (let i = 0; i <= maxMarkerTime; i += 5) {
     timeMarkers.push(i);
   }
 
@@ -1453,10 +1613,13 @@ export default function TimelinePanel({
             <VersionSelector
               sceneBlocks={sceneBlocks}
               activeVersions={activeVersions}
-              onVersionSelect={(sceneNumber, version) => {
+              onVersionSelect={(sceneNumber, assetType, version) => {
                 setActiveVersions((prev) => ({
                   ...prev,
-                  [sceneNumber]: version,
+                  [sceneNumber]: {
+                    ...prev[sceneNumber],
+                    [assetType]: version,
+                  },
                 }));
               }}
             />
@@ -1542,11 +1705,11 @@ export default function TimelinePanel({
                         const width = secondsToPixels(item.duration, zoomLevel);
                         const isSelected = Boolean(
                           item.scene &&
-                          selectedScenes.has(item.scene.scene_number),
+                            selectedScenes.has(item.scene.scene_number),
                         );
                         const isSceneDragging = Boolean(
                           item.scene &&
-                          draggedSceneNumber === item.scene.scene_number,
+                            draggedSceneNumber === item.scene.scene_number,
                         );
 
                         const sceneFolder = item.scene
@@ -1566,9 +1729,11 @@ export default function TimelinePanel({
                             editingSceneNumber={editingSceneNumber}
                             editedSceneName={editedSceneName}
                             sceneFolder={sceneFolder}
+                            activeVersions={activeVersions}
                             onSceneDragStart={handleSceneDragStart}
                             onSceneDragEnd={handleSceneDragEnd}
                             onSceneBlockClick={handleSceneBlockClick}
+                            onVideoBlockClick={handleVideoBlockClick}
                             onNameChange={handleNameChange}
                             onEditedNameChange={setEditedSceneName}
                             onViewDetails={handleViewSceneDetails}

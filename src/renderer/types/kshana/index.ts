@@ -24,10 +24,7 @@ export type {
   ProjectResolution,
 } from './manifest';
 
-export {
-  DEFAULT_PROJECT_SETTINGS,
-  createDefaultManifest,
-} from './manifest';
+export { DEFAULT_PROJECT_SETTINGS, createDefaultManifest } from './manifest';
 
 // Entity types (characters, settings, scenes)
 export type {
@@ -61,11 +58,7 @@ export {
 } from './agentProject';
 
 // Asset manifest (.kshana/agent/manifest.json)
-export type {
-  AssetManifest,
-  AssetInfo,
-  AssetType,
-} from './assetManifest';
+export type { AssetManifest, AssetInfo, AssetType } from './assetManifest';
 
 export {
   createDefaultAssetManifest,
@@ -83,6 +76,7 @@ export type {
   ClipTrim,
   MarkerStatus,
   TrackType,
+  SceneVersions,
 } from './timeline';
 
 export {
@@ -94,10 +88,7 @@ export {
 } from './timeline';
 
 // Context index (.kshana/context/index.json)
-export type {
-  ContextIndex,
-  StoredContextMeta,
-} from './context';
+export type { ContextIndex, StoredContextMeta } from './context';
 
 export {
   createContextMeta,
@@ -151,4 +142,3 @@ export const PROJECT_PATHS = {
   CONTEXT_INDEX: '.kshana/context/index.json',
   CONTEXT_CHUNKS: '.kshana/context/chunks',
 } as const;
-

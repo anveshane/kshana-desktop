@@ -58,4 +58,3 @@ export const SCHEMA_VERSION = '1' as const;
  * Agent project file version
  */
 export const AGENT_PROJECT_VERSION = '2.0' as const;
-

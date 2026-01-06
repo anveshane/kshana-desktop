@@ -7,11 +7,14 @@ $color-panel-border: #21262d;
 $color-accent-green: #00E676;
 $color-accent-green-dim: rgba(0, 230, 118, 0.2);
 $color-accent-cyan: #00bcd4;
+$color-accent-blue: #2196f3;
 $color-text-primary: #ffffff;
 $color-text-secondary: #8b949e;
 $color-text-muted: #6e7681;
 $color-error: #f85149;
 $color-warning: #d29922;
+$color-bg-subtle: rgba(255, 255, 255, 0.04);
+
 
 // Status Colors
 $color-status-connected: $color-accent-green;
@@ -84,4 +87,3 @@ $color-timeline-marker-pending: rgba(0, 188, 212, 0.6);
 $color-timeline-marker-processing: rgba(0, 188, 212, 0.9);
 $color-timeline-marker-complete: rgba(0, 230, 118, 0.8);
 $color-timeline-marker-error: rgba(248, 81, 73, 0.8);
-

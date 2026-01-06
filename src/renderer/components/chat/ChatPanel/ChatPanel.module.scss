@@ -6,6 +6,7 @@
   @include flex-column;
   background-color: $color-panel-background;
   border-left: 1px solid $color-panel-border;
+  position: relative; // Ensure sticky works if needed context
 }
 
 .header {

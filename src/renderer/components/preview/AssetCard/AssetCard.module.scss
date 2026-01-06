@@ -123,10 +123,69 @@
   font-size: $font-size-sm;
   color: $color-text-secondary;
   line-height: $line-height-normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  
+  // For key-value pairs display
+  .keyValuePair {
+    display: flex;
+    gap: $spacing-xs;
+    margin-bottom: $spacing-xs;
+    line-height: $line-height-tight;
+    
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+  
+  .keyLabel {
+    color: $color-text-primary;
+    font-weight: $font-weight-semibold;
+    flex-shrink: 0;
+  }
+  
+  .valueText {
+    color: $color-text-secondary;
+    flex: 1;
+    word-wrap: break-word;
+  }
+  
+  .boldText {
+    color: $color-text-primary;
+    font-weight: $font-weight-semibold;
+  }
+  
+  .italicText {
+    font-style: italic;
+  }
+  
+  .markdownText {
+    display: inline;
+    // Limit to 3 lines with ellipsis
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
+  .listContainer {
+    display: flex;
+    flex-direction: column;
+    gap: $spacing-xs;
+  }
+  
+  .listItem {
+    display: flex;
+    gap: $spacing-xs;
+    line-height: $line-height-tight;
+    
+    // Remove default list styling
+    list-style: none;
+    
+    // Limit to 2 lines with ellipsis
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 }
 
 .metadata {

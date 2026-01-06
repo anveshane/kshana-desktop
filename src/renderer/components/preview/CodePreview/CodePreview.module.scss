@@ -74,3 +74,21 @@
   font-size: $font-size-base;
 }
 
+.plainTextEditor {
+  flex: 1;
+  width: 100%;
+  padding: $spacing-md;
+  background-color: $color-background-dark;
+  color: $color-text-primary;
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  line-height: 1.5;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+  overflow-wrap: normal;
+}
+

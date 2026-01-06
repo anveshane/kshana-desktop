@@ -1,10 +1,9 @@
-import { useMemo, useState, useCallback } from 'react';
-import { User, MapPin, Package, Layers, FileText } from 'lucide-react';
+import { useMemo } from 'react';
+import { User, MapPin, Package, Layers } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { MOCK_PROPS as mockPropsData } from '../../../services/project/mockData/mockProps';
 import AssetCard from '../AssetCard';
-import MarkdownPreview from '../MarkdownPreview';
 import styles from './AssetsView.module.scss';
 
 interface CharacterAsset {
@@ -23,19 +22,6 @@ interface LocationAsset {
   imagePath?: string;
 }
 
-interface PlanFile {
-  name: string;
-  displayName: string;
-  path: string;
-}
-
-const PLAN_FILES: PlanFile[] = [
-  { name: 'plot.md', displayName: 'Plot Summary', path: 'plans/plot.md' },
-  { name: 'story.md', displayName: 'Full Story', path: 'plans/story.md' },
-  { name: 'scenes.md', displayName: 'Scene Breakdown', path: 'plans/scenes.md' },
-  { name: 'full_script.md', displayName: 'Full Script', path: 'plans/full_script.md' },
-];
-
 export default function AssetsView() {
   const { projectDirectory } = useWorkspace();
   const {
@@ -45,10 +31,6 @@ export default function AssetsView() {
     settings: projectSettings,
     useMockData,
   } = useProject();
-
-  const [previewPlan, setPreviewPlan] = useState<PlanFile | null>(null);
-  const [planContent, setPlanContent] = useState<string>('');
-  const [isLoadingPlan, setIsLoadingPlan] = useState(false);
 
   // Convert CharacterData from ProjectContext to CharacterAsset format
   const characters: CharacterAsset[] = useMemo(() => {
@@ -62,7 +44,10 @@ export default function AssetsView() {
       description: char.visual_description,
       appearance: char.visual_description,
       // CharacterData uses reference_image_approval_status and reference_image_path
-      imagePath: char.reference_image_approval_status === 'approved' ? char.reference_image_path : undefined,
+      imagePath:
+        char.reference_image_approval_status === 'approved'
+          ? char.reference_image_path
+          : undefined,
     }));
   }, [isLoaded, projectCharacters]);
 
@@ -78,7 +63,10 @@ export default function AssetsView() {
       description: setting.visual_description,
       atmosphere: setting.visual_description, // Settings use visual_description for atmosphere
       // SettingData uses reference_image_approval_status and reference_image_path
-      imagePath: setting.reference_image_approval_status === 'approved' ? setting.reference_image_path : undefined,
+      imagePath:
+        setting.reference_image_approval_status === 'approved'
+          ? setting.reference_image_path
+          : undefined,
     }));
   }, [isLoaded, projectSettings]);
 
@@ -131,35 +119,8 @@ export default function AssetsView() {
 
   const effectiveProjectDir = projectDirectory || '/mock';
 
-  const handleViewPlan = useCallback(async (plan: PlanFile) => {
-    setPreviewPlan(plan);
-    setIsLoadingPlan(true);
-    
-    const planPath = `${effectiveProjectDir}/.kshana/agent/${plan.path}`;
-    
-    try {
-      const content = await window.electron.project.readFile(planPath);
-      if (content !== null) {
-        setPlanContent(content);
-      } else {
-        setPlanContent(`# ${plan.displayName}\n\nContent not available.`);
-      }
-    } catch (error) {
-      console.error('Failed to load plan file:', error);
-      setPlanContent(`# ${plan.displayName}\n\nFailed to load content.`);
-    } finally {
-      setIsLoadingPlan(false);
-    }
-  }, [effectiveProjectDir]);
-
-  const handleClosePlanPreview = useCallback(() => {
-    setPreviewPlan(null);
-    setPlanContent('');
-  }, []);
-
   return (
-    <>
-      <div className={styles.container}>
+    <div className={styles.container}>
       <div className={styles.content}>
         {/* Characters Section */}
         <div className={styles.section}>
@@ -207,9 +168,6 @@ export default function AssetsView() {
                   description={loc.description}
                   imagePath={loc.imagePath}
                   projectDirectory={effectiveProjectDir}
-                  metadata={{
-                    Atmosphere: loc.atmosphere,
-                  }}
                 />
               ))
             ) : (
@@ -244,39 +202,7 @@ export default function AssetsView() {
             ))}
           </div>
         </div>
-
-        {/* Plans Section */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <FileText size={16} />
-            <h3>Plans</h3>
-            <span className={styles.count}>{PLAN_FILES.length}</span>
-          </div>
-          <div className={styles.plansGrid}>
-            {PLAN_FILES.map((plan) => (
-              <button
-                key={plan.name}
-                type="button"
-                className={styles.planItem}
-                onClick={() => handleViewPlan(plan)}
-              >
-                <FileText size={20} className={styles.planIcon} />
-                <span className={styles.planName}>{plan.displayName}</span>
-                <span className={styles.planFileName}>{plan.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        </div>
       </div>
-      {previewPlan && (
-      <MarkdownPreview
-        isOpen={!!previewPlan}
-        title={previewPlan.displayName}
-        content={isLoadingPlan ? 'Loading...' : planContent || 'Loading...'}
-        onClose={handleClosePlanPreview}
-      />
-    )}
-  </>
+    </div>
   );
 }

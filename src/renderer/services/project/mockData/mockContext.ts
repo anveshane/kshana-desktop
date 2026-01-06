@@ -106,4 +106,3 @@ export function getContextEntriesSorted(
         new Date(a.meta.created_at).getTime(),
     );
 }
-

@@ -12,6 +12,8 @@ import type {
   ContextIndex,
   WorkflowPhase,
   ItemApprovalStatus,
+  AssetInfo,
+  AssetType,
 } from '../../types/kshana';
 import {
   PROJECT_PATHS,
@@ -20,11 +22,9 @@ import {
   createDefaultAgentProject,
   createDefaultAssetManifest,
   createDefaultContextIndex,
+  createAssetInfo,
 } from '../../types/kshana';
-import {
-  createMockKshanaProject,
-  createEmptyKshanaProject,
-} from './mockData';
+import { createMockKshanaProject, createEmptyKshanaProject } from './mockData';
 import { generateMockProjectStructure } from './mockData/generateMockStructure';
 
 /**
@@ -52,7 +52,9 @@ export interface ProjectValidation {
  */
 export class ProjectService {
   private projectDirectory: string | null = null;
+
   private currentProject: KshanaProject | null = null;
+
   private useMockData: boolean = false;
 
   /**
@@ -132,7 +134,7 @@ export class ProjectService {
         await this.writeAgentState(directory, mockProject.agentState);
         await this.writeAssetManifest(directory, mockProject.assetManifest);
         await this.writeTimelineState(directory, mockProject.timelineState);
-        
+
         // Write context index if it exists
         if (mockProject.contextIndex) {
           await this.writeJSON(
@@ -147,7 +149,10 @@ export class ProjectService {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to create mock project',
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Failed to create mock project',
         };
       }
     }
@@ -318,11 +323,11 @@ export class ProjectService {
     }
 
     const statusKey = `${field}_approval_status` as keyof typeof scene;
-    (scene as Record<string, unknown>)[statusKey] = status;
+    (scene as unknown as Record<string, unknown>)[statusKey] = status;
 
     if (status === 'approved') {
       const approvedKey = `${field}_approved_at` as keyof typeof scene;
-      (scene as Record<string, unknown>)[approvedKey] = Date.now();
+      (scene as unknown as Record<string, unknown>)[approvedKey] = Date.now();
     }
 
     this.currentProject.agentState.updated_at = Date.now();
@@ -356,6 +361,58 @@ export class ProjectService {
     return { success: true, data: undefined };
   }
 
+  /**
+   * Adds an asset to the asset manifest
+   */
+  async addAssetToManifest(
+    assetInfo: AssetInfo,
+  ): Promise<ProjectResult<AssetInfo>> {
+    if (!this.currentProject || !this.projectDirectory) {
+      return { success: false, error: 'No project open' };
+    }
+
+    // Check if asset with same ID already exists
+    const existingIndex = this.currentProject.assetManifest.assets.findIndex(
+      (asset) => asset.id === assetInfo.id,
+    );
+
+    if (existingIndex >= 0) {
+      // Update existing asset
+      this.currentProject.assetManifest.assets[existingIndex] = assetInfo;
+    } else {
+      // Add new asset
+      this.currentProject.assetManifest.assets.push(assetInfo);
+    }
+
+    if (!this.useMockData) {
+      await this.writeAssetManifest(
+        this.projectDirectory,
+        this.currentProject.assetManifest,
+      );
+    }
+
+    return { success: true, data: assetInfo };
+  }
+
+  /**
+   * Updates the asset manifest
+   */
+  async updateAssetManifest(
+    manifest: AssetManifest,
+  ): Promise<ProjectResult<void>> {
+    if (!this.currentProject || !this.projectDirectory) {
+      return { success: false, error: 'No project open' };
+    }
+
+    this.currentProject.assetManifest = manifest;
+
+    if (!this.useMockData) {
+      await this.writeAssetManifest(this.projectDirectory, manifest);
+    }
+
+    return { success: true, data: undefined };
+  }
+
   // === Private helper methods ===
 
   private async fileExists(path: string): Promise<boolean> {
@@ -370,6 +427,7 @@ export class ProjectService {
   private async readJSON<T>(path: string): Promise<T | null> {
     try {
       const content = await window.electron.project.readFile(path);
+      if (content === null) return null;
       return JSON.parse(content) as T;
     } catch {
       return null;
@@ -381,7 +439,9 @@ export class ProjectService {
     await window.electron.project.writeFile(path, content);
   }
 
-  private async readManifest(directory: string): Promise<KshanaManifest | null> {
+  private async readManifest(
+    directory: string,
+  ): Promise<KshanaManifest | null> {
     return this.readJSON<KshanaManifest>(
       `${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`,
     );
@@ -392,7 +452,10 @@ export class ProjectService {
     manifest: KshanaManifest,
   ): Promise<void> {
     manifest.updated_at = new Date().toISOString();
-    await this.writeJSON(`${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`, manifest);
+    await this.writeJSON(
+      `${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`,
+      manifest,
+    );
   }
 
   private async readAgentState(
@@ -470,12 +533,25 @@ export class ProjectService {
 
     for (const dir of dirs) {
       // createFolder expects basePath and relativePath
+      // Create nested folders step by step to ensure proper path resolution
       const parts = dir.split('/');
       let basePath = directory;
       for (const part of parts) {
         if (part) {
-          await window.electron.project.createFolder(basePath, part);
-          basePath = `${basePath}/${part}`;
+          const newPath = await window.electron.project.createFolder(
+            basePath,
+            part,
+          );
+          // Use the returned normalized path for the next iteration
+          // This ensures we don't accumulate path errors or duplicates
+          if (newPath) {
+            basePath = newPath;
+          } else {
+            // Fallback for safety (though main process should throw or return path)
+            basePath = basePath.endsWith('/')
+              ? `${basePath}${part}`
+              : `${basePath}/${part}`;
+          }
         }
       }
     }
@@ -488,4 +564,3 @@ export class ProjectService {
 export const projectService = new ProjectService();
 
 export default projectService;
-

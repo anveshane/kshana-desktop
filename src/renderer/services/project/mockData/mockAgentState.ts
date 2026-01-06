@@ -130,11 +130,7 @@ export const MOCK_CONTENT_REGISTRY: ContentRegistry = {
   videos: {
     status: 'partial',
     file: '',
-    items: [
-      'scene_001_video_v2',
-      'scene_002_video_v1',
-      'scene_003_video_v3',
-    ],
+    items: ['scene_001_video_v2', 'scene_002_video_v1', 'scene_003_video_v3'],
   },
   audio: {
     status: 'partial',
@@ -271,4 +267,3 @@ export function getNextIncompletePhase(
 
   return null;
 }
-

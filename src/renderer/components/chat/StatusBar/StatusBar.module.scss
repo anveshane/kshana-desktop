@@ -1,0 +1,62 @@
+.container {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  background-color: var(--color-bg-panel, #161b22);
+  border-bottom: 1px solid var(--color-border, #30363d);
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  color: var(--color-text-secondary, #8b949e);
+  min-height: 36px;
+}
+
+.agentName {
+  font-weight: 600;
+  color: var(--color-accent-blue, #58a6ff);
+  margin-right: 8px;
+}
+
+.statusIndicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  flex-shrink: 0;
+
+  &.ready {
+    background-color: var(--color-success, #238636);
+    box-shadow: 0 0 4px var(--color-success, #238636);
+  }
+
+  &.thinking, &.executing {
+    background-color: var(--color-warning, #d29922);
+    box-shadow: 0 0 4px var(--color-warning, #d29922);
+    animation: pulse 1.5s infinite;
+  }
+
+  &.error {
+    background-color: var(--color-danger, #f85149);
+    box-shadow: 0 0 4px var(--color-danger, #f85149);
+  }
+
+  &.completed {
+    background-color: var(--color-accent-primary, #1f6feb);
+  }
+}
+
+.statusText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}

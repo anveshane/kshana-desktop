@@ -16,7 +16,7 @@ jobs:
         id: set_branches
         run: |
           # Hardcoded branch names for now
-          FRONTEND_BRANCH="fix/version-2"
+          FRONTEND_BRANCH="fix/chat-version-1"
           BACKEND_BRANCH="merged-cleanup-fixes"
           echo "FRONTEND_BRANCH=$FRONTEND_BRANCH" >> $GITHUB_OUTPUT
           echo "BACKEND_BRANCH=$BACKEND_BRANCH" >> $GITHUB_OUTPUT

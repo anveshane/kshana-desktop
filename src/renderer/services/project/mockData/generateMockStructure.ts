@@ -3,14 +3,13 @@
  * Generates the complete directory structure with files for mock data
  */
 
-import { MOCK_CHARACTERS } from './mockCharacters';
-import { generateAllCharacterMarkdowns } from './mockCharacters';
-import { MOCK_SETTINGS } from './mockSettings';
-import { generateAllSettingMarkdowns } from './mockSettings';
-import { MOCK_PROPS } from './mockProps';
-import { generateAllPropMarkdowns } from './mockProps';
-import { MOCK_SCENES } from './mockScenes';
-import { generateAllSceneMarkdowns } from './mockScenes';
+import {
+  MOCK_CHARACTERS,
+  generateAllCharacterMarkdowns,
+} from './mockCharacters';
+import { MOCK_SETTINGS, generateAllSettingMarkdowns } from './mockSettings';
+import { MOCK_PROPS, generateAllPropMarkdowns } from './mockProps';
+import { MOCK_SCENES, generateAllSceneMarkdowns } from './mockScenes';
 import {
   generatePlotMarkdown,
   generateStoryMarkdown,
@@ -25,19 +24,24 @@ import {
   resolveTestAssetPath,
 } from './testAssetMapping';
 import { resolveTestAssetPathToAbsolute } from '../../../utils/pathResolver';
-import { getSceneVideoVersions } from './mockAssets';
-import { createMockAssetManifest } from './mockAssets';
-import { copyVideoToScene, setActiveVideoVersion } from '../../../utils/videoWorkspace';
+import { getSceneVideoVersions, createMockAssetManifest } from './mockAssets';
+import {
+  copyVideoToScene,
+  setActiveVideoVersion,
+} from '../../../utils/videoWorkspace';
+import { PROJECT_PATHS } from '../../../types/kshana';
 
 /**
  * Generates the complete mock project structure
  * Creates directories and files for characters, settings, props, and plans
- * 
+ *
  * @param projectDirectory - The root project directory path
  */
 export async function generateMockProjectStructure(
   projectDirectory: string,
 ): Promise<void> {
+  // Note: .kshana/agent structure is already created by ProjectService.createProjectStructure
+  // before this function is called, so we don't need to create it again here
   const agentPath = `${projectDirectory}/.kshana/agent`;
   const charactersPath = `${agentPath}/characters`;
   const settingsPath = `${agentPath}/settings`;
@@ -46,13 +50,9 @@ export async function generateMockProjectStructure(
   const plansPath = `${agentPath}/plans`;
 
   try {
-    // Create base directories
-    await window.electron.project.createFolder(projectDirectory, '.kshana/agent');
-    await window.electron.project.createFolder(agentPath, 'characters');
-    await window.electron.project.createFolder(agentPath, 'settings');
-    await window.electron.project.createFolder(agentPath, 'props');
-    await window.electron.project.createFolder(agentPath, 'scenes');
-    await window.electron.project.createFolder(agentPath, 'plans');
+    // Note: All subdirectories (characters, settings, props, scenes, plans) are already
+    // created by ProjectService.createProjectStructure before this function is called.
+    // We don't need to create them again - just use the existing paths.
 
     // Generate character files
     await generateCharacterFiles(charactersPath);
@@ -82,10 +82,13 @@ async function generateCharacterFiles(charactersPath: string): Promise<void> {
 
   for (const character of MOCK_CHARACTERS) {
     const characterDir = `${charactersPath}/${character.slug}`;
-    
+
     try {
       // Create character directory
-      await window.electron.project.createFolder(charactersPath, character.slug);
+      await window.electron.project.createFolder(
+        charactersPath,
+        character.slug,
+      );
 
       // Write character.md
       const markdown = characterMarkdowns[character.slug];
@@ -112,7 +115,10 @@ async function generateCharacterFiles(charactersPath: string): Promise<void> {
           const copiedFileName = copiedFilePath.split('/').pop() || testImage;
           const copiedFileFullPath = `${characterDir}/${copiedFileName}`;
           if (copiedFileName !== 'image.png') {
-            await window.electron.project.rename(copiedFileFullPath, 'image.png');
+            await window.electron.project.rename(
+              copiedFileFullPath,
+              'image.png',
+            );
           }
         } catch (imageError) {
           console.warn(
@@ -122,7 +128,10 @@ async function generateCharacterFiles(charactersPath: string): Promise<void> {
         }
       }
     } catch (error) {
-      console.warn(`Failed to generate files for character ${character.slug}:`, error);
+      console.warn(
+        `Failed to generate files for character ${character.slug}:`,
+        error,
+      );
       // Continue with next character
     }
   }
@@ -136,7 +145,7 @@ async function generateSettingFiles(settingsPath: string): Promise<void> {
 
   for (const setting of MOCK_SETTINGS) {
     const settingDir = `${settingsPath}/${setting.slug}`;
-    
+
     try {
       // Create setting directory
       await window.electron.project.createFolder(settingsPath, setting.slug);
@@ -166,7 +175,10 @@ async function generateSettingFiles(settingsPath: string): Promise<void> {
           const copiedFileName = copiedFilePath.split('/').pop() || testImage;
           const copiedFileFullPath = `${settingDir}/${copiedFileName}`;
           if (copiedFileName !== 'image.png') {
-            await window.electron.project.rename(copiedFileFullPath, 'image.png');
+            await window.electron.project.rename(
+              copiedFileFullPath,
+              'image.png',
+            );
           }
         } catch (imageError) {
           console.warn(
@@ -176,7 +188,10 @@ async function generateSettingFiles(settingsPath: string): Promise<void> {
         }
       }
     } catch (error) {
-      console.warn(`Failed to generate files for setting ${setting.slug}:`, error);
+      console.warn(
+        `Failed to generate files for setting ${setting.slug}:`,
+        error,
+      );
       // Continue with next setting
     }
   }
@@ -190,7 +205,7 @@ async function generatePropFiles(propsPath: string): Promise<void> {
 
   for (const prop of MOCK_PROPS) {
     const propDir = `${propsPath}/${prop.slug}`;
-    
+
     try {
       // Create prop directory
       await window.electron.project.createFolder(propsPath, prop.slug);
@@ -198,10 +213,7 @@ async function generatePropFiles(propsPath: string): Promise<void> {
       // Write prop.md
       const markdown = propMarkdowns[prop.slug];
       if (markdown) {
-        await window.electron.project.writeFile(
-          `${propDir}/prop.md`,
-          markdown,
-        );
+        await window.electron.project.writeFile(`${propDir}/prop.md`, markdown);
       }
 
       // Props don't have test images mapped, so we skip image copying for now
@@ -224,7 +236,7 @@ async function generateSceneFiles(
 
   for (const scene of MOCK_SCENES) {
     const sceneDir = `${scenesPath}/${scene.folder}`;
-    
+
     try {
       // Create scene directory
       await window.electron.project.createFolder(scenesPath, scene.folder);
@@ -254,7 +266,10 @@ async function generateSceneFiles(
           const copiedFileName = copiedFilePath.split('/').pop() || testImage;
           const copiedFileFullPath = `${sceneDir}/${copiedFileName}`;
           if (copiedFileName !== 'image.png') {
-            await window.electron.project.rename(copiedFileFullPath, 'image.png');
+            await window.electron.project.rename(
+              copiedFileFullPath,
+              'image.png',
+            );
           }
         } catch (imageError) {
           console.warn(
@@ -287,12 +302,12 @@ async function generateSceneFiles(
           try {
             const version = videoAsset.version || 1;
             const testVideo = getTestVideoForScene(scene.scene_number, version);
-            
+
             if (testVideo) {
               const sourcePath = await resolveTestAssetPathToAbsolute(
                 resolveTestAssetPath('video', testVideo),
               );
-              
+
               // Use videoWorkspace utility to copy video to scene folder
               await copyVideoToScene(
                 sourcePath,
@@ -331,7 +346,10 @@ async function generateSceneFiles(
         }
       }
     } catch (error) {
-      console.warn(`Failed to generate files for scene ${scene.folder}:`, error);
+      console.warn(
+        `Failed to generate files for scene ${scene.folder}:`,
+        error,
+      );
       // Continue with next scene
     }
   }
@@ -370,4 +388,3 @@ async function generatePlanFiles(plansPath: string): Promise<void> {
     // Continue - partial generation is okay
   }
 }
-

@@ -288,7 +288,7 @@ export function getSceneApprovalStats(scenes: SceneRef[]): {
 function extractCharacters(scene: SceneRef): string[] {
   const description = scene.description?.toLowerCase() || '';
   const characters: string[] = [];
-  
+
   // Extract known character names from description
   if (description.includes('alice')) {
     characters.push('Alice Chen');
@@ -299,12 +299,12 @@ function extractCharacters(scene: SceneRef): string[] {
   if (description.includes('fatima') || description.includes('dr.')) {
     characters.push('Dr. Fatima Hassan');
   }
-  
+
   // If no characters found, use "The Team" for group scenes
   if (characters.length === 0 && description.includes('team')) {
     characters.push('The Team');
   }
-  
+
   return characters.length > 0 ? characters : ['Alice Chen']; // Default to Alice
 }
 
@@ -313,7 +313,7 @@ function extractCharacters(scene: SceneRef): string[] {
  */
 function inferLocation(scene: SceneRef): string {
   const description = scene.description?.toLowerCase() || '';
-  
+
   if (description.includes('excavation') || description.includes('artifact')) {
     return 'Desert excavation site';
   }
@@ -323,7 +323,11 @@ function inferLocation(scene: SceneRef): string {
   if (description.includes('village')) {
     return 'Dusty village';
   }
-  if (description.includes('tomb') || description.includes('entrance') || description.includes('well')) {
+  if (
+    description.includes('tomb') ||
+    description.includes('entrance') ||
+    description.includes('well')
+  ) {
     return 'Underground tomb entrance';
   }
   if (description.includes('dunes') || description.includes('sahara')) {
@@ -332,7 +336,7 @@ function inferLocation(scene: SceneRef): string {
   if (description.includes('tent') || description.includes('research')) {
     return 'Research tent';
   }
-  
+
   return 'Desert location'; // Default
 }
 
@@ -341,7 +345,7 @@ function inferLocation(scene: SceneRef): string {
  */
 function inferMood(scene: SceneRef): string {
   const description = scene.description?.toLowerCase() || '';
-  
+
   if (description.includes('troubled') || description.includes('warn')) {
     return 'Concerned';
   }
@@ -354,7 +358,7 @@ function inferMood(scene: SceneRef): string {
   if (description.includes('howls') || description.includes('darkness')) {
     return 'Mysterious';
   }
-  
+
   return 'Tense'; // Default
 }
 
@@ -364,7 +368,7 @@ function inferMood(scene: SceneRef): string {
 function inferShotType(scene: SceneRef): string {
   const prompt = scene.image_prompt?.toLowerCase() || '';
   const description = scene.description?.toLowerCase() || '';
-  
+
   if (prompt.includes('close-up') || description.includes('close')) {
     return 'Close-up';
   }
@@ -374,7 +378,7 @@ function inferShotType(scene: SceneRef): string {
   if (prompt.includes('mid')) {
     return 'Mid Shot';
   }
-  
+
   return 'Mid Shot'; // Default
 }
 
@@ -383,17 +387,17 @@ function inferShotType(scene: SceneRef): string {
  */
 function inferDialogue(scene: SceneRef): string {
   const description = scene.description || '';
-  
+
   // Scene 1 has specific dialogue mentioned
   if (scene.scene_number === 1) {
     return '(whispering) "This can\'t be real..."';
   }
-  
+
   // Scene 2 mentions warning
   if (scene.scene_number === 2) {
     return 'Marcus: "We need to be careful with ancient artifacts."';
   }
-  
+
   // Other scenes don't have explicit dialogue in the mock data
   return '';
 }
@@ -412,7 +416,7 @@ export function generateSceneMarkdown(scene: SceneRef): string {
   const shotType = inferShotType(scene);
   const imagePrompt = scene.image_prompt || 'No image prompt available.';
   const dialogue = inferDialogue(scene);
-  
+
   return `# Scene ${scene.scene_number}: ${title}
 
 ## Description
@@ -421,7 +425,7 @@ ${description}
 
 ## Characters
 
-${characters.map(char => `- ${char}`).join('\n')}
+${characters.map((char) => `- ${char}`).join('\n')}
 
 ## Location
 
@@ -456,4 +460,3 @@ export function generateAllSceneMarkdowns(): Record<string, string> {
   }
   return markdowns;
 }
-

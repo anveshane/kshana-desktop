@@ -103,7 +103,11 @@ export function TimelineProvider({ children }: TimelineProviderProps) {
       projectDirectory: string | null,
       onStateUpdate: (state: ProjectState) => void,
     ) => {
-      if (!projectState || !projectState.storyboard_outline || !projectDirectory)
+      if (
+        !projectState ||
+        !projectState.storyboard_outline ||
+        !projectDirectory
+      )
         return;
 
       const currentScenes = [...projectState.storyboard_outline.scenes];
@@ -191,7 +195,9 @@ export function TimelineProvider({ children }: TimelineProviderProps) {
   };
 
   return (
-    <TimelineContext.Provider value={value}>{children}</TimelineContext.Provider>
+    <TimelineContext.Provider value={value}>
+      {children}
+    </TimelineContext.Provider>
   );
 }
 
@@ -202,4 +208,3 @@ export function useTimeline(): TimelineContextType {
   }
   return context;
 }
-
