@@ -117,6 +117,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         selectedFile: null,
         activeContextFiles: [],
       }));
+
+      console.log('[WorkspaceContext] Project opened:', {
+        projectDirectory: path,
+        projectName,
+      });
     } catch {
       setState((prev) => ({ ...prev, isLoading: false }));
     }

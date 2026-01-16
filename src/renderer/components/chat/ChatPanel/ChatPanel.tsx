@@ -783,9 +783,21 @@ export default function ChatPanel() {
       const port = currentState.port ?? 8001;
       const url = new URL(DEFAULT_WS_PATH, `http://127.0.0.1:${port}`);
       url.protocol = 'ws:';
+
+      console.log('[ChatPanel] Connecting to WebSocket:', {
+        projectDirectory,
+        hasProjectDir: !!projectDirectory,
+        port,
+      });
+
       if (projectDirectory) {
         url.searchParams.set('project_dir', projectDirectory);
+        console.log('[ChatPanel] Set project_dir query param:', projectDirectory);
+      } else {
+        console.warn('[ChatPanel] No projectDirectory available - files may not be saved correctly');
       }
+
+      console.log('[ChatPanel] Final WebSocket URL:', url.toString());
 
       return await new Promise((resolve, reject) => {
         const socket = new WebSocket(url.toString());
@@ -943,6 +955,11 @@ export default function ChatPanel() {
 
   // Clear chat and reconnect when workspace changes
   useEffect(() => {
+    console.log('[ChatPanel] projectDirectory changed:', {
+      newValue: projectDirectory,
+      hasValue: !!projectDirectory,
+    });
+
     if (!projectDirectory) return;
     clearChat();
     // Reconnect logic... (simplified from original for brevity, but same intent)
