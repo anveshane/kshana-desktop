@@ -1,27 +1,41 @@
 import { useState, useCallback, useEffect } from 'react';
 import { FileText } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
-import CodePreview from '../CodePreview/CodePreview';
+import MarkdownEditor from '../MarkdownEditor';
 import styles from './PlansView.module.scss';
 
 interface PlanFile {
   name: string;
   displayName: string;
   path: string;
+  category: 'plans' | 'content';
 }
 
 const PLAN_FILES: PlanFile[] = [
-  { name: 'plot.md', displayName: 'Plot Summary', path: 'plans/plot.md' },
-  { name: 'story.md', displayName: 'Full Story', path: 'plans/story.md' },
+  // Content files section
   {
-    name: 'scenes.md',
-    displayName: 'Scene Breakdown',
-    path: 'plans/scenes.md',
+    name: 'content-plan.md',
+    displayName: 'Content Plan',
+    path: 'plans/content-plan.md',
+    category: 'content',
   },
   {
-    name: 'full_script.md',
-    displayName: 'Full Script',
-    path: 'plans/full_script.md',
+    name: 'transcript.md',
+    displayName: 'Transcript',
+    path: 'content/transcript.md',
+    category: 'content',
+  },
+  {
+    name: 'image-placements.md',
+    displayName: 'Image Placements',
+    path: 'content/image-placements.md',
+    category: 'content',
+  },
+  {
+    name: 'video-placements.md',
+    displayName: 'Video Placements',
+    path: 'content/video-placements.md',
+    category: 'content',
   },
 ];
 
@@ -79,16 +93,17 @@ export default function PlansView() {
     return `${effectiveProjectDir}/.kshana/agent/${plan.path}`;
   };
 
+  const contentFiles = PLAN_FILES.filter((f) => f.category === 'content');
+
   return (
     <div className={styles.container}>
       <div className={styles.plansSection}>
         <div className={styles.sectionHeader}>
           <FileText size={16} />
-          <h3>Plans</h3>
-          <span className={styles.count}>{PLAN_FILES.length}</span>
+          <h3>Content Files</h3>
         </div>
         <div className={styles.plansGrid}>
-          {PLAN_FILES.map((plan) => (
+          {contentFiles.map((plan) => (
             <button
               key={plan.name}
               type="button"
@@ -109,9 +124,8 @@ export default function PlansView() {
         {isLoadingPlan ? (
           <div className={styles.loading}>Loading...</div>
         ) : selectedPlan ? (
-          <CodePreview
+          <MarkdownEditor
             content={planContent || ''}
-            extension=".md"
             fileName={selectedPlan.name}
             filePath={getFilePath(selectedPlan)}
           />
