@@ -12,12 +12,16 @@ export interface StatusBarProps {
   agentName?: string;
   status: AgentStatus;
   message?: string;
+  currentPhase?: string;
+  phaseDisplayName?: string;
 }
 
 export default function StatusBar({
   agentName,
   status,
   message,
+  currentPhase,
+  phaseDisplayName,
 }: StatusBarProps) {
   const getStatusClass = () => {
     switch (status) {
@@ -62,6 +66,9 @@ export default function StatusBar({
     <div className={styles.container}>
       <div className={`${styles.statusIndicator} ${getStatusClass()}`} />
       {agentName && <span className={styles.agentName}>[{agentName}]</span>}
+      {phaseDisplayName && (
+        <span className={styles.phaseName}>{phaseDisplayName}</span>
+      )}
       <span className={styles.statusText}>{getStatusText()}</span>
     </div>
   );

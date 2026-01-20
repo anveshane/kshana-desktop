@@ -14,4 +14,5 @@ export interface BackendEnvOverrides {
   llmProvider?: 'gemini' | 'lmstudio';
   googleApiKey?: string;
   projectDir?: string;
+  contextDir?: string; // User workspace context directory (defaults to app.getPath('userData')/context)
 }

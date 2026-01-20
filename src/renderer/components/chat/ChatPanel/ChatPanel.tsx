@@ -6,6 +6,7 @@ import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import MessageList from '../MessageList';
 import ChatInput from '../ChatInput';
 import StatusBar, { AgentStatus } from '../StatusBar';
+import ProjectSelectionDialog from '../ProjectSelectionDialog';
 import styles from './ChatPanel.module.scss';
 
 // Message types that shouldn't create new messages if same type already exists
@@ -29,6 +30,10 @@ export default function ChatPanel() {
   const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
   const [agentName, setAgentName] = useState('Kshana');
   const [statusMessage, setStatusMessage] = useState('');
+  const [currentPhase, setCurrentPhase] = useState<string | undefined>();
+  const [phaseDisplayName, setPhaseDisplayName] = useState<string | undefined>();
+  const [showProjectDialog, setShowProjectDialog] = useState(false);
+  const [projectDialogResolved, setProjectDialogResolved] = useState(false);
 
   const { setConnectionStatus, projectDirectory } = useWorkspace();
 
@@ -125,43 +130,26 @@ export default function ChatPanel() {
     (content: string, type: string, author?: string) => {
       // Always process chunks - create message even with empty content to show thinking state
       const trimmedContent = content || '';
+      
+      // Streaming types that should accumulate in the same message
+      const streamingTypes = [
+        'text_chunk',
+        'agent_text',
+        'coordinator_response',
+        'stream_chunk',
+      ];
+      const isStreamingType = streamingTypes.includes(type);
+      // Normalize stream_chunk to agent_text for comparison
+      const normalizedType = type === 'stream_chunk' ? 'agent_text' : type;
+
       setMessages((prev) => {
-        // Simplified deduplication: check if same content already exists in recent messages
-        // Only check for substantial content (not reasoning/thinking chunks)
-        if (trimmedContent.length > 50) {
-          const contentHash = trimmedContent.substring(0, 100);
-          for (
-            let i = prev.length - 1;
-            i >= Math.max(0, prev.length - 5);
-            i--
-          ) {
-            const msg = prev[i];
-            if (
-              msg.role === 'assistant' &&
-              msg.content &&
-              msg.content.substring(0, 100) === contentHash
-            ) {
-              return prev; // Duplicate found
-            }
-          }
-        }
-
-        // Stream chunks into existing message if available
-        const streamingTypes = [
-          'text_chunk',
-          'agent_text',
-          'coordinator_response',
-          'stream_chunk',
-        ];
-        // Normalize stream_chunk to agent_text for comparison
-        const normalizedType = type === 'stream_chunk' ? 'agent_text' : type;
-
-        // Check if we should append to existing message
-        // Only append to assistant messages (thinking), NOT to tool calls
-        if (streamingTypes.includes(type) && lastAssistantIdRef.current) {
+        // If we're streaming and have an active message, ALWAYS append to it
+        // This matches CLI behavior where chunks accumulate smoothly
+        if (isStreamingType && lastAssistantIdRef.current) {
           const existingMessage = prev.find(
             (msg) => msg.id === lastAssistantIdRef.current,
           );
+          
           if (
             existingMessage &&
             existingMessage.role === 'assistant' &&
@@ -171,7 +159,7 @@ export default function ChatPanel() {
               existingMessage.type === normalizedType)
           ) {
             setIsStreaming(true);
-            // Append content to existing message
+            // Append content to existing message (smooth accumulation like CLI)
             return prev.map((message) => {
               if (message.id === lastAssistantIdRef.current) {
                 const newContent = `${message.content || ''}${trimmedContent}`;
@@ -179,14 +167,48 @@ export default function ChatPanel() {
                   ...message,
                   content: newContent,
                   type: normalizedType, // Update to normalized type
-                  // Ensure author is set if not already
-                  author: message.author || author,
-                  // Update timestamp to show it's active
-                  timestamp: Date.now(),
+                  author: message.author || author || 'Kshana',
+                  timestamp: Date.now(), // Update timestamp to show it's active
                 };
               }
               return message;
             });
+          }
+        }
+
+        // Check for duplicate content only for substantial chunks (not during active streaming)
+        // This prevents duplicate messages when stream restarts
+        // Note: We check if we're currently streaming by seeing if lastAssistantIdRef points to a message
+        const currentlyStreaming = lastAssistantIdRef.current && 
+          prev.some(msg => msg.id === lastAssistantIdRef.current && msg.role === 'assistant');
+        
+        if (trimmedContent.length > 50 && !currentlyStreaming) {
+          const contentHash = trimmedContent.substring(0, 100);
+          for (
+            let i = prev.length - 1;
+            i >= Math.max(0, prev.length - 3);
+            i--
+          ) {
+            const msg = prev[i];
+            if (
+              msg.role === 'assistant' &&
+              msg.content &&
+              msg.type === normalizedType &&
+              msg.content.substring(0, 100) === contentHash
+            ) {
+              // Found duplicate - reuse this message and start streaming into it
+              lastAssistantIdRef.current = msg.id;
+              setIsStreaming(isStreamingType);
+              return prev.map((m) =>
+                m.id === msg.id
+                  ? {
+                      ...m,
+                      content: m.content + trimmedContent,
+                      timestamp: Date.now(),
+                    }
+                  : m,
+              );
+            }
           }
         }
 
@@ -196,17 +218,21 @@ export default function ChatPanel() {
         if (
           lastMessage &&
           lastMessage.role === 'assistant' &&
-          lastMessage.type !== 'tool_call' && // Don't reuse tool calls
-          lastMessage.type === normalizedType &&
-          !lastMessage.content
+          lastMessage.type !== 'tool_call' &&
+          lastMessage.type !== 'agent_question' && // Don't reuse questions
+          (lastMessage.type === normalizedType || 
+           (isStreamingType && (lastMessage.type === 'agent_text' || lastMessage.type === 'stream_chunk'))) &&
+          (!lastMessage.content || lastMessage.content.trim().length === 0)
         ) {
           // Reuse the empty message
-          setIsStreaming(streamingTypes.includes(type));
+          lastAssistantIdRef.current = lastMessage.id;
+          setIsStreaming(isStreamingType);
           return prev.map((msg) =>
             msg.id === lastMessage.id
               ? {
                   ...msg,
                   content: trimmedContent,
+                  type: normalizedType,
                   author: msg.author || author || 'Kshana',
                   timestamp: Date.now(),
                 }
@@ -214,19 +240,19 @@ export default function ChatPanel() {
           );
         }
 
-        // Create new message - always create even if content is empty (shows thinking state)
+        // Create new message for new stream
         const id = makeId();
         lastAssistantIdRef.current = id;
-        setIsStreaming(streamingTypes.includes(type));
+        setIsStreaming(isStreamingType);
         return [
           ...prev,
           {
             id,
             role: 'assistant',
-            type: normalizedType, // Use normalized type
+            type: normalizedType,
             content: trimmedContent,
             timestamp: Date.now(),
-            author: author || 'Kshana', // Default author if not provided
+            author: author || 'Kshana',
           },
         ];
       });
@@ -311,6 +337,7 @@ export default function ChatPanel() {
             case 'connected':
               setAgentStatus('idle');
               setStatusMessage('Connected');
+              window.electron.logger.logStatusChange('idle', agentNameFromStatus, 'Connected');
               // Initial greeting logic with example prompts
               setMessages((prev) => {
                 const hasGreeting = prev.some((msg) => msg.type === 'greeting');
@@ -332,18 +359,23 @@ export default function ChatPanel() {
               // Update status only - don't create placeholder messages
               // Real agent text will come through stream_chunk messages
               debouncedSetStatus('thinking', statusMsg || 'Thinking...');
+              window.electron.logger.logStatusChange('thinking', agentNameFromStatus, statusMsg || 'Thinking...');
               break;
             case 'ready':
               debouncedSetStatus('waiting', statusMsg || 'Waiting for input...');
+              window.electron.logger.logStatusChange('waiting', agentNameFromStatus, statusMsg || 'Waiting for input...');
               break;
             case 'completed':
               debouncedSetStatus('completed', statusMsg || 'Task completed');
+              window.electron.logger.logStatusChange('completed', agentNameFromStatus, statusMsg || 'Task completed');
               break;
             case 'error':
               debouncedSetStatus('error', statusMsg);
+              window.electron.logger.logStatusChange('error', agentNameFromStatus, statusMsg);
               break;
             default:
               setStatusMessage(statusMsg);
+              window.electron.logger.logStatusChange(status, agentNameFromStatus, statusMsg);
           }
           break;
         }
@@ -370,6 +402,29 @@ export default function ChatPanel() {
           // This represents thinking/reasoning that happens BEFORE tool calls start
           const content = (data.content as string) ?? '';
           const done = (data.done as boolean) ?? false;
+
+          // Skip empty chunks
+          if (!content && !done) {
+            break;
+          }
+
+          // FILTER: Skip repetitive meta-commentary messages that make it look like a loop
+          const skipPatterns = [
+            /^I apologize for/i,
+            /^I understand\.? I will now/i,
+            /^I am (still )?stuck/i,
+            /^I am blocked/i,
+            /^I need to (create|transition)/i,
+            /^Please manually/i,
+          ];
+          
+          const trimmedContent = content.trim();
+          const shouldSkip = skipPatterns.some(pattern => pattern.test(trimmedContent));
+          
+          if (shouldSkip && !done) {
+            console.log('[ChatPanel] Skipping redundant thinking message:', trimmedContent.substring(0, 50));
+            break;
+          }
 
           setAgentStatus('thinking'); // Agent is generating reasoning/thinking text
 
@@ -430,6 +485,12 @@ export default function ChatPanel() {
               cleanedResult = cleanThinkingTags(cleanedResult);
             }
 
+            // Calculate duration if available
+            const duration = (data.duration as number) ?? 0;
+            
+            // Log tool completion
+            window.electron.logger.logToolComplete(toolName, cleanedResult, duration, toolStatus === 'error');
+
             // Create message for completed tool call
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
@@ -445,13 +506,45 @@ export default function ChatPanel() {
                 args,
                 status: toolStatus === 'error' ? 'error' : 'completed',
                 result: cleanedResult,
-                duration: 0,
+                duration,
               },
             });
+            
+            // Check for phase transitions in update_project results
+            if (toolName === 'update_project' && cleanedResult && typeof cleanedResult === 'object') {
+              const resultObj = cleanedResult as Record<string, unknown>;
+              
+              // Update current phase from any update_project result
+              if (resultObj.current_phase) {
+                setCurrentPhase(resultObj.current_phase as string);
+              }
+              if (resultObj.new_phase_name) {
+                setPhaseDisplayName(resultObj.new_phase_name as string);
+              }
+              
+              if (resultObj._phaseTransition) {
+                const transition = resultObj._phaseTransition as {
+                  fromPhase: string;
+                  toPhase: string;
+                  displayName?: string;
+                };
+                window.electron.logger.logPhaseTransition(
+                  transition.fromPhase,
+                  transition.toPhase,
+                  true,
+                  `Transitioned to ${transition.displayName || transition.toPhase}`
+                );
+                // Update phase state
+                setCurrentPhase(transition.toPhase);
+                setPhaseDisplayName(transition.displayName || transition.toPhase);
+              }
+            }
           } else if (toolStatus === 'started') {
             // For started tools, only update status (don't create message)
             // This matches CLI which doesn't show "started" messages
             debouncedSetStatus('executing', `Running ${toolName}...`);
+            window.electron.logger.logToolStart(toolName, args);
+            window.electron.logger.logStatusChange('executing', agentName, `Running ${toolName}...`);
           }
           break;
         }
@@ -460,6 +553,9 @@ export default function ChatPanel() {
           const output = (data.output as string) ?? '';
           const responseStatus = data.status as string;
           if (output) {
+            // Log agent response
+            window.electron.logger.logAgentText(output, agentName);
+            
             // Replace last assistant message if it exists (could be agent_text or stream_chunk)
             // to avoid duplicates
             setMessages((prev) => {
@@ -532,9 +628,12 @@ export default function ChatPanel() {
           if (responseStatus === 'completed') {
             setAgentStatus('completed');
             setStatusMessage('Completed');
+            window.electron.logger.logStatusChange('completed', agentName, 'Completed');
           } else if (responseStatus === 'error') {
             setAgentStatus('error');
             setStatusMessage('Error');
+            window.electron.logger.logStatusChange('error', agentName, 'Error');
+            window.electron.logger.logError('An error occurred while processing your request.');
             appendSystemMessage(
               'An error occurred while processing your request.',
               'error',
@@ -563,6 +662,20 @@ export default function ChatPanel() {
           if (question) {
             setAgentStatus('waiting');
             setStatusMessage('Waiting for your input');
+            window.electron.logger.logStatusChange('waiting', agentName, 'Waiting for your input');
+            
+            // Log question
+            const questionOptions = rawOptions
+              ? rawOptions.map((opt) =>
+                  typeof opt === 'string' ? { label: opt } : opt,
+                )
+              : undefined;
+            window.electron.logger.logQuestion(
+              question,
+              questionOptions,
+              questionType === 'confirm',
+              timeout
+            );
 
             // Update existing question message if it exists to avoid duplicates
             setMessages((prev) => {
@@ -635,6 +748,11 @@ export default function ChatPanel() {
           // kshana-ink todo_update: { todos }
           const todos = data.todos as Array<any>;
           if (todos?.length) {
+            // Log todo update
+            window.electron.logger.logTodoUpdate(
+              todos.map((t) => ({ content: t.content || t.id, status: t.status }))
+            );
+            
             if (lastTodoMessageIdRef.current) {
               setMessages((prev) =>
                 prev.map((msg) =>
@@ -664,6 +782,8 @@ export default function ChatPanel() {
           appendSystemMessage(errorMsg, 'error');
           setAgentStatus('error');
           setStatusMessage(errorMsg);
+          window.electron.logger.logError(errorMsg, data as Record<string, unknown>);
+          window.electron.logger.logStatusChange('error', agentName, errorMsg);
           break;
         }
         // ... (Keep other legacy cases if needed or just minimal support)
@@ -681,6 +801,11 @@ export default function ChatPanel() {
   );
 
   const connectWebSocket = useCallback(async (): Promise<WebSocket> => {
+    // Block connection if project dialog is showing
+    if (showProjectDialog && !projectDialogResolved) {
+      throw new Error('Project selection dialog is open. Please choose an option first.');
+    }
+
     // Prevent duplicate connections
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       return wsRef.current;
@@ -813,12 +938,15 @@ export default function ChatPanel() {
       setConnectionState('disconnected');
       throw error;
     }
-  }, [handleServerPayload, projectDirectory, appendSystemMessage]);
+  }, [handleServerPayload, projectDirectory, appendSystemMessage, showProjectDialog, projectDialogResolved]);
 
   const sendResponse = useCallback(
     async (content: string) => {
       // Used for clicking options in QuestionPrompt
       try {
+        // Log user response
+        window.electron.logger.logUserInput(content);
+        
         const socket = await connectWebSocket();
         socket.send(
           JSON.stringify({
@@ -841,6 +969,7 @@ export default function ChatPanel() {
         });
       } catch (error) {
         console.error('Failed to send response', error);
+        window.electron.logger.logError('Failed to send response', { error: (error as Error).message });
       }
     },
     [appendMessage, connectWebSocket],
@@ -848,6 +977,9 @@ export default function ChatPanel() {
 
   const sendMessage = useCallback(
     async (content: string) => {
+      // Log user input
+      window.electron.logger.logUserInput(content);
+      
       appendMessage({
         role: 'user',
         type: 'message',
@@ -856,6 +988,7 @@ export default function ChatPanel() {
 
       setAgentStatus('thinking');
       setStatusMessage('Processing...');
+      window.electron.logger.logStatusChange('thinking', agentName, 'Processing...');
 
       try {
         const socket = await connectWebSocket();
@@ -877,20 +1010,39 @@ export default function ChatPanel() {
           );
         }
       } catch (error) {
-        appendSystemMessage(
-          `Unable to send message: ${(error as Error).message}`,
-          'error',
-        );
+        const errorMsg = `Unable to send message: ${(error as Error).message}`;
+        appendSystemMessage(errorMsg, 'error');
         setAgentStatus('error');
+        window.electron.logger.logError(errorMsg, { error: (error as Error).message });
       }
     },
-    [appendMessage, connectWebSocket, appendSystemMessage],
+    [appendMessage, connectWebSocket, appendSystemMessage, agentName],
   );
 
   useEffect(() => {
     const bootstrap = async () => {
       const state = await window.electron.backend.getState();
       if (state.status === 'ready' && !wsRef.current && !connectingRef.current) {
+        // Check for existing project before connecting
+        if (projectDirectory && !projectDialogResolved) {
+          try {
+            const port = state.port ?? 8001;
+            const response = await fetch(
+              `http://127.0.0.1:${port}/api/v1/project?project_dir=${encodeURIComponent(projectDirectory)}`,
+            );
+            if (response.ok) {
+              const data = await response.json();
+              if (data.exists) {
+                setShowProjectDialog(true);
+                return; // Don't connect yet, wait for user decision
+              }
+            }
+          } catch (error) {
+            console.error('[ChatPanel] Error checking project:', error);
+            // Continue with connection if check fails
+          }
+        }
+        // No project or dialog resolved - proceed with connection
         connectWebSocket().catch(() => undefined);
       }
     };
@@ -903,7 +1055,8 @@ export default function ChatPanel() {
         } else if (
           state.status === 'ready' &&
           !connectingRef.current &&
-          (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)
+          (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) &&
+          projectDialogResolved // Only auto-connect if dialog is resolved
         ) {
           connectWebSocket().catch(() => undefined);
         }
@@ -917,7 +1070,7 @@ export default function ChatPanel() {
         clearTimeout(statusUpdateTimeoutRef.current);
       }
     };
-  }, [connectWebSocket, appendSystemMessage, disconnectWebSocket]);
+  }, [connectWebSocket, appendSystemMessage, disconnectWebSocket, projectDirectory, projectDialogResolved]);
 
   // Clear chat and reconnect when workspace changes
   const prevProjectDirectoryRef = useRef<string | null>(null);
@@ -934,11 +1087,17 @@ export default function ChatPanel() {
       hasValue: !!projectDirectory,
     });
 
-    if (!projectDirectory) return;
+    if (!projectDirectory) {
+      setProjectDialogResolved(false);
+      setShowProjectDialog(false);
+      return;
+    }
     
     clearChat();
+    setProjectDialogResolved(false);
+    setShowProjectDialog(false);
     
-    // Reconnect with new project directory
+    // Reconnect with new project directory (will check for project in bootstrap)
     const reconnect = async () => {
       if (wsRef.current) {
         wsRef.current.close();
@@ -947,6 +1106,23 @@ export default function ChatPanel() {
       try {
         const state = await window.electron.backend.getState();
         if (state.status === 'ready') {
+          // Check for existing project before connecting
+          try {
+            const port = state.port ?? 8001;
+            const response = await fetch(
+              `http://127.0.0.1:${port}/api/v1/project?project_dir=${encodeURIComponent(projectDirectory)}`,
+            );
+            if (response.ok) {
+              const data = await response.json();
+              if (data.exists) {
+                setShowProjectDialog(true);
+                return; // Don't connect yet, wait for user decision
+              }
+            }
+          } catch (error) {
+            console.error('[ChatPanel] Error checking project:', error);
+            // Continue with connection if check fails
+          }
           await connectWebSocket();
         }
       } catch (error) {
@@ -956,42 +1132,68 @@ export default function ChatPanel() {
     reconnect();
   }, [projectDirectory, clearChat, connectWebSocket]);
 
+  const handleProjectContinue = useCallback(() => {
+    setShowProjectDialog(false);
+    setProjectDialogResolved(true);
+    // Now connect WebSocket
+    connectWebSocket().catch(() => undefined);
+  }, [connectWebSocket]);
+
+  const handleProjectStartNew = useCallback(() => {
+    setShowProjectDialog(false);
+    setProjectDialogResolved(true);
+    // Project deletion is handled by ProjectSelectionDialog
+    // Now connect WebSocket
+    connectWebSocket().catch(() => undefined);
+  }, [connectWebSocket]);
+
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
-        <Bot size={18} className={styles.headerIcon} />
-        <span className={styles.headerTitle}>Kshana Assistant</span>
-        <button
-          type="button"
-          className={styles.clearButton}
-          onClick={clearChat}
-          title="Clear chat"
-        >
-          <Trash2 size={14} />
-          <span>Clear</span>
-        </button>
-      </div>
+    <>
+      {showProjectDialog && projectDirectory && (
+        <ProjectSelectionDialog
+          projectDirectory={projectDirectory}
+          onContinue={handleProjectContinue}
+          onStartNew={handleProjectStartNew}
+        />
+      )}
+      <div className={styles.container}>
+        <div className={styles.header}>
+          <Bot size={18} className={styles.headerIcon} />
+          <span className={styles.headerTitle}>Kshana Assistant</span>
+          <button
+            type="button"
+            className={styles.clearButton}
+            onClick={clearChat}
+            title="Clear chat"
+          >
+            <Trash2 size={14} />
+            <span>Clear</span>
+          </button>
+        </div>
 
-      {/* New Status Bar */}
-      <StatusBar
-        agentName={agentName}
-        status={agentStatus}
-        message={statusMessage}
-      />
+        {/* New Status Bar */}
+        <StatusBar
+          agentName={agentName}
+          status={agentStatus}
+          message={statusMessage}
+          currentPhase={currentPhase}
+          phaseDisplayName={phaseDisplayName}
+        />
 
-      <div className={styles.messages}>
-        <MessageList
-          messages={messages}
-          isStreaming={isStreaming}
-          onDelete={deleteMessage}
-          onResponse={sendResponse} // Pass down to MessageBubble
+        <div className={styles.messages}>
+          <MessageList
+            messages={messages}
+            isStreaming={isStreaming}
+            onDelete={deleteMessage}
+            onResponse={sendResponse} // Pass down to MessageBubble
+          />
+        </div>
+
+        <ChatInput
+          disabled={connectionState === 'connecting'}
+          onSend={sendMessage}
         />
       </div>
-
-      <ChatInput
-        disabled={connectionState === 'connecting'}
-        onSend={sendMessage}
-      />
-    </div>
+    </>
   );
 }

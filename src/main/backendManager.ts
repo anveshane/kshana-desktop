@@ -103,6 +103,15 @@ function setupEnvironment(overrides: BackendEnvOverrides): void {
   if (overrides.projectDir) {
     process.env.KSHANA_PROJECT_DIR = overrides.projectDir;
   }
+  // Set context directory to user workspace (not project directory)
+  // This prevents context/index.json from being created in the project
+  if (overrides.contextDir) {
+    process.env.KSHANA_CONTEXT_DIR = overrides.contextDir;
+  } else {
+    // Default to userData/context for desktop app
+    const userDataPath = app.getPath('userData');
+    process.env.KSHANA_CONTEXT_DIR = path.join(userDataPath, 'context');
+  }
 }
 
 class BackendManager extends EventEmitter {

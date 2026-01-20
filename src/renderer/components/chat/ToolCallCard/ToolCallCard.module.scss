@@ -422,6 +422,44 @@
   color: $color-text-secondary;
 }
 
+.cliFilePath {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: $color-accent-green;
+  margin-bottom: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background: rgba($color-accent-green, 0.1);
+  border-radius: $radius-sm;
+  border-left: 2px solid $color-accent-green;
+}
+
+.cliFileSize {
+  color: $color-text-secondary;
+  font-size: 0.9em;
+  margin-left: $spacing-xs;
+}
+
+.cliPreview {
+  margin-top: $spacing-xs;
+  margin-bottom: $spacing-xs;
+  
+  summary {
+    cursor: pointer;
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+    padding: $spacing-xs 0;
+    user-select: none;
+    
+    &:hover {
+      color: $color-text-primary;
+    }
+  }
+}
+
+.cliResultContent {
+  margin-top: $spacing-xs;
+}
+
 .cliResultPre {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
@@ -433,5 +471,39 @@
   word-break: break-word;
   margin: 0;
   line-height: 1.5;
+}
+
+.cliFilePath {
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  color: $color-accent-cyan;
+  margin-bottom: $spacing-xs;
+  font-weight: $font-weight-medium;
+}
+
+.cliFileSize {
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-normal;
+}
+
+.cliPreview {
+  margin-top: $spacing-xs;
+  margin-bottom: $spacing-xs;
+  
+  summary {
+    cursor: pointer;
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+    user-select: none;
+    
+    &:hover {
+      color: $color-text-primary;
+    }
+  }
+}
+
+.cliResultContent {
+  margin-top: $spacing-xs;
 }
 

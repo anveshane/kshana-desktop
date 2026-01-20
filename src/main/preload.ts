@@ -129,6 +129,60 @@ const projectBridge = {
   },
 };
 
+const loggerBridge = {
+  init(): Promise<void> {
+    return ipcRenderer.invoke('logger:init');
+  },
+  logUserInput(content: string): Promise<void> {
+    return ipcRenderer.invoke('logger:user-input', content);
+  },
+  logAgentText(text: string, agentName?: string): Promise<void> {
+    return ipcRenderer.invoke('logger:agent-text', text, agentName);
+  },
+  logToolStart(toolName: string, args?: Record<string, unknown>): Promise<void> {
+    return ipcRenderer.invoke('logger:tool-start', toolName, args);
+  },
+  logToolComplete(
+    toolName: string,
+    result: unknown,
+    duration?: number,
+    isError?: boolean
+  ): Promise<void> {
+    return ipcRenderer.invoke('logger:tool-complete', toolName, result, duration, isError);
+  },
+  logQuestion(
+    question: string,
+    options?: Array<{ label: string; description?: string }>,
+    isConfirmation?: boolean,
+    autoApproveTimeoutMs?: number
+  ): Promise<void> {
+    return ipcRenderer.invoke('logger:question', question, options, isConfirmation, autoApproveTimeoutMs);
+  },
+  logStatusChange(status: string, agentName?: string, message?: string): Promise<void> {
+    return ipcRenderer.invoke('logger:status-change', status, agentName, message);
+  },
+  logPhaseTransition(
+    fromPhase: string,
+    toPhase: string,
+    success: boolean,
+    reason?: string
+  ): Promise<void> {
+    return ipcRenderer.invoke('logger:phase-transition', fromPhase, toPhase, success, reason);
+  },
+  logTodoUpdate(todos: Array<{ content: string; status: string }>): Promise<void> {
+    return ipcRenderer.invoke('logger:todo-update', todos);
+  },
+  logError(error: string, context?: Record<string, unknown>): Promise<void> {
+    return ipcRenderer.invoke('logger:error', error, context);
+  },
+  logSessionEnd(): Promise<void> {
+    return ipcRenderer.invoke('logger:session-end');
+  },
+  getLogPaths(): Promise<{ uiLog: string; phaseLog: string; workflowLog: string }> {
+    return ipcRenderer.invoke('logger:get-paths');
+  },
+};
+
 const electronHandler = {
   ipcRenderer: {
     sendMessage(channel: Channels, ...args: unknown[]) {
@@ -150,6 +204,7 @@ const electronHandler = {
   backend: backendBridge,
   settings: settingsBridge,
   project: projectBridge,
+  logger: loggerBridge,
 };
 
 contextBridge.exposeInMainWorld('electron', electronHandler);

@@ -26,6 +26,7 @@ import {
 } from './settingsManager';
 import fileSystemManager from './fileSystemManager';
 import type { FileChangeEvent } from '../shared/fileSystemTypes';
+import * as desktopLogger from './services/DesktopLogger';
 
 const buildBackendEnv = (
   overrides: BackendEnvOverrides = {},
@@ -357,6 +358,55 @@ fileSystemManager.on('file-change', (event: FileChangeEvent) => {
   }
 });
 
+// Logger IPC handlers
+ipcMain.handle('logger:init', () => {
+  desktopLogger.initUILog();
+});
+
+ipcMain.handle('logger:user-input', (_event, content: string) => {
+  desktopLogger.logUserInput(content);
+});
+
+ipcMain.handle('logger:agent-text', (_event, text: string, agentName?: string) => {
+  desktopLogger.logAgentText(text, agentName);
+});
+
+ipcMain.handle('logger:tool-start', (_event, toolName: string, args?: Record<string, unknown>) => {
+  desktopLogger.logToolStart(toolName, args);
+});
+
+ipcMain.handle('logger:tool-complete', (_event, toolName: string, result: unknown, duration?: number, isError?: boolean) => {
+  desktopLogger.logToolComplete(toolName, result, duration, isError);
+});
+
+ipcMain.handle('logger:question', (_event, question: string, options?: Array<{ label: string; description?: string }>, isConfirmation?: boolean, autoApproveTimeoutMs?: number) => {
+  desktopLogger.logQuestion(question, options, isConfirmation, autoApproveTimeoutMs);
+});
+
+ipcMain.handle('logger:status-change', (_event, status: string, agentName?: string, message?: string) => {
+  desktopLogger.logStatusChange(status, agentName, message);
+});
+
+ipcMain.handle('logger:phase-transition', (_event, fromPhase: string, toPhase: string, success: boolean, reason?: string) => {
+  desktopLogger.logPhaseTransition(fromPhase, toPhase, success, reason);
+});
+
+ipcMain.handle('logger:todo-update', (_event, todos: Array<{ content: string; status: string }>) => {
+  desktopLogger.logTodoUpdate(todos);
+});
+
+ipcMain.handle('logger:error', (_event, error: string, context?: Record<string, unknown>) => {
+  desktopLogger.logError(error, context);
+});
+
+ipcMain.handle('logger:session-end', () => {
+  desktopLogger.logSessionEnd();
+});
+
+ipcMain.handle('logger:get-paths', () => {
+  return desktopLogger.getLogPaths();
+});
+
 if (process.env.NODE_ENV === 'production') {
   const sourceMapSupport = require('source-map-support');
   sourceMapSupport.install();
@@ -502,6 +552,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  desktopLogger.logSessionEnd();
   backendManager.stop().catch((error) => {
     log.error(`Failed to stop backend: ${(error as Error).message}`);
   });
@@ -527,6 +578,9 @@ const startBackendInBackground = () => {
 app
   .whenReady()
   .then(async () => {
+    // Initialize logger for this session
+    desktopLogger.initUILog();
+    
     // Create window first so UI appears immediately
     await createWindow();
 

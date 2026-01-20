@@ -340,15 +340,47 @@ export default function ToolCallCard({
   // CLI-style format: [TOOL] toolName
   const prefix = agentName ? `[${agentName}]` : '[TOOL]';
   
-  // Format result for display
+  // Format result for display - extract key information like file paths
   let resultDisplay = '';
+  let filePath: string | undefined;
+  let fileSize: string | undefined;
+  let preview: string | undefined;
+  
   if (result !== undefined) {
     if (typeof result === 'object' && result !== null) {
+      const resultObj = result as Record<string, unknown>;
+      
+      // Extract file information (common in Task tool results)
+      if ('file_path' in resultObj || 'filePath' in resultObj) {
+        filePath = (resultObj.file_path || resultObj.filePath) as string;
+      }
+      if ('file_saved' in resultObj && filePath) {
+        // File was saved
+      }
+      if ('size' in resultObj) {
+        const size = resultObj.size as number;
+        fileSize = size < 1024 ? `${size} bytes` : `${(size / 1024).toFixed(1)} KB`;
+      }
+      if ('preview' in resultObj) {
+        preview = String(resultObj.preview);
+      }
+      
       // Check if result has content field (like dispatch_content_agent results)
-      if ('content' in result && typeof (result as Record<string, unknown>).content === 'string') {
-        resultDisplay = String((result as Record<string, unknown>).content);
+      if ('content' in resultObj && typeof resultObj.content === 'string') {
+        resultDisplay = String(resultObj.content);
+      } else if ('output' in resultObj && typeof resultObj.output === 'string') {
+        resultDisplay = String(resultObj.output);
+      } else if (filePath && !resultDisplay) {
+        // If we have a file path but no content, show the file path
+        resultDisplay = `File: ${filePath}`;
       } else {
-        resultDisplay = JSON.stringify(result, null, 2);
+        // For other objects, show a summary
+        const keys = Object.keys(resultObj);
+        if (keys.length <= 3) {
+          resultDisplay = JSON.stringify(result, null, 2);
+        } else {
+          resultDisplay = `{${keys.slice(0, 3).join(', ')}...}`;
+        }
       }
     } else {
       resultDisplay = String(result);
@@ -373,12 +405,30 @@ export default function ToolCallCard({
           <span className={styles.cliDuration}> ({formatDuration(duration)})</span>
         )}
       </div>
-      {resultDisplay && (
+      {(filePath || fileSize || resultDisplay) && (
         <div className={styles.cliResult}>
-          {typeof result === 'object' && result !== null && 'content' in result ? (
-            <ReactMarkdown>{resultDisplay}</ReactMarkdown>
-          ) : (
-            <pre className={styles.cliResultPre}>{resultDisplay}</pre>
+          {filePath && (
+            <div className={styles.cliFilePath}>
+              📄 {filePath}
+              {fileSize && <span className={styles.cliFileSize}> ({fileSize})</span>}
+            </div>
+          )}
+          {preview && (
+            <div className={styles.cliPreview}>
+              <details>
+                <summary>Preview</summary>
+                <pre className={styles.cliResultPre}>{preview}</pre>
+              </details>
+            </div>
+          )}
+          {resultDisplay && (
+            <div className={styles.cliResultContent}>
+              {typeof result === 'object' && result !== null && 'content' in result ? (
+                <ReactMarkdown>{resultDisplay}</ReactMarkdown>
+              ) : (
+                <pre className={styles.cliResultPre}>{resultDisplay}</pre>
+              )}
+            </div>
           )}
         </div>
       )}

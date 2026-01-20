@@ -620,13 +620,13 @@ export default function TimelinePanel({
   // Sync active versions to timeline state when they change
   // Use ref to track previous serialized state to avoid infinite loops
   const prevActiveVersionsRef = useRef<string>('');
-  
+
   useEffect(() => {
     if (!projectDirectory) return;
 
     // Serialize current activeVersions for comparison
     const serializedActiveVersions = JSON.stringify(activeVersions);
-    
+
     // Check if timeline state already matches what we're trying to set
     // Convert timelineState.active_versions to the same format for comparison
     const timelineVersions: Record<number, SceneVersions> = {};
@@ -646,7 +646,7 @@ export default function TimelinePanel({
       );
     }
     const serializedTimelineVersions = JSON.stringify(timelineVersions);
-    
+
     // Only update if activeVersions changed AND doesn't match timeline state
     // This prevents circular updates when timeline state changes trigger activeVersions changes
     if (
@@ -655,7 +655,7 @@ export default function TimelinePanel({
     ) {
       return;
     }
-    
+
     prevActiveVersionsRef.current = serializedActiveVersions;
 
     Object.entries(activeVersions).forEach(
@@ -672,10 +672,10 @@ export default function TimelinePanel({
             timelineVersion?.video !== sceneVersions.video;
 
           // Update timeline state active_versions for both image and video
-          if (needsImageUpdate) {
+          if (needsImageUpdate && sceneVersions.image !== undefined) {
             setActiveVersion(sceneFolder, 'image', sceneVersions.image);
           }
-          if (needsVideoUpdate) {
+          if (needsVideoUpdate && sceneVersions.video !== undefined) {
             setActiveVersion(sceneFolder, 'video', sceneVersions.video);
 
             // Update current.txt file for video version
@@ -683,7 +683,7 @@ export default function TimelinePanel({
               await setActiveVideoVersion(
                 projectDirectory,
                 sceneFolder,
-                sceneVersions.video,
+                sceneVersions.video!,
               );
             } catch (error) {
               console.error('Failed to update current.txt:', error);
@@ -787,8 +787,7 @@ export default function TimelinePanel({
         } else {
           const scene = scenes.find((s) => s.scene_number === sceneNumber);
           setMarkdownContent(
-            `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
-              scene?.description || 'No details available.'
+            `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${scene?.description || 'No details available.'
             }`,
           );
         }
@@ -796,8 +795,7 @@ export default function TimelinePanel({
         console.error('Failed to load scene markdown:', error);
         const scene = scenes.find((s) => s.scene_number === sceneNumber);
         setMarkdownContent(
-          `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
-            scene?.description || 'No details available.'
+          `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${scene?.description || 'No details available.'
           }`,
         );
       } finally {
@@ -841,7 +839,7 @@ export default function TimelinePanel({
       const sceneEndTime =
         sceneBlocks.length > 0
           ? sceneBlocks[sceneBlocks.length - 1].startTime +
-            sceneBlocks[sceneBlocks.length - 1].duration
+          sceneBlocks[sceneBlocks.length - 1].duration
           : 0;
       let currentTime = sceneEndTime;
       const videos = importedVideoArtifacts.map((artifact) => {
@@ -1139,7 +1137,7 @@ export default function TimelinePanel({
             sceneBlocks.length,
             null, // projectState no longer needed
             projectDirectory,
-            () => {}, // No-op function for state update
+            () => { }, // No-op function for state update
           );
         }
       } else {
@@ -1153,7 +1151,7 @@ export default function TimelinePanel({
             dropInsertIndex,
             null, // projectState no longer needed
             projectDirectory,
-            () => {}, // No-op function for state update
+            () => { }, // No-op function for state update
           );
         }
       }
@@ -1654,13 +1652,14 @@ export default function TimelinePanel({
               sceneBlocks={sceneBlocks}
               activeVersions={activeVersions}
               onVersionSelect={(sceneNumber, assetType, version) => {
-                setActiveVersions((prev) => ({
-                  ...prev,
+                const newVersions: Record<number, SceneVersions> = {
+                  ...activeVersions,
                   [sceneNumber]: {
-                    ...prev[sceneNumber],
+                    ...activeVersions[sceneNumber],
                     [assetType]: version,
                   },
-                }));
+                };
+                setActiveVersions(newVersions);
               }}
             />
             {/* eslint-disable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
@@ -1745,11 +1744,11 @@ export default function TimelinePanel({
                         const width = secondsToPixels(item.duration, zoomLevel);
                         const isSelected = Boolean(
                           item.scene &&
-                            selectedScenes.has(item.scene.scene_number),
+                          selectedScenes.has(item.scene.scene_number),
                         );
                         const isSceneDragging = Boolean(
                           item.scene &&
-                            draggedSceneNumber === item.scene.scene_number,
+                          draggedSceneNumber === item.scene.scene_number,
                         );
 
                         const sceneFolder = item.scene
