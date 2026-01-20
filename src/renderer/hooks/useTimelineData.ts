@@ -60,6 +60,13 @@ export function useTimelineData(): TimelineData {
     if (!isLoaded || projectScenes.length === 0) return map;
 
     projectScenes.forEach((scene: SceneRef) => {
+      // Helper function to safely parse dates
+      const parseDate = (dateValue: string | number | null | undefined): string => {
+        if (!dateValue) return new Date().toISOString();
+        const date = new Date(dateValue);
+        return isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+      };
+
       // Check if scene has approved video (highest priority)
       if (scene.video_approval_status === 'approved' && scene.video_path) {
         map[scene.scene_number] = {
@@ -68,9 +75,7 @@ export function useTimelineData(): TimelineData {
           artifact_type: 'video',
           scene_number: scene.scene_number,
           file_path: scene.video_path,
-          created_at: scene.video_approved_at
-            ? new Date(scene.video_approved_at).toISOString()
-            : new Date().toISOString(),
+          created_at: parseDate(scene.video_approved_at),
         };
       } else if (
         scene.image_approval_status === 'approved' &&
@@ -83,9 +88,7 @@ export function useTimelineData(): TimelineData {
           artifact_type: 'image',
           scene_number: scene.scene_number,
           file_path: scene.image_path,
-          created_at: scene.image_approved_at
-            ? new Date(scene.image_approved_at).toISOString()
-            : new Date().toISOString(),
+          created_at: parseDate(scene.image_approved_at),
         };
       }
     });
@@ -102,18 +105,31 @@ export function useTimelineData(): TimelineData {
       .filter(
         (asset) => asset.type === 'scene_video' || asset.type === 'final_video',
       )
-      .map((asset) => ({
-        artifact_id: asset.id,
-        artifact_type: 'video',
-        file_path: asset.path,
-        created_at: new Date(asset.created_at).toISOString(),
-        scene_number: asset.scene_number,
-        metadata: {
-          title: asset.path.split('/').pop(),
-          duration: asset.metadata?.duration,
-          imported: asset.metadata?.imported,
-        },
-      }));
+      .map((asset) => {
+        // Validate and parse created_at date
+        let createdAt: string;
+        if (asset.created_at) {
+          const date = new Date(asset.created_at);
+          createdAt = isNaN(date.getTime())
+            ? new Date().toISOString()
+            : date.toISOString();
+        } else {
+          createdAt = new Date().toISOString();
+        }
+
+        return {
+          artifact_id: asset.id,
+          artifact_type: 'video',
+          file_path: asset.path,
+          created_at: createdAt,
+          scene_number: asset.scene_number,
+          metadata: {
+            title: asset.path.split('/').pop(),
+            duration: asset.metadata?.duration,
+            imported: asset.metadata?.imported,
+          },
+        };
+      });
   }, [assetManifest]);
 
   // Separate imported videos from scene videos
