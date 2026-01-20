@@ -101,8 +101,19 @@ export default function MessageBubble({
   // Render tool call card
   if (isToolCall && message.meta) {
     const toolName = (message.meta.toolName as string) || 'tool';
-    // Hide certain tools that are rendered elsewhere (like todo_write)
-    const HIDDEN_TOOLS = new Set(['todo_write']);
+    // Hide internal tools that shouldn't be displayed to users
+    const HIDDEN_TOOLS = new Set([
+      'todo_write',
+      'update_project',
+      'write_file',
+      'read_file',
+      'read_project',
+      'write_placement_plan',
+      'read_placement_plan',
+      'update_phase',
+      'transition_phase',
+      'update_plan_stage',
+    ]);
     if (HIDDEN_TOOLS.has(toolName)) {
       return null; // Don't render hidden tools
     }
@@ -204,11 +215,15 @@ export default function MessageBubble({
             <span className={styles.role}>
               <span className={styles.agentName}>[{agentName}]</span>
             </span>
+          ) : message.role === 'assistant' ? (
+            <span className={styles.role}>
+              <span className={styles.agentName}>[Orchestrator]</span>
+            </span>
           ) : (
             <span className={styles.role}>{roleLabels[message.role]}</span>
           )}
 
-          {message.type && message.type !== 'message' && (
+          {message.type && message.type !== 'message' && message.type !== 'agent_text' && message.type !== 'stream_chunk' && (
             <span className={styles.type}>{message.type}</span>
           )}
           <span className={styles.time}>

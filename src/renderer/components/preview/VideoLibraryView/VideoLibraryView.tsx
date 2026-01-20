@@ -20,14 +20,12 @@ interface VideoCardProps {
   artifact: Artifact;
   formatDate: (dateString: string) => string;
   projectDirectory: string | null;
-  useMockData: boolean;
 }
 
 function VideoCard({
   artifact,
   formatDate,
   projectDirectory,
-  useMockData,
 }: VideoCardProps) {
   const [videoPath, setVideoPath] = useState<string>('');
 
@@ -35,11 +33,10 @@ function VideoCard({
     resolveAssetPathForDisplay(
       artifact.file_path,
       projectDirectory,
-      useMockData,
     ).then((resolved) => {
       setVideoPath(resolved);
     });
-  }, [artifact.file_path, projectDirectory, useMockData]);
+  }, [artifact.file_path, projectDirectory]);
 
   return (
     <div className={styles.videoCard}>
@@ -92,7 +89,7 @@ export default function VideoLibraryView({
   projectScenes = [],
 }: VideoLibraryViewProps) {
   const { projectDirectory } = useWorkspace();
-  const { isLoading, useMockData, assetManifest } = useProject();
+  const { isLoading, assetManifest } = useProject();
 
   // Create scene folder map
   const sceneFoldersByNumber = useMemo(() => {
@@ -212,14 +209,14 @@ export default function VideoLibraryView({
       return;
     }
 
-    resolveAssetPathForDisplay(sceneImagePath, projectDirectory, useMockData)
+    resolveAssetPathForDisplay(sceneImagePath, projectDirectory)
       .then((resolved) => {
         setResolvedSceneImagePath(resolved);
       })
       .catch(() => {
         setResolvedSceneImagePath(null);
       });
-  }, [sceneImagePath, projectDirectory, useMockData]);
+  }, [sceneImagePath, projectDirectory]);
 
   // Handle video play/pause
   const handlePlayPause = useCallback(() => {
@@ -373,11 +370,10 @@ export default function VideoLibraryView({
     resolveAssetPathForDisplay(
       versionPath,
       projectDirectory || null,
-      useMockData,
     ).then((resolved) => {
       setCurrentVideoPath(resolved);
     });
-  }, [versionPath, projectDirectory, useMockData]);
+  }, [versionPath, projectDirectory]);
 
   // Update video source when current video changes
   // Don't switch videos during dragging - wait until drag ends
@@ -575,8 +571,8 @@ export default function VideoLibraryView({
     onPlaybackStateChange,
   ]);
 
-  // Show empty state if no project and not using mock data
-  if (!projectDirectory && !useMockData) {
+  // Show empty state if no project
+  if (!projectDirectory) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>
@@ -625,7 +621,6 @@ export default function VideoLibraryView({
                   artifact={artifact}
                   formatDate={formatDate}
                   projectDirectory={projectDirectory || null}
-                  useMockData={useMockData}
                 />
               ))}
             </div>

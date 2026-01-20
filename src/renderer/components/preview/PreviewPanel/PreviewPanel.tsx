@@ -76,24 +76,38 @@ export default function PreviewPanel() {
   });
 
   // Update activeVersions when timelineState changes (with migration)
+  // Use ref to track previous serialized state to avoid infinite loops
+  const prevActiveVersionsRef = useRef<string>('');
+  
   useEffect(() => {
-    if (timelineState?.active_versions) {
-      const versions: Record<number, SceneVersions> = {};
-      Object.entries(timelineState.active_versions).forEach(
-        ([folder, versionData]) => {
-          const match = folder.match(/scene-(\d+)/);
-          if (match) {
-            const sceneNumber = parseInt(match[1], 10);
+    if (!timelineState?.active_versions) {
+      prevActiveVersionsRef.current = '';
+      return;
+    }
 
-            // Handle migration from old format (number) to new format (SceneVersions)
-            if (typeof versionData === 'number') {
-              versions[sceneNumber] = { video: versionData };
-            } else if (versionData && typeof versionData === 'object') {
-              versions[sceneNumber] = versionData;
-            }
+    const versions: Record<number, SceneVersions> = {};
+    Object.entries(timelineState.active_versions).forEach(
+      ([folder, versionData]) => {
+        const match = folder.match(/scene-(\d+)/);
+        if (match) {
+          const sceneNumber = parseInt(match[1], 10);
+
+          // Handle migration from old format (number) to new format (SceneVersions)
+          if (typeof versionData === 'number') {
+            versions[sceneNumber] = { video: versionData };
+          } else if (versionData && typeof versionData === 'object') {
+            versions[sceneNumber] = versionData;
           }
-        },
-      );
+        }
+      },
+    );
+
+    // Serialize to compare if content actually changed
+    const serializedVersions = JSON.stringify(versions);
+    
+    // Only update if content actually changed
+    if (serializedVersions !== prevActiveVersionsRef.current) {
+      prevActiveVersionsRef.current = serializedVersions;
       setActiveVersions(versions);
     }
   }, [timelineState?.active_versions]);

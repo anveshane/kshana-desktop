@@ -126,32 +126,22 @@ export default function ChatPanel() {
       // Always process chunks - create message even with empty content to show thinking state
       const trimmedContent = content || '';
       setMessages((prev) => {
-        // Check if this content is already in a recent tool call result to avoid duplicates
+        // Simplified deduplication: check if same content already exists in recent messages
         // Only check for substantial content (not reasoning/thinking chunks)
-        if (
-          trimmedContent.length > 100 &&
-          !trimmedContent.includes('<think>') &&
-          !trimmedContent.includes('<think>')
-        ) {
+        if (trimmedContent.length > 50) {
+          const contentHash = trimmedContent.substring(0, 100);
           for (
             let i = prev.length - 1;
-            i >= Math.max(0, prev.length - 10);
+            i >= Math.max(0, prev.length - 5);
             i--
           ) {
             const msg = prev[i];
-            if (msg.type === 'tool_call' && msg.meta?.result) {
-              const resultStr =
-                typeof msg.meta.result === 'string'
-                  ? msg.meta.result
-                  : JSON.stringify(msg.meta.result);
-              // If the tool result contains this exact content (or a large portion), skip it
-              const contentToCheck = trimmedContent.substring(
-                0,
-                Math.min(200, trimmedContent.length),
-              );
-              if (resultStr.includes(contentToCheck)) {
-                return prev;
-              }
+            if (
+              msg.role === 'assistant' &&
+              msg.content &&
+              msg.content.substring(0, 100) === contentHash
+            ) {
+              return prev; // Duplicate found
             }
           }
         }
@@ -255,6 +245,32 @@ export default function ChatPanel() {
     }
   }, []);
 
+  // Internal tools that should not be displayed to users
+  const HIDDEN_TOOLS = useRef(new Set([
+    'todo_write',
+    'update_project',
+    'write_file',
+    'read_file',
+    'read_project',
+    'write_placement_plan',
+    'read_placement_plan',
+    'update_phase',
+    'transition_phase',
+    'update_plan_stage',
+  ]));
+
+  // Debounce status updates to prevent flicker
+  const statusUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debouncedSetStatus = useCallback((status: AgentStatus, message: string) => {
+    if (statusUpdateTimeoutRef.current) {
+      clearTimeout(statusUpdateTimeoutRef.current);
+    }
+    statusUpdateTimeoutRef.current = setTimeout(() => {
+      setAgentStatus(status);
+      setStatusMessage(message);
+    }, 100); // 100ms debounce
+  }, []);
+
   /**
    * Handle server payload from kshana-ink WebSocket.
    * kshana-ink messages have the format: { type, sessionId, timestamp, data: {...} }
@@ -266,83 +282,68 @@ export default function ChatPanel() {
       const messageType = payload.type as string;
 
       // Extract optional agent name logic (if provided by backend)
-      const currentAgentName =
-        (data.agentName as string) ??
-        (payload.agentName as string) ??
-        agentName;
-      if (currentAgentName !== agentName) {
-        setAgentName(currentAgentName);
-      }
+      // Use functional update to avoid dependency on agentName
+      setAgentName((prevAgentName) => {
+        const currentAgentName =
+          (data.agentName as string) ??
+          (payload.agentName as string) ??
+          prevAgentName;
+        return currentAgentName;
+      });
 
       switch (messageType) {
         case 'status': {
-          // kshana-ink status: { status: 'connected' | 'ready' | 'busy' | 'completed' | 'error', message?: string }
+          // kshana-ink status: { status: 'connected' | 'ready' | 'busy' | 'completed' | 'error', message?: string, agentName?: string }
           const statusMsg =
             (data.message as string) ??
             (data.status as string) ??
             'Status update';
           const status = data.status as string;
+          const agentNameFromStatus = (data.agentName as string) ?? agentName;
 
-          if (status === 'connected') {
-            setAgentStatus('idle');
-            setStatusMessage('Connected');
-            // Initial greeting logic with example prompts
-            setMessages((prev) => {
-              const hasGreeting = prev.some((msg) => msg.type === 'greeting');
-              if (hasGreeting) return prev;
-              return [
-                ...prev,
-                {
-                  id: makeId(),
-                  role: 'system',
-                  type: 'greeting',
-                  content:
-                    'Welcome to Kshana! Describe your story idea and I\'ll help you create a video.\n\n**Example prompts:**\n\n* "A story about a robot learning to dance"\n* "Create a video about a magical forest adventure"\n* "An epic tale of a knight and a dragon"',
-                  timestamp: Date.now(),
-                },
-              ];
-            });
-          } else if (status === 'busy') {
-            setAgentStatus('thinking');
-            setStatusMessage(statusMsg || 'Processing...');
-            // Show a thinking message when busy status is received
-            // This will be updated by actual stream_chunk messages when they arrive
-            setMessages((prev) => {
-              // Check if last message is already a thinking/assistant message
-              const lastMsg = prev[prev.length - 1];
-              if (
-                lastMsg &&
-                lastMsg.role === 'assistant' &&
-                lastMsg.type === 'agent_text' &&
-                !lastMsg.content
-              ) {
-                // Already have a thinking message, just update timestamp
-                return prev;
-              }
-              // Create new thinking message
-              const thinkingId = makeId();
-              lastAssistantIdRef.current = thinkingId;
-              setIsStreaming(true);
-              return [
-                ...prev,
-                {
-                  id: thinkingId,
-                  role: 'assistant',
-                  type: 'agent_text',
-                  content: '',
-                  author: agentName,
-                  timestamp: Date.now(),
-                },
-              ];
-            });
-          } else if (status === 'completed') {
-            setAgentStatus('completed');
-            setStatusMessage('Task completed');
-          } else if (status === 'error') {
-            setAgentStatus('error');
-            setStatusMessage(statusMsg);
-          } else {
-            setStatusMessage(statusMsg);
+          // Update agent name if it changed
+          if (agentNameFromStatus !== agentName) {
+            setAgentName(agentNameFromStatus);
+          }
+
+          // Map status to agent status with debouncing
+          switch (status) {
+            case 'connected':
+              setAgentStatus('idle');
+              setStatusMessage('Connected');
+              // Initial greeting logic with example prompts
+              setMessages((prev) => {
+                const hasGreeting = prev.some((msg) => msg.type === 'greeting');
+                if (hasGreeting) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: makeId(),
+                    role: 'system',
+                    type: 'greeting',
+                    content:
+                      'Welcome to Kshana!\n\nPaste an SRT transcript or enter a documentary script.\nThe system will detect SRT format automatically.\n\n**Style:** Cinematic Realism\n\n**Example prompts:**\n\n* Paste a full SRT transcript to begin\n* A 10-minute documentary script about coral reefs',
+                    timestamp: Date.now(),
+                  },
+                ];
+              });
+              break;
+            case 'busy':
+              // Update status only - don't create placeholder messages
+              // Real agent text will come through stream_chunk messages
+              debouncedSetStatus('thinking', statusMsg || 'Thinking...');
+              break;
+            case 'ready':
+              debouncedSetStatus('waiting', statusMsg || 'Waiting for input...');
+              break;
+            case 'completed':
+              debouncedSetStatus('completed', statusMsg || 'Task completed');
+              break;
+            case 'error':
+              debouncedSetStatus('error', statusMsg);
+              break;
+            default:
+              setStatusMessage(statusMsg);
           }
           break;
         }
@@ -397,141 +398,60 @@ export default function ChatPanel() {
           const { result } = data;
           const { error } = data;
 
-          if (toolStatus === 'started') {
-            // Tool is starting - create new tool call message
-            // Ensure it appears at the bottom by appending after any current thinking messages
-            setAgentStatus('executing');
-            setStatusMessage(`Running ${toolName}...`);
+          // Skip hidden/internal tools entirely
+          if (HIDDEN_TOOLS.current.has(toolName)) {
+            break;
+          }
 
-            const startTime = Date.now();
-            const seq = (toolCallSequenceRef.current.get(toolName) ?? 0) + 1;
-            toolCallSequenceRef.current.set(toolName, seq);
-            const toolKey = `${toolName}-${seq}`;
-            const toolCallId = makeId();
+          // Only show tool calls when completed (not when started)
+          // This matches CLI behavior and reduces noise
+          if (toolStatus === 'completed' || toolStatus === 'error') {
+            debouncedSetStatus('thinking', 'Processing...');
 
-            // Clear any active assistant message ref so tool call appears as new message
-            // This ensures thinking messages don't append to tool calls, and tool calls don't append to thinking
+            // Clean thinking/reasoning content from result if it exists
+            let cleanedResult = result ?? error;
+            const cleanThinkingTags = (text: string): string => {
+              return text
+                .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                .replace(/<think>[\s\S]*?<\/redacted_reasoning>/gi, '')
+                .replace(/<think[\s\S]*?\/>/gi, '')
+                .trim();
+            };
+
+            if (
+              cleanedResult &&
+              typeof cleanedResult === 'object' &&
+              'content' in cleanedResult
+            ) {
+              const content = cleanedResult.content as string;
+              const cleanedContent = cleanThinkingTags(content);
+              cleanedResult = { ...cleanedResult, content: cleanedContent };
+            } else if (typeof cleanedResult === 'string') {
+              cleanedResult = cleanThinkingTags(cleanedResult);
+            }
+
+            // Create message for completed tool call
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
 
-            // Create tool call message - this creates a separate UI (executing status)
-            // It will appear below any existing thinking messages
-            const messageId = appendMessage({
+            appendMessage({
               role: 'system',
               type: 'tool_call',
               content: '',
               author: agentName,
               meta: {
-                toolCallId,
+                toolCallId: makeId(),
                 toolName,
                 args,
-                status: 'executing',
-                startTime,
+                status: toolStatus === 'error' ? 'error' : 'completed',
+                result: cleanedResult,
+                duration: 0,
               },
             });
-
-            // Track this tool call by messageId so we can update it when it completes
-            // This allows us to update the correct message even if thinking happens between start and completion
-            activeToolCallsRef.current.set(toolKey, {
-              messageId,
-              startTime,
-              toolName,
-            });
-          } else if (toolStatus === 'completed' || toolStatus === 'error') {
-            // Tool completed - find the most recent started tool call with this name
-            setAgentStatus('thinking');
-
-            // Find the most recent active tool call for this tool name
-            let toolCall:
-              | { messageId: string; startTime: number; toolName: string }
-              | undefined;
-            let toolKey: string | undefined;
-
-            // Search backwards through sequence numbers
-            const maxSeq = toolCallSequenceRef.current.get(toolName) ?? 0;
-            for (let seq = maxSeq; seq > 0; seq--) {
-              const key = `${toolName}-${seq}`;
-              const candidate = activeToolCallsRef.current.get(key);
-              if (candidate) {
-                toolCall = candidate;
-                toolKey = key;
-                break;
-              }
-            }
-
-            if (toolCall) {
-              const duration = Date.now() - toolCall.startTime;
-              const toolCallId = makeId();
-
-              // Clean thinking/reasoning content from result if it exists
-              // Thinking content should already be shown in separate messages before tool call
-              let cleanedResult = result ?? error;
-              const cleanThinkingTags = (text: string): string => {
-                // Remove <think>...</think> or <think>...</think> blocks
-                return text
-                  .replace(/<think>[\s\S]*?<\/think>/gi, '')
-                  .replace(/<think>[\s\S]*?<\/redacted_reasoning>/gi, '')
-                  .replace(/<think[\s\S]*?\/>/gi, '')
-                  .trim();
-              };
-
-              if (
-                cleanedResult &&
-                typeof cleanedResult === 'object' &&
-                'content' in cleanedResult
-              ) {
-                const content = cleanedResult.content as string;
-                const cleanedContent = cleanThinkingTags(content);
-                cleanedResult = { ...cleanedResult, content: cleanedContent };
-              } else if (typeof cleanedResult === 'string') {
-                cleanedResult = cleanThinkingTags(cleanedResult);
-              }
-
-              // Create a NEW message for completed tool call (separate UI from executing)
-              // Don't update the existing executing message - create a new one at the bottom
-              // This ensures both executing and completed states have separate UIs
-              lastAssistantIdRef.current = null; // Ensure it's a new message, not appended to thinking
-              setIsStreaming(false);
-
-              appendMessage({
-                role: 'system',
-                type: 'tool_call',
-                content: '',
-                author: agentName,
-                meta: {
-                  toolCallId,
-                  toolName,
-                  args, // Use args from completion event
-                  status: toolStatus === 'error' ? 'error' : 'completed',
-                  result: cleanedResult,
-                  duration,
-                },
-              });
-
-              if (toolKey) {
-                activeToolCallsRef.current.delete(toolKey);
-              }
-            } else {
-              // Fallback: create new message if tool call wasn't tracked
-              // Don't append - create as new message below thinking
-              const toolCallId = makeId();
-              lastAssistantIdRef.current = null; // Ensure it's a new message
-              setIsStreaming(false);
-              appendMessage({
-                role: 'system',
-                type: 'tool_call',
-                content: '',
-                author: agentName,
-                meta: {
-                  toolCallId,
-                  toolName,
-                  args,
-                  status: toolStatus === 'error' ? 'error' : 'completed',
-                  result: result ?? error,
-                  duration: 0,
-                },
-              });
-            }
+          } else if (toolStatus === 'started') {
+            // For started tools, only update status (don't create message)
+            // This matches CLI which doesn't show "started" messages
+            debouncedSetStatus('executing', `Running ${toolName}...`);
           }
           break;
         }
@@ -757,12 +677,33 @@ export default function ChatPanel() {
           break;
       }
     },
-    [appendAssistantChunk, appendMessage, appendSystemMessage, agentName],
+    [appendAssistantChunk, appendMessage, appendSystemMessage, debouncedSetStatus],
   );
 
   const connectWebSocket = useCallback(async (): Promise<WebSocket> => {
+    // Prevent duplicate connections
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       return wsRef.current;
+    }
+
+    // Prevent concurrent connection attempts
+    if (connectingRef.current) {
+      // Wait for existing connection attempt
+      return new Promise((resolve, reject) => {
+        const checkInterval = setInterval(() => {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            clearInterval(checkInterval);
+            resolve(wsRef.current);
+          } else if (!connectingRef.current) {
+            clearInterval(checkInterval);
+            reject(new Error('Connection attempt failed'));
+          }
+        }, 100);
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          reject(new Error('Connection timeout'));
+        }, 10000);
+      });
     }
 
     if (reconnectTimeoutRef.current) {
@@ -770,7 +711,9 @@ export default function ChatPanel() {
       reconnectTimeoutRef.current = null;
     }
 
+    connectingRef.current = true;
     setConnectionState('connecting');
+    
     try {
       const currentState = await window.electron.backend.getState();
       if (currentState.status !== 'ready') {
@@ -806,27 +749,52 @@ export default function ChatPanel() {
         const timeout = setTimeout(() => {
           if (socket.readyState !== WebSocket.OPEN) {
             socket.close();
+            connectingRef.current = false;
             reject(new Error('WebSocket connection timeout'));
           }
         }, 10000);
 
         socket.onopen = () => {
           clearTimeout(timeout);
+          connectingRef.current = false;
           setConnectionState('connected');
           resolve(socket);
         };
 
-        socket.onerror = () => {
+        socket.onerror = (error) => {
           clearTimeout(timeout);
+          connectingRef.current = false;
+          console.error('[ChatPanel] WebSocket error:', error);
+          appendSystemMessage(
+            'WebSocket connection error. Check if backend is running.',
+            'error',
+          );
+          reject(error);
         };
 
         socket.onclose = (event) => {
           clearTimeout(timeout);
+          connectingRef.current = false;
           setConnectionState('disconnected');
           wsRef.current = null;
-          if (event.code !== 1000) {
+          if (event.code !== 1000 && !reconnectTimeoutRef.current) {
+            // Connection lost - attempt reconnection (only if not already reconnecting)
+            appendSystemMessage(
+              'Connection to backend lost. Attempting to reconnect...',
+              'error',
+            );
             reconnectTimeoutRef.current = setTimeout(() => {
-              connectWebSocket().catch(() => {});
+              reconnectTimeoutRef.current = null;
+              connectWebSocket()
+                .then(() => {
+                  appendSystemMessage('Reconnected to backend successfully', 'status');
+                })
+                .catch((err) => {
+                  appendSystemMessage(
+                    `Reconnection failed: ${(err as Error).message}. Will retry...`,
+                    'error',
+                  );
+                });
             }, 3000);
           }
         };
@@ -841,10 +809,11 @@ export default function ChatPanel() {
         };
       });
     } catch (error) {
+      connectingRef.current = false;
       setConnectionState('disconnected');
       throw error;
     }
-  }, [handleServerPayload, setConnectionStatus, projectDirectory]);
+  }, [handleServerPayload, projectDirectory, appendSystemMessage]);
 
   const sendResponse = useCallback(
     async (content: string) => {
@@ -859,7 +828,7 @@ export default function ChatPanel() {
         );
         awaitingResponseRef.current = false;
         setAgentStatus('thinking');
-        setStatusMessage('Thinking...');
+        setStatusMessage('Processing...');
 
         // Clear question ref since we've responded
         lastQuestionMessageIdRef.current = null;
@@ -886,7 +855,7 @@ export default function ChatPanel() {
       });
 
       setAgentStatus('thinking');
-      setStatusMessage('Thinking...');
+      setStatusMessage('Processing...');
 
       try {
         const socket = await connectWebSocket();
@@ -921,7 +890,7 @@ export default function ChatPanel() {
   useEffect(() => {
     const bootstrap = async () => {
       const state = await window.electron.backend.getState();
-      if (state.status === 'ready' && !wsRef.current) {
+      if (state.status === 'ready' && !wsRef.current && !connectingRef.current) {
         connectWebSocket().catch(() => undefined);
       }
     };
@@ -934,14 +903,9 @@ export default function ChatPanel() {
         } else if (
           state.status === 'ready' &&
           !connectingRef.current &&
-          !wsRef.current
+          (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)
         ) {
-          connectingRef.current = true;
-          connectWebSocket()
-            .catch(() => undefined)
-            .finally(() => {
-              connectingRef.current = false;
-            });
+          connectWebSocket().catch(() => undefined);
         }
       },
     );
@@ -949,30 +913,48 @@ export default function ChatPanel() {
     return () => {
       unsubscribeBackend();
       disconnectWebSocket();
+      if (statusUpdateTimeoutRef.current) {
+        clearTimeout(statusUpdateTimeoutRef.current);
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [connectWebSocket, appendSystemMessage, disconnectWebSocket]);
 
   // Clear chat and reconnect when workspace changes
+  const prevProjectDirectoryRef = useRef<string | null>(null);
   useEffect(() => {
+    // Only reconnect if projectDirectory actually changed
+    if (projectDirectory === prevProjectDirectoryRef.current) {
+      return;
+    }
+    
+    prevProjectDirectoryRef.current = projectDirectory || null;
+    
     console.log('[ChatPanel] projectDirectory changed:', {
       newValue: projectDirectory,
       hasValue: !!projectDirectory,
     });
 
     if (!projectDirectory) return;
+    
     clearChat();
-    // Reconnect logic... (simplified from original for brevity, but same intent)
+    
+    // Reconnect with new project directory
     const reconnect = async () => {
-      if (wsRef.current) wsRef.current.close();
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
       try {
         const state = await window.electron.backend.getState();
-        if (state.status === 'ready') await connectWebSocket();
-      } catch {}
+        if (state.status === 'ready') {
+          await connectWebSocket();
+        }
+      } catch (error) {
+        console.error('[ChatPanel] Reconnect failed:', error);
+      }
     };
     reconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectDirectory]);
+  }, [projectDirectory, clearChat, connectWebSocket]);
 
   return (
     <div className={styles.container}>

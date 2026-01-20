@@ -331,154 +331,54 @@ export default function ToolCallCard({
   agentName,
   streamingContent,
 }: ToolCallCardProps) {
-  // Always expand if executing, error, needs_confirmation, or has result/streaming content
-  const [isExpanded, setIsExpanded] = useState(
-    status === 'executing' ||
-      status === 'error' ||
-      status === 'needs_confirmation' ||
-      result !== undefined ||
-      streamingContent !== undefined,
-  );
-
-  useEffect(() => {
-    if (
-      status === 'executing' ||
-      status === 'needs_confirmation' ||
-      result !== undefined ||
-      streamingContent !== undefined
-    ) {
-      setIsExpanded(true);
-    }
-  }, [status, result, streamingContent]);
-
-  // Special rendering for think tool
-  if (toolName === 'think') {
-    return <>{renderThinkTool(args, status)}</>;
+  // CLI-style: Only show completed/error tools (not executing/started)
+  // This matches the behavior we set in ChatPanel where we only show completed tools
+  if (status === 'executing' || status === 'started') {
+    return null; // Don't show executing/started state - matches CLI behavior
   }
 
-  // Special rendering for dispatch_agent (planning) tool
-  if (toolName === 'dispatch_agent') {
-    return <>{renderDispatchAgentTool(args, status, result)}</>;
+  // CLI-style format: [TOOL] toolName
+  const prefix = agentName ? `[${agentName}]` : '[TOOL]';
+  
+  // Format result for display
+  let resultDisplay = '';
+  if (result !== undefined) {
+    if (typeof result === 'object' && result !== null) {
+      // Check if result has content field (like dispatch_content_agent results)
+      if ('content' in result && typeof (result as Record<string, unknown>).content === 'string') {
+        resultDisplay = String((result as Record<string, unknown>).content);
+      } else {
+        resultDisplay = JSON.stringify(result, null, 2);
+      }
+    } else {
+      resultDisplay = String(result);
+    }
   }
 
-  // Special rendering for project state tools
-  if (toolName === 'write_project_state' || toolName === 'read_project_state') {
-    return <>{renderProjectStateTool(toolName, args, status)}</>;
+  // Truncate long results for cleaner display
+  const MAX_RESULT_LENGTH = 500;
+  if (resultDisplay.length > MAX_RESULT_LENGTH) {
+    resultDisplay = resultDisplay.substring(0, MAX_RESULT_LENGTH) + '...';
   }
-
-  // Standard tool display
-  const isExecuting = status === 'executing';
-  const displayName = getDisplayName(toolName, isExecuting);
-  const toolCallStr = formatToolCall(toolName, args);
-
-  const getStatusIcon = () => {
-    switch (status) {
-      case 'executing':
-        return null; // No loader/icon for executing status
-      case 'completed':
-        return (
-          <CheckCircle2 size={14} className={styles.statusIconCompleted} />
-        );
-      case 'error':
-        return <XCircle size={14} className={styles.statusIconError} />;
-      case 'needs_confirmation':
-        return (
-          <AlertCircle
-            size={14}
-            className={styles.statusIconNeedsConfirmation}
-          />
-        );
-      default:
-        return <div className={styles.statusIconDefault}>○</div>;
-    }
-  };
-
-  const getBorderColor = () => {
-    switch (status) {
-      case 'executing':
-        return styles.borderExecuting;
-      case 'completed':
-        return styles.borderCompleted;
-      case 'error':
-        return styles.borderError;
-      case 'needs_confirmation':
-        return styles.borderNeedsConfirmation;
-      default:
-        return styles.borderDefault;
-    }
-  };
 
   return (
-    <div className={`${styles.container} ${getBorderColor()}`}>
-      <div className={styles.header}>
-        <button
-          type="button"
-          className={styles.expandButton}
-          onClick={() => setIsExpanded(!isExpanded)}
-          aria-expanded={isExpanded}
-        >
-          {isExpanded ? (
-            <ChevronDown size={14} className={styles.chevron} />
-          ) : (
-            <ChevronRight size={14} className={styles.chevron} />
-          )}
-        </button>
-        {getStatusIcon()}
-        <span className={styles.toolName}>
-          {agentName && (
-            <span className={styles.agentName}>[{agentName}] </span>
-          )}
-          {displayName}
-        </span>
-        {duration !== undefined && status !== 'executing' && (
-          <span className={styles.duration}>({formatDuration(duration)})</span>
+    <div className={styles.container}>
+      <div className={styles.cliStyle}>
+        <span className={styles.cliPrefix}>{prefix}</span>
+        <span className={styles.cliToolName}>{toolName}</span>
+        {status === 'error' && (
+          <span className={styles.cliError}> (error)</span>
+        )}
+        {duration !== undefined && (
+          <span className={styles.cliDuration}> ({formatDuration(duration)})</span>
         )}
       </div>
-      <div className={styles.toolCallSummary}>
-        <code className={styles.toolCallCode}>{toolCallStr}</code>
-      </div>
-      {(isExpanded || streamingContent) && (
-        <div className={styles.content}>
-          {streamingContent && (
-            <div className={styles.streamingContent}>
-              <div className={styles.streamingLabel}>Thinking:</div>
-              <div className={styles.streamingPre}>
-                <ReactMarkdown>{streamingContent}</ReactMarkdown>
-              </div>
-            </div>
-          )}
-          {status === 'error' && result !== undefined && (
-            <div className={styles.errorResult}>
-              <span className={styles.errorLabel}>Error:</span>
-              <span className={styles.errorMessage}>
-                {typeof result === 'object'
-                  ? JSON.stringify(result, null, 2)
-                  : String(result)}
-              </span>
-            </div>
-          )}
-          {status === 'completed' && result !== undefined && (
-            <div className={styles.result}>
-              <span className={styles.resultLabel}>Result:</span>
-              {typeof result === 'object' && result !== null ? (
-                // Check if result has content field (like dispatch_content_agent results)
-                'content' in result &&
-                typeof (result as Record<string, unknown>).content ===
-                  'string' ? (
-                  <div className={styles.resultContentMarkdown}>
-                    <ReactMarkdown>
-                      {String((result as Record<string, unknown>).content)}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  <pre className={styles.resultContent}>
-                    {JSON.stringify(result, null, 2)}
-                  </pre>
-                )
-              ) : (
-                <pre className={styles.resultContent}>{String(result)}</pre>
-              )}
-            </div>
+      {resultDisplay && (
+        <div className={styles.cliResult}>
+          {typeof result === 'object' && result !== null && 'content' in result ? (
+            <ReactMarkdown>{resultDisplay}</ReactMarkdown>
+          ) : (
+            <pre className={styles.cliResultPre}>{resultDisplay}</pre>
           )}
         </div>
       )}

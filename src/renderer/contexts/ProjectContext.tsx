@@ -59,9 +59,6 @@ interface ProjectState {
 
   /** Context index */
   contextIndex: ContextIndex | null;
-
-  /** Whether using mock data */
-  useMockData: boolean;
 }
 
 /**
@@ -80,12 +77,6 @@ interface ProjectActions {
 
   /** Close the current project */
   closeProject: () => void;
-
-  /** Enable/disable mock data mode */
-  setUseMockData: (useMock: boolean) => void;
-
-  /** Load mock data directly */
-  loadMockProject: () => void;
 
   /** Update the current workflow phase */
   updatePhase: (phase: WorkflowPhase) => Promise<void>;
@@ -170,7 +161,6 @@ const initialState: ProjectState = {
   assetManifest: null,
   timelineState: { ...DEFAULT_TIMELINE_STATE },
   contextIndex: null,
-  useMockData: false,
 };
 
 /**
@@ -183,41 +173,25 @@ const ProjectContext = createContext<ProjectContextType | null>(null);
  */
 interface ProjectProviderProps {
   children: ReactNode;
-  /** Start with mock data */
-  initialMockData?: boolean;
 }
 
 /**
  * Project Provider component
  */
-export function ProjectProvider({
-  children,
-  initialMockData = false,
-}: ProjectProviderProps) {
-  const [state, setState] = useState<ProjectState>(() => ({
-    ...initialState,
-    useMockData: initialMockData,
-  }));
+export function ProjectProvider({ children }: ProjectProviderProps) {
+  const [state, setState] = useState<ProjectState>(initialState);
 
   // Get workspace context for sync
   const { projectDirectory } = useWorkspace();
   const lastLoadedDir = useRef<string | null>(null);
 
-  // Sync mock data setting with service
-  useEffect(() => {
-    projectService.setUseMockData(state.useMockData);
-  }, [state.useMockData]);
-
-  // Sync with WorkspaceContext - auto-load mock data when directory changes
+  // Sync with WorkspaceContext - auto-load project when directory changes
   useEffect(() => {
     if (!projectDirectory) {
       // Directory was cleared - close project
       if (lastLoadedDir.current) {
         projectService.closeProject();
-        setState((prev) => ({
-          ...initialState,
-          useMockData: prev.useMockData,
-        }));
+        setState(initialState);
         lastLoadedDir.current = null;
       }
       return;
@@ -226,15 +200,13 @@ export function ProjectProvider({
     // Don't reload if same directory
     if (projectDirectory === lastLoadedDir.current) return;
 
-    // Auto-load with mock data when opening any project directory
-    const loadWithMockData = async () => {
+    // Auto-load project when opening a project directory
+    const loadProject = async () => {
       setState((prev) => ({
         ...prev,
         isLoading: true,
         error: null,
-        useMockData: true,
       }));
-      projectService.setUseMockData(true);
 
       const result = await projectService.openProject(projectDirectory);
 
@@ -245,7 +217,6 @@ export function ProjectProvider({
           isLoaded: true,
           isLoading: false,
           error: null,
-          useMockData: true,
           manifest: project.manifest,
           agentState: project.agentState,
           assetManifest: project.assetManifest,
@@ -257,15 +228,69 @@ export function ProjectProvider({
         setState((prev) => ({
           ...prev,
           isLoading: false,
-          error: null,
+          error: result.error,
           isLoaded: false,
         }));
         lastLoadedDir.current = null;
       }
     };
 
-    loadWithMockData();
+    loadProject();
   }, [projectDirectory]);
+
+  // Listen for file changes and reload project state when relevant files change
+  useEffect(() => {
+    if (!projectDirectory || !state.isLoaded) return;
+
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const filePath = event.path;
+      
+      // Reload project when key files change
+      if (
+        filePath.includes('.kshana/agent/project.json') ||
+        filePath.includes('.kshana/agent/manifest.json') ||
+        filePath.includes('.kshana/context/index.json')
+      ) {
+        // Clear existing timeout
+        if (debounceTimeout) {
+          clearTimeout(debounceTimeout);
+        }
+
+        // Debounce rapid file changes
+        debounceTimeout = setTimeout(async () => {
+          try {
+            const result = await projectService.openProject(projectDirectory);
+            if (result.success) {
+              const project = result.data;
+              setState((prev) => ({
+                ...prev,
+                manifest: project.manifest,
+                agentState: project.agentState,
+                assetManifest: project.assetManifest,
+                timelineState: project.timelineState,
+                contextIndex: project.contextIndex,
+              }));
+            } else {
+              console.error('[ProjectContext] Failed to reload project:', result.error);
+              // Don't show error to user - file might be temporarily locked
+            }
+          } catch (error) {
+            console.error('[ProjectContext] Error reloading project:', error);
+            // Don't show error to user - file might be temporarily locked
+          }
+        }, 300); // 300ms debounce
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      if (debounceTimeout) {
+        clearTimeout(debounceTimeout);
+      }
+    };
+  }, [projectDirectory, state.isLoaded]);
 
   // Load project from directory
   const loadProject = useCallback(
@@ -342,22 +367,8 @@ export function ProjectProvider({
   // Close project
   const closeProject = useCallback(() => {
     projectService.closeProject();
-    setState({ ...initialState, useMockData: state.useMockData });
-  }, [state.useMockData]);
-
-  // Set mock data mode
-  const setUseMockData = useCallback((useMock: boolean) => {
-    setState((prev) => ({ ...prev, useMockData: useMock }));
+    setState(initialState);
   }, []);
-
-  // Load mock project directly
-  const loadMockProject = useCallback(() => {
-    setState((prev) => ({ ...prev, useMockData: true }));
-    projectService.setUseMockData(true);
-
-    // Use a placeholder directory for mock data
-    loadProject('/mock/desert-survival-story');
-  }, [loadProject]);
 
   // Update phase
   const updatePhase = useCallback(async (phase: WorkflowPhase) => {
@@ -409,7 +420,8 @@ export function ProjectProvider({
   const saveTimelineState = useCallback(
     async (timelineState: KshanaTimelineState) => {
       await projectService.saveTimelineState(timelineState);
-      setState((prev) => ({ ...prev, timelineState }));
+      // Don't update state here - it's already current when called from auto-save
+      // This prevents infinite loops in the auto-save effect
     },
     [],
   );
@@ -522,22 +534,67 @@ export function ProjectProvider({
   );
 
   // Auto-save timeline state with debouncing
+  // Use refs to track previous serialized values to avoid infinite loops with object dependencies
+  const prevTimelineStateRef = useRef<string>('');
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timelineStateRef = useRef(state.timelineState);
+  
+  // Keep ref in sync with state
   useEffect(() => {
-    if (!state.isLoaded || state.useMockData) return;
+    timelineStateRef.current = state.timelineState;
+  }, [state.timelineState]);
+  
+  useEffect(() => {
+    if (!state.isLoaded) {
+      prevTimelineStateRef.current = '';
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      return;
+    }
 
-    const timeoutId = setTimeout(() => {
-      saveTimelineState(state.timelineState);
+    // Serialize timeline state for comparison (only the fields we care about)
+    const currentState = JSON.stringify({
+      playhead_seconds: state.timelineState.playhead_seconds,
+      zoom_level: state.timelineState.zoom_level,
+      active_versions: state.timelineState.active_versions,
+      markers: state.timelineState.markers,
+      imported_clips: state.timelineState.imported_clips,
+    });
+
+    // Only save if state actually changed
+    if (currentState === prevTimelineStateRef.current) return;
+    
+    // Clear any pending save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Update ref immediately to prevent duplicate saves
+    prevTimelineStateRef.current = currentState;
+
+    // Debounce the save - use ref to get latest state at save time
+    saveTimeoutRef.current = setTimeout(() => {
+      saveTimelineState(timelineStateRef.current);
+      saveTimeoutRef.current = null;
     }, 500); // Debounce 500ms
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+    };
   }, [
     state.timelineState.playhead_seconds,
     state.timelineState.zoom_level,
-    state.timelineState.active_versions,
-    state.timelineState.markers,
-    state.timelineState.imported_clips,
     state.isLoaded,
-    state.useMockData,
+    // Use JSON.stringify for object/array dependencies to get stable string references
+    // The actual comparison happens inside the effect using the ref
+    JSON.stringify(state.timelineState.active_versions),
+    JSON.stringify(state.timelineState.markers),
+    JSON.stringify(state.timelineState.imported_clips),
     saveTimelineState,
   ]);
 
@@ -576,8 +633,6 @@ export function ProjectProvider({
       loadProject,
       createProject,
       closeProject,
-      setUseMockData,
-      loadMockProject,
       updatePhase,
       updateSceneApproval,
       saveTimelineState,
@@ -594,8 +649,6 @@ export function ProjectProvider({
       loadProject,
       createProject,
       closeProject,
-      setUseMockData,
-      loadMockProject,
       updatePhase,
       updateSceneApproval,
       saveTimelineState,

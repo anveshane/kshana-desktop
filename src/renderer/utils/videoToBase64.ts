@@ -31,17 +31,11 @@ export async function videoToBase64(videoPath: string): Promise<string | null> {
 
 /**
  * Checks if a video should be converted to base64
- * For test videos in mock mode, we prefer base64 for reliability
+ * For test videos, we prefer base64 for reliability
  */
-export function shouldUseBase64ForVideo(
-  filePath: string,
-  useMockData: boolean,
-): boolean {
-  // Use base64 for test videos in mock mode
-  if (
-    useMockData &&
-    (filePath.includes('test_video/') || filePath.includes('test_image/'))
-  ) {
+export function shouldUseBase64ForVideo(filePath: string): boolean {
+  // Use base64 for test videos if they're in test directories
+  if (filePath.includes('test_video/') || filePath.includes('test_image/')) {
     return true;
   }
   return false;

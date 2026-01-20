@@ -148,7 +148,6 @@ export async function resolveTestAssetPathToAbsolute(
 export async function resolveAssetPathForDisplay(
   assetPath: string,
   projectDirectory: string | null,
-  useMockData: boolean = false,
 ): Promise<string> {
   // If no path, return empty
   if (!assetPath || !assetPath.trim()) {
@@ -163,7 +162,7 @@ export async function resolveAssetPathForDisplay(
   }
 
   // ALWAYS resolve test asset paths to resources path in production or if detected
-  // This ensures bundled assets load correctly even if useMockData is false
+  // This ensures bundled assets load correctly
   if (isTestAssetPath(trimmedPath)) {
     const absolutePath = await resolveTestAssetPathToAbsolute(trimmedPath);
     if (absolutePath) {

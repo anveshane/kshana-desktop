@@ -31,17 +31,11 @@ export async function imageToBase64(imagePath: string): Promise<string | null> {
 
 /**
  * Checks if an image should be converted to base64
- * For test images in mock mode, we prefer base64 for reliability
+ * For test images, we prefer base64 for reliability
  */
-export function shouldUseBase64(
-  filePath: string,
-  useMockData: boolean,
-): boolean {
-  // Use base64 for test images in mock mode
-  if (
-    useMockData &&
-    (filePath.includes('test_image/') || filePath.includes('test_video/'))
-  ) {
+export function shouldUseBase64(filePath: string): boolean {
+  // Use base64 for test images if they're in test directories
+  if (filePath.includes('test_image/') || filePath.includes('test_video/')) {
     return true;
   }
   return false;

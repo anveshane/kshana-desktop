@@ -385,3 +385,53 @@
   }
 }
 
+// CLI-style display
+.cliStyle {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  margin-bottom: $spacing-xs;
+}
+
+.cliPrefix {
+  color: $color-accent-cyan;
+  font-weight: $font-weight-semibold;
+}
+
+.cliToolName {
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.cliError {
+  color: $color-error;
+}
+
+.cliDuration {
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+}
+
+.cliResult {
+  margin-top: $spacing-xs;
+  padding-left: $spacing-md;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.cliResultPre {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: rgba(0, 0, 0, 0.2);
+  padding: $spacing-xs $spacing-sm;
+  border-radius: $radius-sm;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  line-height: 1.5;
+}
+

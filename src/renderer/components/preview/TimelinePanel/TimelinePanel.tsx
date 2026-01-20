@@ -45,7 +45,6 @@ interface TimelineItemComponentProps {
   left: number;
   width: number;
   projectDirectory: string | null;
-  useMockData: boolean;
   isSelected: boolean;
   isSceneDragging: boolean;
   editingSceneNumber: number | null;
@@ -76,7 +75,6 @@ function TimelineItemComponent({
   left,
   width,
   projectDirectory,
-  useMockData,
   isSelected,
   isSceneDragging,
   editingSceneNumber,
@@ -141,14 +139,13 @@ function TimelineItemComponent({
       resolveAssetPathForDisplay(
         videoVersionPath,
         projectDirectory,
-        useMockData,
       ).then((resolved) => {
         setVideoPath(resolved);
       });
     } else {
       setVideoPath(null);
     }
-  }, [videoVersionPath, projectDirectory, useMockData]);
+  }, [videoVersionPath, projectDirectory]);
 
   useEffect(() => {
     if (item.artifact && item.artifact.artifact_type === 'image') {
@@ -156,10 +153,9 @@ function TimelineItemComponent({
       resolveAssetPathForDisplay(
         pathToResolve,
         projectDirectory,
-        useMockData,
       ).then(async (resolved) => {
-        // For test images in mock mode, try to convert to base64
-        if (shouldUseBase64(resolved, useMockData)) {
+        // For test images, try to convert to base64
+        if (shouldUseBase64(resolved)) {
           const base64 = await imageToBase64(resolved);
           if (base64) {
             setImagePath(base64);
@@ -177,7 +173,6 @@ function TimelineItemComponent({
     item.artifact?.file_path,
     item.artifact?.artifact_type,
     projectDirectory,
-    useMockData,
   ]);
 
   if (item.type === 'video' && videoPath) {
@@ -383,7 +378,6 @@ export default function TimelinePanel({
   const { projectDirectory } = useWorkspace();
   const {
     isLoading,
-    useMockData,
     scenes: projectScenes,
     timelineState,
     saveTimelineState,
@@ -624,18 +618,64 @@ export default function TimelinePanel({
   const setActiveVersions = onActiveVersionsChange ?? setInternalActiveVersions;
 
   // Sync active versions to timeline state when they change
+  // Use ref to track previous serialized state to avoid infinite loops
+  const prevActiveVersionsRef = useRef<string>('');
+  
   useEffect(() => {
-    if (!projectDirectory || useMockData) return;
+    if (!projectDirectory) return;
+
+    // Serialize current activeVersions for comparison
+    const serializedActiveVersions = JSON.stringify(activeVersions);
+    
+    // Check if timeline state already matches what we're trying to set
+    // Convert timelineState.active_versions to the same format for comparison
+    const timelineVersions: Record<number, SceneVersions> = {};
+    if (timelineState?.active_versions) {
+      Object.entries(timelineState.active_versions).forEach(
+        ([folder, versionData]) => {
+          const match = folder.match(/scene-(\d+)/);
+          if (match) {
+            const sceneNumber = parseInt(match[1], 10);
+            if (typeof versionData === 'number') {
+              timelineVersions[sceneNumber] = { video: versionData };
+            } else if (versionData && typeof versionData === 'object') {
+              timelineVersions[sceneNumber] = versionData;
+            }
+          }
+        },
+      );
+    }
+    const serializedTimelineVersions = JSON.stringify(timelineVersions);
+    
+    // Only update if activeVersions changed AND doesn't match timeline state
+    // This prevents circular updates when timeline state changes trigger activeVersions changes
+    if (
+      serializedActiveVersions === prevActiveVersionsRef.current ||
+      serializedActiveVersions === serializedTimelineVersions
+    ) {
+      return;
+    }
+    
+    prevActiveVersionsRef.current = serializedActiveVersions;
 
     Object.entries(activeVersions).forEach(
       async ([sceneNumber, sceneVersions]) => {
         const sceneFolder = sceneFoldersByNumber[parseInt(sceneNumber, 10)];
         if (sceneFolder && sceneVersions) {
+          // Check if timeline state already has these values to avoid unnecessary updates
+          const timelineVersion = timelineVersions[parseInt(sceneNumber, 10)];
+          const needsImageUpdate =
+            sceneVersions.image !== undefined &&
+            timelineVersion?.image !== sceneVersions.image;
+          const needsVideoUpdate =
+            sceneVersions.video !== undefined &&
+            timelineVersion?.video !== sceneVersions.video;
+
           // Update timeline state active_versions for both image and video
-          if (sceneVersions.image !== undefined) {
+          if (needsImageUpdate) {
             setActiveVersion(sceneFolder, 'image', sceneVersions.image);
           }
-          if (sceneVersions.video !== undefined) {
+          if (needsVideoUpdate) {
             setActiveVersion(sceneFolder, 'video', sceneVersions.video);
 
             // Update current.txt file for video version
@@ -655,9 +695,9 @@ export default function TimelinePanel({
   }, [
     activeVersions,
     projectDirectory,
-    useMockData,
     sceneFoldersByNumber,
     setActiveVersion,
+    timelineState?.active_versions,
   ]);
   const {
     selectedScenes,
@@ -1496,8 +1536,8 @@ export default function TimelinePanel({
     setIsPlaying,
   ]);
 
-  // Show empty state if no project and not using mock data
-  if (!projectDirectory && !useMockData) {
+  // Show empty state if no project
+  if (!projectDirectory) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>
@@ -1723,7 +1763,6 @@ export default function TimelinePanel({
                             left={left}
                             width={width}
                             projectDirectory={projectDirectory || null}
-                            useMockData={useMockData}
                             isSelected={isSelected}
                             isSceneDragging={isSceneDragging}
                             editingSceneNumber={editingSceneNumber}

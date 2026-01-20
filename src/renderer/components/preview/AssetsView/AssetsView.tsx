@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { User, MapPin, Package, Layers } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
-import { MOCK_PROPS as mockPropsData } from '../../../services/project/mockData/mockProps';
+import { MOCK_PROPS as mockPropsData } from '../../../types/projectState';
 import AssetCard from '../AssetCard';
 import styles from './AssetsView.module.scss';
 
@@ -29,7 +29,6 @@ export default function AssetsView() {
     isLoading,
     characters: projectCharacters,
     settings: projectSettings,
-    useMockData,
   } = useProject();
 
   // Convert CharacterData from ProjectContext to CharacterAsset format
@@ -82,8 +81,8 @@ export default function AssetsView() {
     }));
   }, []);
 
-  // Show empty state if no project and not using mock data
-  if (!projectDirectory && !useMockData) {
+  // Show empty state if no project
+  if (!projectDirectory) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>

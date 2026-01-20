@@ -24,8 +24,6 @@ import {
   createDefaultContextIndex,
   createAssetInfo,
 } from '../../types/kshana';
-import { createMockKshanaProject, createEmptyKshanaProject } from './mockData';
-import { generateMockProjectStructure } from './mockData/generateMockStructure';
 
 /**
  * Result type for async operations
@@ -55,15 +53,6 @@ export class ProjectService {
 
   private currentProject: KshanaProject | null = null;
 
-  private useMockData: boolean = false;
-
-  /**
-   * Sets whether to use mock data instead of real file system
-   */
-  setUseMockData(useMock: boolean): void {
-    this.useMockData = useMock;
-  }
-
   /**
    * Gets the current project directory
    */
@@ -80,20 +69,22 @@ export class ProjectService {
 
   /**
    * Validates if a directory is a valid Kshana project
+   * CLI projects use .kshana/agent/project.json as the primary source
+   * Desktop projects may also have kshana.json at root (optional)
    */
   async validateProject(directory: string): Promise<ProjectValidation> {
     const errors: string[] = [];
 
-    // Check for root manifest
-    const manifestPath = `${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`;
-    const hasManifest = await this.fileExists(manifestPath);
-    if (!hasManifest) {
-      errors.push('Missing kshana.json manifest file');
-    }
-
-    // Check for agent state
+    // Check for agent state (required - this is the primary project file)
     const agentStatePath = `${directory}/${PROJECT_PATHS.AGENT_PROJECT}`;
     const hasAgentState = await this.fileExists(agentStatePath);
+    if (!hasAgentState) {
+      errors.push('Missing .kshana/agent/project.json file');
+    }
+
+    // Check for root manifest (optional - CLI doesn't create this)
+    const manifestPath = `${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`;
+    const hasManifest = await this.fileExists(manifestPath);
 
     // Check for asset manifest
     const assetManifestPath = `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`;
@@ -103,8 +94,9 @@ export class ProjectService {
     const timelinePath = `${directory}/${PROJECT_PATHS.UI_TIMELINE}`;
     const hasTimelineState = await this.fileExists(timelinePath);
 
+    // Project is valid if it has agent state (CLI structure)
     return {
-      isValid: hasManifest,
+      isValid: hasAgentState,
       hasManifest,
       hasAgentState,
       hasAssetManifest,
@@ -117,46 +109,6 @@ export class ProjectService {
    * Opens a project from the given directory
    */
   async openProject(directory: string): Promise<ProjectResult<KshanaProject>> {
-    // Use mock data if enabled - write it to disk so user can see the structure
-    if (this.useMockData) {
-      try {
-        // Create project structure first
-        await this.createProjectStructure(directory);
-
-        // Generate mock asset structure (characters, settings, props, plans)
-        await generateMockProjectStructure(directory);
-
-        // Generate mock project data
-        const mockProject = createMockKshanaProject();
-
-        // Write all mock data files to disk
-        await this.writeManifest(directory, mockProject.manifest);
-        await this.writeAgentState(directory, mockProject.agentState);
-        await this.writeAssetManifest(directory, mockProject.assetManifest);
-        await this.writeTimelineState(directory, mockProject.timelineState);
-
-        // Write context index if it exists
-        if (mockProject.contextIndex) {
-          await this.writeJSON(
-            `${directory}/${PROJECT_PATHS.CONTEXT_INDEX}`,
-            mockProject.contextIndex,
-          );
-        }
-
-        this.projectDirectory = directory;
-        this.currentProject = mockProject;
-        return { success: true, data: this.currentProject };
-      } catch (error) {
-        return {
-          success: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Failed to create mock project',
-        };
-      }
-    }
-
     try {
       // Validate the project
       const validation = await this.validateProject(directory);
@@ -167,17 +119,22 @@ export class ProjectService {
         };
       }
 
-      // Read manifest (required)
-      const manifest = await this.readManifest(directory);
-      if (!manifest) {
-        return { success: false, error: 'Failed to read project manifest' };
-      }
-
-      // Read agent state (create default if missing)
+      // Read agent state (primary source - required)
       let agentState = await this.readAgentState(directory);
       if (!agentState) {
-        agentState = createDefaultAgentProject(manifest.id, manifest.name);
-        await this.writeAgentState(directory, agentState);
+        return { success: false, error: 'Failed to read agent project file' };
+      }
+
+      // Read manifest (optional - generate from agent state if missing)
+      let manifest = await this.readManifest(directory);
+      if (!manifest) {
+        // Generate manifest from agent state for backward compatibility
+        manifest = createDefaultManifest(
+          agentState.id,
+          agentState.title || 'Untitled Project',
+          '1.0.0',
+        );
+        await this.writeManifest(directory, manifest);
       }
 
       // Read asset manifest (create default if missing)
@@ -225,30 +182,21 @@ export class ProjectService {
     name: string,
     description?: string,
   ): Promise<ProjectResult<KshanaProject>> {
-    if (this.useMockData) {
-      this.projectDirectory = directory;
-      this.currentProject = createEmptyKshanaProject(name, description);
-      return { success: true, data: this.currentProject };
-    }
-
     try {
       // Create directory structure
       await this.createProjectStructure(directory);
 
-      // Create manifest
-      const manifest = createDefaultManifest(
-        `proj_${Date.now()}`,
-        name,
-        '1.0.0',
-      );
+      // Create agent state first (primary source)
+      const projectId = `proj_${Date.now()}`;
+      const agentState = createDefaultAgentProject(projectId, name);
+      await this.writeAgentState(directory, agentState);
+
+      // Create manifest (optional, for backward compatibility)
+      const manifest = createDefaultManifest(projectId, name, '1.0.0');
       if (description) {
         manifest.description = description;
       }
       await this.writeManifest(directory, manifest);
-
-      // Create agent state
-      const agentState = createDefaultAgentProject(manifest.id, name);
-      await this.writeAgentState(directory, agentState);
 
       // Create asset manifest
       const assetManifest = createDefaultAssetManifest();
@@ -293,12 +241,10 @@ export class ProjectService {
     this.currentProject.agentState.current_phase = phase;
     this.currentProject.agentState.updated_at = Date.now();
 
-    if (!this.useMockData) {
-      await this.writeAgentState(
-        this.projectDirectory,
-        this.currentProject.agentState,
-      );
-    }
+    await this.writeAgentState(
+      this.projectDirectory,
+      this.currentProject.agentState,
+    );
 
     return { success: true, data: undefined };
   }
@@ -332,12 +278,10 @@ export class ProjectService {
 
     this.currentProject.agentState.updated_at = Date.now();
 
-    if (!this.useMockData) {
-      await this.writeAgentState(
-        this.projectDirectory,
-        this.currentProject.agentState,
-      );
-    }
+    await this.writeAgentState(
+      this.projectDirectory,
+      this.currentProject.agentState,
+    );
 
     return { success: true, data: undefined };
   }
@@ -354,9 +298,7 @@ export class ProjectService {
 
     this.currentProject.timelineState = state;
 
-    if (!this.useMockData) {
-      await this.writeTimelineState(this.projectDirectory, state);
-    }
+    await this.writeTimelineState(this.projectDirectory, state);
 
     return { success: true, data: undefined };
   }
@@ -384,12 +326,10 @@ export class ProjectService {
       this.currentProject.assetManifest.assets.push(assetInfo);
     }
 
-    if (!this.useMockData) {
-      await this.writeAssetManifest(
-        this.projectDirectory,
-        this.currentProject.assetManifest,
-      );
-    }
+    await this.writeAssetManifest(
+      this.projectDirectory,
+      this.currentProject.assetManifest,
+    );
 
     return { success: true, data: assetInfo };
   }
@@ -406,9 +346,7 @@ export class ProjectService {
 
     this.currentProject.assetManifest = manifest;
 
-    if (!this.useMockData) {
-      await this.writeAssetManifest(this.projectDirectory, manifest);
-    }
+    await this.writeAssetManifest(this.projectDirectory, manifest);
 
     return { success: true, data: undefined };
   }
@@ -429,14 +367,20 @@ export class ProjectService {
       const content = await window.electron.project.readFile(path);
       if (content === null) return null;
       return JSON.parse(content) as T;
-    } catch {
+    } catch (error) {
+      console.error(`[ProjectService] Failed to read JSON from ${path}:`, error);
       return null;
     }
   }
 
   private async writeJSON(path: string, data: unknown): Promise<void> {
-    const content = JSON.stringify(data, null, 2);
-    await window.electron.project.writeFile(path, content);
+    try {
+      const content = JSON.stringify(data, null, 2);
+      await window.electron.project.writeFile(path, content);
+    } catch (error) {
+      console.error(`[ProjectService] Failed to write JSON to ${path}:`, error);
+      throw new Error(`Failed to write file: ${(error as Error).message}`);
+    }
   }
 
   private async readManifest(
