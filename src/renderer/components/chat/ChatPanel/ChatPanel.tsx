@@ -409,17 +409,27 @@ export default function ChatPanel() {
           }
 
           // FILTER: Skip repetitive meta-commentary messages that make it look like a loop
+          // But show warnings for blocked messages to help with debugging
           const skipPatterns = [
             /^I apologize for/i,
             /^I understand\.? I will now/i,
             /^I am (still )?stuck/i,
-            /^I am blocked/i,
             /^I need to (create|transition)/i,
             /^Please manually/i,
           ];
           
           const trimmedContent = content.trim();
+          const isBlockedMessage = /^I am blocked/i.test(trimmedContent);
           const shouldSkip = skipPatterns.some(pattern => pattern.test(trimmedContent));
+          
+          // Show warning for blocked messages instead of hiding them completely
+          if (isBlockedMessage && !done) {
+            console.warn('[ChatPanel] Agent loop detected - blocked message:', trimmedContent.substring(0, 100));
+            // Show a condensed warning message to user
+            appendSystemMessage('⚠️ Agent retrying phase transition (circuit breaker will activate if needed)...', 'status');
+            // Still skip the actual blocked message text to avoid clutter
+            break;
+          }
           
           if (shouldSkip && !done) {
             console.log('[ChatPanel] Skipping redundant thinking message:', trimmedContent.substring(0, 50));
