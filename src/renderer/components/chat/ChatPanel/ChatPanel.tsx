@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Trash2 } from 'lucide-react';
 import type { BackendState } from '../../../../shared/backendTypes';
 import type { ChatMessage } from '../../../types/chat';
@@ -34,6 +34,7 @@ export default function ChatPanel() {
   const [phaseDisplayName, setPhaseDisplayName] = useState<string | undefined>();
   const [showProjectDialog, setShowProjectDialog] = useState(false);
   const [projectDialogResolved, setProjectDialogResolved] = useState(false);
+  const [hasUserSentMessage, setHasUserSentMessage] = useState(false);
 
   const { setConnectionStatus, projectDirectory } = useWorkspace();
 
@@ -119,6 +120,7 @@ export default function ChatPanel() {
     lastQuestionMessageIdRef.current = null;
     setAgentStatus('idle');
     setStatusMessage('Ready');
+    setHasUserSentMessage(false);
     // Backend will send greeting via WebSocket when connection is re-established
   }, []);
 
@@ -957,6 +959,9 @@ export default function ChatPanel() {
         // Log user response
         window.electron.logger.logUserInput(content);
         
+        // Mark that user has sent their first message
+        setHasUserSentMessage(true);
+        
         const socket = await connectWebSocket();
         socket.send(
           JSON.stringify({
@@ -989,6 +994,9 @@ export default function ChatPanel() {
     async (content: string) => {
       // Log user input
       window.electron.logger.logUserInput(content);
+      
+      // Mark that user has sent their first message
+      setHasUserSentMessage(true);
       
       appendMessage({
         role: 'user',
@@ -1157,6 +1165,16 @@ export default function ChatPanel() {
     connectWebSocket().catch(() => undefined);
   }, [connectWebSocket]);
 
+  // Filter out greeting messages if user has sent a message
+  const filteredMessages = useMemo(() => {
+    if (hasUserSentMessage) {
+      return messages.filter(
+        (msg) => !(msg.type === 'greeting' && msg.role === 'system'),
+      );
+    }
+    return messages;
+  }, [messages, hasUserSentMessage]);
+
   return (
     <>
       {showProjectDialog && projectDirectory && (
@@ -1192,7 +1210,7 @@ export default function ChatPanel() {
 
         <div className={styles.messages}>
           <MessageList
-            messages={messages}
+            messages={filteredMessages}
             isStreaming={isStreaming}
             onDelete={deleteMessage}
             onResponse={sendResponse} // Pass down to MessageBubble

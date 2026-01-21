@@ -11,8 +11,11 @@ export interface BackendEnvOverrides {
   comfyuiUrl?: string;
   lmStudioUrl?: string;
   lmStudioModel?: string;
-  llmProvider?: 'gemini' | 'lmstudio';
+  llmProvider?: 'gemini' | 'lmstudio' | 'openrouter';
   googleApiKey?: string;
+  geminiModel?: string;
+  openRouterApiKey?: string;
+  openRouterModel?: string;
   projectDir?: string;
   contextDir?: string; // User workspace context directory (defaults to app.getPath('userData')/context)
 }

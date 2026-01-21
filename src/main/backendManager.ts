@@ -97,9 +97,14 @@ function setupEnvironment(overrides: BackendEnvOverrides): void {
   if (overrides.googleApiKey) {
     process.env.GOOGLE_API_KEY = overrides.googleApiKey;
   }
-  // Set Gemini model (defaults to gemini-2.5-flash if not specified)
-  if (overrides.llmProvider === 'gemini') {
-    process.env.GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  if (overrides.geminiModel) {
+    process.env.GEMINI_MODEL = overrides.geminiModel;
+  }
+  if (overrides.openRouterApiKey) {
+    process.env.OPENROUTER_API_KEY = overrides.openRouterApiKey;
+  }
+  if (overrides.openRouterModel) {
+    process.env.OPENROUTER_MODEL = overrides.openRouterModel;
   }
   if (overrides.comfyuiUrl) {
     process.env.COMFYUI_BASE_URL = overrides.comfyuiUrl;

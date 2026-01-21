@@ -8,6 +8,9 @@ const defaults: AppSettings = {
   lmStudioModel: 'qwen3',
   llmProvider: 'lmstudio',
   googleApiKey: '',
+  geminiModel: 'gemini-2.5-flash',
+  openRouterApiKey: '',
+  openRouterModel: 'z-ai/glm-4.7-flash',
 };
 
 const store = new Store<AppSettings>({
@@ -32,6 +35,9 @@ export const toBackendEnv = (settings: AppSettings): BackendEnvOverrides => ({
   lmStudioModel: settings.lmStudioModel,
   llmProvider: settings.llmProvider,
   googleApiKey: settings.googleApiKey,
+  geminiModel: settings.geminiModel,
+  openRouterApiKey: settings.openRouterApiKey,
+  openRouterModel: settings.openRouterModel,
   projectDir: settings.projectDir,
 });
 

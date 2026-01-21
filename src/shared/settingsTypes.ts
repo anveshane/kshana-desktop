@@ -1,4 +1,4 @@
-export type LlmProvider = 'gemini' | 'lmstudio';
+export type LlmProvider = 'gemini' | 'lmstudio' | 'openrouter';
 
 export interface AppSettings {
   comfyuiUrl: string;
@@ -6,6 +6,9 @@ export interface AppSettings {
   lmStudioModel: string;
   llmProvider: LlmProvider;
   googleApiKey: string;
+  geminiModel: string;
+  openRouterApiKey: string;
+  openRouterModel: string;
   projectDir?: string;
   preferredPort?: number;
 }

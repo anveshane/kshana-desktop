@@ -27,12 +27,12 @@ async function checkComfyUIHealth(comfyuiUrl: string): Promise<boolean> {
 }
 
 async function checkLLMProviderHealth(
-  llmProvider: 'gemini' | 'lmstudio',
+  llmProvider: 'gemini' | 'lmstudio' | 'openrouter',
   lmStudioUrl?: string,
 ): Promise<boolean> {
-  if (llmProvider === 'gemini') {
-    // For Gemini, we assume it's connected if backend is healthy
-    // The backend will handle Gemini API errors
+  if (llmProvider === 'gemini' || llmProvider === 'openrouter') {
+    // For Gemini and OpenRouter, we assume it's connected if backend is healthy
+    // The backend will handle API errors
     return true;
   }
 

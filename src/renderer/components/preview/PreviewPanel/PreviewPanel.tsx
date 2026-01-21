@@ -25,6 +25,9 @@ const mapSettingsToEnv = (settings: AppSettings): BackendEnvOverrides => ({
   lmStudioModel: settings.lmStudioModel,
   llmProvider: settings.llmProvider,
   googleApiKey: settings.googleApiKey,
+  geminiModel: settings.geminiModel,
+  openRouterApiKey: settings.openRouterApiKey,
+  openRouterModel: settings.openRouterModel,
   projectDir: settings.projectDir,
 });
 
@@ -205,13 +208,14 @@ export default function PreviewPanel() {
           >
             Video Library
           </button>
-          <button
+          {/* Storyboard tab hidden for now */}
+          {/* <button
             type="button"
             className={`${styles.tab} ${activeTab === 'storyboard' ? styles.active : ''}`}
             onClick={() => setActiveTab('storyboard')}
           >
             Storyboard
-          </button>
+          </button> */}
           <button
             type="button"
             className={`${styles.tab} ${activeTab === 'assets' ? styles.active : ''}`}
@@ -239,7 +243,12 @@ export default function PreviewPanel() {
                 }`}
               />
               <span className={styles.statusLabel}>
-                {settings?.llmProvider === 'gemini' ? 'Gemini' : 'LM Studio'}:{' '}
+                {settings?.llmProvider === 'gemini'
+                  ? 'Gemini'
+                  : settings?.llmProvider === 'openrouter'
+                    ? 'OpenRouter'
+                    : 'LM Studio'}
+                :{' '}
                 {connectionState.lmStudio === 'connected'
                   ? 'Connected'
                   : connectionState.lmStudio === 'connecting'
@@ -278,7 +287,8 @@ export default function PreviewPanel() {
 
       <div className={styles.contentWrapper}>
         <div className={styles.content}>
-          {activeTab === 'storyboard' && <StoryboardView />}
+          {/* Storyboard view hidden for now */}
+          {/* {activeTab === 'storyboard' && <StoryboardView />} */}
           {activeTab === 'assets' && <AssetsView />}
           {activeTab === 'video-library' && (
             <VideoLibraryView

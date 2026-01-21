@@ -87,7 +87,7 @@ The app stores settings using Electron's native storage. Configure:
 - **ComfyUI URL**: URL where ComfyUI is running (default: `http://localhost:8000`)
 - **LM Studio URL**: URL where LM Studio is running (default: `http://127.0.0.1:1234`)
 - **LM Studio Model**: Model name to use (default: `qwen3`)
-- **LLM Provider**: Choose between `gemini` or `lmstudio`
+- **LLM Provider**: Choose between `gemini`, `lmstudio`, or `openrouter`
 
 Settings are accessible via the Settings panel in the app UI.
 
@@ -95,7 +95,7 @@ Settings are accessible via the Settings panel in the app UI.
 
 The backend uses environment variables set by the Electron main process:
 
-- `LLM_PROVIDER`: `gemini` or `lmstudio`
+- `LLM_PROVIDER`: `gemini`, `lmstudio`, or `openrouter`
 - `LMSTUDIO_BASE_URL`: LM Studio URL
 - `LMSTUDIO_MODEL`: Model name
 - `GOOGLE_API_KEY`: Google API key (if using Gemini)

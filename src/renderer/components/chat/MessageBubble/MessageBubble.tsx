@@ -32,6 +32,9 @@ const formatter = new Intl.DateTimeFormat('en-IN', {
   timeZone: 'Asia/Kolkata',
 });
 
+// Character limit for truncating user messages
+const USER_MESSAGE_TRUNCATE_LIMIT = 150;
+
 const MarkdownComponents = {
   code({ inline, className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '');
@@ -201,6 +204,17 @@ export default function MessageBubble({
     }
   }, [isReasoningOnly, isStreaming]);
 
+  // Check if user message should be truncated
+  const isUserMessage = message.role === 'user';
+  const shouldTruncate = isUserMessage && message.content.length > USER_MESSAGE_TRUNCATE_LIMIT;
+  const [isUserMessageExpanded, setIsUserMessageExpanded] = useState(false);
+  
+  // Get truncated content for user messages
+  const getTruncatedContent = (content: string) => {
+    if (!shouldTruncate) return content;
+    return content.substring(0, USER_MESSAGE_TRUNCATE_LIMIT) + '...';
+  };
+
   return (
     <div
       className={`${styles.container} ${styles[message.role]} ${
@@ -288,6 +302,45 @@ export default function MessageBubble({
                   {message.content}
                 </ReactMarkdown>
               </div>
+            )}
+          </div>
+        ) : shouldTruncate ? (
+          // Truncated user message with expand/collapse
+          <div className={styles.reasoningContainer}>
+            {!isUserMessageExpanded ? (
+              <>
+                <ReactMarkdown
+                  remarkPlugins={remarkGfm ? [remarkGfm] : []}
+                  components={MarkdownComponents}
+                >
+                  {getTruncatedContent(message.content)}
+                </ReactMarkdown>
+                <button
+                  type="button"
+                  className={styles.reasoningToggle}
+                  onClick={() => setIsUserMessageExpanded(true)}
+                >
+                  <ChevronDown size={16} />
+                  <span className={styles.reasoningLabel}>Show more</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <ReactMarkdown
+                  remarkPlugins={remarkGfm ? [remarkGfm] : []}
+                  components={MarkdownComponents}
+                >
+                  {message.content}
+                </ReactMarkdown>
+                <button
+                  type="button"
+                  className={styles.reasoningToggle}
+                  onClick={() => setIsUserMessageExpanded(false)}
+                >
+                  <ChevronUp size={16} />
+                  <span className={styles.reasoningLabel}>Show less</span>
+                </button>
+              </>
             )}
           </div>
         ) : (

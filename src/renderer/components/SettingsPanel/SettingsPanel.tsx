@@ -16,6 +16,9 @@ const emptySettings: AppSettings = {
   lmStudioModel: 'qwen3',
   llmProvider: 'lmstudio',
   googleApiKey: '',
+  geminiModel: 'gemini-2.5-flash',
+  openRouterApiKey: '',
+  openRouterModel: 'z-ai/glm-4.7-flash',
 };
 
 export default function SettingsPanel({
@@ -104,34 +107,6 @@ export default function SettingsPanel({
           </label>
 
           <label className={styles.label}>
-            LM Studio URL
-            <input
-              type="url"
-              className={styles.input}
-              value={form.lmStudioUrl}
-              onChange={(event) =>
-                handleInput('lmStudioUrl', event.target.value)
-              }
-              placeholder="http://127.0.0.1:1234"
-              required
-            />
-          </label>
-
-          <label className={styles.label}>
-            LM Studio Model ID
-            <input
-              type="text"
-              className={styles.input}
-              value={form.lmStudioModel}
-              onChange={(event) =>
-                handleInput('lmStudioModel', event.target.value)
-              }
-              placeholder="qwen3"
-              required
-            />
-          </label>
-
-          <label className={styles.label}>
             Preferred backend port
             <input
               type="number"
@@ -184,23 +159,116 @@ export default function SettingsPanel({
                 />
                 Gemini (cloud)
               </label>
+              <label className={styles.radioLabel}>
+                <input
+                  type="radio"
+                  className={styles.radioInput}
+                  name="llm-provider"
+                  value="openrouter"
+                  checked={form.llmProvider === 'openrouter'}
+                  onChange={(event) =>
+                    handleInput(
+                      'llmProvider',
+                      event.target.value as AppSettings['llmProvider'],
+                    )
+                  }
+                />
+                OpenRouter (cloud)
+              </label>
             </div>
           </fieldset>
 
+          {form.llmProvider === 'lmstudio' && (
+            <>
+              <label className={styles.label}>
+                LM Studio URL
+                <input
+                  type="url"
+                  className={styles.input}
+                  value={form.lmStudioUrl}
+                  onChange={(event) =>
+                    handleInput('lmStudioUrl', event.target.value)
+                  }
+                  placeholder="http://127.0.0.1:1234"
+                  required
+                />
+              </label>
+              <label className={styles.label}>
+                LM Studio Model ID
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={form.lmStudioModel}
+                  onChange={(event) =>
+                    handleInput('lmStudioModel', event.target.value)
+                  }
+                  placeholder="qwen3"
+                  required
+                />
+              </label>
+            </>
+          )}
+
           {form.llmProvider === 'gemini' && (
-            <label className={styles.label}>
-              Google API Key
-              <input
-                type="password"
-                className={styles.input}
-                value={form.googleApiKey}
-                onChange={(event) =>
-                  handleInput('googleApiKey', event.target.value)
-                }
-                placeholder="AIza..."
-                required
-              />
-            </label>
+            <>
+              <label className={styles.label}>
+                Google API Key
+                <input
+                  type="password"
+                  className={styles.input}
+                  value={form.googleApiKey}
+                  onChange={(event) =>
+                    handleInput('googleApiKey', event.target.value)
+                  }
+                  placeholder="AIza..."
+                  required
+                />
+              </label>
+              <label className={styles.label}>
+                Gemini Model ID
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={form.geminiModel}
+                  onChange={(event) =>
+                    handleInput('geminiModel', event.target.value)
+                  }
+                  placeholder="gemini-2.5-flash"
+                  required
+                />
+              </label>
+            </>
+          )}
+
+          {form.llmProvider === 'openrouter' && (
+            <>
+              <label className={styles.label}>
+                OpenRouter API Key
+                <input
+                  type="password"
+                  className={styles.input}
+                  value={form.openRouterApiKey}
+                  onChange={(event) =>
+                    handleInput('openRouterApiKey', event.target.value)
+                  }
+                  placeholder="sk-or-v1-..."
+                  required
+                />
+              </label>
+              <label className={styles.label}>
+                OpenRouter Model ID
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={form.openRouterModel}
+                  onChange={(event) =>
+                    handleInput('openRouterModel', event.target.value)
+                  }
+                  placeholder="z-ai/glm-4.7-flash"
+                  required
+                />
+              </label>
+            </>
           )}
 
           <div className={styles.actions}>
