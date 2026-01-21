@@ -1,261 +1,240 @@
 /**
  * useTimelineData Hook
  * Provides unified timeline data source for VideoLibraryView and TimelinePanel
- * Ensures consistent scene-to-video mapping and timeline item calculation
+ * Placement-based timeline architecture: timeline items driven by placement timestamps
  */
 
 import { useMemo } from 'react';
 import { useProject } from '../contexts/ProjectContext';
-import type { Artifact, StoryboardScene } from '../types/projectState';
-import type { SceneRef } from '../types/kshana/entities';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import { usePlacementFiles } from './usePlacementFiles';
+import { useTranscript } from './useTranscript';
+import { timeStringToSeconds } from '../utils/placementParsers';
+import { resolveAssetPathForDisplay } from '../utils/pathResolver';
+import type { AssetInfo, AssetManifest } from '../types/kshana/assetManifest';
+import type { SceneVersions } from '../types/kshana/timeline';
 
 export interface TimelineItem {
-  id: string;
-  type: 'video' | 'scene';
-  startTime: number;
-  duration: number;
-  artifact?: Artifact;
-  scene?: StoryboardScene;
-  path?: string;
-  label: string;
-  sceneNumber?: number;
+  id: string; // "image-1", "video-2", "placeholder-start"
+  type: 'image' | 'video' | 'placeholder';
+  startTime: number; // seconds
+  endTime: number; // seconds
+  duration: number; // calculated: endTime - startTime
+  label: string; // "Placement 1", "Original Footage"
+  prompt?: string;
+  placementNumber?: number;
+  imagePath?: string; // resolved if asset matched
+  videoPath?: string; // resolved if asset matched
 }
 
 export interface TimelineData {
-  scenes: StoryboardScene[];
   timelineItems: TimelineItem[];
-  artifactsByScene: Record<number, Artifact>;
-  videoArtifacts: Artifact[];
-  importedVideoArtifacts: Artifact[];
   totalDuration: number;
+}
+
+/**
+ * Find asset by placement number
+ * Matching priority:
+ * 1. Primary: asset.metadata?.placementNumber === placementNumber
+ * 2. Fallback: asset.scene_number === placementNumber
+ */
+function findAssetByPlacementNumber(
+  placementNumber: number,
+  assetManifest: AssetManifest | null,
+  assetType: 'scene_image' | 'scene_video',
+  activeVersions?: Record<number, SceneVersions>,
+): AssetInfo | undefined {
+  if (!assetManifest?.assets) return undefined;
+
+  // Get active version if specified
+  const activeVersion = activeVersions?.[placementNumber];
+  const targetVersion = assetType === 'scene_image'
+    ? activeVersion?.image
+    : activeVersion?.video;
+
+  // Find matching asset
+  const matchingAssets = assetManifest.assets.filter(
+    (a) => a.type === assetType && (
+      a.metadata?.placementNumber === placementNumber || // Primary
+      a.scene_number === placementNumber                  // Fallback
+    )
+  );
+
+  if (matchingAssets.length === 0) return undefined;
+
+  // If version is specified, find that version; otherwise get latest
+  if (targetVersion !== undefined) {
+    const versionAsset = matchingAssets.find((a) => a.version === targetVersion);
+    if (versionAsset) return versionAsset;
+  }
+
+  // Return latest version
+  return matchingAssets.reduce((latest, current) =>
+    current.version > latest.version ? current : latest,
+  );
+}
+
+/**
+ * Create a placeholder timeline item for "Original Footage"
+ */
+function createPlaceholderItem(
+  startTime: number,
+  endTime: number,
+  id?: string,
+): TimelineItem {
+  return {
+    id: id || `placeholder-${startTime}-${endTime}`,
+    type: 'placeholder',
+    startTime,
+    endTime,
+    duration: endTime - startTime,
+    label: 'Original Footage',
+  };
+}
+
+/**
+ * Fill gaps between placements with placeholder items
+ */
+function fillGapsWithPlaceholders(
+  placementItems: TimelineItem[],
+  totalDuration: number,
+): TimelineItem[] {
+  const allItems: TimelineItem[] = [];
+  let currentTime = 0;
+
+  // Sort placements by startTime
+  const sorted = [...placementItems].sort((a, b) => a.startTime - b.startTime);
+
+  for (const placement of sorted) {
+    // Add placeholder before placement if gap exists
+    if (placement.startTime > currentTime) {
+      allItems.push(createPlaceholderItem(currentTime, placement.startTime));
+    }
+    // Add placement
+    allItems.push(placement);
+    currentTime = Math.max(currentTime, placement.endTime);
+  }
+
+  // Add placeholder after last placement
+  if (currentTime < totalDuration) {
+    allItems.push(createPlaceholderItem(currentTime, totalDuration));
+  }
+
+  return allItems;
 }
 
 /**
  * Custom hook that provides unified timeline data
  * Single source of truth for timeline calculations
+ * Placement-based architecture: timeline driven by placement timestamps
  */
-export function useTimelineData(): TimelineData {
-  const { isLoaded, scenes: projectScenes, assetManifest } = useProject();
+export function useTimelineData(
+  activeVersions?: Record<number, SceneVersions>,
+): TimelineData {
+  const { isLoaded, assetManifest } = useProject();
+  const { projectDirectory } = useWorkspace();
+  const { imagePlacements, videoPlacements } = usePlacementFiles();
+  const { entries: transcriptEntries, totalDuration: transcriptDuration } = useTranscript();
 
-  // Convert SceneRef from ProjectContext to StoryboardScene format
-  const scenes: StoryboardScene[] = useMemo(() => {
-    if (!isLoaded || projectScenes.length === 0) {
+  // Convert placements to timeline items
+  const placementItems: TimelineItem[] = useMemo(() => {
+    const items: TimelineItem[] = [];
+
+    // Convert image placements to timeline items
+    imagePlacements.forEach((placement) => {
+      const startSeconds = timeStringToSeconds(placement.startTime);
+      const endSeconds = timeStringToSeconds(placement.endTime);
+
+      // Find matching asset
+      const asset = findAssetByPlacementNumber(
+        placement.placementNumber,
+        assetManifest,
+        'scene_image',
+        activeVersions,
+      );
+
+      items.push({
+        id: `image-${placement.placementNumber}`,
+        type: 'image',
+        startTime: startSeconds,
+        endTime: endSeconds,
+        duration: endSeconds - startSeconds,
+        label: `Placement ${placement.placementNumber}`,
+        prompt: placement.prompt,
+        placementNumber: placement.placementNumber,
+        imagePath: asset?.path, // Will be resolved later
+      });
+    });
+
+    // Convert video placements to timeline items
+    videoPlacements.forEach((placement) => {
+      const startSeconds = timeStringToSeconds(placement.startTime);
+      const endSeconds = timeStringToSeconds(placement.endTime);
+
+      // Find matching asset
+      const asset = findAssetByPlacementNumber(
+        placement.placementNumber,
+        assetManifest,
+        'scene_video',
+        activeVersions,
+      );
+
+      items.push({
+        id: `video-${placement.placementNumber}`,
+        type: 'video',
+        startTime: startSeconds,
+        endTime: endSeconds,
+        duration: endSeconds - startSeconds,
+        label: `Placement ${placement.placementNumber}`,
+        prompt: placement.prompt,
+        placementNumber: placement.placementNumber,
+        videoPath: asset?.path, // Will be resolved later
+      });
+    });
+
+    return items;
+  }, [imagePlacements, videoPlacements, assetManifest, activeVersions]);
+
+  // Resolve asset paths for display
+  const timelineItems: TimelineItem[] = useMemo(() => {
+    // Start with placement items
+    const items = [...placementItems];
+
+    // Resolve paths asynchronously (we'll do this synchronously for now, but paths will be resolved in component)
+    // For now, we'll just pass the paths and let the component resolve them
+
+    // Fill gaps with placeholders
+    const totalDuration = transcriptDuration || 0;
+    const filledItems = fillGapsWithPlaceholders(items, totalDuration);
+
+    // If no placements and no transcript, return empty
+    if (filledItems.length === 0 && totalDuration === 0) {
       return [];
     }
 
-    return projectScenes.map((scene) => ({
-      scene_number: scene.scene_number,
-      name: scene.title,
-      description: scene.description || '',
-      duration: 5, // Default duration
-      shot_type: 'Mid Shot',
-      lighting: 'Natural',
-    }));
-  }, [isLoaded, projectScenes]);
+    // If no placements but transcript exists, return single placeholder
+    if (filledItems.length === 0 && totalDuration > 0) {
+      return [createPlaceholderItem(0, totalDuration)];
+    }
 
-  // Build artifacts map from scenes - prioritize video, fallback to image
-  const artifactsByScene: Record<number, Artifact> = useMemo(() => {
-    const map: Record<number, Artifact> = {};
+    // Sort all items by startTime
+    filledItems.sort((a, b) => a.startTime - b.startTime);
 
-    if (!isLoaded || projectScenes.length === 0) return map;
+    return filledItems;
+  }, [placementItems, transcriptDuration]);
 
-    projectScenes.forEach((scene: SceneRef) => {
-      // Helper function to safely parse dates
-      const parseDate = (dateValue: string | number | null | undefined): string => {
-        if (!dateValue) return new Date().toISOString();
-        const date = new Date(dateValue);
-        return isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
-      };
-
-      // Check if scene has approved video (highest priority)
-      if (scene.video_approval_status === 'approved' && scene.video_path) {
-        map[scene.scene_number] = {
-          artifact_id:
-            scene.video_artifact_id || `scene-${scene.scene_number}-video`,
-          artifact_type: 'video',
-          scene_number: scene.scene_number,
-          file_path: scene.video_path,
-          created_at: parseDate(scene.video_approved_at),
-        };
-      } else if (
-        scene.image_approval_status === 'approved' &&
-        scene.image_path
-      ) {
-        // Fallback to image if no video
-        map[scene.scene_number] = {
-          artifact_id:
-            scene.image_artifact_id || `scene-${scene.scene_number}-image`,
-          artifact_type: 'image',
-          scene_number: scene.scene_number,
-          file_path: scene.image_path,
-          created_at: parseDate(scene.image_approved_at),
-        };
-      }
-    });
-
-    return map;
-  }, [isLoaded, projectScenes]);
-
-  // Build video artifacts from asset manifest
-  const videoArtifacts: Artifact[] = useMemo(() => {
-    if (!assetManifest?.assets) return [];
-
-    // Filter for video-related asset types
-    return assetManifest.assets
-      .filter(
-        (asset) => asset.type === 'scene_video' || asset.type === 'final_video',
-      )
-      .map((asset) => {
-        // Validate and parse created_at date
-        let createdAt: string;
-        if (asset.created_at) {
-          const date = new Date(asset.created_at);
-          createdAt = isNaN(date.getTime())
-            ? new Date().toISOString()
-            : date.toISOString();
-        } else {
-          createdAt = new Date().toISOString();
-        }
-
-        return {
-          artifact_id: asset.id,
-          artifact_type: 'video',
-          file_path: asset.path,
-          created_at: createdAt,
-          scene_number: asset.scene_number,
-          metadata: {
-            title: asset.path.split('/').pop(),
-            duration: asset.metadata?.duration,
-            imported: asset.metadata?.imported,
-          },
-        };
-      });
-  }, [assetManifest]);
-
-  // Separate imported videos from scene videos
-  const importedVideoArtifacts: Artifact[] = useMemo(() => {
-    return videoArtifacts.filter(
-      (artifact) => artifact.metadata?.imported === true,
-    );
-  }, [videoArtifacts]);
-
-  // Calculate scene blocks with timing
-  const sceneBlocks = useMemo(() => {
-    let currentTime = 0;
-    return scenes.map((scene) => {
-      const startTime = currentTime;
-      const duration = scene.duration || 5;
-      currentTime += duration;
-      return {
-        scene,
-        startTime,
-        duration,
-        artifact: artifactsByScene[scene.scene_number],
-      };
-    });
-  }, [scenes, artifactsByScene]);
-
-  // Create unified timeline items - combine all videos and scenes
-  const timelineItems: TimelineItem[] = useMemo(() => {
-    const items: TimelineItem[] = [];
-
-    // Add ALL scene blocks from storyboard - every scene appears on timeline
-    sceneBlocks.forEach((block) => {
-      const sceneLabel =
-        block.scene.name || `Scene ${block.scene.scene_number}`;
-
-      if (block.artifact && block.artifact.artifact_type === 'video') {
-        // Scene has video - add as video item
-        items.push({
-          id: `scene-video-${block.scene.scene_number}`,
-          type: 'video',
-          startTime: block.startTime,
-          duration: block.duration,
-          artifact: block.artifact,
-          scene: block.scene,
-          path: block.artifact.file_path,
-          label: sceneLabel,
-          sceneNumber: block.scene.scene_number,
-        });
-      } else {
-        // Scene without video - add as scene item (will show placeholder or image)
-        items.push({
-          id: `scene-${block.scene.scene_number}`,
-          type: 'scene',
-          startTime: block.startTime,
-          duration: block.duration,
-          scene: block.scene,
-          artifact: block.artifact,
-          label: sceneLabel,
-          sceneNumber: block.scene.scene_number,
-        });
-      }
-    });
-
-    // Calculate scene end time for positioning imported videos
-    const sceneEndTime =
-      sceneBlocks.length > 0
-        ? sceneBlocks[sceneBlocks.length - 1].startTime +
-          sceneBlocks[sceneBlocks.length - 1].duration
-        : 0;
-
-    // Add imported videos (they go after all scenes)
-    let importedVideoTime = sceneEndTime;
-    importedVideoArtifacts.forEach((artifact, index) => {
-      const duration = (artifact.metadata?.duration as number) || 5;
-      items.push({
-        id: `imported-${index}`,
-        type: 'video',
-        startTime: importedVideoTime,
-        duration,
-        artifact,
-        path: artifact.file_path,
-        label: 'Imported',
-      });
-      importedVideoTime += duration;
-    });
-
-    // Add other video artifacts that don't have scene numbers and aren't imported
-    let orphanVideoTime = importedVideoTime;
-    videoArtifacts.forEach((artifact) => {
-      if (
-        !artifact.scene_number &&
-        !artifact.metadata?.imported &&
-        !importedVideoArtifacts.includes(artifact)
-      ) {
-        const duration = (artifact.metadata?.duration as number) || 5;
-        items.push({
-          id: artifact.artifact_id,
-          type: 'video',
-          startTime: orphanVideoTime,
-          duration,
-          artifact,
-          path: artifact.file_path,
-          label: `VID_${artifact.artifact_id.slice(-6)}`,
-        });
-        orphanVideoTime += duration;
-      }
-    });
-
-    // Sort timeline items by startTime to ensure correct order
-    items.sort((a, b) => a.startTime - b.startTime);
-
-    return items;
-  }, [sceneBlocks, importedVideoArtifacts, videoArtifacts]);
-
-  // Calculate total duration from all timeline items
+  // Calculate total duration from transcript or timeline items
   const totalDuration = useMemo(() => {
+    if (transcriptDuration > 0) {
+      return transcriptDuration;
+    }
     if (timelineItems.length === 0) return 0;
     const lastItem = timelineItems[timelineItems.length - 1];
-    return lastItem.startTime + lastItem.duration;
-  }, [timelineItems]);
+    return lastItem.endTime;
+  }, [transcriptDuration, timelineItems]);
 
   return {
-    scenes,
     timelineItems,
-    artifactsByScene,
-    videoArtifacts,
-    importedVideoArtifacts,
     totalDuration,
   };
 }

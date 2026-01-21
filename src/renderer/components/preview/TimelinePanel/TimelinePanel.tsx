@@ -19,7 +19,6 @@ import {
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
-import { useTimeline } from '../../../contexts/TimelineContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
 import {
   useTimelineData,
@@ -27,16 +26,13 @@ import {
 } from '../../../hooks/useTimelineData';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
-import { setActiveVideoVersion } from '../../../utils/videoWorkspace';
-import type { Artifact, TimelineMarker } from '../../../types/projectState';
+import type { TimelineMarker } from '../../../types/projectState';
 import type { KshanaTimelineMarker, ImportedClip } from '../../../types/kshana';
 import type { SceneVersions } from '../../../types/kshana/timeline';
 import { PROJECT_PATHS, createAssetInfo } from '../../../types/kshana';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
-import SceneActionPopover from './SceneActionPopover';
 import VersionSelector from '../VersionSelector';
-import MarkdownPreview from '../MarkdownPreview';
 import styles from './TimelinePanel.module.scss';
 
 // Timeline Item Component for proper hook usage
@@ -46,28 +42,8 @@ interface TimelineItemComponentProps {
   width: number;
   projectDirectory: string | null;
   isSelected: boolean;
-  isSceneDragging: boolean;
-  editingSceneNumber: number | null;
-  editedSceneName: string;
-  sceneFolder?: string;
-  activeVersions?: Record<number, SceneVersions>; // sceneNumber -> { image?: number, video?: number }
-  onSceneDragStart: (
-    e: React.DragEvent<HTMLDivElement>,
-    sceneNumber: number,
-  ) => void;
-  onSceneDragEnd: () => void;
-  onSceneBlockClick: (
-    e: React.MouseEvent<HTMLDivElement>,
-    sceneNumber: number,
-  ) => void;
-  onVideoBlockClick: (
-    e: React.MouseEvent<HTMLDivElement>,
-    item: TimelineItem,
-  ) => void;
-  onNameChange: (sceneNumber: number, name: string) => void;
-  onEditedNameChange: (name: string) => void;
-  onEditingCancel: () => void;
-  onViewDetails?: (sceneNumber: number, sceneFolder: string) => void;
+  activeVersions?: Record<number, SceneVersions>; // placementNumber -> { image?: number, video?: number }
+  onItemClick?: (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => void;
 }
 
 function TimelineItemComponent({
@@ -76,68 +52,18 @@ function TimelineItemComponent({
   width,
   projectDirectory,
   isSelected,
-  isSceneDragging,
-  editingSceneNumber,
-  editedSceneName,
-  sceneFolder,
   activeVersions = {},
-  onSceneDragStart,
-  onSceneDragEnd,
-  onSceneBlockClick,
-  onVideoBlockClick,
-  onNameChange,
-  onEditedNameChange,
-  onEditingCancel,
-  onViewDetails,
+  onItemClick,
 }: TimelineItemComponentProps) {
   const { assetManifest } = useProject();
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [imagePath, setImagePath] = useState<string | null>(null);
 
-  // Construct version-specific video path if active version is set
-  const videoVersionPath = useMemo(() => {
-    if (
-      item.sceneNumber &&
-      activeVersions[item.sceneNumber]?.video &&
-      sceneFolder
-    ) {
-      const version = activeVersions[item.sceneNumber].video!;
-      return `.kshana/agent/scenes/${sceneFolder}/video/v${version}.mp4`;
-    }
-    return item.path;
-  }, [item.sceneNumber, item.path, activeVersions, sceneFolder]);
-
-  // Construct version-specific image path from asset manifest (source of truth)
-  const imageVersionPath = useMemo(() => {
-    if (
-      item.sceneNumber &&
-      activeVersions[item.sceneNumber]?.image &&
-      assetManifest?.assets
-    ) {
-      const version = activeVersions[item.sceneNumber].image!;
-      // Find the image asset with matching scene number and version
-      const imageAsset = assetManifest.assets.find(
-        (asset) =>
-          asset.type === 'scene_image' &&
-          asset.scene_number === item.sceneNumber &&
-          asset.version === version,
-      );
-      if (imageAsset) {
-        return imageAsset.path;
-      }
-    }
-    return item.artifact?.file_path;
-  }, [
-    item.sceneNumber,
-    item.artifact?.file_path,
-    activeVersions,
-    assetManifest,
-  ]);
-
+  // Resolve video path from item
   useEffect(() => {
-    if (videoVersionPath) {
+    if (item.type === 'video' && item.videoPath) {
       resolveAssetPathForDisplay(
-        videoVersionPath,
+        item.videoPath,
         projectDirectory,
       ).then((resolved) => {
         setVideoPath(resolved);
@@ -145,13 +71,13 @@ function TimelineItemComponent({
     } else {
       setVideoPath(null);
     }
-  }, [videoVersionPath, projectDirectory]);
+  }, [item.type, item.videoPath, projectDirectory]);
 
+  // Resolve image path from item
   useEffect(() => {
-    if (item.artifact && item.artifact.artifact_type === 'image') {
-      const pathToResolve = imageVersionPath || item.artifact.file_path;
+    if (item.type === 'image' && item.imagePath) {
       resolveAssetPathForDisplay(
-        pathToResolve,
+        item.imagePath,
         projectDirectory,
       ).then(async (resolved) => {
         // For test images, try to convert to base64
@@ -168,16 +94,33 @@ function TimelineItemComponent({
     } else {
       setImagePath(null);
     }
-  }, [
-    imageVersionPath,
-    item.artifact?.file_path,
-    item.artifact?.artifact_type,
-    projectDirectory,
-  ]);
+  }, [item.type, item.imagePath, projectDirectory]);
 
+  // Handle placeholder type
+  if (item.type === 'placeholder') {
+    return (
+      <div
+        className={`${styles.sceneBlock} ${styles.placeholderBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        title={item.label}
+      >
+        <div className={styles.scenePlaceholder} />
+        <div className={styles.sceneId}>{item.label}</div>
+      </div>
+    );
+  }
+
+  // Handle video type
   if (item.type === 'video' && videoPath) {
     return (
-      // eslint-disable-next-line jsx-a11y/click-events-have-key-events
       <div
         className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
         style={{
@@ -185,8 +128,11 @@ function TimelineItemComponent({
           width: `${width}px`,
         }}
         onClick={(e) => {
-          onVideoBlockClick(e, item);
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
         }}
+        title={item.prompt || item.label}
       >
         <video
           src={videoPath}
@@ -199,123 +145,35 @@ function TimelineItemComponent({
     );
   }
 
-  // Scene block (with or without image)
+  // Handle image type
   let thumbnailElement: React.ReactNode;
   if (imagePath) {
     thumbnailElement = (
       <img src={imagePath} alt={item.label} className={styles.sceneThumbnail} />
-    );
-  } else if (videoPath) {
-    thumbnailElement = (
-      <video
-        src={videoPath}
-        className={styles.sceneThumbnail}
-        preload="metadata"
-        muted
-      />
     );
   } else {
     thumbnailElement = <div className={styles.scenePlaceholder} />;
   }
 
   return (
-    // eslint-disable-next-line jsx-a11y/click-events-have-key-events
     <div
-      className={`${styles.sceneBlock} ${isSelected ? styles.selected : ''} ${isSceneDragging ? styles.dragging : ''}`}
+      className={`${styles.sceneBlock} ${isSelected ? styles.selected : ''}`}
       style={{
         left: `${left}px`,
         width: `${width}px`,
       }}
-      draggable={!!item.scene}
-      onDragStart={(e) => {
-        if (item.scene) {
-          onSceneDragStart(e, item.scene.scene_number);
-        }
-      }}
-      onDragEnd={onSceneDragEnd}
       onClick={(e) => {
-        if (item.scene) {
-          onSceneBlockClick(e, item.scene.scene_number);
+        if (onItemClick) {
+          onItemClick(e, item);
         }
       }}
+      title={item.prompt || item.label}
     >
       {thumbnailElement}
-      {item.scene && editingSceneNumber === item.scene.scene_number ? (
-        <div className={styles.sceneNameEdit}>
-          <input
-            type="text"
-            value={editedSceneName}
-            onChange={(e) => onEditedNameChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                onNameChange(item.scene!.scene_number, editedSceneName);
-                onEditingCancel();
-              } else if (e.key === 'Escape') {
-                onEditingCancel();
-              }
-            }}
-            onBlur={() => {
-              onNameChange(item.scene!.scene_number, editedSceneName);
-              onEditingCancel();
-            }}
-            onFocus={(e) => {
-              // Prevent browser from scrolling to input
-              e.target.scrollIntoView({
-                behavior: 'instant',
-                block: 'nearest',
-                inline: 'nearest',
-              });
-            }}
-            className={styles.sceneNameInput}
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
-            onClick={(e) => e.stopPropagation()}
-            placeholder={`Scene ${item.scene.scene_number}`}
-          />
-        </div>
-      ) : (
-        <div
-          className={styles.sceneId}
-          onDoubleClick={(e) => {
-            if (item.scene) {
-              e.stopPropagation();
-              // This will be handled by parent component
-            }
-          }}
-          title="Double-click to edit name"
-        >
-          {item.label}
-          {item.scene && (
-            <button
-              type="button"
-              className={styles.sceneNameEditButton}
-              onClick={(e) => {
-                e.stopPropagation();
-                // This will be handled by parent component
-              }}
-              title="Edit scene name"
-            >
-              <Edit2 size={10} />
-            </button>
-          )}
-        </div>
-      )}
-      {item.scene && (
-        <div className={styles.sceneDescription}>{item.scene.description}</div>
-      )}
-      {item.scene && sceneFolder && onViewDetails && (
-        <div className={styles.sceneFooter}>
-          <button
-            type="button"
-            className={styles.viewDetailsButton}
-            onClick={(e) => {
-              e.stopPropagation();
-              onViewDetails(item.scene!.scene_number, sceneFolder);
-            }}
-            title="View details"
-          >
-            <FileText size={10} />
-          </button>
+      <div className={styles.sceneId}>{item.label}</div>
+      {item.prompt && (
+        <div className={styles.sceneDescription} title={item.prompt}>
+          {item.prompt.length > 50 ? `${item.prompt.substring(0, 50)}...` : item.prompt}
         </div>
       )}
     </div>
@@ -389,9 +247,9 @@ export default function TimelinePanel({
     addAsset,
   } = useProject();
 
-  // Use unified timeline data hook
-  const { scenes, timelineItems, artifactsByScene, importedVideoArtifacts } =
-    useTimelineData();
+  // Use unified timeline data hook with placement-based architecture
+  const { timelineItems, totalDuration: timelineTotalDuration } =
+    useTimelineData(externalActiveVersions);
 
   // Initialize zoom level from timeline state
   const [zoomLevel, setZoomLevel] = useState(timelineState.zoom_level);
@@ -562,32 +420,6 @@ export default function TimelinePanel({
   const [markerPromptPosition, setMarkerPromptPosition] = useState<
     number | null
   >(null);
-  const [popoverSceneNumber, setPopoverSceneNumber] = useState<number | null>(
-    null,
-  );
-  const [popoverPosition, setPopoverPosition] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [previewSceneNumber, setPreviewSceneNumber] = useState<number | null>(
-    null,
-  );
-  const [markdownContent, setMarkdownContent] = useState<string>('');
-  const [isLoadingMarkdown, setIsLoadingMarkdown] = useState(false);
-  const [editingSceneNumber, setEditingSceneNumber] = useState<number | null>(
-    null,
-  );
-  const [editedSceneName, setEditedSceneName] = useState<string>('');
-  // Create scene folder map for markdown preview and version management
-  const sceneFoldersByNumber = useMemo(() => {
-    const map: Record<number, string> = {};
-    if (!projectScenes || projectScenes.length === 0) return map;
-
-    projectScenes.forEach((scene) => {
-      map[scene.scene_number] = scene.folder;
-    });
-    return map;
-  }, [projectScenes]);
 
   // Load active versions from timeline state or use external prop (with migration)
   const [internalActiveVersions, setInternalActiveVersions] = useState<
@@ -618,7 +450,8 @@ export default function TimelinePanel({
   const setActiveVersions = onActiveVersionsChange ?? setInternalActiveVersions;
 
   // Sync active versions to timeline state when they change
-  // Use ref to track previous serialized state to avoid infinite loops
+  // For placement-based timeline, we use placementNumber as key
+  // Note: Timeline state still uses sceneFolder format, so we map placementNumber to a folder-like key
   const prevActiveVersionsRef = useRef<string>('');
 
   useEffect(() => {
@@ -627,67 +460,27 @@ export default function TimelinePanel({
     // Serialize current activeVersions for comparison
     const serializedActiveVersions = JSON.stringify(activeVersions);
 
-    // Check if timeline state already matches what we're trying to set
-    // Convert timelineState.active_versions to the same format for comparison
-    const timelineVersions: Record<number, SceneVersions> = {};
-    if (timelineState?.active_versions) {
-      Object.entries(timelineState.active_versions).forEach(
-        ([folder, versionData]) => {
-          const match = folder.match(/scene-(\d+)/);
-          if (match) {
-            const sceneNumber = parseInt(match[1], 10);
-            if (typeof versionData === 'number') {
-              timelineVersions[sceneNumber] = { video: versionData };
-            } else if (versionData && typeof versionData === 'object') {
-              timelineVersions[sceneNumber] = versionData;
-            }
-          }
-        },
-      );
-    }
-    const serializedTimelineVersions = JSON.stringify(timelineVersions);
-
-    // Only update if activeVersions changed AND doesn't match timeline state
-    // This prevents circular updates when timeline state changes trigger activeVersions changes
-    if (
-      serializedActiveVersions === prevActiveVersionsRef.current ||
-      serializedActiveVersions === serializedTimelineVersions
-    ) {
+    // Only update if activeVersions actually changed
+    if (serializedActiveVersions === prevActiveVersionsRef.current) {
       return;
     }
 
     prevActiveVersionsRef.current = serializedActiveVersions;
 
+    // Update timeline state active_versions
+    // Map placementNumber to a folder-like key for timeline state compatibility
     Object.entries(activeVersions).forEach(
-      async ([sceneNumber, sceneVersions]) => {
-        const sceneFolder = sceneFoldersByNumber[parseInt(sceneNumber, 10)];
-        if (sceneFolder && sceneVersions) {
-          // Check if timeline state already has these values to avoid unnecessary updates
-          const timelineVersion = timelineVersions[parseInt(sceneNumber, 10)];
-          const needsImageUpdate =
-            sceneVersions.image !== undefined &&
-            timelineVersion?.image !== sceneVersions.image;
-          const needsVideoUpdate =
-            sceneVersions.video !== undefined &&
-            timelineVersion?.video !== sceneVersions.video;
+      ([placementNumberStr, sceneVersions]) => {
+        const placementNumber = parseInt(placementNumberStr, 10);
+        // Use placement-{number} as the key to distinguish from scene folders
+        const folderKey = `placement-${String(placementNumber).padStart(3, '0')}`;
 
-          // Update timeline state active_versions for both image and video
-          if (needsImageUpdate && sceneVersions.image !== undefined) {
-            setActiveVersion(sceneFolder, 'image', sceneVersions.image);
+        if (sceneVersions) {
+          if (sceneVersions.image !== undefined) {
+            setActiveVersion(folderKey, 'image', sceneVersions.image);
           }
-          if (needsVideoUpdate && sceneVersions.video !== undefined) {
-            setActiveVersion(sceneFolder, 'video', sceneVersions.video);
-
-            // Update current.txt file for video version
-            try {
-              await setActiveVideoVersion(
-                projectDirectory,
-                sceneFolder,
-                sceneVersions.video!,
-              );
-            } catch (error) {
-              console.error('Failed to update current.txt:', error);
-            }
+          if (sceneVersions.video !== undefined) {
+            setActiveVersion(folderKey, 'video', sceneVersions.video);
           }
         }
       },
@@ -695,21 +488,10 @@ export default function TimelinePanel({
   }, [
     activeVersions,
     projectDirectory,
-    sceneFoldersByNumber,
     setActiveVersion,
-    timelineState?.active_versions,
   ]);
-  const {
-    selectedScenes,
-    selectScene,
-    clearSelection,
-    draggedSceneNumber,
-    dropInsertIndex,
-    startDrag,
-    endDrag,
-    setDropIndex,
-    reorderScenes,
-  } = useTimeline();
+  // Scene selection and drag/drop removed for placement-based timeline
+  // Placements are timestamp-based and cannot be reordered
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const tracksRef = useRef<HTMLDivElement>(null);
@@ -745,119 +527,23 @@ export default function TimelinePanel({
 
   const { sendTimelineMarker } = useTimelineWebSocket(handleMarkerUpdate);
 
-  // Restore scroll position when exiting edit mode
-  useEffect(() => {
-    if (
-      editingSceneNumber === null &&
-      scrollPositionBeforeEditRef.current !== null &&
-      tracksRef.current
-    ) {
-      // Use requestAnimationFrame to ensure DOM has updated
-      requestAnimationFrame(() => {
-        if (tracksRef.current && scrollPositionBeforeEditRef.current !== null) {
-          tracksRef.current.scrollLeft = scrollPositionBeforeEditRef.current;
-          scrollPositionBeforeEditRef.current = null;
-        }
-      });
-    }
-  }, [editingSceneNumber]);
+  // Scene-based functionality removed for placement-based timeline
 
-  // Handle scene name change
-  const handleNameChange = useCallback(
-    async (sceneNumber: number, name: string) => {
-      // TODO: Implement name change via ProjectContext
-      console.log('Name change:', sceneNumber, name);
-    },
-    [],
-  );
 
-  // Load markdown content when preview is opened
-  const handleViewSceneDetails = useCallback(
-    async (sceneNumber: number, sceneFolder: string) => {
-      setPreviewSceneNumber(sceneNumber);
-      setIsLoadingMarkdown(true);
-
-      const basePath = projectDirectory || '/mock';
-      const markdownPath = `${basePath}/.kshana/agent/scenes/${sceneFolder}/scene.md`;
-
-      try {
-        const content = await window.electron.project.readFile(markdownPath);
-        if (content !== null) {
-          setMarkdownContent(content);
-        } else {
-          const scene = scenes.find((s) => s.scene_number === sceneNumber);
-          setMarkdownContent(
-            `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${scene?.description || 'No details available.'
-            }`,
-          );
-        }
-      } catch (error) {
-        console.error('Failed to load scene markdown:', error);
-        const scene = scenes.find((s) => s.scene_number === sceneNumber);
-        setMarkdownContent(
-          `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${scene?.description || 'No details available.'
-          }`,
-        );
-      } finally {
-        setIsLoadingMarkdown(false);
-      }
-    },
-    [projectDirectory, scenes],
-  );
-
-  const handleClosePreview = useCallback(() => {
-    setPreviewSceneNumber(null);
-    setMarkdownContent('');
-  }, []);
-
-  // Calculate scene blocks for marker context and version selector
-  const sceneBlocks = useMemo(() => {
-    let currentTime = 0;
-    return scenes.map((scene) => {
-      const startTime = currentTime;
-      const duration = scene.duration || 5;
-      currentTime += duration;
-      return {
-        scene,
-        startTime,
-        duration,
-        artifact: artifactsByScene[scene.scene_number],
-      };
-    });
-  }, [scenes, artifactsByScene]);
-
-  // Calculate total duration from timeline items
+  // Calculate total duration from timeline (placement-based)
   const totalDuration = useMemo(() => {
+    if (timelineTotalDuration > 0) return timelineTotalDuration;
     if (timelineItems.length === 0) return 10;
     const lastItem = timelineItems[timelineItems.length - 1];
-    return Math.max(lastItem.startTime + lastItem.duration, 10);
-  }, [timelineItems]);
+    return Math.max(lastItem.endTime, 10);
+  }, [timelineTotalDuration, timelineItems]);
 
   // Load imported videos from asset manifest (for local video import feature)
+  // Note: Imported videos are handled separately and appended after timeline items
   useEffect(() => {
-    if (importedVideoArtifacts.length > 0) {
-      const sceneEndTime =
-        sceneBlocks.length > 0
-          ? sceneBlocks[sceneBlocks.length - 1].startTime +
-          sceneBlocks[sceneBlocks.length - 1].duration
-          : 0;
-      let currentTime = sceneEndTime;
-      const videos = importedVideoArtifacts.map((artifact) => {
-        const startTime = currentTime;
-        const duration = (artifact.metadata?.duration as number) || 5;
-        currentTime += duration;
-        return {
-          path: artifact.file_path,
-          duration,
-          startTime,
-        };
-      });
-      setImportedVideos(videos);
-    } else {
-      // Clear imported videos if none
-      setImportedVideos([]);
-    }
-  }, [importedVideoArtifacts, sceneBlocks]);
+    // Imported videos logic can be added here if needed
+    // For now, they're handled in the timeline items rendering
+  }, []);
 
   // Timeline click handler removed - no longer opens marker prompt
   // Marker functionality can be accessed via keyboard shortcut or toolbar button
@@ -886,18 +572,19 @@ export default function TimelinePanel({
 
       // Send to backend via WebSocket
       try {
-        // Get current scene context
-        const currentScene = sceneBlocks.find(
-          (block) =>
-            position >= block.startTime &&
-            position < block.startTime + block.duration,
+        // Get current timeline item context (placement-based)
+        const currentItem = timelineItems.find(
+          (item) =>
+            position >= item.startTime &&
+            position < item.endTime,
         );
 
-        const previousScenes = sceneBlocks
-          .filter((block) => block.startTime + block.duration <= position)
-          .map((block) => ({
-            scene_number: block.scene.scene_number,
-            description: block.scene.description,
+        const previousItems = timelineItems
+          .filter((item) => item.endTime <= position)
+          .map((item) => ({
+            placementNumber: item.placementNumber,
+            label: item.label,
+            prompt: item.prompt,
           }));
 
         await sendTimelineMarker({
@@ -905,8 +592,11 @@ export default function TimelinePanel({
           position,
           prompt,
           scene_context: {
-            current_scene: currentScene?.scene.scene_number,
-            previous_scenes: previousScenes,
+            current_scene: currentItem?.placementNumber,
+            previous_scenes: previousItems.map((item) => ({
+              scene_number: item.placementNumber,
+              description: item.prompt || item.label,
+            })),
           },
         });
       } catch {
@@ -918,7 +608,7 @@ export default function TimelinePanel({
         );
       }
     },
-    [sceneBlocks, sendTimelineMarker],
+    [timelineItems, sendTimelineMarker],
   );
 
   // Open marker popover at current playhead position (keyboard shortcut)
@@ -975,6 +665,16 @@ export default function TimelinePanel({
 
   // Offset for the timeline content margin
   const TIMELINE_OFFSET = 10;
+
+  // Helper function to clear text selection
+  const clearSelection = useCallback(() => {
+    if (window.getSelection) {
+      const selection = window.getSelection();
+      if (selection) {
+        selection.removeAllRanges();
+      }
+    }
+  }, []);
 
   // Calculate position from mouse event
   const calculatePositionFromMouse = useCallback(
@@ -1061,168 +761,16 @@ export default function TimelinePanel({
     ],
   );
 
-  // Handle scene drag start
-  const handleSceneDragStart = useCallback(
-    (e: React.DragEvent<HTMLDivElement>, sceneNumber: number) => {
-      startDrag(sceneNumber);
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', String(sceneNumber));
-    },
-    [startDrag],
-  );
-
-  // Handle scene drag end
-  const handleSceneDragEnd = useCallback(() => {
-    endDrag();
-  }, [endDrag]);
-
-  // Calculate insertion index from mouse position
-  const calculateInsertIndex = useCallback(
-    (clientX: number): number | null => {
-      if (!tracksRef.current || !sceneBlocks.length) return null;
-
-      const rect = tracksRef.current.getBoundingClientRect();
-      const x = clientX - rect.left + scrollLeft - TIMELINE_OFFSET;
-      const position = pixelsToSeconds(x, zoomLevel);
-
-      // Find which scene index to insert before/after
-      for (let i = 0; i < sceneBlocks.length; i += 1) {
-        const block = sceneBlocks[i];
-        const blockStart = block.startTime;
-        const blockCenter = blockStart + block.duration / 2;
-
-        // If position is before this block's center, insert before it
-        if (position < blockCenter) {
-          return i;
-        }
-      }
-
-      // If position is after all scenes, insert at the end
-      return sceneBlocks.length;
-    },
-    [sceneBlocks, scrollLeft, zoomLevel],
-  );
-
-  // Handle drag over on track content
-  const handleTrackDragOver = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      if (draggedSceneNumber === null) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = 'move';
-
-      const insertIndex = calculateInsertIndex(e.clientX);
-      setDropIndex(insertIndex);
-    },
-    [draggedSceneNumber, calculateInsertIndex, setDropIndex],
-  );
-
-  // Handle drop on track content
-  const handleTrackDrop = useCallback(
-    async (e: React.DragEvent<HTMLDivElement>) => {
-      if (draggedSceneNumber === null || dropInsertIndex === null) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Find the scene number at the target index
-      const targetScene = sceneBlocks[dropInsertIndex];
-      if (!targetScene) {
-        // Dropping at the end
-        const lastScene = sceneBlocks[sceneBlocks.length - 1];
-        if (lastScene) {
-          await reorderScenes(
-            draggedSceneNumber,
-            sceneBlocks.length,
-            null, // projectState no longer needed
-            projectDirectory,
-            () => { }, // No-op function for state update
-          );
-        }
-      } else {
-        // Find the index of the dragged scene in sceneBlocks
-        const draggedIndex = sceneBlocks.findIndex(
-          (block) => block.scene.scene_number === draggedSceneNumber,
-        );
-        if (draggedIndex !== -1) {
-          await reorderScenes(
-            draggedSceneNumber,
-            dropInsertIndex,
-            null, // projectState no longer needed
-            projectDirectory,
-            () => { }, // No-op function for state update
-          );
-        }
-      }
-
-      endDrag();
-    },
-    [
-      draggedSceneNumber,
-      dropInsertIndex,
-      sceneBlocks,
-      reorderScenes,
-      projectDirectory,
-      endDrag,
-    ],
-  );
-
-  // Handle scene block click to select scene
-  const handleSceneBlockClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>, sceneNumber: number) => {
-      // Don't select if we're dragging
-      if (draggedSceneNumber !== null) {
-        return;
-      }
-
-      e.stopPropagation();
-      e.preventDefault();
-
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const multiKey = isMac ? e.metaKey : e.ctrlKey;
-      const rangeKey = e.shiftKey;
-
-      // If clicking on an already-selected scene (and not multi-select), show popover
-      if (selectedScenes.has(sceneNumber) && !multiKey && !rangeKey) {
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        setPopoverPosition({
-          x: rect.left + rect.width / 2,
-          y: rect.top + rect.height,
-        });
-        setPopoverSceneNumber(sceneNumber);
-      } else {
-        selectScene(sceneNumber, multiKey, rangeKey);
-        // Close popover if selecting a different scene
-        if (popoverSceneNumber !== sceneNumber) {
-          setPopoverSceneNumber(null);
-          setPopoverPosition(null);
-        }
-      }
-    },
-    [draggedSceneNumber, selectedScenes, selectScene, popoverSceneNumber],
-  );
-
-  // Handle video block click
-  const handleVideoBlockClick = useCallback(
+  // Handle timeline item click (placement-based)
+  const handleItemClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
-      // Don't handle if we're dragging
-      if (draggedSceneNumber !== null) {
-        return;
-      }
-
       e.stopPropagation();
       e.preventDefault();
 
-      // If video has an associated scene, treat it like a scene click
-      if (item.scene) {
-        handleSceneBlockClick(e, item.scene.scene_number);
-      } else {
-        // For videos without scenes (imported videos), seek to the video's start position
-        setCurrentPosition(item.startTime);
-      }
+      // Seek to item's start position
+      setCurrentPosition(item.startTime);
     },
-    [draggedSceneNumber, handleSceneBlockClick, setCurrentPosition],
+    [setCurrentPosition],
   );
 
   // Handle timeline area scrubbing (click and drag)
@@ -1430,35 +978,12 @@ export default function TimelinePanel({
 
   // Drag handlers removed - not used in unified timeline
 
-  // Handle scene split at playhead
+  // Handle scene split at playhead (disabled for placement-based timeline)
   const handleSplitScene = useCallback(() => {
-    const currentSceneIndex = sceneBlocks.findIndex(
-      (block) =>
-        currentPosition >= block.startTime &&
-        currentPosition < block.startTime + block.duration,
-    );
-
-    if (currentSceneIndex === -1) {
-      return;
-    }
-
-    const block = sceneBlocks[currentSceneIndex];
-    const splitTime = currentPosition - block.startTime;
-
-    if (splitTime > 0 && splitTime < block.duration) {
-      // Split the scene
-      // TODO: Update project state with split scenes
-      // const firstPart = {
-      //   ...block.scene,
-      //   duration: splitTime,
-      // };
-      // const secondPart = {
-      //   ...block.scene,
-      //   scene_number: block.scene.scene_number + 0.5, // Temporary number
-      //   duration: block.duration - splitTime,
-      // };
-    }
-  }, [currentPosition, sceneBlocks]);
+    // Placements are timestamp-based and cannot be split
+    // This functionality is not applicable to placement-based timeline
+    console.log('Split scene not supported for placement-based timeline');
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1649,13 +1174,13 @@ export default function TimelinePanel({
 
           <div className={styles.timelineContainer} ref={timelineRef}>
             <VersionSelector
-              sceneBlocks={sceneBlocks}
+              timelineItems={timelineItems}
               activeVersions={activeVersions}
-              onVersionSelect={(sceneNumber, assetType, version) => {
+              onVersionSelect={(placementNumber, assetType, version) => {
                 const newVersions: Record<number, SceneVersions> = {
                   ...activeVersions,
-                  [sceneNumber]: {
-                    ...activeVersions[sceneNumber],
+                  [placementNumber]: {
+                    ...activeVersions[placementNumber],
                     [assetType]: version,
                   },
                 };
@@ -1718,42 +1243,10 @@ export default function TimelinePanel({
                 {/* Unified Track */}
                 {timelineItems.length > 0 && (
                   <div className={styles.track}>
-                    <div
-                      className={styles.trackContent}
-                      onDragOver={handleTrackDragOver}
-                      onDrop={handleTrackDrop}
-                      onDragLeave={(e) => {
-                        // Only clear if actually leaving the track area
-                        const rect = (
-                          e.currentTarget as HTMLElement
-                        ).getBoundingClientRect();
-                        const x = e.clientX;
-                        const y = e.clientY;
-                        if (
-                          x < rect.left ||
-                          x > rect.right ||
-                          y < rect.top ||
-                          y > rect.bottom
-                        ) {
-                          setDropIndex(null);
-                        }
-                      }}
-                    >
+                    <div className={styles.trackContent}>
                       {timelineItems.map((item) => {
                         const left = secondsToPixels(item.startTime, zoomLevel);
                         const width = secondsToPixels(item.duration, zoomLevel);
-                        const isSelected = Boolean(
-                          item.scene &&
-                          selectedScenes.has(item.scene.scene_number),
-                        );
-                        const isSceneDragging = Boolean(
-                          item.scene &&
-                          draggedSceneNumber === item.scene.scene_number,
-                        );
-
-                        const sceneFolder = item.scene
-                          ? sceneFoldersByNumber[item.scene.scene_number]
-                          : undefined;
 
                         return (
                           <TimelineItemComponent
@@ -1762,65 +1255,12 @@ export default function TimelinePanel({
                             left={left}
                             width={width}
                             projectDirectory={projectDirectory || null}
-                            isSelected={isSelected}
-                            isSceneDragging={isSceneDragging}
-                            editingSceneNumber={editingSceneNumber}
-                            editedSceneName={editedSceneName}
-                            sceneFolder={sceneFolder}
+                            isSelected={false}
                             activeVersions={activeVersions}
-                            onSceneDragStart={handleSceneDragStart}
-                            onSceneDragEnd={handleSceneDragEnd}
-                            onSceneBlockClick={handleSceneBlockClick}
-                            onVideoBlockClick={handleVideoBlockClick}
-                            onNameChange={handleNameChange}
-                            onEditedNameChange={setEditedSceneName}
-                            onViewDetails={handleViewSceneDetails}
-                            onEditingCancel={() => {
-                              // Restore scroll position on cancel
-                              if (
-                                scrollPositionBeforeEditRef.current !== null &&
-                                tracksRef.current
-                              ) {
-                                tracksRef.current.scrollLeft =
-                                  scrollPositionBeforeEditRef.current;
-                                scrollPositionBeforeEditRef.current = null;
-                              }
-                              setEditingSceneNumber(null);
-                              if (item.scene) {
-                                setEditedSceneName(item.scene.name || '');
-                              }
-                            }}
+                            onItemClick={handleItemClick}
                           />
                         );
                       })}
-
-                      {/* Drop Indicator Line */}
-                      {dropInsertIndex !== null &&
-                        draggedSceneNumber !== null &&
-                        (() => {
-                          let indicatorLeft = 0;
-                          if (dropInsertIndex < sceneBlocks.length) {
-                            indicatorLeft = secondsToPixels(
-                              sceneBlocks[dropInsertIndex].startTime,
-                              zoomLevel,
-                            );
-                          } else if (sceneBlocks.length > 0) {
-                            const lastBlock =
-                              sceneBlocks[sceneBlocks.length - 1];
-                            indicatorLeft = secondsToPixels(
-                              lastBlock.startTime + lastBlock.duration,
-                              zoomLevel,
-                            );
-                          }
-                          return (
-                            <div
-                              className={styles.dropIndicatorLine}
-                              style={{
-                                left: `${indicatorLeft}px`,
-                              }}
-                            />
-                          );
-                        })()}
                     </div>
                   </div>
                 )}
@@ -1853,48 +1293,6 @@ export default function TimelinePanel({
             />
           )}
 
-          {popoverSceneNumber !== null && popoverPosition && (
-            <SceneActionPopover
-              sceneNumber={popoverSceneNumber}
-              position={popoverPosition}
-              onClose={() => {
-                setPopoverSceneNumber(null);
-                setPopoverPosition(null);
-              }}
-              onRegenerate={(sceneNum, prompt) => {
-                // TODO: Implement regenerate scene logic with prompt
-                // This will call backend/agent to regenerate the scene with the given prompt
-                // Parameters: sceneNum (number), prompt (string)
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                const unusedParams = { sceneNum, prompt };
-                return unusedParams;
-              }}
-              onGenerateNext={(sceneNum, prompt) => {
-                // TODO: Implement generate next scene logic with prompt
-                // This will call backend/agent to generate a new scene after sceneNum with the given prompt
-                // Parameters: sceneNum (number), prompt (string)
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                const unusedParams = { sceneNum, prompt };
-                return unusedParams;
-              }}
-            />
-          )}
-
-          {previewSceneNumber !== null && (
-            <MarkdownPreview
-              isOpen={previewSceneNumber !== null}
-              title={
-                scenes.find((s) => s.scene_number === previewSceneNumber)
-                  ?.name || `Scene ${previewSceneNumber}`
-              }
-              content={
-                isLoadingMarkdown
-                  ? 'Loading...'
-                  : markdownContent || 'Loading...'
-              }
-              onClose={handleClosePreview}
-            />
-          )}
         </>
       )}
     </div>

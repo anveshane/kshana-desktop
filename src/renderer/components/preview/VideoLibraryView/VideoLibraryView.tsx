@@ -100,9 +100,38 @@ export default function VideoLibraryView({
     return map;
   }, [projectScenes]);
 
-  // Use unified timeline data hook
-  const { scenes, timelineItems, videoArtifacts, totalDuration } =
-    useTimelineData();
+  // Use unified timeline data hook (placement-based)
+  const { timelineItems, totalDuration } = useTimelineData(activeVersions);
+  
+  // Get video artifacts from asset manifest for the sidebar
+  const videoArtifacts = useMemo(() => {
+    if (!assetManifest?.assets) return [];
+    return assetManifest.assets
+      .filter((asset) => asset.type === 'scene_video' || asset.type === 'final_video')
+      .map((asset) => {
+        let createdAt: string;
+        if (asset.created_at) {
+          const date = new Date(asset.created_at);
+          createdAt = isNaN(date.getTime())
+            ? new Date().toISOString()
+            : date.toISOString();
+        } else {
+          createdAt = new Date().toISOString();
+        }
+        return {
+          artifact_id: asset.id,
+          artifact_type: 'video',
+          file_path: asset.path,
+          created_at: createdAt,
+          scene_number: asset.scene_number,
+          metadata: {
+            title: asset.path.split('/').pop(),
+            duration: asset.metadata?.duration,
+            imported: asset.metadata?.imported,
+          },
+        };
+      });
+  }, [assetManifest]);
 
   const [currentItemIndex, setCurrentItemIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -133,49 +162,27 @@ export default function VideoLibraryView({
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  // Get current item from timeline (can be video or scene)
+  // Get current item from timeline (placement-based: image, video, or placeholder)
   const currentItem = timelineItems[currentItemIndex] || null;
   const currentVideo = currentItem?.type === 'video' ? currentItem : null;
+  const currentImage = currentItem?.type === 'image' ? currentItem : null;
 
-  // Calculate current scene from currentItem or playbackTime
-  // Prefer scene from currentItem if it exists, otherwise calculate from playbackTime
-  const currentScene = useMemo(() => {
-    // If current item has a scene, use that
-    if (currentItem?.scene) {
-      return currentItem.scene;
-    }
-
-    // Otherwise, calculate scene from playbackTime (for scenes without videos)
-    if (scenes.length === 0) return null;
-
-    let accumulatedTime = 0;
-    for (const scene of scenes) {
-      const sceneDuration = scene.duration || 5;
-      if (
-        playbackTime >= accumulatedTime &&
-        playbackTime < accumulatedTime + sceneDuration
-      ) {
-        return scene;
-      }
-      accumulatedTime += sceneDuration;
-    }
-    // If past all scenes, return last scene
-    return scenes[scenes.length - 1] || null;
-  }, [playbackTime, scenes, currentItem]);
-
-  // Resolve scene image path from asset manifest (respecting active versions)
+  // Resolve image path from current timeline item (placement-based)
   const sceneImagePath = useMemo(() => {
-    if (!currentScene || !assetManifest?.assets) return null;
+    if (!currentImage || !assetManifest?.assets) return null;
 
-    const sceneNumber = currentScene.scene_number;
-    const activeImageVersion = activeVersions[sceneNumber]?.image;
+    const placementNumber = currentImage.placementNumber;
+    if (placementNumber === undefined) return null;
 
-    // Find image asset matching scene number and version
+    const activeImageVersion = activeVersions[placementNumber]?.image;
+
+    // Find image asset matching placement number and version
     if (activeImageVersion !== undefined) {
       const imageAsset = assetManifest.assets.find(
         (asset) =>
           asset.type === 'scene_image' &&
-          asset.scene_number === sceneNumber &&
+          (asset.metadata?.placementNumber === placementNumber ||
+            asset.scene_number === placementNumber) &&
           asset.version === activeImageVersion,
       );
       if (imageAsset) {
@@ -183,20 +190,22 @@ export default function VideoLibraryView({
       }
     }
 
-    // Fallback: find latest image asset for this scene
+    // Fallback: find latest image asset for this placement
     const imageAssets = assetManifest.assets.filter(
       (asset) =>
-        asset.type === 'scene_image' && asset.scene_number === sceneNumber,
+        asset.type === 'scene_image' &&
+        (asset.metadata?.placementNumber === placementNumber ||
+          asset.scene_number === placementNumber),
     );
     if (imageAssets.length > 0) {
       // Sort by version descending to get latest
       const sorted = imageAssets.sort((a, b) => b.version - a.version);
-      return sorted[0].path;
+      return sorted[0]?.path || null;
     }
 
-    // Final fallback: use scene.image_path if available
-    return currentScene.image_path || null;
-  }, [currentScene, activeVersions, assetManifest]);
+    // Use imagePath from timeline item if available
+    return currentImage.imagePath || null;
+  }, [currentImage, activeVersions, assetManifest]);
 
   // Resolve and store the display-ready image path
   const [resolvedSceneImagePath, setResolvedSceneImagePath] = useState<
@@ -286,7 +295,7 @@ export default function VideoLibraryView({
       const itemIndex = timelineItems.findIndex(
         (item) =>
           seekTime >= item.startTime &&
-          seekTime < item.startTime + item.duration,
+          seekTime < item.endTime,
       );
 
       if (itemIndex >= 0) {
@@ -307,7 +316,7 @@ export default function VideoLibraryView({
         if (lastIndex >= 0) {
           const lastItem = timelineItems[lastIndex];
           setCurrentItemIndex(lastIndex);
-          onPlaybackTimeChange(lastItem.startTime + lastItem.duration);
+          onPlaybackTimeChange(lastItem.endTime);
           if (videoRef.current && lastItem.type === 'video') {
             videoRef.current.currentTime = lastItem.duration;
           }
@@ -341,23 +350,36 @@ export default function VideoLibraryView({
   // Resolved video path state
   const [currentVideoPath, setCurrentVideoPath] = useState<string>('');
 
-  // Construct version-specific path if active version is set
+  // Construct version-specific path if active version is set (placement-based)
   const versionPath = useMemo(() => {
-    if (
-      currentVideo?.sceneNumber &&
-      activeVersions[currentVideo.sceneNumber]?.video &&
-      sceneFoldersByNumber[currentVideo.sceneNumber]
-    ) {
-      const version = activeVersions[currentVideo.sceneNumber].video!;
-      const sceneFolder = sceneFoldersByNumber[currentVideo.sceneNumber];
-      return `.kshana/agent/scenes/${sceneFolder}/video/v${version}.mp4`;
+    if (!currentVideo) return null;
+    
+    const placementNumber = currentVideo.placementNumber;
+    if (placementNumber === undefined) {
+      return currentVideo.videoPath || null;
     }
-    return currentVideo?.path;
+
+    const activeVideoVersion = activeVersions[placementNumber]?.video;
+    if (activeVideoVersion !== undefined && assetManifest?.assets) {
+      // Find video asset matching placement number and version
+      const videoAsset = assetManifest.assets.find(
+        (asset) =>
+          asset.type === 'scene_video' &&
+          (asset.metadata?.placementNumber === placementNumber ||
+            asset.scene_number === placementNumber) &&
+          asset.version === activeVideoVersion,
+      );
+      if (videoAsset) {
+        return videoAsset.path;
+      }
+    }
+
+    // Fallback: use videoPath from timeline item
+    return currentVideo.videoPath || null;
   }, [
-    currentVideo?.sceneNumber,
-    currentVideo?.path,
+    currentVideo,
     activeVersions,
-    sceneFoldersByNumber,
+    assetManifest,
   ]);
 
   // Resolve video path when current video or version changes
@@ -442,7 +464,7 @@ export default function VideoLibraryView({
     const itemIndex = timelineItems.findIndex(
       (item) =>
         playbackTime >= item.startTime &&
-        playbackTime < item.startTime + item.duration,
+        playbackTime < item.endTime,
     );
 
     if (itemIndex >= 0 && itemIndex !== currentItemIndex) {
@@ -538,21 +560,21 @@ export default function VideoLibraryView({
     }
   }, [playbackTime, currentVideo, isDragging]);
 
-  // Handle auto-advance for scenes without videos
-  // When playing a scene item (not video), check if we've reached the end of the item
+  // Handle auto-advance for non-video items (images, placeholders)
+  // When playing a non-video item, check if we've reached the end of the item
   useEffect(() => {
     if (!isPlaying || isDragging || isSeekingRef.current) return;
-    if (!currentItem || currentItem.type === 'video') return; // Only handle scene items
+    if (!currentItem || currentItem.type === 'video') return; // Only handle non-video items
 
-    const itemEndTime = currentItem.startTime + currentItem.duration;
-    // If playbackTime has reached or passed the end of the current scene, move to next item
+    const itemEndTime = currentItem.endTime;
+    // If playbackTime has reached or passed the end of the current item, move to next item
     if (
       playbackTime >= itemEndTime &&
       currentItemIndex < timelineItems.length - 1
     ) {
       const nextIndex = currentItemIndex + 1;
       setCurrentItemIndex(nextIndex);
-      onPlaybackTimeChange(timelineItems[nextIndex].startTime);
+      onPlaybackTimeChange(timelineItems[nextIndex]!.startTime);
     } else if (playbackTime >= totalDuration) {
       // Reached end of timeline
       onPlaybackStateChange(false);
@@ -668,7 +690,7 @@ export default function VideoLibraryView({
               </div>
             </div>
           ) : timelineItems.length > 0 ? (
-            /* Show controls even when no video - for scene playback */
+            /* Show controls even when no video - for image/placeholder playback */
             <div className={styles.videoPlayer}>
               <div
                 className={`${styles.scenePlaceholder} ${
@@ -682,15 +704,15 @@ export default function VideoLibraryView({
                     : undefined
                 }
               >
-                {currentItem && currentItem.type === 'scene' && (
+                {currentItem && (currentItem.type === 'image' || currentItem.type === 'placeholder') && (
                   <div className={styles.scenePlaceholderContent}>
                     {!resolvedSceneImagePath && (
                       <Film size={64} className={styles.scenePlaceholderIcon} />
                     )}
                     <h3>{currentItem.label}</h3>
-                    {currentItem.scene?.description && (
+                    {currentItem.prompt && (
                       <p className={styles.scenePlaceholderDescription}>
-                        {currentItem.scene.description}
+                        {currentItem.prompt}
                       </p>
                     )}
                   </div>
@@ -719,57 +741,35 @@ export default function VideoLibraryView({
             </div>
           ) : null}
 
-          {/* Scene info panel - show when currentScene exists and NOT playing imported video */}
-          {currentScene && (!currentVideo || currentVideo.scene) ? (
+          {/* Placement info panel - show when currentItem exists and NOT playing video */}
+          {currentItem && (!currentVideo || currentItem.type !== 'video') ? (
             <div className={styles.sceneInfoPanel}>
               <div className={styles.sceneHeader}>
                 <h3 className={styles.sceneTitle}>
-                  Scene {currentScene.scene_number}
-                  {currentScene.name && (
+                  {currentItem.label}
+                  {currentItem.placementNumber && (
                     <span className={styles.sceneName}>
-                      : {currentScene.name}
+                      {' '}(Placement {currentItem.placementNumber})
                     </span>
                   )}
                 </h3>
               </div>
-              {currentScene.description && (
+              {currentItem.prompt && (
                 <div className={styles.sceneDescription}>
-                  {currentScene.description}
+                  {currentItem.prompt}
                 </div>
               )}
               <div className={styles.sceneMetadata}>
-                {currentScene.shot_type && (
-                  <div className={styles.sceneMetaItem}>
-                    <strong>Shot Type:</strong> {currentScene.shot_type}
-                  </div>
-                )}
-                {currentScene.lighting && (
-                  <div className={styles.sceneMetaItem}>
-                    <strong>Lighting:</strong> {currentScene.lighting}
-                  </div>
-                )}
-                {currentScene.duration && (
-                  <div className={styles.sceneMetaItem}>
-                    <strong>Duration:</strong> {currentScene.duration}s
-                  </div>
-                )}
-                {currentScene.location && (
-                  <div className={styles.sceneMetaItem}>
-                    <strong>Location:</strong> {currentScene.location}
-                  </div>
-                )}
-                {currentScene.mood && (
-                  <div className={styles.sceneMetaItem}>
-                    <strong>Mood:</strong> {currentScene.mood}
-                  </div>
-                )}
-                {currentScene.characters &&
-                  currentScene.characters.length > 0 && (
-                    <div className={styles.sceneMetaItem}>
-                      <strong>Characters:</strong>{' '}
-                      {currentScene.characters.join(', ')}
-                    </div>
-                  )}
+                <div className={styles.sceneMetaItem}>
+                  <strong>Type:</strong> {currentItem.type}
+                </div>
+                <div className={styles.sceneMetaItem}>
+                  <strong>Duration:</strong> {currentItem.duration.toFixed(1)}s
+                </div>
+                <div className={styles.sceneMetaItem}>
+                  <strong>Time Range:</strong>{' '}
+                  {currentItem.startTime.toFixed(1)}s - {currentItem.endTime.toFixed(1)}s
+                </div>
               </div>
             </div>
           ) : timelineItems.length === 0 ? (

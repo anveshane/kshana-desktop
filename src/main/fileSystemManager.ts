@@ -44,7 +44,24 @@ class FileSystemManager extends EventEmitter {
   }
 
   async readDirectory(dirPath: string, depth: number = 1): Promise<FileNode> {
-    const stats = await fs.promises.stat(dirPath);
+    
+    let stats;
+    try {
+      stats = await fs.promises.stat(dirPath);
+    } catch (error: unknown) {
+      const err = error as { code?: string };
+      if (err.code === 'ENOENT') {
+        // Directory doesn't exist - return empty directory node
+        const name = path.basename(dirPath);
+        return {
+          name,
+          path: dirPath,
+          type: 'directory',
+          children: [],
+        };
+      }
+      throw error;
+    }
     const name = path.basename(dirPath);
 
     if (!stats.isDirectory()) {

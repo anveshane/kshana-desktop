@@ -196,6 +196,11 @@ export async function resolveAssetPathForDisplay(
       return `file://${normalizedProjectDir}/.kshana/agent/${trimmedPath}`;
     }
 
+    // Handle paths starting with "agent/" (e.g., agent/image-placements/...)
+    if (trimmedPath.startsWith('agent/')) {
+      return `file://${normalizedProjectDir}/.kshana/${trimmedPath}`;
+    }
+
     // Handle other relative paths
     const result = `file://${normalizedProjectDir}/${trimmedPath}`;
     if (assetPath.endsWith('.mp4')) {
