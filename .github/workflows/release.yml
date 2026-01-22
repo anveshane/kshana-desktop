@@ -16,8 +16,8 @@ jobs:
         id: set_branches
         run: |
           # Hardcoded branch names for now
-          FRONTEND_BRANCH="fix/chat-version-1"
-          BACKEND_BRANCH="merged-cleanup-fixes"
+          FRONTEND_BRANCH="fix-image-display"
+          BACKEND_BRANCH="fix-image-display"
           echo "FRONTEND_BRANCH=$FRONTEND_BRANCH" >> $GITHUB_OUTPUT
           echo "BACKEND_BRANCH=$BACKEND_BRANCH" >> $GITHUB_OUTPUT
           echo "✓ Using branches: frontend=$FRONTEND_BRANCH, backend=$BACKEND_BRANCH"
