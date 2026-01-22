@@ -140,6 +140,9 @@ function roundDuration(seconds: number): number {
  * Parse video placements from the video-placements.md file content.
  * 
  * Expected format:
+ * - Placement N: startTime-endTime | type=video_type | prompt text
+ * 
+ * Legacy format (filename is ignored):
  * - Placement N: startTime-endTime | type=video_type | prompt text | filename.mp4
  * 
  * @param content - The content of the video-placements.md file
@@ -158,14 +161,15 @@ export function parseVideoPlacements(content: string): ParsedVideoPlacement[] {
       continue;
     }
     
-    // Match pattern: - Placement N: startTime-endTime | type=video_type | prompt | filename
+    // Match pattern: - Placement N: startTime-endTime | type=video_type | prompt [| filename]
     // Also handle: • Placement N: ... (bullet point)
-    const placementMatch = trimmedLine.match(/^[•\-]\s*Placement\s+(\d+):\s*([^\|]+)\s*\|\s*type=([^\|]+)\s*\|\s*([^\|]+)\s*\|\s*(.+)$/);
+    // Filename is optional (for backward compatibility)
+    const placementMatch = trimmedLine.match(/^[•\-]\s*Placement\s+(\d+):\s*([^\|]+)\s*\|\s*type=([^\|]+)\s*\|\s*([^\|]+)(?:\s*\|\s*(.+))?$/);
     
-    if (!placementMatch || !placementMatch[1] || !placementMatch[2] || !placementMatch[3] || !placementMatch[4] || !placementMatch[5]) {
+    if (!placementMatch || !placementMatch[1] || !placementMatch[2] || !placementMatch[3] || !placementMatch[4]) {
       // Try alternative format without leading dash/bullet
-      const altMatch = trimmedLine.match(/Placement\s+(\d+):\s*([^\|]+)\s*\|\s*type=([^\|]+)\s*\|\s*([^\|]+)\s*\|\s*(.+)$/);
-      if (!altMatch || !altMatch[1] || !altMatch[2] || !altMatch[3] || !altMatch[4] || !altMatch[5]) {
+      const altMatch = trimmedLine.match(/Placement\s+(\d+):\s*([^\|]+)\s*\|\s*type=([^\|]+)\s*\|\s*([^\|]+)(?:\s*\|\s*(.+))?$/);
+      if (!altMatch || !altMatch[1] || !altMatch[2] || !altMatch[3] || !altMatch[4]) {
         continue;
       }
       

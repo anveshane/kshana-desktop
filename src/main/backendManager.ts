@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import net from 'net';
 import path from 'path';
+import fs from 'fs';
 import { pathToFileURL } from 'url';
 import { app } from 'electron';
 import log from 'electron-log';
@@ -120,6 +121,25 @@ function setupEnvironment(overrides: BackendEnvOverrides): void {
     // Default to userData/context for desktop app
     const userDataPath = app.getPath('userData');
     process.env.KSHANA_CONTEXT_DIR = path.join(userDataPath, 'context');
+  }
+  // Set workflows directory to kshana-desktop/workflows
+  // In development: __dirname/../../workflows (points to kshana-desktop/workflows)
+  // In packaged: process.resourcesPath/workflows or app.getAppPath()/workflows
+  if (app.isPackaged) {
+    // In production, try process.resourcesPath first, then app path
+    const resourcesWorkflows = path.join(process.resourcesPath || '', 'workflows');
+    if (fs.existsSync(resourcesWorkflows)) {
+      process.env.KSHANA_WORKFLOWS_DIR = resourcesWorkflows;
+    } else {
+      // Fall back to app path
+      const appPath = app.getAppPath();
+      const appWorkflows = path.join(path.dirname(appPath), 'workflows');
+      process.env.KSHANA_WORKFLOWS_DIR = appWorkflows;
+    }
+  } else {
+    // In development, __dirname is dist/main, so ../../workflows gives us kshana-desktop/workflows
+    const devWorkflows = path.join(__dirname, '../../workflows');
+    process.env.KSHANA_WORKFLOWS_DIR = path.resolve(devWorkflows);
   }
 }
 
