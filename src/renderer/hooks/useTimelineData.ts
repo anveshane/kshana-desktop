@@ -15,12 +15,12 @@ import type { AssetInfo, AssetManifest } from '../types/kshana/assetManifest';
 import type { SceneVersions } from '../types/kshana/timeline';
 
 export interface TimelineItem {
-  id: string; // "image-1", "video-2", "placeholder-start"
+  id: string; // "PLM-1", "vd-placement-1", "placeholder-start"
   type: 'image' | 'video' | 'placeholder';
   startTime: number; // seconds
   endTime: number; // seconds
   duration: number; // calculated: endTime - startTime
-  label: string; // "Placement 1", "Original Footage"
+  label: string; // "PLM-1", "vd-placement-1", "Original Footage"
   prompt?: string;
   placementNumber?: number;
   imagePath?: string; // resolved if asset matched
@@ -154,12 +154,12 @@ export function useTimelineData(
       );
 
       items.push({
-        id: `image-${placement.placementNumber}`,
+        id: `PLM-${placement.placementNumber}`,
         type: 'image',
         startTime: startSeconds,
         endTime: endSeconds,
         duration: endSeconds - startSeconds,
-        label: `Placement ${placement.placementNumber}`,
+        label: `PLM-${placement.placementNumber}`,
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
         imagePath: asset?.path, // Will be resolved later
@@ -180,12 +180,12 @@ export function useTimelineData(
       );
 
       items.push({
-        id: `video-${placement.placementNumber}`,
+        id: `vd-placement-${placement.placementNumber}`,
         type: 'video',
         startTime: startSeconds,
         endTime: endSeconds,
         duration: endSeconds - startSeconds,
-        label: `Placement ${placement.placementNumber}`,
+        label: `vd-placement-${placement.placementNumber}`,
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
         videoPath: asset?.path, // Will be resolved later

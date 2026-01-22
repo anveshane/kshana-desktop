@@ -192,6 +192,31 @@
   background-color: #000;
 }
 
+.videoPlaceholder {
+  width: 100%;
+  height: 100%;
+  @include flex-center;
+  @include flex-column;
+  gap: $spacing-md;
+  background-color: $color-background-dark;
+  color: $color-text-muted;
+}
+
+.videoPlaceholderIcon {
+  opacity: 0.3;
+}
+
+.videoPlaceholder p {
+  margin: 0;
+  font-size: $font-size-sm;
+}
+
+.videoPlaceholderSubtext {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  opacity: 0.7;
+}
+
 .playerControls {
   position: absolute;
   bottom: 0;
@@ -371,6 +396,16 @@
   max-height: 50%;
 }
 
+.sceneInfoPanelCompact {
+  width: 100%;
+  padding: $spacing-xs $spacing-md;
+  background-color: $color-panel-background;
+  border-top: 1px solid $color-panel-border;
+  flex-shrink: 0;
+  min-height: auto;
+  max-height: none;
+}
+
 .sceneHeader {
   margin-bottom: $spacing-md;
 }
@@ -413,5 +448,32 @@
     font-weight: $font-weight-semibold;
     min-width: 80px;
   }
+}
+
+.sceneMetadataCompact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+  width: 100%;
+}
+
+.sceneTitleCompact {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-secondary;
+  flex-shrink: 0;
+  
+  .sceneName {
+    font-weight: $font-weight-normal;
+    color: $color-text-muted;
+  }
+}
+
+.sceneMetaCompact {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  font-family: $font-family-mono;
+  flex-shrink: 0;
 }
 

@@ -147,7 +147,7 @@ class FileSystemManager extends EventEmitter {
       ignored: IGNORED_PATTERNS,
       persistent: true,
       ignoreInitial: true,
-      depth: 3, // Reduced from 10 to prevent massive watching overhead
+      depth: 5, // Ensure .kshana/agent/content and .kshana/agent/{image,video}-placements are watched
     });
 
     const emitChange = (type: FileChangeEvent['type'], filePath: string) => {

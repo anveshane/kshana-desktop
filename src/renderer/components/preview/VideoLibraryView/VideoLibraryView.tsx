@@ -356,7 +356,11 @@ export default function VideoLibraryView({
     
     const placementNumber = currentVideo.placementNumber;
     if (placementNumber === undefined) {
-      return currentVideo.videoPath || null;
+      const path = currentVideo.videoPath || null;
+      if (!path) {
+        console.warn(`[VideoLibraryView] No videoPath for video: ${currentVideo.label}`);
+      }
+      return path;
     }
 
     const activeVideoVersion = activeVersions[placementNumber]?.video;
@@ -372,10 +376,19 @@ export default function VideoLibraryView({
       if (videoAsset) {
         return videoAsset.path;
       }
+      console.warn(
+        `[VideoLibraryView] Video asset not found for placement ${placementNumber}, version ${activeVideoVersion}`,
+      );
     }
 
     // Fallback: use videoPath from timeline item
-    return currentVideo.videoPath || null;
+    const fallbackPath = currentVideo.videoPath || null;
+    if (!fallbackPath) {
+      console.warn(
+        `[VideoLibraryView] No videoPath found for placement ${placementNumber} (${currentVideo.label})`,
+      );
+    }
+    return fallbackPath;
   }, [
     currentVideo,
     activeVersions,
@@ -392,19 +405,40 @@ export default function VideoLibraryView({
     resolveAssetPathForDisplay(
       versionPath,
       projectDirectory || null,
-    ).then((resolved) => {
-      setCurrentVideoPath(resolved);
-    });
+    )
+      .then((resolved) => {
+        if (resolved && resolved.trim()) {
+          setCurrentVideoPath(resolved);
+        } else {
+          console.warn(`[VideoLibraryView] Empty resolved path for: ${versionPath}`);
+          setCurrentVideoPath('');
+        }
+      })
+      .catch((error) => {
+        console.error(`[VideoLibraryView] Failed to resolve video path: ${versionPath}`, error);
+        setCurrentVideoPath('');
+      });
   }, [versionPath, projectDirectory]);
 
   // Update video source when current video changes
   // Don't switch videos during dragging - wait until drag ends
   useEffect(() => {
-    if (!currentVideo || !videoRef.current || !currentVideoPath || isDragging) {
+    if (!currentVideo || !videoRef.current || isDragging) {
       return;
     }
 
     const videoElement = videoRef.current;
+
+    // If path is empty, clear the video source
+    if (!currentVideoPath || !currentVideoPath.trim()) {
+      if (videoElement.src) {
+        videoElement.pause();
+        videoElement.src = '';
+        videoElement.load();
+        currentVideoPathRef.current = null;
+      }
+      return;
+    }
 
     // Only update if source actually changed to prevent flickering
     if (currentVideoPathRef.current !== currentVideoPath) {
@@ -414,15 +448,22 @@ export default function VideoLibraryView({
       // Pause current video before changing source
       videoElement.pause();
 
-      // Set new source
-      videoElement.src = currentVideoPath;
-      videoElement.currentTime = 0;
+      // Clear previous error handlers
+      const handleError = (e: Event) => {
+        const error = videoElement.error;
+        if (error) {
+          console.error(`[VideoLibraryView] Video error for ${currentVideo.label}:`, {
+            code: error.code,
+            message: error.message,
+            path: currentVideoPath,
+          });
+        }
+      };
 
-      // Wait for video to be ready before playing
       const handleCanPlay = () => {
         if (wasPlaying || isPlaying) {
-          videoElement.play().catch(() => {
-            // Ignore play errors - video might not be ready yet
+          videoElement.play().catch((playError) => {
+            console.warn(`[VideoLibraryView] Play error for ${currentVideo.label}:`, playError);
           });
         }
         videoElement.removeEventListener('canplay', handleCanPlay);
@@ -431,20 +472,33 @@ export default function VideoLibraryView({
       const handleLoadedData = () => {
         // Video is loaded, safe to play if needed
         if (wasPlaying || isPlaying) {
-          videoElement.play().catch(() => {
-            // Ignore play errors
+          videoElement.play().catch((playError) => {
+            console.warn(`[VideoLibraryView] Play error for ${currentVideo.label}:`, playError);
           });
         }
         videoElement.removeEventListener('loadeddata', handleLoadedData);
       };
 
+      const handleLoadStart = () => {
+        console.log(`[VideoLibraryView] Loading video: ${currentVideo.label} from ${currentVideoPath}`);
+      };
+
+      // Add error handler
+      videoElement.addEventListener('error', handleError);
       videoElement.addEventListener('canplay', handleCanPlay);
       videoElement.addEventListener('loadeddata', handleLoadedData);
+      videoElement.addEventListener('loadstart', handleLoadStart);
+
+      // Set new source
+      videoElement.src = currentVideoPath;
+      videoElement.currentTime = 0;
       videoElement.load();
 
       return () => {
+        videoElement.removeEventListener('error', handleError);
         videoElement.removeEventListener('canplay', handleCanPlay);
         videoElement.removeEventListener('loadeddata', handleLoadedData);
+        videoElement.removeEventListener('loadstart', handleLoadStart);
       };
     }
   }, [currentVideo, currentVideoPath, isPlaying, isDragging]);
@@ -654,14 +708,34 @@ export default function VideoLibraryView({
           {/* Video player - only show if currentVideo exists */}
           {currentVideo ? (
             <div className={styles.videoPlayer}>
-              <video
-                ref={videoRef}
-                className={styles.playerVideo}
-                onTimeUpdate={handleTimeUpdate}
-                onEnded={handleVideoEnd}
-                preload="auto"
-                playsInline
-              />
+              {currentVideoPath ? (
+                <video
+                  ref={videoRef}
+                  className={styles.playerVideo}
+                  onTimeUpdate={handleTimeUpdate}
+                  onEnded={handleVideoEnd}
+                  onError={(e) => {
+                    const video = e.currentTarget;
+                    const error = video.error;
+                    if (error) {
+                      console.error(`[VideoLibraryView] Video element error:`, {
+                        code: error.code,
+                        message: error.message,
+                        path: currentVideoPath,
+                        label: currentVideo.label,
+                      });
+                    }
+                  }}
+                  preload="auto"
+                  playsInline
+                />
+              ) : (
+                <div className={styles.videoPlaceholder}>
+                  <Film size={48} className={styles.videoPlaceholderIcon} />
+                  <p>Loading video...</p>
+                  <p className={styles.videoPlaceholderSubtext}>{currentVideo.label}</p>
+                </div>
+              )}
               <div className={styles.currentVideoLabel}>
                 {currentVideo.label}
                 {(currentVideo.artifact?.metadata?.imported as boolean) && (
@@ -704,17 +778,10 @@ export default function VideoLibraryView({
                     : undefined
                 }
               >
-                {currentItem && (currentItem.type === 'image' || currentItem.type === 'placeholder') && (
+                {currentItem && (currentItem.type === 'image' || currentItem.type === 'placeholder') && !resolvedSceneImagePath && (
                   <div className={styles.scenePlaceholderContent}>
-                    {!resolvedSceneImagePath && (
-                      <Film size={64} className={styles.scenePlaceholderIcon} />
-                    )}
+                    <Film size={64} className={styles.scenePlaceholderIcon} />
                     <h3>{currentItem.label}</h3>
-                    {currentItem.prompt && (
-                      <p className={styles.scenePlaceholderDescription}>
-                        {currentItem.prompt}
-                      </p>
-                    )}
                   </div>
                 )}
               </div>
@@ -743,34 +810,29 @@ export default function VideoLibraryView({
 
           {/* Placement info panel - show when currentItem exists and NOT playing video */}
           {currentItem && (!currentVideo || currentItem.type !== 'video') ? (
-            <div className={styles.sceneInfoPanel}>
-              <div className={styles.sceneHeader}>
-                <h3 className={styles.sceneTitle}>
-                  {currentItem.label}
-                  {currentItem.placementNumber && (
-                    <span className={styles.sceneName}>
-                      {' '}(Placement {currentItem.placementNumber})
-                    </span>
-                  )}
-                </h3>
-              </div>
-              {currentItem.prompt && (
-                <div className={styles.sceneDescription}>
-                  {currentItem.prompt}
+            <div className={styles.sceneInfoPanelCompact}>
+              {currentItem.type === 'placeholder' ? (
+                <div className={styles.sceneMetadataCompact}>
+                  <span className={styles.sceneTitleCompact}>{currentItem.label}</span>
+                  <span className={styles.sceneMetaCompact}>
+                    {currentItem.startTime.toFixed(1)}s - {currentItem.endTime.toFixed(1)}s
+                  </span>
+                </div>
+              ) : (
+                <div className={styles.sceneMetadataCompact}>
+                  <span className={styles.sceneTitleCompact}>
+                    {currentItem.label}
+                    {currentItem.placementNumber && (
+                      <span className={styles.sceneName}>
+                        {' '}(Placement {currentItem.placementNumber})
+                      </span>
+                    )}
+                  </span>
+                  <span className={styles.sceneMetaCompact}>
+                    {currentItem.startTime.toFixed(1)}s - {currentItem.endTime.toFixed(1)}s
+                  </span>
                 </div>
               )}
-              <div className={styles.sceneMetadata}>
-                <div className={styles.sceneMetaItem}>
-                  <strong>Type:</strong> {currentItem.type}
-                </div>
-                <div className={styles.sceneMetaItem}>
-                  <strong>Duration:</strong> {currentItem.duration.toFixed(1)}s
-                </div>
-                <div className={styles.sceneMetaItem}>
-                  <strong>Time Range:</strong>{' '}
-                  {currentItem.startTime.toFixed(1)}s - {currentItem.endTime.toFixed(1)}s
-                </div>
-              </div>
             </div>
           ) : timelineItems.length === 0 ? (
             /* Empty state - only show if no scene and no items in timeline */
