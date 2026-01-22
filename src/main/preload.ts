@@ -115,6 +115,25 @@ const projectBridge = {
   getResourcesPath(): Promise<string> {
     return ipcRenderer.invoke('project:get-resources-path');
   },
+  saveVideoFile(): Promise<string | null> {
+    return ipcRenderer.invoke('project:save-video-file');
+  },
+  composeTimelineVideo(
+    timelineItems: Array<{
+      type: 'image' | 'video' | 'placeholder';
+      path: string;
+      duration: number;
+      startTime: number;
+      endTime: number;
+    }>,
+    projectDirectory: string,
+  ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+    return ipcRenderer.invoke(
+      'project:compose-timeline-video',
+      timelineItems,
+      projectDirectory,
+    );
+  },
   onFileChange(callback: (event: FileChangeEvent) => void) {
     const subscription = (
       _event: IpcRendererEvent,

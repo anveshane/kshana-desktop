@@ -140,8 +140,14 @@ export class ProjectService {
       // Read asset manifest (create default if missing)
       let assetManifest = await this.readAssetManifest(directory);
       if (!assetManifest) {
+        console.log('[ProjectService] Asset manifest not found, creating default');
         assetManifest = createDefaultAssetManifest();
         await this.writeAssetManifest(directory, assetManifest);
+      } else {
+        console.log('[ProjectService] Asset manifest loaded:', {
+          assetCount: assetManifest.assets.length,
+          imageAssets: assetManifest.assets.filter(a => a.type === 'scene_image').length,
+        });
       }
 
       // Read timeline state (use default if missing)
@@ -421,6 +427,9 @@ export class ProjectService {
   private async readAssetManifest(
     directory: string,
   ): Promise<AssetManifest | null> {
+    const manifestPath = `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`;
+    console.log('[ProjectService] Reading asset manifest from:', manifestPath);
+    
     const manifest = await this.readJSON<{
       schema_version?: string;
       assets: Array<{
@@ -434,9 +443,17 @@ export class ProjectService {
         entity_slug?: string;
         metadata?: Record<string, unknown>;
       }>;
-    }>(`${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`);
+    }>(manifestPath);
     
-    if (!manifest) return null;
+    if (!manifest) {
+      console.warn('[ProjectService] Asset manifest file not found or empty:', manifestPath);
+      return null;
+    }
+    
+    console.log('[ProjectService] Asset manifest read successfully:', {
+      schemaVersion: manifest.schema_version,
+      assetCount: manifest.assets?.length || 0,
+    });
     
     // Normalize createdAt to created_at for compatibility
     const normalizedAssets = manifest.assets.map((asset) => ({

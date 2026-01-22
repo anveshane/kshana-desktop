@@ -45,7 +45,7 @@ function findAssetByPlacementNumber(
   activeVersions?: Record<number, SceneVersions>,
 ): AssetInfo | undefined {
   if (!assetManifest?.assets) {
-    console.log(`[findAssetByPlacementNumber] No assetManifest or assets for placement ${placementNumber}`, {
+    console.warn(`[findAssetByPlacementNumber] No assetManifest or assets for placement ${placementNumber}`, {
       hasManifest: !!assetManifest,
       hasAssets: !!assetManifest?.assets,
     });
@@ -58,16 +58,20 @@ function findAssetByPlacementNumber(
     ? activeVersion?.image
     : activeVersion?.video;
 
-  // Find matching asset
+  // Find matching asset with improved logging
   const matchingAssets = assetManifest.assets.filter(
     (a) => {
       const typeMatch = a.type === assetType;
+      if (!typeMatch) return false;
+
+      // Check both metadata.placementNumber and scene_number
       const placementMatch = a.metadata?.placementNumber === placementNumber;
       const sceneMatch = a.scene_number === placementNumber;
-      const matches = typeMatch && (placementMatch || sceneMatch);
+      const matches = placementMatch || sceneMatch;
       
-      if (typeMatch && !matches) {
-        console.log(`[findAssetByPlacementNumber] Asset ${a.id} type matches but placement doesn't:`, {
+      if (!matches) {
+        // Only log if it's the same type but wrong placement (to reduce noise)
+        console.debug(`[findAssetByPlacementNumber] Asset ${a.id} type matches but placement doesn't:`, {
           assetType: a.type,
           targetType: assetType,
           assetPlacementNumber: a.metadata?.placementNumber,
@@ -80,29 +84,51 @@ function findAssetByPlacementNumber(
     }
   );
 
-  console.log(`[findAssetByPlacementNumber] Searching for placement ${placementNumber}, type ${assetType}:`, {
-    totalAssets: assetManifest.assets.length,
-    matchingCount: matchingAssets.length,
+  if (matchingAssets.length === 0) {
+    // Enhanced logging when no match found
+    const allAssetsOfType = assetManifest.assets.filter(a => a.type === assetType);
+    console.warn(`[findAssetByPlacementNumber] No matching asset found for placement ${placementNumber}, type ${assetType}`, {
+      totalAssets: assetManifest.assets.length,
+      assetsOfType: allAssetsOfType.length,
+      availablePlacements: allAssetsOfType.map(a => ({
+        id: a.id,
+        placementNumber: a.metadata?.placementNumber,
+        scene_number: a.scene_number,
+        version: a.version,
+        path: a.path,
+      })),
+    });
+    return undefined;
+  }
+
+  console.log(`[findAssetByPlacementNumber] Found ${matchingAssets.length} matching asset(s) for placement ${placementNumber}, type ${assetType}:`, {
     matchingAssets: matchingAssets.map(a => ({
       id: a.id,
       placementNumber: a.metadata?.placementNumber,
       scene_number: a.scene_number,
       version: a.version,
+      path: a.path,
     })),
+    targetVersion,
   });
-
-  if (matchingAssets.length === 0) return undefined;
 
   // If version is specified, find that version; otherwise get latest
   if (targetVersion !== undefined) {
     const versionAsset = matchingAssets.find((a) => a.version === targetVersion);
-    if (versionAsset) return versionAsset;
+    if (versionAsset) {
+      console.log(`[findAssetByPlacementNumber] Using specified version ${targetVersion} for placement ${placementNumber}`);
+      return versionAsset;
+    } else {
+      console.warn(`[findAssetByPlacementNumber] Specified version ${targetVersion} not found, using latest`);
+    }
   }
 
   // Return latest version
-  return matchingAssets.reduce((latest, current) =>
+  const latest = matchingAssets.reduce((latest, current) =>
     current.version > latest.version ? current : latest,
   );
+  console.log(`[findAssetByPlacementNumber] Using latest version ${latest.version} for placement ${placementNumber}`);
+  return latest;
 }
 
 /**
@@ -206,17 +232,27 @@ export function useTimelineData(
         activeVersions,
       );
 
-      // Debug logging
+      // Enhanced logging and validation
       if (asset) {
-        console.log(`[useTimelineData] Found asset for placement ${placement.placementNumber}:`, {
-          placementNumber: placement.placementNumber,
-          assetPath: asset.path,
-          assetId: asset.id,
-          metadata: asset.metadata,
-        });
+        if (!asset.path) {
+          console.error(`[useTimelineData] Asset found for placement ${placement.placementNumber} but has no path:`, {
+            placementNumber: placement.placementNumber,
+            assetId: asset.id,
+            assetPath: asset.path,
+            metadata: asset.metadata,
+          });
+        } else {
+          console.log(`[useTimelineData] Found asset for placement ${placement.placementNumber}:`, {
+            placementNumber: placement.placementNumber,
+            assetPath: asset.path,
+            assetId: asset.id,
+            version: asset.version,
+            metadata: asset.metadata,
+          });
+        }
       } else {
         const imageAssets = assetManifest?.assets?.filter(a => a.type === 'scene_image') || [];
-        console.log(`[useTimelineData] No asset found for placement ${placement.placementNumber}`, {
+        console.warn(`[useTimelineData] No asset found for placement ${placement.placementNumber}`, {
           placementNumber: placement.placementNumber,
           totalAssets: assetManifest?.assets?.length || 0,
           imageAssetsCount: imageAssets.length,
@@ -225,6 +261,7 @@ export function useTimelineData(
             placementNumber: a.metadata?.placementNumber,
             scene_number: a.scene_number,
             path: a.path,
+            version: a.version,
           })),
           assetManifestExists: !!assetManifest,
           assetsArrayExists: !!assetManifest?.assets,
@@ -240,7 +277,7 @@ export function useTimelineData(
         label: `PLM-${placement.placementNumber}`,
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
-        imagePath: asset?.path, // Will be resolved later
+        imagePath: asset?.path || undefined, // Ensure path is set if asset exists
       });
     });
 

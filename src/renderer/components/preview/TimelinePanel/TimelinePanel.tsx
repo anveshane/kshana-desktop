@@ -73,44 +73,93 @@ function TimelineItemComponent({
     }
   }, [item.type, item.videoPath, projectDirectory]);
 
-  // Resolve image path from item
+  // Resolve image path from item with fallback to asset manifest
   useEffect(() => {
-    if (item.type === 'image' && item.imagePath) {
+    if (item.type !== 'image') {
+      setImagePath(null);
+      return;
+    }
+
+    // First, try to use imagePath from item
+    let pathToResolve: string | undefined = item.imagePath;
+
+    // If no imagePath, try to find asset from manifest
+    if (!pathToResolve && item.placementNumber !== undefined && assetManifest?.assets) {
+      const activeVersion = activeVersions[item.placementNumber]?.image;
+      const matchingAssets = assetManifest.assets.filter(
+        (a) =>
+          a.type === 'scene_image' &&
+          (a.metadata?.placementNumber === item.placementNumber ||
+            a.scene_number === item.placementNumber),
+      );
+
+      if (matchingAssets.length > 0) {
+        let asset = matchingAssets[0]!;
+        if (activeVersion !== undefined) {
+          const versionAsset = matchingAssets.find((a) => a.version === activeVersion);
+          if (versionAsset) {
+            asset = versionAsset;
+          }
+        } else {
+          // Get latest version
+          asset = matchingAssets.reduce((latest, current) =>
+            current.version > latest.version ? current : latest,
+          );
+        }
+
+        if (asset.path) {
+          pathToResolve = asset.path;
+          console.log(`[TimelineItemComponent] Found asset from manifest for ${item.label}:`, {
+            placementNumber: item.placementNumber,
+            assetPath: asset.path,
+            assetId: asset.id,
+            version: asset.version,
+          });
+        }
+      }
+    }
+
+    if (pathToResolve) {
       console.log(`[TimelineItemComponent] Resolving image path for ${item.label}:`, {
         itemImagePath: item.imagePath,
+        resolvedPath: pathToResolve,
         projectDirectory,
         placementNumber: item.placementNumber,
       });
       resolveAssetPathForDisplay(
-        item.imagePath,
+        pathToResolve,
         projectDirectory,
-      ).then(async (resolved) => {
-        console.log(`[TimelineItemComponent] Resolved path for ${item.label}:`, resolved);
-        // For test images, try to convert to base64
-        if (shouldUseBase64(resolved)) {
-          const base64 = await imageToBase64(resolved);
-          if (base64) {
-            console.log(`[TimelineItemComponent] Using base64 for ${item.label}`);
-            setImagePath(base64);
-            return;
+      )
+        .then(async (resolved) => {
+          console.log(`[TimelineItemComponent] Resolved path for ${item.label}:`, resolved);
+          // For test images, try to convert to base64
+          if (shouldUseBase64(resolved)) {
+            const base64 = await imageToBase64(resolved);
+            if (base64) {
+              console.log(`[TimelineItemComponent] Using base64 for ${item.label}`);
+              setImagePath(base64);
+              return;
+            }
           }
-        }
-        // Fallback to file:// path
-        setImagePath(resolved);
-      }).catch((error) => {
-        console.error(`[TimelineItemComponent] Failed to resolve image path for ${item.label}:`, error);
-        setImagePath(null);
-      });
+          // Fallback to file:// path
+          setImagePath(resolved);
+        })
+        .catch((error) => {
+          console.error(`[TimelineItemComponent] Failed to resolve image path for ${item.label}:`, error);
+          setImagePath(null);
+        });
     } else {
       if (item.type === 'image') {
-        console.log(`[TimelineItemComponent] No imagePath for ${item.label}:`, {
+        console.warn(`[TimelineItemComponent] No imagePath for ${item.label}:`, {
           itemImagePath: item.imagePath,
-          itemType: item.type,
+          placementNumber: item.placementNumber,
+          hasAssetManifest: !!assetManifest,
+          assetCount: assetManifest?.assets?.length || 0,
         });
       }
       setImagePath(null);
     }
-  }, [item.type, item.imagePath, item.label, item.placementNumber, projectDirectory]);
+  }, [item.type, item.imagePath, item.label, item.placementNumber, projectDirectory, assetManifest, activeVersions]);
 
   // Handle placeholder type
   if (item.type === 'placeholder') {

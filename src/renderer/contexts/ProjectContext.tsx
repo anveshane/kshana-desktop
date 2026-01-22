@@ -202,6 +202,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
     // Auto-load project when opening a project directory
     const loadProject = async () => {
+      console.log('[ProjectContext] Loading project from:', projectDirectory);
       setState((prev) => ({
         ...prev,
         isLoading: true,
@@ -212,6 +213,13 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
       if (result.success) {
         const project = result.data;
+        console.log('[ProjectContext] Project loaded successfully:', {
+          hasManifest: !!project.manifest,
+          hasAgentState: !!project.agentState,
+          hasAssetManifest: !!project.assetManifest,
+          assetCount: project.assetManifest?.assets?.length || 0,
+          imageAssets: project.assetManifest?.assets?.filter(a => a.type === 'scene_image').length || 0,
+        });
         setState((prev) => ({
           ...prev,
           isLoaded: true,
@@ -225,6 +233,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         }));
         lastLoadedDir.current = projectDirectory;
       } else {
+        console.error('[ProjectContext] Failed to load project:', result.error);
         setState((prev) => ({
           ...prev,
           isLoading: false,
@@ -261,9 +270,14 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         // Debounce rapid file changes
         debounceTimeout = setTimeout(async () => {
           try {
+            console.log('[ProjectContext] Reloading project due to file change:', filePath);
             const result = await projectService.openProject(projectDirectory);
             if (result.success) {
               const project = result.data;
+              console.log('[ProjectContext] Project reloaded successfully:', {
+                hasAssetManifest: !!project.assetManifest,
+                assetCount: project.assetManifest?.assets?.length || 0,
+              });
               setState((prev) => ({
                 ...prev,
                 manifest: project.manifest,
@@ -291,6 +305,43 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       }
     };
   }, [projectDirectory, state.isLoaded]);
+
+  // Poll for manifest updates during image generation (fallback if file watcher fails)
+  useEffect(() => {
+    if (!projectDirectory || !state.isLoaded) return;
+
+    // Poll every 2 seconds to check for manifest updates
+    // This is a fallback in case file watching doesn't work
+    const pollInterval = setInterval(async () => {
+      try {
+        const result = await projectService.openProject(projectDirectory);
+        if (result.success) {
+          const project = result.data;
+          const currentAssetCount = state.assetManifest?.assets?.length || 0;
+          const newAssetCount = project.assetManifest?.assets?.length || 0;
+          
+          // Only update if asset count changed (to avoid unnecessary re-renders)
+          if (newAssetCount !== currentAssetCount) {
+            console.log('[ProjectContext] Asset count changed, updating manifest:', {
+              oldCount: currentAssetCount,
+              newCount: newAssetCount,
+            });
+            setState((prev) => ({
+              ...prev,
+              assetManifest: project.assetManifest,
+            }));
+          }
+        }
+      } catch (error) {
+        // Silently fail - polling is just a fallback
+        console.debug('[ProjectContext] Poll check failed:', error);
+      }
+    }, 2000); // Poll every 2 seconds
+
+    return () => {
+      clearInterval(pollInterval);
+    };
+  }, [projectDirectory, state.isLoaded, state.assetManifest]);
 
   // Load project from directory
   const loadProject = useCallback(

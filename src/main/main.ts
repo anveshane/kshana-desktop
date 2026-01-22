@@ -12,6 +12,8 @@ import path from 'path';
 import fs from 'fs/promises';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import log from 'electron-log';
+import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import backendManager, {
@@ -348,6 +350,279 @@ ipcMain.handle(
   'project:reveal-in-finder',
   async (_event, targetPath: string) => {
     return fileSystemManager.revealInFinder(targetPath);
+  },
+);
+
+ipcMain.handle('project:save-video-file', async () => {
+  if (!mainWindow) return null;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Video',
+    defaultPath: `kshana-timeline-${timestamp}.mp4`,
+    filters: [
+      {
+        name: 'Video Files',
+        extensions: ['mp4'],
+      },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+  return result.filePath;
+});
+
+// Configure ffmpeg to use bundled binary
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+
+interface TimelineItem {
+  type: 'image' | 'video' | 'placeholder';
+  path: string;
+  duration: number;
+  startTime: number;
+  endTime: number;
+}
+
+ipcMain.handle(
+  'project:compose-timeline-video',
+  async (
+    _event,
+    timelineItems: TimelineItem[],
+    projectDirectory: string,
+  ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
+    console.log('[VideoComposition] Starting video composition...');
+    console.log('[VideoComposition] Timeline items:', timelineItems.length);
+    
+    if (!timelineItems || timelineItems.length === 0) {
+      console.error('[VideoComposition] No timeline items to compose');
+      return { success: false, error: 'No timeline items to compose' };
+    }
+
+    const tempDir = path.join(projectDirectory, '.kshana', 'temp');
+    await fs.mkdir(tempDir, { recursive: true });
+    console.log('[VideoComposition] Temp directory:', tempDir);
+
+    const segmentFiles: string[] = [];
+    const cleanupFiles: string[] = [];
+
+    try {
+      // Process each timeline item
+      for (let i = 0; i < timelineItems.length; i++) {
+        const item = timelineItems[i]!;
+        const segmentPath = path.join(tempDir, `segment-${i}.mp4`);
+        console.log(`[VideoComposition] Processing segment ${i + 1}/${timelineItems.length}: ${item.type} (${item.duration}s)`);
+
+        if (item.type === 'video') {
+          // For video segments, use the full video file
+          // The timeline startTime/endTime are for positioning, not extraction
+          // Strip file:// protocol if present
+          let cleanPath = item.path.replace(/^file:\/\//, '');
+          const absolutePath = path.isAbsolute(cleanPath)
+            ? cleanPath
+            : path.join(projectDirectory, cleanPath);
+
+          console.log(`[VideoComposition] Video segment ${i + 1}: ${absolutePath}`);
+
+          // Check if file exists
+          try {
+            await fs.access(absolutePath);
+            console.log(`[VideoComposition] Video file exists: ${absolutePath}`);
+          } catch {
+            console.error(`[VideoComposition] Video file not found: ${absolutePath}`);
+            throw new Error(`Video file not found: ${absolutePath}`);
+          }
+
+          console.log(`[VideoComposition] Converting video segment ${i + 1}...`);
+          await new Promise<void>((resolve, reject) => {
+            ffmpeg(absolutePath)
+              .outputOptions([
+                '-c:v libx264',
+                '-c:a aac',
+                '-preset medium',
+                '-crf 23',
+                '-pix_fmt yuv420p',
+                '-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+                '-t', item.duration.toString(), // Limit to segment duration
+              ])
+              .output(segmentPath)
+              .on('start', (commandLine) => {
+                console.log(`[VideoComposition] FFmpeg command: ${commandLine}`);
+              })
+              .on('progress', (progress) => {
+                if (progress.percent) {
+                  console.log(`[VideoComposition] Video segment ${i + 1} progress: ${Math.round(progress.percent)}%`);
+                }
+              })
+              .on('end', () => {
+                console.log(`[VideoComposition] Video segment ${i + 1} completed`);
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error(`[VideoComposition] Video segment ${i + 1} error:`, err);
+                reject(err);
+              })
+              .run();
+          });
+
+          segmentFiles.push(segmentPath);
+          cleanupFiles.push(segmentPath);
+        } else if (item.type === 'image') {
+          // Convert image to video
+          // Strip file:// protocol if present
+          let cleanPath = item.path.replace(/^file:\/\//, '');
+          const absolutePath = path.isAbsolute(cleanPath)
+            ? cleanPath
+            : path.join(projectDirectory, cleanPath);
+
+          console.log(`[VideoComposition] Image segment ${i + 1}: ${absolutePath}`);
+
+          // Check if file exists
+          try {
+            await fs.access(absolutePath);
+            console.log(`[VideoComposition] Image file exists: ${absolutePath}`);
+          } catch {
+            console.error(`[VideoComposition] Image file not found: ${absolutePath}`);
+            throw new Error(`Image file not found: ${absolutePath}`);
+          }
+
+          console.log(`[VideoComposition] Converting image segment ${i + 1} to video (${item.duration}s)...`);
+          await new Promise<void>((resolve, reject) => {
+            ffmpeg(absolutePath)
+              .inputOptions(['-loop 1'])
+              .outputOptions([
+                '-t', item.duration.toString(),
+                '-c:v libx264',
+                '-preset medium',
+                '-crf 23',
+                '-pix_fmt yuv420p',
+                '-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+              ])
+              .output(segmentPath)
+              .on('start', (commandLine) => {
+                console.log(`[VideoComposition] FFmpeg command: ${commandLine}`);
+              })
+              .on('progress', (progress) => {
+                if (progress.percent) {
+                  console.log(`[VideoComposition] Image segment ${i + 1} progress: ${Math.round(progress.percent)}%`);
+                }
+              })
+              .on('end', () => {
+                console.log(`[VideoComposition] Image segment ${i + 1} completed`);
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error(`[VideoComposition] Image segment ${i + 1} error:`, err);
+                reject(err);
+              })
+              .run();
+          });
+
+          segmentFiles.push(segmentPath);
+          cleanupFiles.push(segmentPath);
+        } else if (item.type === 'placeholder') {
+          // Create black video frames
+          console.log(`[VideoComposition] Creating placeholder segment ${i + 1} (${item.duration}s)...`);
+          await new Promise<void>((resolve, reject) => {
+            ffmpeg()
+              .input('color=c=black:s=1920x1080:d=' + item.duration)
+              .inputOptions(['-f lavfi'])
+              .outputOptions([
+                '-c:v libx264',
+                '-preset medium',
+                '-crf 23',
+                '-pix_fmt yuv420p',
+              ])
+              .output(segmentPath)
+              .on('start', (commandLine) => {
+                console.log(`[VideoComposition] FFmpeg command: ${commandLine}`);
+              })
+              .on('end', () => {
+                console.log(`[VideoComposition] Placeholder segment ${i + 1} completed`);
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error(`[VideoComposition] Placeholder segment ${i + 1} error:`, err);
+                reject(err);
+              })
+              .run();
+          });
+
+          segmentFiles.push(segmentPath);
+          cleanupFiles.push(segmentPath);
+        }
+      }
+
+      console.log(`[VideoComposition] All ${segmentFiles.length} segments processed. Creating concat list...`);
+
+      // Create concat file list
+      const concatListPath = path.join(tempDir, 'concat-list.txt');
+      const concatList = segmentFiles
+        .map((file) => `file '${file.replace(/'/g, "'\\''")}'`)
+        .join('\n');
+      await fs.writeFile(concatListPath, concatList, 'utf-8');
+      cleanupFiles.push(concatListPath);
+      console.log(`[VideoComposition] Concat list created with ${segmentFiles.length} files`);
+
+      // Concatenate all segments
+      const outputPath = path.join(tempDir, 'composed-video.mp4');
+      console.log(`[VideoComposition] Concatenating segments into final video: ${outputPath}`);
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg()
+          .input(concatListPath)
+          .inputOptions(['-f concat', '-safe 0'])
+          .outputOptions([
+            '-c copy', // Copy streams without re-encoding for speed
+          ])
+          .output(outputPath)
+          .on('start', (commandLine) => {
+            console.log(`[VideoComposition] FFmpeg concat command: ${commandLine}`);
+          })
+          .on('progress', (progress) => {
+            if (progress.percent) {
+              console.log(`[VideoComposition] Concatenation progress: ${Math.round(progress.percent)}%`);
+            }
+          })
+          .on('end', () => {
+            console.log(`[VideoComposition] Concatenation completed`);
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error(`[VideoComposition] Concatenation error:`, err);
+            reject(err);
+          })
+          .run();
+      });
+
+      // Verify output file exists
+      try {
+        const stats = await fs.stat(outputPath);
+        console.log(`[VideoComposition] Output file created: ${outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+      } catch {
+        console.error(`[VideoComposition] Output file not found: ${outputPath}`);
+        throw new Error('Composed video file was not created');
+      }
+
+      console.log('[VideoComposition] Video composition completed successfully!');
+      return { success: true, outputPath };
+    } catch (error) {
+      console.error('[VideoComposition] Error during composition:', error);
+      // Clean up temporary files on error
+      console.log(`[VideoComposition] Cleaning up ${cleanupFiles.length} temporary files...`);
+      for (const file of cleanupFiles) {
+        try {
+          await fs.unlink(file);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[VideoComposition] Composition failed: ${errorMessage}`);
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    }
   },
 );
 

@@ -38,6 +38,42 @@
   border-radius: $radius-full;
 }
 
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.downloadButton {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background-color: rgba($color-accent-green, 0.1);
+  border: 1px solid rgba($color-accent-green, 0.3);
+  border-radius: $radius-sm;
+  color: $color-accent-green;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background-color: rgba($color-accent-green, 0.2);
+    border-color: rgba($color-accent-green, 0.5);
+    transform: translateY(-1px);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+}
+
 .content {
   flex: 1;
   display: flex;

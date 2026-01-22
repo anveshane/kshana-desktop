@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import {
   parseImagePlacements,
+  parseImagePlacementsWithErrors,
   parseVideoPlacements,
   type ParsedImagePlacement,
   type ParsedVideoPlacement,
@@ -58,18 +59,45 @@ export function usePlacementFiles(): PlacementFilesState {
       ]);
 
       // Parse placements (empty arrays if files don't exist)
-      const imagePlacements = imageContent
-        ? parseImagePlacements(imageContent)
-        : [];
-      const videoPlacements = videoContent
-        ? parseVideoPlacements(videoContent)
-        : [];
+      let imagePlacements: ParsedImagePlacement[] = [];
+      let videoPlacements: ParsedVideoPlacement[] = [];
+      let parseError: string | null = null;
+
+      if (imageContent) {
+        try {
+          const parseResult = parseImagePlacementsWithErrors(imageContent, false);
+          imagePlacements = parseResult.placements;
+
+          // Log warnings and errors
+          if (parseResult.warnings.length > 0) {
+            console.warn('[usePlacementFiles] Image placement parser warnings:', parseResult.warnings);
+          }
+          if (parseResult.errors.length > 0) {
+            console.error('[usePlacementFiles] Image placement parser errors:', parseResult.errors);
+            parseError = `Found ${parseResult.errors.length} parsing error(s) in image-placements.md. Check console for details.`;
+          }
+        } catch (error) {
+          console.error('[usePlacementFiles] Failed to parse image placements:', error);
+          parseError = `Failed to parse image-placements.md: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      }
+
+      if (videoContent) {
+        try {
+          videoPlacements = parseVideoPlacements(videoContent);
+        } catch (error) {
+          console.error('[usePlacementFiles] Failed to parse video placements:', error);
+          parseError = parseError
+            ? `${parseError}; Failed to parse video-placements.md: ${error instanceof Error ? error.message : String(error)}`
+            : `Failed to parse video-placements.md: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      }
 
       setState({
         imagePlacements,
         videoPlacements,
         isLoading: false,
-        error: null,
+        error: parseError,
       });
     } catch (error) {
       console.error('[usePlacementFiles] Failed to load placement files:', error);

@@ -5,7 +5,7 @@ import React, {
   useRef,
   useMemo,
 } from 'react';
-import { Film, Play, Calendar, Pause } from 'lucide-react';
+import { Film, Play, Calendar, Pause, Download } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimelineData } from '../../../hooks/useTimelineData';
@@ -137,6 +137,7 @@ export default function VideoLibraryView({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const currentVideoPathRef = useRef<string | null>(null);
   const isSeekingRef = useRef(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Format date
   const formatDate = (dateString: string): string => {
@@ -169,10 +170,24 @@ export default function VideoLibraryView({
 
   // Resolve image path from current timeline item (placement-based)
   const sceneImagePath = useMemo(() => {
-    if (!currentImage || !assetManifest?.assets) return null;
+    if (!currentImage) {
+      console.debug('[VideoLibraryView] No current image item');
+      return null;
+    }
+
+    if (!assetManifest?.assets) {
+      console.warn('[VideoLibraryView] No asset manifest or assets available', {
+        hasManifest: !!assetManifest,
+        hasAssets: !!assetManifest?.assets,
+      });
+      return currentImage.imagePath || null;
+    }
 
     const placementNumber = currentImage.placementNumber;
-    if (placementNumber === undefined) return null;
+    if (placementNumber === undefined) {
+      console.warn('[VideoLibraryView] Current image has no placement number');
+      return currentImage.imagePath || null;
+    }
 
     const activeImageVersion = activeVersions[placementNumber]?.image;
 
@@ -185,8 +200,14 @@ export default function VideoLibraryView({
             asset.scene_number === placementNumber) &&
           asset.version === activeImageVersion,
       );
-      if (imageAsset) {
+      if (imageAsset?.path) {
+        console.log(`[VideoLibraryView] Found asset for placement ${placementNumber} (version ${activeImageVersion}):`, {
+          path: imageAsset.path,
+          assetId: imageAsset.id,
+        });
         return imageAsset.path;
+      } else {
+        console.warn(`[VideoLibraryView] Specified version ${activeImageVersion} not found for placement ${placementNumber}, trying latest`);
       }
     }
 
@@ -200,11 +221,39 @@ export default function VideoLibraryView({
     if (imageAssets.length > 0) {
       // Sort by version descending to get latest
       const sorted = imageAssets.sort((a, b) => b.version - a.version);
-      return sorted[0]?.path || null;
+      const latest = sorted[0]!;
+      if (latest.path) {
+        console.log(`[VideoLibraryView] Using latest asset for placement ${placementNumber}:`, {
+          path: latest.path,
+          version: latest.version,
+          assetId: latest.id,
+        });
+        return latest.path;
+      } else {
+        console.error(`[VideoLibraryView] Latest asset for placement ${placementNumber} has no path:`, {
+          assetId: latest.id,
+          version: latest.version,
+        });
+      }
+    } else {
+      console.warn(`[VideoLibraryView] No image assets found for placement ${placementNumber}`, {
+        totalAssets: assetManifest.assets.length,
+        imageAssets: assetManifest.assets.filter(a => a.type === 'scene_image').map(a => ({
+          id: a.id,
+          placementNumber: a.metadata?.placementNumber,
+          scene_number: a.scene_number,
+          path: a.path,
+        })),
+      });
     }
 
     // Use imagePath from timeline item if available
-    return currentImage.imagePath || null;
+    if (currentImage.imagePath) {
+      console.log(`[VideoLibraryView] Using imagePath from timeline item for placement ${placementNumber}`);
+      return currentImage.imagePath;
+    }
+
+    return null;
   }, [currentImage, activeVersions, assetManifest]);
 
   // Resolve and store the display-ready image path
@@ -647,6 +696,126 @@ export default function VideoLibraryView({
     onPlaybackStateChange,
   ]);
 
+  // Handle video download
+  const handleDownloadVideo = useCallback(async () => {
+    if (!projectDirectory || timelineItems.length === 0 || isDownloading) {
+      return;
+    }
+
+    setIsDownloading(true);
+
+    try {
+      console.log('[VideoDownload] Starting video download process...');
+      console.log('[VideoDownload] Timeline items:', timelineItems.length);
+      console.log('[VideoDownload] Project directory:', projectDirectory);
+
+      // Prepare timeline items data with resolved paths
+      console.log('[VideoDownload] Resolving asset paths...');
+      const itemsData = await Promise.all(
+        timelineItems.map(async (item, index) => {
+          let resolvedPath = '';
+          if (item.type === 'video' && item.videoPath) {
+            resolvedPath = await resolveAssetPathForDisplay(
+              item.videoPath,
+              projectDirectory,
+            );
+            console.log(`[VideoDownload] Resolved video ${index + 1}: ${item.videoPath} -> ${resolvedPath}`);
+          } else if (item.type === 'image' && item.imagePath) {
+            resolvedPath = await resolveAssetPathForDisplay(
+              item.imagePath,
+              projectDirectory,
+            );
+            console.log(`[VideoDownload] Resolved image ${index + 1}: ${item.imagePath} -> ${resolvedPath}`);
+          }
+
+          return {
+            type: item.type,
+            path: resolvedPath || item.videoPath || item.imagePath || '',
+            duration: item.duration,
+            startTime: item.startTime,
+            endTime: item.endTime,
+          };
+        }),
+      );
+
+      console.log('[VideoDownload] Starting video composition...');
+      console.log('[VideoDownload] Items data:', itemsData.map((item, i) => ({
+        index: i + 1,
+        type: item.type,
+        path: item.path.substring(0, 80) + '...',
+        duration: item.duration,
+      })));
+
+      // Compose the video
+      const result = await window.electron.project.composeTimelineVideo(
+        itemsData,
+        projectDirectory,
+      );
+
+      console.log('[VideoDownload] Composition result:', result);
+
+      if (!result.success) {
+        console.error('[VideoDownload] Composition failed:', result.error);
+        alert(`Failed to compose video: ${result.error || 'Unknown error'}`);
+        return;
+      }
+
+      if (!result.outputPath) {
+        console.error('[VideoDownload] No output path returned');
+        alert('Video composition completed but no output path was returned');
+        return;
+      }
+
+      console.log('[VideoDownload] Composition successful. Output:', result.outputPath);
+      console.log('[VideoDownload] Opening save dialog...');
+
+      // Open save dialog
+      const savePath = await window.electron.project.saveVideoFile();
+      if (!savePath) {
+        console.log('[VideoDownload] User cancelled save dialog');
+        // User cancelled
+        return;
+      }
+
+      console.log('[VideoDownload] Save path selected:', savePath);
+
+      // Extract directory and filename from savePath
+      const lastSlash = savePath.lastIndexOf('/');
+      const saveDir = lastSlash >= 0 ? savePath.substring(0, lastSlash) : '';
+      const saveFileName = lastSlash >= 0 ? savePath.substring(lastSlash + 1) : savePath;
+
+      console.log('[VideoDownload] Copying video to:', saveDir);
+      console.log('[VideoDownload] Target filename:', saveFileName);
+
+      // Copy the composed video to the destination directory
+      const copiedPath = await window.electron.project.copy(
+        result.outputPath,
+        saveDir,
+      );
+
+      console.log('[VideoDownload] Video copied to:', copiedPath);
+
+      // Rename to the user's chosen filename if different
+      const finalPath = savePath;
+      if (copiedPath !== finalPath) {
+        console.log('[VideoDownload] Renaming to:', saveFileName);
+        await window.electron.project.rename(copiedPath, saveFileName);
+      }
+
+      console.log('[VideoDownload] Video download completed successfully!');
+      alert('Video downloaded successfully!');
+    } catch (error) {
+      console.error('Error downloading video:', error);
+      alert(
+        `Failed to download video: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [projectDirectory, timelineItems, isDownloading]);
+
   // Show empty state if no project
   if (!projectDirectory) {
     return (
@@ -675,6 +844,18 @@ export default function VideoLibraryView({
           <Film size={16} />
           <h3>Video Library</h3>
           <span className={styles.count}>{videoArtifacts.length}</span>
+        </div>
+        <div className={styles.headerRight}>
+          <button
+            type="button"
+            className={styles.downloadButton}
+            onClick={handleDownloadVideo}
+            disabled={isDownloading || timelineItems.length === 0}
+            title="Download complete timeline video"
+          >
+            <Download size={16} />
+            {isDownloading ? 'Composing...' : 'Download'}
+          </button>
         </div>
       </div>
 
