@@ -4,7 +4,7 @@
  * Placement-based timeline architecture: timeline items driven by placement timestamps
  */
 
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { useProject } from '../contexts/ProjectContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { usePlacementFiles } from './usePlacementFiles';
@@ -44,7 +44,13 @@ function findAssetByPlacementNumber(
   assetType: 'scene_image' | 'scene_video',
   activeVersions?: Record<number, SceneVersions>,
 ): AssetInfo | undefined {
-  if (!assetManifest?.assets) return undefined;
+  if (!assetManifest?.assets) {
+    console.log(`[findAssetByPlacementNumber] No assetManifest or assets for placement ${placementNumber}`, {
+      hasManifest: !!assetManifest,
+      hasAssets: !!assetManifest?.assets,
+    });
+    return undefined;
+  }
 
   // Get active version if specified
   const activeVersion = activeVersions?.[placementNumber];
@@ -54,11 +60,36 @@ function findAssetByPlacementNumber(
 
   // Find matching asset
   const matchingAssets = assetManifest.assets.filter(
-    (a) => a.type === assetType && (
-      a.metadata?.placementNumber === placementNumber || // Primary
-      a.scene_number === placementNumber                  // Fallback
-    )
+    (a) => {
+      const typeMatch = a.type === assetType;
+      const placementMatch = a.metadata?.placementNumber === placementNumber;
+      const sceneMatch = a.scene_number === placementNumber;
+      const matches = typeMatch && (placementMatch || sceneMatch);
+      
+      if (typeMatch && !matches) {
+        console.log(`[findAssetByPlacementNumber] Asset ${a.id} type matches but placement doesn't:`, {
+          assetType: a.type,
+          targetType: assetType,
+          assetPlacementNumber: a.metadata?.placementNumber,
+          assetSceneNumber: a.scene_number,
+          targetPlacementNumber: placementNumber,
+        });
+      }
+      
+      return matches;
+    }
   );
+
+  console.log(`[findAssetByPlacementNumber] Searching for placement ${placementNumber}, type ${assetType}:`, {
+    totalAssets: assetManifest.assets.length,
+    matchingCount: matchingAssets.length,
+    matchingAssets: matchingAssets.map(a => ({
+      id: a.id,
+      placementNumber: a.metadata?.placementNumber,
+      scene_number: a.scene_number,
+      version: a.version,
+    })),
+  });
 
   if (matchingAssets.length === 0) return undefined;
 
@@ -136,6 +167,28 @@ export function useTimelineData(
   const { imagePlacements, videoPlacements } = usePlacementFiles();
   const { entries: transcriptEntries, totalDuration: transcriptDuration } = useTranscript();
 
+  // Debug: Log assetManifest state
+  useEffect(() => {
+    console.log('[useTimelineData] AssetManifest state:', {
+      isLoaded,
+      hasManifest: !!assetManifest,
+      totalAssets: assetManifest?.assets?.length || 0,
+      imageAssets: assetManifest?.assets?.filter(a => a.type === 'scene_image').map(a => ({
+        id: a.id,
+        placementNumber: a.metadata?.placementNumber,
+        scene_number: a.scene_number,
+        path: a.path,
+        metadata: a.metadata,
+      })) || [],
+      videoAssets: assetManifest?.assets?.filter(a => a.type === 'scene_video').map(a => ({
+        id: a.id,
+        placementNumber: a.metadata?.placementNumber,
+        scene_number: a.scene_number,
+        path: a.path,
+      })) || [],
+    });
+  }, [isLoaded, assetManifest]);
+
   // Convert placements to timeline items
   const placementItems: TimelineItem[] = useMemo(() => {
     const items: TimelineItem[] = [];
@@ -152,6 +205,31 @@ export function useTimelineData(
         'scene_image',
         activeVersions,
       );
+
+      // Debug logging
+      if (asset) {
+        console.log(`[useTimelineData] Found asset for placement ${placement.placementNumber}:`, {
+          placementNumber: placement.placementNumber,
+          assetPath: asset.path,
+          assetId: asset.id,
+          metadata: asset.metadata,
+        });
+      } else {
+        const imageAssets = assetManifest?.assets?.filter(a => a.type === 'scene_image') || [];
+        console.log(`[useTimelineData] No asset found for placement ${placement.placementNumber}`, {
+          placementNumber: placement.placementNumber,
+          totalAssets: assetManifest?.assets?.length || 0,
+          imageAssetsCount: imageAssets.length,
+          imageAssetsPlacementNumbers: imageAssets.map(a => ({
+            id: a.id,
+            placementNumber: a.metadata?.placementNumber,
+            scene_number: a.scene_number,
+            path: a.path,
+          })),
+          assetManifestExists: !!assetManifest,
+          assetsArrayExists: !!assetManifest?.assets,
+        });
+      }
 
       items.push({
         id: `PLM-${placement.placementNumber}`,

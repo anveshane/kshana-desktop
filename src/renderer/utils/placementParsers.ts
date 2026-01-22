@@ -21,12 +21,19 @@ export interface ParsedVideoPlacement {
 }
 
 /**
- * Convert time string (e.g., "0:08", "1:23", "7:41") to seconds.
- * Handles both "M:SS" and "MM:SS" formats.
+ * Convert time string to seconds.
+ * Handles formats: "M:SS", "MM:SS", "H:MM:SS", "HH:MM:SS"
  */
 export function timeStringToSeconds(timeStr: string): number {
   const parts = timeStr.split(':');
-  if (parts.length === 2) {
+  if (parts.length === 3) {
+    // HH:MM:SS format
+    const hours = parseInt(parts[0] ?? '0', 10) || 0;
+    const minutes = parseInt(parts[1] ?? '0', 10) || 0;
+    const seconds = parseInt(parts[2] ?? '0', 10) || 0;
+    return hours * 3600 + minutes * 60 + seconds;
+  } else if (parts.length === 2) {
+    // M:SS or MM:SS format
     const minutes = parseInt(parts[0] ?? '0', 10) || 0;
     const seconds = parseInt(parts[1] ?? '0', 10) || 0;
     return minutes * 60 + seconds;
@@ -119,12 +126,23 @@ export function parseImagePlacements(content: string): ParsedImagePlacement[] {
 }
 
 /**
- * Round duration to nearest valid value (4 or 5 seconds for optimization).
+ * Round duration to nearest valid value (4-15 seconds).
+ * Rounds to the nearest valid duration that matches generation capability.
  */
 function roundDuration(seconds: number): number {
-  // Optimized for speed: prefer 4-5 seconds instead of longer durations
+  // Round to nearest valid duration (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, or 15)
   if (seconds <= 4.5) return 4;
-  return 5;
+  if (seconds <= 5.5) return 5;
+  if (seconds <= 6.5) return 6;
+  if (seconds <= 7.5) return 7;
+  if (seconds <= 8.5) return 8;
+  if (seconds <= 9.5) return 9;
+  if (seconds <= 10.5) return 10;
+  if (seconds <= 11.5) return 11;
+  if (seconds <= 12.5) return 12;
+  if (seconds <= 13.5) return 13;
+  if (seconds <= 14.5) return 14;
+  return 15; // Cap at 15 seconds
 }
 
 /**

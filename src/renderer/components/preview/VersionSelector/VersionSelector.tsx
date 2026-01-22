@@ -7,6 +7,8 @@ import styles from './VersionSelector.module.scss';
 
 export interface PlacementVersion {
   placementNumber: number;
+  itemType: 'image' | 'video';
+  itemLabel: string;
   imageVersions: number[];
   videoVersions: number[];
 }
@@ -28,54 +30,87 @@ export default function VersionSelector({
 }: VersionSelectorProps) {
   const { assetManifest } = useProject();
 
-  // Get both image and video versions from asset manifest by placementNumber
+  // Get versions from asset manifest, grouped by placementNumber AND timeline item type
   const placementVersions = useMemo(() => {
     if (!assetManifest?.assets || timelineItems.length === 0) {
       return [];
     }
 
-    // Get unique placement numbers from timeline items
-    const placementNumbers = new Set<number>();
+    // Group by placementNumber + item type to separate image and video placements
+    const versionMap = new Map<string, PlacementVersion>();
+
     timelineItems.forEach((item) => {
-      if (item.placementNumber !== undefined) {
-        placementNumbers.add(item.placementNumber);
+      // Skip placeholders and items without placement numbers
+      if (item.placementNumber === undefined || item.type === 'placeholder') {
+        return;
+      }
+
+      // Create unique key: "image-1" or "video-1"
+      const key = `${item.type}-${item.placementNumber}`;
+
+      // Skip if we already processed this combination
+      if (versionMap.has(key)) {
+        return;
+      }
+
+      // Find assets matching this placement number
+      const imageAssets = assetManifest.assets.filter(
+        (asset) =>
+          asset.type === 'scene_image' &&
+          (asset.metadata?.placementNumber === item.placementNumber ||
+            asset.scene_number === item.placementNumber),
+      );
+      const videoAssets = assetManifest.assets.filter(
+        (asset) =>
+          asset.type === 'scene_video' &&
+          (asset.metadata?.placementNumber === item.placementNumber ||
+            asset.scene_number === item.placementNumber),
+      );
+
+      // Extract and sort version numbers - only for the matching type
+      // For image items, only store image versions
+      // For video items, only store video versions
+      const imageVersions = item.type === 'image'
+        ? imageAssets.map((asset) => asset.version).sort((a, b) => a - b)
+        : [];
+      const videoVersions = item.type === 'video'
+        ? videoAssets.map((asset) => asset.version).sort((a, b) => a - b)
+        : [];
+
+      // Only create entry if there are versions for the matching type
+      const hasMatchingVersions =
+        (item.type === 'image' && imageVersions.length > 0) ||
+        (item.type === 'video' && videoVersions.length > 0);
+
+      // Ensure label exists, fallback to generated label if missing
+      let itemLabel = item.label || '';
+      if (!itemLabel) {
+        if (item.type === 'image') {
+          itemLabel = `PLM-${item.placementNumber}`;
+        } else {
+          itemLabel = `vd-placement-${item.placementNumber}`;
+        }
+      }
+
+      if (hasMatchingVersions) {
+        versionMap.set(key, {
+          placementNumber: item.placementNumber,
+          itemType: item.type,
+          itemLabel,
+          imageVersions, // Only populated for image items
+          videoVersions, // Only populated for video items
+        });
       }
     });
 
-    return Array.from(placementNumbers)
-      .sort((a, b) => a - b)
-      .map((placementNumber) => {
-        // Filter assets for this placement by type and placementNumber
-        const imageAssets = assetManifest.assets.filter(
-          (asset) =>
-            asset.type === 'scene_image' &&
-            (asset.metadata?.placementNumber === placementNumber ||
-              asset.scene_number === placementNumber), // Fallback to scene_number
-        );
-        const videoAssets = assetManifest.assets.filter(
-          (asset) =>
-            asset.type === 'scene_video' &&
-            (asset.metadata?.placementNumber === placementNumber ||
-              asset.scene_number === placementNumber), // Fallback to scene_number
-        );
-
-        // Extract and sort version numbers
-        const imageVersions = imageAssets
-          .map((asset) => asset.version)
-          .sort((a, b) => a - b);
-        const videoVersions = videoAssets
-          .map((asset) => asset.version)
-          .sort((a, b) => a - b);
-
-        return {
-          placementNumber,
-          imageVersions,
-          videoVersions,
-        };
-      })
-      .filter(
-        (pv) => pv.imageVersions.length > 0 || pv.videoVersions.length > 0,
-      );
+    // Convert map to array and sort by placement number, then by type (image first)
+    return Array.from(versionMap.values()).sort((a, b) => {
+      if (a.placementNumber !== b.placementNumber) {
+        return a.placementNumber - b.placementNumber;
+      }
+      // If same placement number, image comes before video
+      return a.itemType === 'image' ? -1 : 1;
+    });
   }, [assetManifest, timelineItems]);
 
   const handleVersionClick = (
@@ -97,6 +132,19 @@ export default function VersionSelector({
         {placementVersions.map((placementVersion) => {
           const activeVersionsForPlacement =
             activeVersions[placementVersion.placementNumber] || {};
+
+          // Only show versions for the matching timeline item type
+          const showImageVersions =
+            placementVersion.itemType === 'image' &&
+            placementVersion.imageVersions.length > 0;
+          const showVideoVersions =
+            placementVersion.itemType === 'video' &&
+            placementVersion.videoVersions.length > 0;
+
+          if (!showImageVersions && !showVideoVersions) {
+            return null;
+          }
+
           const activeImageVersion =
             activeVersionsForPlacement.image ??
             placementVersion.imageVersions[0];
@@ -104,17 +152,31 @@ export default function VersionSelector({
             activeVersionsForPlacement.video ??
             placementVersion.videoVersions[0];
 
+          // Format label: convert "PLM-1" to "PLM_01", "vd-placement-1" to "vd-placement-1"
+          // Fallback to generating label from placement number if label is missing
+          let displayLabel = placementVersion.itemLabel || '';
+          if (!displayLabel) {
+            // Generate label from placement number and type
+            if (placementVersion.itemType === 'image') {
+              displayLabel = `PLM_${String(placementVersion.placementNumber).padStart(2, '0')}`;
+            } else {
+              displayLabel = `vd-placement-${placementVersion.placementNumber}`;
+            }
+          } else {
+            displayLabel = displayLabel
+              .replace(/-/g, '_')
+              .replace(/PLM_(\d+)/, (_, num) => `PLM_${String(num).padStart(2, '0')}`);
+          }
+
           return (
             <div
-              key={placementVersion.placementNumber}
+              key={`${placementVersion.itemType}-${placementVersion.placementNumber}`}
               className={styles.sceneVersions}
             >
-              <div className={styles.sceneLabel}>
-                PLM_{String(placementVersion.placementNumber).padStart(2, '0')}
-              </div>
+              <div className={styles.sceneLabel}>{displayLabel}</div>
 
-              {/* Image Versions */}
-              {placementVersion.imageVersions.length > 0 && (
+              {/* Image Versions - Only show for image timeline items */}
+              {showImageVersions && (
                 <div className={styles.assetTypeSection}>
                   <div className={styles.assetTypeLabel}>
                     <FileImage size={12} />
@@ -145,8 +207,8 @@ export default function VersionSelector({
                 </div>
               )}
 
-              {/* Video Versions */}
-              {placementVersion.videoVersions.length > 0 && (
+              {/* Video Versions - Only show for video timeline items */}
+              {showVideoVersions && (
                 <div className={styles.assetTypeSection}>
                   <div className={styles.assetTypeLabel}>
                     <FileVideo size={12} />

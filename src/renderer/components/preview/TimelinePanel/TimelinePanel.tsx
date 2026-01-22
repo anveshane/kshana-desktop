@@ -76,25 +76,41 @@ function TimelineItemComponent({
   // Resolve image path from item
   useEffect(() => {
     if (item.type === 'image' && item.imagePath) {
+      console.log(`[TimelineItemComponent] Resolving image path for ${item.label}:`, {
+        itemImagePath: item.imagePath,
+        projectDirectory,
+        placementNumber: item.placementNumber,
+      });
       resolveAssetPathForDisplay(
         item.imagePath,
         projectDirectory,
       ).then(async (resolved) => {
+        console.log(`[TimelineItemComponent] Resolved path for ${item.label}:`, resolved);
         // For test images, try to convert to base64
         if (shouldUseBase64(resolved)) {
           const base64 = await imageToBase64(resolved);
           if (base64) {
+            console.log(`[TimelineItemComponent] Using base64 for ${item.label}`);
             setImagePath(base64);
             return;
           }
         }
         // Fallback to file:// path
         setImagePath(resolved);
+      }).catch((error) => {
+        console.error(`[TimelineItemComponent] Failed to resolve image path for ${item.label}:`, error);
+        setImagePath(null);
       });
     } else {
+      if (item.type === 'image') {
+        console.log(`[TimelineItemComponent] No imagePath for ${item.label}:`, {
+          itemImagePath: item.imagePath,
+          itemType: item.type,
+        });
+      }
       setImagePath(null);
     }
-  }, [item.type, item.imagePath, projectDirectory]);
+  }, [item.type, item.imagePath, item.label, item.placementNumber, projectDirectory]);
 
   // Handle placeholder type
   if (item.type === 'placeholder') {

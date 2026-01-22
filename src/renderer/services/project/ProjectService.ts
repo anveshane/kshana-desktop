@@ -421,9 +421,36 @@ export class ProjectService {
   private async readAssetManifest(
     directory: string,
   ): Promise<AssetManifest | null> {
-    return this.readJSON<AssetManifest>(
-      `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`,
-    );
+    const manifest = await this.readJSON<{
+      schema_version?: string;
+      assets: Array<{
+        id: string;
+        type: string;
+        path: string;
+        createdAt?: number;
+        created_at?: number;
+        version?: number;
+        scene_number?: number;
+        entity_slug?: string;
+        metadata?: Record<string, unknown>;
+      }>;
+    }>(`${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`);
+    
+    if (!manifest) return null;
+    
+    // Normalize createdAt to created_at for compatibility
+    const normalizedAssets = manifest.assets.map((asset) => ({
+      ...asset,
+      created_at: asset.created_at ?? asset.createdAt ?? Date.now(),
+    }));
+    
+    // Remove createdAt if it exists (keep only created_at)
+    const cleanedAssets = normalizedAssets.map(({ createdAt, ...rest }) => rest);
+    
+    return {
+      schema_version: (manifest.schema_version as '1') || '1',
+      assets: cleanedAssets as AssetManifest['assets'],
+    };
   }
 
   private async writeAssetManifest(
