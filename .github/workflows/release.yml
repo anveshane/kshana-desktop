@@ -132,7 +132,7 @@ jobs:
         run: |
           cd kshana-ink
           echo "Building kshana-ink from: $(pwd)"
-          pnpm install
+          pnpm install --no-frozen-lockfile
           pnpm build
           echo "✓ kshana-ink built successfully"
           echo "Verifying dist directory exists:"
