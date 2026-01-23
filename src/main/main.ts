@@ -145,6 +145,56 @@ ipcMain.handle('project:select-video-file', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('project:select-audio-file', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: 'Select Audio File',
+    filters: [
+      {
+        name: 'Audio Files',
+        extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'wma'],
+      },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
+
+async function getAudioDuration(audioPath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(audioPath, (err, metadata) => {
+      if (err) {
+        log.warn(`[Audio Duration] Could not get duration: ${err.message}`);
+        resolve(0); // Return 0 if we can't get duration
+        return;
+      }
+      const duration = metadata?.format?.duration || 0;
+      resolve(duration);
+    });
+  });
+}
+
+ipcMain.handle(
+  'project:get-audio-duration',
+  async (_event, audioPath: string): Promise<number> => {
+    try {
+      // Ensure we have an absolute path
+      const fullPath = path.isAbsolute(audioPath)
+        ? audioPath
+        : path.resolve(audioPath);
+      return await getAudioDuration(fullPath);
+    } catch (error) {
+      log.warn(`[Audio Duration IPC] Error getting duration for ${audioPath}:`, error);
+      return 0;
+    }
+  },
+);
+
 ipcMain.handle(
   'project:read-tree',
   async (_event, dirPath: string, depth?: number) => {
@@ -848,6 +898,16 @@ const createWindow = async () => {
 /**
  * Add event listeners...
  */
+
+// Handle unhandled promise rejections to prevent crashes
+process.on('unhandledRejection', (reason, promise) => {
+  log.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  log.error('Uncaught Exception:', error);
+});
 
 app.on('window-all-closed', () => {
   // Respect the OSX convention of having the application in memory even

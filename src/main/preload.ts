@@ -60,6 +60,13 @@ const projectBridge = {
   selectVideoFile(): Promise<string | null> {
     return ipcRenderer.invoke('project:select-video-file');
   },
+  selectAudioFile(): Promise<string | null> {
+    return ipcRenderer.invoke('project:select-audio-file');
+  },
+  getAudioDuration(audioPath: string): Promise<number> {
+    return ipcRenderer.invoke('project:get-audio-duration', audioPath);
+  },
+  // extractYoutubeAudio removed - can be re-added later if needed
   readTree(dirPath: string, depth?: number): Promise<FileNode> {
     return ipcRenderer.invoke('project:read-tree', dirPath, depth);
   },

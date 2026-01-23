@@ -16,6 +16,7 @@ import {
   Scissors,
   Edit2,
   FileText,
+  Music,
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
@@ -33,6 +34,7 @@ import { PROJECT_PATHS, createAssetInfo } from '../../../types/kshana';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
 import VersionSelector from '../VersionSelector';
+import AudioImportModal from './AudioImportModal';
 import styles from './TimelinePanel.module.scss';
 
 // Timeline Item Component for proper hook usage
@@ -190,6 +192,28 @@ function TimelineItemComponent({
       >
         <div className={styles.scenePlaceholder} />
         <div className={styles.sceneId}>{item.label}</div>
+      </div>
+    );
+  }
+
+  // Handle audio type
+  if (item.type === 'audio' && item.audioPath) {
+    return (
+      <div
+        className={`${styles.audioBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        title={item.label}
+      >
+        <div className={styles.audioWaveform} />
+        <div className={styles.audioLabel}>{item.label}</div>
       </div>
     );
   }
@@ -496,6 +520,7 @@ export default function TimelinePanel({
   const [markerPromptPosition, setMarkerPromptPosition] = useState<
     number | null
   >(null);
+  const [isAudioModalOpen, setIsAudioModalOpen] = useState(false);
 
   // Load active versions from timeline state or use external prop (with migration)
   const [internalActiveVersions, setInternalActiveVersions] = useState<
@@ -669,10 +694,12 @@ export default function TimelinePanel({
           prompt,
           scene_context: {
             current_scene: currentItem?.placementNumber,
-            previous_scenes: previousItems.map((item) => ({
-              scene_number: item.placementNumber,
-              description: item.prompt || item.label,
-            })),
+            previous_scenes: previousItems
+              .filter((item) => item.placementNumber !== undefined)
+              .map((item) => ({
+                scene_number: item.placementNumber!,
+                description: item.prompt || item.label,
+              })),
           },
         });
       } catch {
@@ -1052,6 +1079,49 @@ export default function TimelinePanel({
     }
   }, [projectDirectory, totalDuration, addAsset]);
 
+  // Handle audio import from file
+  const handleImportAudioFromFile = useCallback(async () => {
+    if (!projectDirectory) return;
+
+    try {
+      const audioPath = await window.electron.project.selectAudioFile();
+      if (!audioPath) return;
+
+      // Create .kshana/agent/audio folder structure if it doesn't exist
+      const parts = PROJECT_PATHS.AGENT_AUDIO.split('/');
+      let basePath = projectDirectory;
+      for (const part of parts) {
+        if (part) {
+          await window.electron.project.createFolder(basePath, part);
+          basePath = `${basePath}/${part}`;
+        }
+      }
+      const audioFolder = basePath;
+
+      // Copy audio to .kshana/agent/audio folder
+      const audioFileName =
+        audioPath.split('/').pop() || `audio-${Date.now()}.mp3`;
+      await window.electron.project.copy(audioPath, audioFolder);
+
+      // Refresh audio files without reloading the page
+      if ((window as any).refreshAudioFiles) {
+        (window as any).refreshAudioFiles();
+      }
+      console.log('Audio file imported successfully');
+    } catch (error) {
+      console.error('Failed to import audio file:', error);
+    }
+  }, [projectDirectory]);
+
+  // YouTube audio import removed - can be re-added later if needed
+  const handleImportAudioFromYouTube = useCallback(
+    async (_youtubeUrl: string) => {
+      // YouTube extraction functionality removed
+      alert('YouTube audio extraction is currently disabled');
+    },
+    [],
+  );
+
   // Drag handlers removed - not used in unified timeline
 
   // Handle scene split at playhead (disabled for placement-based timeline)
@@ -1221,6 +1291,15 @@ export default function TimelinePanel({
               <button
                 type="button"
                 className={styles.toolbarButton}
+                onClick={() => setIsAudioModalOpen(true)}
+                title="Import Audio"
+              >
+                <Music size={14} />
+                <span>Import Audio</span>
+              </button>
+              <button
+                type="button"
+                className={styles.toolbarButton}
                 onClick={handleSplitScene}
                 title="Split Scene at Playhead (S)"
               >
@@ -1317,26 +1396,55 @@ export default function TimelinePanel({
                 />
 
                 {/* Unified Track */}
-                {timelineItems.length > 0 && (
+                {timelineItems.filter((item) => item.type !== 'audio').length > 0 && (
                   <div className={styles.track}>
                     <div className={styles.trackContent}>
-                      {timelineItems.map((item) => {
-                        const left = secondsToPixels(item.startTime, zoomLevel);
-                        const width = secondsToPixels(item.duration, zoomLevel);
+                      {timelineItems
+                        .filter((item) => item.type !== 'audio')
+                        .map((item) => {
+                          const left = secondsToPixels(item.startTime, zoomLevel);
+                          const width = secondsToPixels(item.duration, zoomLevel);
 
-                        return (
-                          <TimelineItemComponent
-                            key={item.id}
-                            item={item}
-                            left={left}
-                            width={width}
-                            projectDirectory={projectDirectory || null}
-                            isSelected={false}
-                            activeVersions={activeVersions}
-                            onItemClick={handleItemClick}
-                          />
-                        );
-                      })}
+                          return (
+                            <TimelineItemComponent
+                              key={item.id}
+                              item={item}
+                              left={left}
+                              width={width}
+                              projectDirectory={projectDirectory || null}
+                              isSelected={false}
+                              activeVersions={activeVersions}
+                              onItemClick={handleItemClick}
+                            />
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Audio Track */}
+                {timelineItems.filter((item) => item.type === 'audio').length > 0 && (
+                  <div className={`${styles.track} ${styles.audioTrack}`}>
+                    <div className={styles.trackContent}>
+                      {timelineItems
+                        .filter((item) => item.type === 'audio')
+                        .map((item) => {
+                          const left = secondsToPixels(item.startTime, zoomLevel);
+                          const width = secondsToPixels(item.duration, zoomLevel);
+
+                          return (
+                            <TimelineItemComponent
+                              key={item.id}
+                              item={item}
+                              left={left}
+                              width={width}
+                              projectDirectory={projectDirectory || null}
+                              isSelected={false}
+                              activeVersions={activeVersions}
+                              onItemClick={handleItemClick}
+                            />
+                          );
+                        })}
                     </div>
                   </div>
                 )}
@@ -1368,6 +1476,13 @@ export default function TimelinePanel({
               }}
             />
           )}
+
+          <AudioImportModal
+            isOpen={isAudioModalOpen}
+            onClose={() => setIsAudioModalOpen(false)}
+            onImportFromFile={handleImportAudioFromFile}
+            onImportFromYouTube={handleImportAudioFromYouTube}
+          />
 
         </>
       )}

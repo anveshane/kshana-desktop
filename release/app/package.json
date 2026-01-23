@@ -47,7 +47,6 @@
     "remark-gfm": "^1.0.0",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "fluent-ffmpeg": "^2.1.3",
-    "@ts-ffmpeg/fluent-ffmpeg": "^2.2.6",
-    "kshana-ink": "file:node_modules/kshana-ink"
+    "@ts-ffmpeg/fluent-ffmpeg": "^2.2.6"
   }
 }

@@ -282,7 +282,23 @@
 .track {
   display: flex;
   min-height: 120px;
-  border-bottom: 1px solid $color-panel-border;
+  
+  // Only show border on last track
+  &:last-child {
+    border-bottom: 1px solid $color-panel-border;
+  }
+}
+
+.audioTrack {
+  margin-top: 0 !important;
+  padding-top: 28px;
+  min-height: auto; // Let it size based on content
+  
+  .trackContent {
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+    min-height: auto; // Remove min-height for audio track
+  }
 }
 
 .trackLabel {
@@ -304,6 +320,7 @@
   flex: 1;
   position: relative;
   min-height: 120px;
+  padding-bottom: 0; // Remove extra padding
 }
 
 .sceneBlock {
@@ -465,6 +482,60 @@
   font-weight: $font-weight-semibold;
   color: $color-accent-cyan;
   background-color: rgba($color-accent-cyan, 0.1);
+}
+
+.audioBlock {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 50px;
+  min-height: 50px;
+  background-color: rgba($color-accent-cyan, 0.15);
+  border: 1px solid rgba($color-accent-cyan, 0.4);
+  border-radius: $radius-sm;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all $transition-fast;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: $spacing-xs;
+
+  &:hover {
+    background-color: rgba($color-accent-cyan, 0.2);
+    border-color: rgba($color-accent-cyan, 0.6);
+  }
+
+  &.selected {
+    border-color: $color-accent-green;
+    box-shadow: 0 0 0 2px rgba($color-accent-green, 0.3);
+  }
+}
+
+.audioWaveform {
+  width: 100%;
+  height: 10px;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent,
+    transparent 2px,
+    rgba($color-accent-cyan, 0.6) 2px,
+    rgba($color-accent-cyan, 0.6) 4px
+  );
+  background-size: 8px 100%;
+  opacity: 0.9;
+  border-radius: $radius-sm;
+}
+
+.audioLabel {
+  font-size: $font-size-xs;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+  margin-top: $spacing-xs;
+  @include truncate;
+  max-width: 100%;
+  padding: 0 $spacing-xs;
 }
 
 .emptyState {

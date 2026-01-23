@@ -135,7 +135,9 @@ export default function VideoLibraryView({
 
   const [currentItemIndex, setCurrentItemIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentVideoPathRef = useRef<string | null>(null);
+  const currentAudioPathRef = useRef<string | null>(null);
   const isSeekingRef = useRef(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -167,6 +169,14 @@ export default function VideoLibraryView({
   const currentItem = timelineItems[currentItemIndex] || null;
   const currentVideo = currentItem?.type === 'video' ? currentItem : null;
   const currentImage = currentItem?.type === 'image' ? currentItem : null;
+
+  // Get audio timeline items
+  const audioItems = useMemo(() => {
+    return timelineItems.filter((item) => item.type === 'audio');
+  }, [timelineItems]);
+
+  // Get the first audio item (assuming single audio track)
+  const currentAudio = audioItems.length > 0 ? audioItems[0] : null;
 
   // Resolve image path from current timeline item (placement-based)
   const sceneImagePath = useMemo(() => {
@@ -276,6 +286,24 @@ export default function VideoLibraryView({
       });
   }, [sceneImagePath, projectDirectory]);
 
+  // Resolve and store the display-ready audio path
+  const [resolvedAudioPath, setResolvedAudioPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!currentAudio?.audioPath || !projectDirectory) {
+      setResolvedAudioPath(null);
+      return;
+    }
+
+    resolveAssetPathForDisplay(currentAudio.audioPath, projectDirectory)
+      .then((resolved) => {
+        setResolvedAudioPath(resolved);
+      })
+      .catch(() => {
+        setResolvedAudioPath(null);
+      });
+  }, [currentAudio?.audioPath, projectDirectory]);
+
   // Handle video play/pause
   const handlePlayPause = useCallback(() => {
     onPlaybackStateChange(!isPlaying);
@@ -308,6 +336,10 @@ export default function VideoLibraryView({
       if (videoRef.current) {
         videoRef.current.currentTime = 0;
       }
+      // Reset audio to start
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+      }
     }
   }, [
     currentItemIndex,
@@ -332,6 +364,10 @@ export default function VideoLibraryView({
           if (videoTime >= 0 && videoTime <= currentVideo.duration) {
             videoRef.current.currentTime = videoTime;
           }
+        }
+        // Seek audio to match timeline position
+        if (audioRef.current && currentAudio) {
+          audioRef.current.currentTime = Math.max(0, Math.min(seekTime, currentAudio.duration));
         }
         setTimeout(() => {
           isSeekingRef.current = false;
@@ -359,6 +395,10 @@ export default function VideoLibraryView({
           const videoTime = seekTime - item.startTime;
           videoRef.current.currentTime = videoTime;
         }
+        // Seek audio to match timeline position
+        if (audioRef.current && currentAudio) {
+          audioRef.current.currentTime = Math.max(0, Math.min(seekTime, currentAudio.duration));
+        }
       } else if (seekTime >= totalDuration) {
         // Seeked past end - go to last item
         const lastIndex = timelineItems.length - 1;
@@ -368,6 +408,10 @@ export default function VideoLibraryView({
           onPlaybackTimeChange(lastItem.endTime);
           if (videoRef.current && lastItem.type === 'video') {
             videoRef.current.currentTime = lastItem.duration;
+          }
+          // Seek audio to end
+          if (audioRef.current && currentAudio) {
+            audioRef.current.currentTime = Math.min(seekTime, currentAudio.duration);
           }
         }
       }
@@ -384,6 +428,7 @@ export default function VideoLibraryView({
       onPlaybackTimeChange,
       isDragging,
       currentVideo,
+      currentAudio,
     ],
   );
 
@@ -662,6 +707,88 @@ export default function VideoLibraryView({
       videoElement.currentTime = Math.max(0, expectedVideoTime);
     }
   }, [playbackTime, currentVideo, isDragging]);
+
+  // Update audio source when audio path changes
+  useEffect(() => {
+    if (!audioRef.current || !resolvedAudioPath || isDragging) {
+      return;
+    }
+
+    const audioElement = audioRef.current;
+
+    // Only update if source actually changed
+    if (currentAudioPathRef.current !== resolvedAudioPath) {
+      const wasPlaying = !audioElement.paused;
+      currentAudioPathRef.current = resolvedAudioPath;
+      audioElement.pause();
+      audioElement.src = resolvedAudioPath;
+      audioElement.load();
+
+      // Resume playback if it was playing
+      if (wasPlaying || isPlaying) {
+        audioElement.play().catch((error) => {
+          console.warn('[VideoLibraryView] Audio play error:', error);
+        });
+      }
+    }
+  }, [resolvedAudioPath, isDragging, isPlaying]);
+
+  // Sync audio playback with shared state
+  useEffect(() => {
+    if (!audioRef.current || !currentAudio || isDragging) return;
+
+    const audioElement = audioRef.current;
+
+    // Sync play/pause state
+    if (isPlaying && audioElement.paused) {
+      audioElement.play().catch(() => {
+        // Ignore play errors
+      });
+    } else if (!isPlaying && !audioElement.paused) {
+      audioElement.pause();
+    }
+  }, [isPlaying, currentAudio, isDragging]);
+
+  // Sync audio position with playbackTime (when not seeking or dragging)
+  useEffect(() => {
+    if (
+      !audioRef.current ||
+      !currentAudio ||
+      isSeekingRef.current ||
+      isDragging
+    ) {
+      return;
+    }
+
+    const audioElement = audioRef.current;
+    // Audio starts at timeline time 0, so playbackTime directly maps to audio currentTime
+    const expectedAudioTime = playbackTime;
+
+    // Only update if there's a significant difference to avoid jitter
+    if (Math.abs(audioElement.currentTime - expectedAudioTime) > 0.2) {
+      audioElement.currentTime = Math.max(0, Math.min(expectedAudioTime, currentAudio.duration));
+    }
+  }, [playbackTime, currentAudio, isDragging]);
+
+  // Handle audio end event
+  useEffect(() => {
+    if (!audioRef.current || !currentAudio) return;
+
+    const audioElement = audioRef.current;
+
+    const handleEnded = () => {
+      // Audio has ended, pause playback if we're still at the end
+      if (playbackTime >= currentAudio.duration) {
+        onPlaybackStateChange(false);
+      }
+    };
+
+    audioElement.addEventListener('ended', handleEnded);
+
+    return () => {
+      audioElement.removeEventListener('ended', handleEnded);
+    };
+  }, [currentAudio, playbackTime, onPlaybackStateChange]);
 
   // Handle auto-advance for non-video items (images, placeholders)
   // When playing a non-video item, check if we've reached the end of the item
@@ -1058,6 +1185,16 @@ export default function VideoLibraryView({
               </p>
             </div>
           ) : null}
+
+          {/* Hidden audio element for playback */}
+          {currentAudio && resolvedAudioPath && (
+            <audio
+              ref={audioRef}
+              src={resolvedAudioPath}
+              preload="auto"
+              style={{ display: 'none' }}
+            />
+          )}
         </div>
       </div>
     </div>

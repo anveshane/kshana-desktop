@@ -4,7 +4,7 @@
  * Placement-based timeline architecture: timeline items driven by placement timestamps
  */
 
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { useProject } from '../contexts/ProjectContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { usePlacementFiles } from './usePlacementFiles';
@@ -13,18 +13,20 @@ import { timeStringToSeconds } from '../utils/placementParsers';
 import { resolveAssetPathForDisplay } from '../utils/pathResolver';
 import type { AssetInfo, AssetManifest } from '../types/kshana/assetManifest';
 import type { SceneVersions } from '../types/kshana/timeline';
+import { PROJECT_PATHS } from '../types/kshana';
 
 export interface TimelineItem {
-  id: string; // "PLM-1", "vd-placement-1", "placeholder-start"
-  type: 'image' | 'video' | 'placeholder';
+  id: string; // "PLM-1", "vd-placement-1", "placeholder-start", "audio-1"
+  type: 'image' | 'video' | 'placeholder' | 'audio';
   startTime: number; // seconds
   endTime: number; // seconds
   duration: number; // calculated: endTime - startTime
-  label: string; // "PLM-1", "vd-placement-1", "Original Footage"
+  label: string; // "PLM-1", "vd-placement-1", "Original Footage", "Audio Track"
   prompt?: string;
   placementNumber?: number;
   imagePath?: string; // resolved if asset matched
   videoPath?: string; // resolved if asset matched
+  audioPath?: string; // path to audio file
 }
 
 export interface TimelineData {
@@ -201,6 +203,63 @@ export function useTimelineData(
   const { projectDirectory } = useWorkspace();
   const { imagePlacements, videoPlacements } = usePlacementFiles();
   const { entries: transcriptEntries, totalDuration: transcriptDuration } = useTranscript();
+  const [audioFiles, setAudioFiles] = useState<Array<{ path: string; duration: number }>>([]);
+  const [audioRefreshTrigger, setAudioRefreshTrigger] = useState(0);
+
+  // Expose refresh function via window for external triggers
+  useEffect(() => {
+    (window as any).refreshAudioFiles = () => {
+      setAudioRefreshTrigger((prev) => prev + 1);
+    };
+    return () => {
+      delete (window as any).refreshAudioFiles;
+    };
+  }, []);
+
+  // Load audio files from .kshana/agent/audio directory
+  useEffect(() => {
+    if (!projectDirectory || !isLoaded) return;
+
+    const loadAudioFiles = async () => {
+      try {
+        const audioDir = `${projectDirectory}/${PROJECT_PATHS.AGENT_AUDIO}`;
+        const files = await window.electron.project.readTree(audioDir, 1);
+        
+        const audioFilesList: Array<{ path: string; duration: number }> = [];
+        
+        if (files && files.children) {
+          for (const file of files.children) {
+            if (file.type === 'file' && file.name.match(/\.(mp3|wav|m4a|aac|ogg|flac)$/i)) {
+              const audioPath = `${PROJECT_PATHS.AGENT_AUDIO}/${file.name}`;
+              // Get actual duration from audio file
+              const fullAudioPath = `${projectDirectory}/${audioPath}`;
+              let duration = 0;
+              try {
+                duration = await window.electron.project.getAudioDuration(fullAudioPath);
+                console.log(`[useTimelineData] Got audio duration for ${file.name}: ${duration}s`);
+              } catch (error) {
+                console.warn(`[useTimelineData] Failed to get duration for ${file.name}:`, error);
+                // Fallback to transcript duration if available
+                duration = transcriptDuration || 0;
+              }
+              audioFilesList.push({
+                path: audioPath,
+                duration,
+              });
+            }
+          }
+        }
+        
+        setAudioFiles(audioFilesList);
+      } catch (error) {
+        // Directory might not exist yet, that's okay
+        console.debug('[useTimelineData] Audio directory not found or error loading:', error);
+        setAudioFiles([]);
+      }
+    };
+
+    loadAudioFiles();
+  }, [projectDirectory, isLoaded, transcriptDuration, audioRefreshTrigger]);
 
   // Debug: Log assetManifest state
   useEffect(() => {
@@ -324,12 +383,27 @@ export function useTimelineData(
     // Start with placement items
     const items = [...placementItems];
 
-    // Resolve paths asynchronously (we'll do this synchronously for now, but paths will be resolved in component)
-    // For now, we'll just pass the paths and let the component resolve them
+    // Add audio items - they span the full duration
+    audioFiles.forEach((audioFile, index) => {
+      items.push({
+        id: `audio-${index}`,
+        type: 'audio',
+        startTime: 0,
+        endTime: audioFile.duration || transcriptDuration || 0,
+        duration: audioFile.duration || transcriptDuration || 0,
+        label: 'Audio Track',
+        audioPath: audioFile.path,
+      });
+    });
 
-    // Fill gaps with placeholders
+    // Fill gaps with placeholders (but don't fill gaps for audio items)
+    const nonAudioItems = items.filter((item) => item.type !== 'audio');
     const totalDuration = transcriptDuration || 0;
-    const filledItems = fillGapsWithPlaceholders(items, totalDuration);
+    const filledItems = fillGapsWithPlaceholders(nonAudioItems, totalDuration);
+
+    // Add audio items back
+    const audioItems = items.filter((item) => item.type === 'audio');
+    filledItems.push(...audioItems);
 
     // If no placements and no transcript, return empty
     if (filledItems.length === 0 && totalDuration === 0) {
@@ -345,7 +419,7 @@ export function useTimelineData(
     filledItems.sort((a, b) => a.startTime - b.startTime);
 
     return filledItems;
-  }, [placementItems, transcriptDuration]);
+  }, [placementItems, transcriptDuration, audioFiles]);
 
   // Calculate total duration from transcript or timeline items
   const totalDuration = useMemo(() => {
