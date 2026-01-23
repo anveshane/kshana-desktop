@@ -87,10 +87,21 @@ function TimelineItemComponent({
     if (!pathToResolve && item.placementNumber !== undefined && assetManifest?.assets) {
       const activeVersion = activeVersions[item.placementNumber]?.image;
       const matchingAssets = assetManifest.assets.filter(
-        (a) =>
-          a.type === 'scene_image' &&
-          (a.metadata?.placementNumber === item.placementNumber ||
-            a.scene_number === item.placementNumber),
+        (a) => {
+          if (a.type !== 'scene_image') return false;
+          
+          // Handle type coercion (placementNumber might be number or string)
+          const assetPlacementNumber = a.metadata?.placementNumber;
+          const assetSceneNumber = a.scene_number;
+          const placementMatch = assetPlacementNumber !== undefined && 
+            (Number(assetPlacementNumber) === item.placementNumber || 
+             String(assetPlacementNumber) === String(item.placementNumber));
+          const sceneMatch = assetSceneNumber !== undefined &&
+            (Number(assetSceneNumber) === item.placementNumber ||
+             String(assetSceneNumber) === String(item.placementNumber));
+          
+          return placementMatch || sceneMatch;
+        }
       );
 
       if (matchingAssets.length > 0) {

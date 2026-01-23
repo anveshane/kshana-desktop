@@ -418,19 +418,34 @@ ipcMain.handle(
           // The timeline startTime/endTime are for positioning, not extraction
           // Strip file:// protocol if present
           let cleanPath = item.path.replace(/^file:\/\//, '');
+          
+          // Skip items with empty paths
+          if (!cleanPath || cleanPath.trim() === '') {
+            console.warn(`[VideoComposition] Skipping video segment ${i + 1}: empty path`);
+            continue;
+          }
+          
           const absolutePath = path.isAbsolute(cleanPath)
             ? cleanPath
             : path.join(projectDirectory, cleanPath);
 
           console.log(`[VideoComposition] Video segment ${i + 1}: ${absolutePath}`);
 
-          // Check if file exists
+          // Check if path exists and is a file (not a directory)
           try {
-            await fs.access(absolutePath);
+            const stats = await fs.stat(absolutePath);
+            if (stats.isDirectory()) {
+              console.warn(`[VideoComposition] Skipping video segment ${i + 1}: path is a directory: ${absolutePath}`);
+              continue;
+            }
             console.log(`[VideoComposition] Video file exists: ${absolutePath}`);
-          } catch {
-            console.error(`[VideoComposition] Video file not found: ${absolutePath}`);
-            throw new Error(`Video file not found: ${absolutePath}`);
+          } catch (error) {
+            if (error instanceof Error && error.message.includes('is a directory')) {
+              console.warn(`[VideoComposition] Skipping video segment ${i + 1}: path is a directory`);
+              continue;
+            }
+            console.warn(`[VideoComposition] Skipping video segment ${i + 1}: file not found: ${absolutePath}`);
+            continue;
           }
 
           console.log(`[VideoComposition] Converting video segment ${i + 1}...`);
@@ -471,6 +486,13 @@ ipcMain.handle(
           // Convert image to video
           // Strip file:// protocol if present
           let cleanPath = item.path.replace(/^file:\/\//, '');
+          
+          // Skip items with empty paths
+          if (!cleanPath || cleanPath.trim() === '') {
+            console.warn(`[VideoComposition] Skipping image segment ${i + 1}: empty path`);
+            continue;
+          }
+          
           const absolutePath = path.isAbsolute(cleanPath)
             ? cleanPath
             : path.join(projectDirectory, cleanPath);
@@ -482,8 +504,8 @@ ipcMain.handle(
             await fs.access(absolutePath);
             console.log(`[VideoComposition] Image file exists: ${absolutePath}`);
           } catch {
-            console.error(`[VideoComposition] Image file not found: ${absolutePath}`);
-            throw new Error(`Image file not found: ${absolutePath}`);
+            console.warn(`[VideoComposition] Skipping image segment ${i + 1}: file not found: ${absolutePath}`);
+            continue;
           }
 
           console.log(`[VideoComposition] Converting image segment ${i + 1} to video (${item.duration}s)...`);
@@ -551,6 +573,15 @@ ipcMain.handle(
           segmentFiles.push(segmentPath);
           cleanupFiles.push(segmentPath);
         }
+      }
+
+      // Check if we have any valid segments
+      if (segmentFiles.length === 0) {
+        console.error('[VideoComposition] No valid segments to compose. All timeline items were skipped.');
+        return { 
+          success: false, 
+          error: 'No valid segments found. All timeline items were skipped due to missing or invalid file paths.' 
+        };
       }
 
       console.log(`[VideoComposition] All ${segmentFiles.length} segments processed. Creating concat list...`);

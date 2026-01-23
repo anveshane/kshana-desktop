@@ -711,7 +711,7 @@ export default function VideoLibraryView({
 
       // Prepare timeline items data with resolved paths
       console.log('[VideoDownload] Resolving asset paths...');
-      const itemsData = await Promise.all(
+      const itemsDataWithPaths = await Promise.all(
         timelineItems.map(async (item, index) => {
           let resolvedPath = '';
           if (item.type === 'video' && item.videoPath) {
@@ -728,17 +728,50 @@ export default function VideoLibraryView({
             console.log(`[VideoDownload] Resolved image ${index + 1}: ${item.imagePath} -> ${resolvedPath}`);
           }
 
+          const finalPath = resolvedPath || item.videoPath || item.imagePath || '';
+          
           return {
             type: item.type,
-            path: resolvedPath || item.videoPath || item.imagePath || '',
+            path: finalPath,
             duration: item.duration,
             startTime: item.startTime,
             endTime: item.endTime,
+            originalIndex: index,
+            label: item.label,
           };
         }),
       );
 
-      console.log('[VideoDownload] Starting video composition...');
+      // Filter out items with empty paths and log warnings
+      const skippedItems: Array<{ index: number; type: string; label?: string }> = [];
+      const itemsData = itemsDataWithPaths.filter((item, index) => {
+        const hasValidPath = item.path && item.path.trim() !== '';
+        if (!hasValidPath) {
+          skippedItems.push({
+            index: item.originalIndex + 1,
+            type: item.type,
+            label: item.label,
+          });
+          console.warn(`[VideoDownload] Skipping timeline item ${item.originalIndex + 1} (${item.type}): no file path`, {
+            type: item.type,
+            label: item.label,
+          });
+        }
+        return hasValidPath;
+      });
+
+      if (skippedItems.length > 0) {
+        console.warn(`[VideoDownload] Skipped ${skippedItems.length} timeline item(s) with missing paths:`, skippedItems);
+      }
+
+      if (itemsData.length === 0) {
+        console.error('[VideoDownload] No valid timeline items to compose');
+        alert('No valid timeline items found. Please ensure at least one timeline item has a valid video or image path.');
+        setIsDownloading(false);
+        return;
+      }
+
+      console.log(`[VideoDownload] Starting video composition with ${itemsData.length} valid item(s) (${skippedItems.length} skipped)...`);
       console.log('[VideoDownload] Items data:', itemsData.map((item, i) => ({
         index: i + 1,
         type: item.type,

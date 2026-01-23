@@ -65,8 +65,15 @@ function findAssetByPlacementNumber(
       if (!typeMatch) return false;
 
       // Check both metadata.placementNumber and scene_number
-      const placementMatch = a.metadata?.placementNumber === placementNumber;
-      const sceneMatch = a.scene_number === placementNumber;
+      // Handle type coercion (placementNumber might be number or string)
+      const assetPlacementNumber = a.metadata?.placementNumber;
+      const assetSceneNumber = a.scene_number;
+      const placementMatch = assetPlacementNumber !== undefined && 
+        (Number(assetPlacementNumber) === placementNumber || 
+         String(assetPlacementNumber) === String(placementNumber));
+      const sceneMatch = assetSceneNumber !== undefined &&
+        (Number(assetSceneNumber) === placementNumber ||
+         String(assetSceneNumber) === String(placementNumber));
       const matches = placementMatch || sceneMatch;
       
       if (!matches) {
@@ -74,9 +81,11 @@ function findAssetByPlacementNumber(
         console.debug(`[findAssetByPlacementNumber] Asset ${a.id} type matches but placement doesn't:`, {
           assetType: a.type,
           targetType: assetType,
-          assetPlacementNumber: a.metadata?.placementNumber,
-          assetSceneNumber: a.scene_number,
+          assetPlacementNumber: assetPlacementNumber,
+          assetSceneNumber: assetSceneNumber,
           targetPlacementNumber: placementNumber,
+          placementMatch,
+          sceneMatch,
         });
       }
       

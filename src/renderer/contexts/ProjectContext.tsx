@@ -262,6 +262,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         filePath.includes('.kshana/agent/manifest.json') ||
         filePath.includes('.kshana/context/index.json')
       ) {
+        console.log('[ProjectContext] File change detected:', filePath);
         // Clear existing timeout
         if (debounceTimeout) {
           clearTimeout(debounceTimeout);
@@ -277,6 +278,11 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
               console.log('[ProjectContext] Project reloaded successfully:', {
                 hasAssetManifest: !!project.assetManifest,
                 assetCount: project.assetManifest?.assets?.length || 0,
+                imageAssets: project.assetManifest?.assets?.filter(a => a.type === 'scene_image').map(a => ({
+                  id: a.id,
+                  placementNumber: a.metadata?.placementNumber,
+                  path: a.path,
+                })) || [],
               });
               setState((prev) => ({
                 ...prev,
@@ -320,11 +326,25 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           const currentAssetCount = state.assetManifest?.assets?.length || 0;
           const newAssetCount = project.assetManifest?.assets?.length || 0;
           
-          // Only update if asset count changed (to avoid unnecessary re-renders)
-          if (newAssetCount !== currentAssetCount) {
-            console.log('[ProjectContext] Asset count changed, updating manifest:', {
+          // Check if assets have changed (count or content)
+          const currentAssetIds = new Set(state.assetManifest?.assets?.map(a => a.id) || []);
+          const newAssetIds = new Set(project.assetManifest?.assets?.map(a => a.id) || []);
+          const assetsChanged = newAssetCount !== currentAssetCount || 
+            currentAssetIds.size !== newAssetIds.size ||
+            [...newAssetIds].some(id => !currentAssetIds.has(id));
+          
+          // Update if assets changed (to avoid unnecessary re-renders)
+          if (assetsChanged) {
+            console.log('[ProjectContext] Assets changed, updating manifest:', {
               oldCount: currentAssetCount,
               newCount: newAssetCount,
+              oldAssetIds: [...currentAssetIds],
+              newAssetIds: [...newAssetIds],
+              addedAssets: project.assetManifest?.assets?.filter(a => !currentAssetIds.has(a.id)).map(a => ({
+                id: a.id,
+                placementNumber: a.metadata?.placementNumber,
+                path: a.path,
+              })) || [],
             });
             setState((prev) => ({
               ...prev,
