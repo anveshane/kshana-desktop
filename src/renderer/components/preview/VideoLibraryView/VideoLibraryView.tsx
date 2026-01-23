@@ -139,6 +139,7 @@ export default function VideoLibraryView({
   const currentVideoPathRef = useRef<string | null>(null);
   const currentAudioPathRef = useRef<string | null>(null);
   const isSeekingRef = useRef(false);
+  const isVideoLoadingRef = useRef(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
   // Format date
@@ -177,6 +178,19 @@ export default function VideoLibraryView({
 
   // Get the first audio item (assuming single audio track)
   const currentAudio = audioItems.length > 0 ? audioItems[0] : null;
+
+  // Debug: Log audio items
+  useEffect(() => {
+    console.log('[VideoLibraryView] Audio items:', {
+      audioItemsCount: audioItems.length,
+      currentAudio: currentAudio ? {
+        id: currentAudio.id,
+        audioPath: currentAudio.audioPath,
+        duration: currentAudio.duration,
+      } : null,
+      timelineItemsCount: timelineItems.length,
+    });
+  }, [audioItems, currentAudio, timelineItems.length]);
 
   // Resolve image path from current timeline item (placement-based)
   const sceneImagePath = useMemo(() => {
@@ -291,23 +305,43 @@ export default function VideoLibraryView({
 
   useEffect(() => {
     if (!currentAudio?.audioPath || !projectDirectory) {
+      console.log('[VideoLibraryView] No audio to resolve:', {
+        hasCurrentAudio: !!currentAudio,
+        audioPath: currentAudio?.audioPath,
+        hasProjectDirectory: !!projectDirectory,
+      });
       setResolvedAudioPath(null);
       return;
     }
 
+    console.log('[VideoLibraryView] Resolving audio path:', currentAudio.audioPath);
     resolveAssetPathForDisplay(currentAudio.audioPath, projectDirectory)
       .then((resolved) => {
+        console.log('[VideoLibraryView] Audio path resolved:', resolved);
         setResolvedAudioPath(resolved);
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error('[VideoLibraryView] Failed to resolve audio path:', error);
         setResolvedAudioPath(null);
       });
   }, [currentAudio?.audioPath, projectDirectory]);
 
   // Handle video play/pause
   const handlePlayPause = useCallback(() => {
-    onPlaybackStateChange(!isPlaying);
-  }, [isPlaying, onPlaybackStateChange]);
+    const newPlayingState = !isPlaying;
+    onPlaybackStateChange(newPlayingState);
+    
+    // Explicitly play/pause audio if available
+    if (audioRef.current && currentAudio && resolvedAudioPath) {
+      if (newPlayingState) {
+        audioRef.current.play().catch((error) => {
+          console.warn('[VideoLibraryView] Audio play error on button click:', error);
+        });
+      } else {
+        audioRef.current.pause();
+      }
+    }
+  }, [isPlaying, onPlaybackStateChange, currentAudio, resolvedAudioPath]);
 
   // Handle video time update - sync with timeline position
   const handleTimeUpdate = useCallback(
@@ -555,6 +589,13 @@ export default function VideoLibraryView({
       };
 
       const handleCanPlay = () => {
+        console.log(`[VideoLibraryView] Video can play: ${currentVideo.label}`);
+        // Seek to the correct position based on playbackTime
+        const videoTime = playbackTime - currentVideo.startTime;
+        if (videoTime > 0 && videoTime < currentVideo.duration) {
+          videoElement.currentTime = Math.max(0, videoTime);
+        }
+        // Resume playback if it was playing
         if (wasPlaying || isPlaying) {
           videoElement.play().catch((playError) => {
             console.warn(`[VideoLibraryView] Play error for ${currentVideo.label}:`, playError);
@@ -564,7 +605,13 @@ export default function VideoLibraryView({
       };
 
       const handleLoadedData = () => {
-        // Video is loaded, safe to play if needed
+        console.log(`[VideoLibraryView] Video loaded: ${currentVideo.label}`);
+        // Video is loaded, seek to correct position
+        const videoTime = playbackTime - currentVideo.startTime;
+        if (videoTime > 0 && videoTime < currentVideo.duration) {
+          videoElement.currentTime = Math.max(0, videoTime);
+        }
+        // Resume playback if it was playing
         if (wasPlaying || isPlaying) {
           videoElement.play().catch((playError) => {
             console.warn(`[VideoLibraryView] Play error for ${currentVideo.label}:`, playError);
@@ -575,6 +622,7 @@ export default function VideoLibraryView({
 
       const handleLoadStart = () => {
         console.log(`[VideoLibraryView] Loading video: ${currentVideo.label} from ${currentVideoPath}`);
+        isVideoLoadingRef.current = true;
       };
 
       // Add error handler
@@ -585,7 +633,8 @@ export default function VideoLibraryView({
 
       // Set new source
       videoElement.src = currentVideoPath;
-      videoElement.currentTime = 0;
+      videoElement.muted = true; // Mute video audio so only imported audio track plays
+      // Don't reset currentTime to 0 - let it be set by the loaded event handlers based on playbackTime
       videoElement.load();
 
       return () => {
@@ -617,18 +666,11 @@ export default function VideoLibraryView({
 
     if (itemIndex >= 0 && itemIndex !== currentItemIndex) {
       // Switch to the correct item (scene or video)
+      console.log(`[VideoLibraryView] Switching to item ${itemIndex}: ${timelineItems[itemIndex]?.type} - ${timelineItems[itemIndex]?.label}`);
       setCurrentItemIndex(itemIndex);
       const item = timelineItems[itemIndex];
-      // If item is video, seek to the right position
-      if (item.type === 'video' && videoRef.current) {
-        const videoTime = playbackTime - item.startTime;
-        // Video source will update via useEffect, then we'll seek to the right position
-        setTimeout(() => {
-          if (videoRef.current) {
-            videoRef.current.currentTime = Math.max(0, videoTime);
-          }
-        }, 100);
-      }
+      // If item is video, the video source will update via useEffect
+      // The video will seek to the right position in handleCanPlay/handleLoadedData
     } else if (itemIndex < 0 && playbackTime >= totalDuration) {
       // Past end - go to last item
       const lastIndex = timelineItems.length - 1;
@@ -678,6 +720,11 @@ export default function VideoLibraryView({
 
     const videoElement = videoRef.current;
 
+    // Ensure video is muted so only imported audio plays
+    if (!videoElement.muted) {
+      videoElement.muted = true;
+    }
+
     // Sync play/pause state
     if (isPlaying && videoElement.paused) {
       videoElement.play().catch(() => {
@@ -694,16 +741,28 @@ export default function VideoLibraryView({
       !videoRef.current ||
       !currentVideo ||
       isSeekingRef.current ||
-      isDragging
+      isDragging ||
+      isVideoLoadingRef.current // Don't sync while video is loading
     ) {
       return;
     }
 
     const videoElement = videoRef.current;
+    
+    // Don't sync if video is not ready (still loading)
+    if (videoElement.readyState < 2) {
+      return;
+    }
+    
     const expectedVideoTime = playbackTime - currentVideo.startTime;
 
     // Only update if there's a significant difference to avoid jitter
-    if (Math.abs(videoElement.currentTime - expectedVideoTime) > 0.2) {
+    // Also ensure we're within valid bounds
+    if (
+      expectedVideoTime >= 0 &&
+      expectedVideoTime <= currentVideo.duration &&
+      Math.abs(videoElement.currentTime - expectedVideoTime) > 0.2
+    ) {
       videoElement.currentTime = Math.max(0, expectedVideoTime);
     }
   }, [playbackTime, currentVideo, isDragging]);
@@ -722,14 +781,46 @@ export default function VideoLibraryView({
       currentAudioPathRef.current = resolvedAudioPath;
       audioElement.pause();
       audioElement.src = resolvedAudioPath;
+      audioElement.volume = 1.0; // Ensure volume is set
       audioElement.load();
 
-      // Resume playback if it was playing
+      // Add error handler
+      const handleError = () => {
+        const error = audioElement.error;
+        if (error) {
+          console.error('[VideoLibraryView] Audio error:', {
+            code: error.code,
+            message: error.message,
+            path: resolvedAudioPath,
+          });
+        }
+      };
+
+      const handleCanPlay = () => {
+        console.log('[VideoLibraryView] Audio can play:', resolvedAudioPath);
+        // Resume playback if it was playing
+        if (wasPlaying || isPlaying) {
+          audioElement.play().catch((error) => {
+            console.warn('[VideoLibraryView] Audio play error:', error);
+          });
+        }
+        audioElement.removeEventListener('canplay', handleCanPlay);
+      };
+
+      audioElement.addEventListener('error', handleError);
+      audioElement.addEventListener('canplay', handleCanPlay);
+
+      // Resume playback if it was playing (try immediately, but also wait for canplay)
       if (wasPlaying || isPlaying) {
         audioElement.play().catch((error) => {
-          console.warn('[VideoLibraryView] Audio play error:', error);
+          console.warn('[VideoLibraryView] Audio play error (immediate):', error);
         });
       }
+
+      return () => {
+        audioElement.removeEventListener('error', handleError);
+        audioElement.removeEventListener('canplay', handleCanPlay);
+      };
     }
   }, [resolvedAudioPath, isDragging, isPlaying]);
 
@@ -739,10 +830,15 @@ export default function VideoLibraryView({
 
     const audioElement = audioRef.current;
 
+    // Ensure volume is set
+    if (audioElement.volume !== 1.0) {
+      audioElement.volume = 1.0;
+    }
+
     // Sync play/pause state
     if (isPlaying && audioElement.paused) {
-      audioElement.play().catch(() => {
-        // Ignore play errors
+      audioElement.play().catch((error) => {
+        console.warn('[VideoLibraryView] Audio play error during sync:', error);
       });
     } else if (!isPlaying && !audioElement.paused) {
       audioElement.pause();
@@ -837,36 +933,39 @@ export default function VideoLibraryView({
       console.log('[VideoDownload] Project directory:', projectDirectory);
 
       // Prepare timeline items data with resolved paths
+      // Filter out audio items as they're not part of video composition
       console.log('[VideoDownload] Resolving asset paths...');
       const itemsDataWithPaths = await Promise.all(
-        timelineItems.map(async (item, index) => {
-          let resolvedPath = '';
-          if (item.type === 'video' && item.videoPath) {
-            resolvedPath = await resolveAssetPathForDisplay(
-              item.videoPath,
-              projectDirectory,
-            );
-            console.log(`[VideoDownload] Resolved video ${index + 1}: ${item.videoPath} -> ${resolvedPath}`);
-          } else if (item.type === 'image' && item.imagePath) {
-            resolvedPath = await resolveAssetPathForDisplay(
-              item.imagePath,
-              projectDirectory,
-            );
-            console.log(`[VideoDownload] Resolved image ${index + 1}: ${item.imagePath} -> ${resolvedPath}`);
-          }
+        timelineItems
+          .filter((item) => item.type !== 'audio') // Exclude audio items
+          .map(async (item, index) => {
+            let resolvedPath = '';
+            if (item.type === 'video' && item.videoPath) {
+              resolvedPath = await resolveAssetPathForDisplay(
+                item.videoPath,
+                projectDirectory,
+              );
+              console.log(`[VideoDownload] Resolved video ${index + 1}: ${item.videoPath} -> ${resolvedPath}`);
+            } else if (item.type === 'image' && item.imagePath) {
+              resolvedPath = await resolveAssetPathForDisplay(
+                item.imagePath,
+                projectDirectory,
+              );
+              console.log(`[VideoDownload] Resolved image ${index + 1}: ${item.imagePath} -> ${resolvedPath}`);
+            }
 
-          const finalPath = resolvedPath || item.videoPath || item.imagePath || '';
-          
-          return {
-            type: item.type,
-            path: finalPath,
-            duration: item.duration,
-            startTime: item.startTime,
-            endTime: item.endTime,
-            originalIndex: index,
-            label: item.label,
-          };
-        }),
+            const finalPath = resolvedPath || item.videoPath || item.imagePath || '';
+            
+            return {
+              type: item.type as 'video' | 'image' | 'placeholder',
+              path: finalPath,
+              duration: item.duration,
+              startTime: item.startTime,
+              endTime: item.endTime,
+              originalIndex: index,
+              label: item.label,
+            };
+          }),
       );
 
       // Filter out items with empty paths and log warnings
@@ -1069,6 +1168,7 @@ export default function VideoLibraryView({
                   }}
                   preload="auto"
                   playsInline
+                  muted
                 />
               ) : (
                 <div className={styles.videoPlaceholder}>
@@ -1079,9 +1179,6 @@ export default function VideoLibraryView({
               )}
               <div className={styles.currentVideoLabel}>
                 {currentVideo.label}
-                {(currentVideo.artifact?.metadata?.imported as boolean) && (
-                  <span className={styles.importedBadge}> (Imported)</span>
-                )}
               </div>
               <div className={styles.playerControls}>
                 <button
@@ -1193,6 +1290,23 @@ export default function VideoLibraryView({
               src={resolvedAudioPath}
               preload="auto"
               style={{ display: 'none' }}
+              onError={(e) => {
+                const audio = e.currentTarget;
+                const error = audio.error;
+                if (error) {
+                  console.error('[VideoLibraryView] Audio element error:', {
+                    code: error.code,
+                    message: error.message,
+                    path: resolvedAudioPath,
+                  });
+                }
+              }}
+              onLoadedData={() => {
+                console.log('[VideoLibraryView] Audio loaded:', resolvedAudioPath);
+                if (audioRef.current) {
+                  audioRef.current.volume = 1.0;
+                }
+              }}
             />
           )}
         </div>
