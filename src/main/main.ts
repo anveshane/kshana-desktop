@@ -10,6 +10,7 @@
  */
 import path from 'path';
 import fs from 'fs/promises';
+import { normalizePathForFFmpeg } from './utils/pathNormalizer';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import log from 'electron-log';
 import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
@@ -440,6 +441,7 @@ ipcMain.handle(
     _event,
     timelineItems: TimelineItem[],
     projectDirectory: string,
+    audioPath?: string,
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
     console.log('[VideoComposition] Starting video composition...');
     console.log('[VideoComposition] Timeline items:', timelineItems.length);
@@ -645,9 +647,9 @@ ipcMain.handle(
       cleanupFiles.push(concatListPath);
       console.log(`[VideoComposition] Concat list created with ${segmentFiles.length} files`);
 
-      // Concatenate all segments
-      const outputPath = path.join(tempDir, 'composed-video.mp4');
-      console.log(`[VideoComposition] Concatenating segments into final video: ${outputPath}`);
+      // Step 1: Concatenate all video segments
+      const concatenatedVideoPath = path.join(tempDir, 'concatenated-video.mp4');
+      console.log(`[VideoComposition] Concatenating segments into video: ${concatenatedVideoPath}`);
       await new Promise<void>((resolve, reject) => {
         ffmpeg()
           .input(concatListPath)
@@ -655,7 +657,7 @@ ipcMain.handle(
           .outputOptions([
             '-c copy', // Copy streams without re-encoding for speed
           ])
-          .output(outputPath)
+          .output(concatenatedVideoPath)
           .on('start', (commandLine) => {
             console.log(`[VideoComposition] FFmpeg concat command: ${commandLine}`);
           })
@@ -674,6 +676,71 @@ ipcMain.handle(
           })
           .run();
       });
+
+      // Step 2: Mix audio if provided
+      const outputPath = path.join(tempDir, 'composed-video.mp4');
+      if (audioPath) {
+        // Normalize audio path (strips file://, resolves relative paths)
+        const normalizedAudioPath = await normalizePathForFFmpeg(audioPath, projectDirectory);
+        
+        if (!normalizedAudioPath) {
+          console.warn('[VideoComposition] Audio path is empty after normalization');
+          await fs.copyFile(concatenatedVideoPath, outputPath);
+          console.log('[VideoComposition] No audio track provided, using video only');
+        } else {
+          // Check if audio file exists
+          try {
+            await fs.access(normalizedAudioPath);
+            console.log(`[VideoComposition] Mixing audio track: ${normalizedAudioPath}`);
+            
+            await new Promise<void>((resolve, reject) => {
+              ffmpeg()
+                .input(concatenatedVideoPath)
+                .input(normalizedAudioPath)
+                .outputOptions([
+                  '-c:v copy', // Copy video stream (no re-encoding)
+                  '-c:a aac', // Encode audio to AAC format
+                  '-map 0:v:0', // Use video from first input (concatenated video)
+                  '-map 1:a:0', // Use audio from second input (audio file)
+                  '-shortest', // End when shortest stream ends (prevents length mismatch)
+                ])
+                .output(outputPath)
+                .on('start', (commandLine) => {
+                  console.log(`[VideoComposition] FFmpeg audio mix command: ${commandLine}`);
+                })
+                .on('progress', (progress) => {
+                  if (progress.percent) {
+                    console.log(`[VideoComposition] Audio mixing progress: ${Math.round(progress.percent)}%`);
+                  }
+                })
+                .on('end', () => {
+                  console.log(`[VideoComposition] Audio mixing completed`);
+                  resolve();
+                })
+                .on('error', (err) => {
+                  console.error(`[VideoComposition] Audio mixing error:`, err);
+                  // Fall back to video-only if audio mixing fails
+                  console.warn('[VideoComposition] Falling back to video-only output');
+                  fs.copyFile(concatenatedVideoPath, outputPath)
+                    .then(() => resolve())
+                    .catch((copyErr) => {
+                      console.error('[VideoComposition] Failed to copy video-only output:', copyErr);
+                      reject(err);
+                    });
+                })
+                .run();
+            });
+          } catch (error) {
+            // Audio file doesn't exist - use video only
+            console.warn(`[VideoComposition] Audio file not found: ${normalizedAudioPath}, using video only`);
+            await fs.copyFile(concatenatedVideoPath, outputPath);
+          }
+        }
+      } else {
+        // No audio provided - just use concatenated video
+        console.log('[VideoComposition] No audio track provided, using video only');
+        await fs.copyFile(concatenatedVideoPath, outputPath);
+      }
 
       // Verify output file exists
       try {

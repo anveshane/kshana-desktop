@@ -134,11 +134,13 @@ const projectBridge = {
       endTime: number;
     }>,
     projectDirectory: string,
+    audioPath?: string,
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
     return ipcRenderer.invoke(
       'project:compose-timeline-video',
       timelineItems,
       projectDirectory,
+      audioPath,
     );
   },
   onFileChange(callback: (event: FileChangeEvent) => void) {

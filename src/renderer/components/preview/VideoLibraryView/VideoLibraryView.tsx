@@ -9,7 +9,10 @@ import { Film, Play, Calendar, Pause, Download } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimelineData } from '../../../hooks/useTimelineData';
+import { useAudioController } from '../../../hooks/useAudioController';
+import { usePlaybackController } from '../../../hooks/usePlaybackController';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
+import { normalizePathForExport } from '../../../utils/pathNormalizer';
 import type { Artifact } from '../../../types/projectState';
 import type { SceneRef } from '../../../types/kshana/entities';
 import type { SceneVersions } from '../../../types/kshana/timeline';
@@ -133,14 +136,22 @@ export default function VideoLibraryView({
       });
   }, [assetManifest]);
 
-  const [currentItemIndex, setCurrentItemIndex] = useState(0);
+  // Refs must be declared before usePlaybackController hook
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentVideoPathRef = useRef<string | null>(null);
-  const currentAudioPathRef = useRef<string | null>(null);
   const isSeekingRef = useRef(false);
   const isVideoLoadingRef = useRef(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const lastPlaybackTimeRef = useRef(0);
+
+  // Use production-grade playback controller instead of manual state management
+  const { currentItem, currentItemIndex } = usePlaybackController(
+    timelineItems,
+    playbackTime,
+    isPlaying,
+    isDragging,
+    () => isSeekingRef.current, // Pass function to get current seeking state
+  );
 
   // Format date
   const formatDate = (dateString: string): string => {
@@ -166,31 +177,94 @@ export default function VideoLibraryView({
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  // Get current item from timeline (placement-based: image, video, or placeholder)
-  const currentItem = timelineItems[currentItemIndex] || null;
+  // Wrapper to prevent backward jumps during normal playback
+  // Backward jumps are only allowed during explicit seeks or when dragging
+  const safeSetPlaybackTime = useCallback(
+    (newTime: number, isSeeking = false) => {
+      const lastTime = lastPlaybackTimeRef.current;
+
+      // Allow backward jumps if:
+      // - Explicitly seeking
+      // - Small correction (< 0.5s)
+      // - Moving forward (newTime >= lastTime)
+      // - Starting from 0
+      if (isSeeking || newTime >= lastTime - 0.5 || lastTime === 0) {
+        onPlaybackTimeChange(newTime);
+        lastPlaybackTimeRef.current = newTime;
+      } else {
+        console.warn('[VideoLibraryView] Prevented backward jump during playback:', {
+          from: lastTime,
+          to: newTime,
+        });
+      }
+    },
+    [onPlaybackTimeChange],
+  );
+
+  // Get current video and image from playback controller
+  // currentItem is already provided by usePlaybackController
   const currentVideo = currentItem?.type === 'video' ? currentItem : null;
   const currentImage = currentItem?.type === 'image' ? currentItem : null;
 
-  // Get audio timeline items
-  const audioItems = useMemo(() => {
-    return timelineItems.filter((item) => item.type === 'audio');
-  }, [timelineItems]);
-
-  // Get the first audio item (assuming single audio track)
-  const currentAudio = audioItems.length > 0 ? audioItems[0] : null;
-
-  // Debug: Log audio items
+  // Log when currentVideo changes
   useEffect(() => {
-    console.log('[VideoLibraryView] Audio items:', {
-      audioItemsCount: audioItems.length,
-      currentAudio: currentAudio ? {
-        id: currentAudio.id,
-        audioPath: currentAudio.audioPath,
-        duration: currentAudio.duration,
-      } : null,
-      timelineItemsCount: timelineItems.length,
+    console.log('[VideoLibraryView] currentVideo changed:', {
+      currentItemIndex,
+      currentItemType: currentItem?.type,
+      currentVideoLabel: currentVideo?.label,
+      currentVideoPlacementNumber: currentVideo?.placementNumber,
+      currentVideoPath: currentVideo?.videoPath,
+      currentVideoStartTime: currentVideo?.startTime?.toFixed(2),
+      currentVideoEndTime: currentVideo?.endTime?.toFixed(2),
+      hasVideoRef: !!videoRef.current,
+      currentVideoElementSrc: videoRef.current?.src,
     });
-  }, [audioItems, currentAudio, timelineItems.length]);
+  }, [currentVideo, currentItemIndex, currentItem]);
+
+  // Extract audio file metadata from timeline data (stable - only changes when audio file changes)
+  const audioFile = useMemo(() => {
+    const audioItems = timelineItems.filter((item) => item.type === 'audio');
+    if (audioItems.length === 0) return null;
+    
+    const firstAudio = audioItems[0];
+    if (!firstAudio.audioPath) return null;
+    
+    return {
+      path: firstAudio.audioPath,
+      duration: firstAudio.duration,
+    };
+  }, [timelineItems]); // ✅ Stable - only changes when audio file actually changes
+
+  // Resolve audio path
+  const [resolvedAudioPath, setResolvedAudioPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!audioFile?.path || !projectDirectory) {
+      setResolvedAudioPath(null);
+      return;
+    }
+
+    resolveAssetPathForDisplay(audioFile.path, projectDirectory)
+      .then((resolved) => {
+        setResolvedAudioPath(resolved);
+      })
+      .catch((error) => {
+        console.error('[VideoLibraryView] Failed to resolve audio path:', error);
+        setResolvedAudioPath(null);
+      });
+  }, [audioFile?.path, projectDirectory]);
+
+  // Use audio controller hook (imperative audio management)
+  const { audioRef } = useAudioController({
+    playbackTime,
+    isPlaying,
+    audioFile,
+    resolvedAudioPath,
+    projectDirectory,
+    isDragging,
+    isSeeking: () => isSeekingRef.current, // Pass function to get current seeking state
+    onPlaybackStateChange,
+  });
 
   // Resolve image path from current timeline item (placement-based)
   const sceneImagePath = useMemo(() => {
@@ -300,85 +374,62 @@ export default function VideoLibraryView({
       });
   }, [sceneImagePath, projectDirectory]);
 
-  // Resolve and store the display-ready audio path
-  const [resolvedAudioPath, setResolvedAudioPath] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!currentAudio?.audioPath || !projectDirectory) {
-      console.log('[VideoLibraryView] No audio to resolve:', {
-        hasCurrentAudio: !!currentAudio,
-        audioPath: currentAudio?.audioPath,
-        hasProjectDirectory: !!projectDirectory,
-      });
-      setResolvedAudioPath(null);
-      return;
-    }
-
-    console.log('[VideoLibraryView] Resolving audio path:', currentAudio.audioPath);
-    resolveAssetPathForDisplay(currentAudio.audioPath, projectDirectory)
-      .then((resolved) => {
-        console.log('[VideoLibraryView] Audio path resolved:', resolved);
-        setResolvedAudioPath(resolved);
-      })
-      .catch((error) => {
-        console.error('[VideoLibraryView] Failed to resolve audio path:', error);
-        setResolvedAudioPath(null);
-      });
-  }, [currentAudio?.audioPath, projectDirectory]);
 
   // Handle video play/pause
   const handlePlayPause = useCallback(() => {
     const newPlayingState = !isPlaying;
     onPlaybackStateChange(newPlayingState);
     
-    // Explicitly play/pause audio if available
-    if (audioRef.current && currentAudio && resolvedAudioPath) {
-      if (newPlayingState) {
-        audioRef.current.play().catch((error) => {
-          console.warn('[VideoLibraryView] Audio play error on button click:', error);
-        });
-      } else {
-        audioRef.current.pause();
-      }
-    }
-  }, [isPlaying, onPlaybackStateChange, currentAudio, resolvedAudioPath]);
+    // Audio play/pause is handled by audio controller
+  }, [isPlaying, onPlaybackStateChange]);
 
   // Handle video time update - sync with timeline position
+  // Video time updates should always be trusted - they come from the video element itself
   const handleTimeUpdate = useCallback(
     (e: React.SyntheticEvent<HTMLVideoElement>) => {
       if (!currentVideo || isSeekingRef.current || isDragging) return;
       const videoTime = e.currentTarget.currentTime;
       const timelineTime = currentVideo.startTime + videoTime;
+      // Always update playbackTime from video - don't use safeSetPlaybackTime
+      // Video element's currentTime is authoritative and should be trusted
+      console.log('[VideoLibraryView] Video time update:', {
+        videoTime: videoTime.toFixed(2),
+        timelineTime: timelineTime.toFixed(2),
+        currentVideoLabel: currentVideo?.label,
+        currentVideoStartTime: currentVideo.startTime.toFixed(2),
+      });
       onPlaybackTimeChange(timelineTime);
+      lastPlaybackTimeRef.current = timelineTime; // Update ref for safeSetPlaybackTime
     },
     [currentVideo, onPlaybackTimeChange, isDragging],
   );
 
-  // Handle video end - move to next item
+  // Handle video end - playback controller will handle item transitions automatically
+  // We just need to advance playbackTime to trigger the transition
   const handleVideoEnd = useCallback(() => {
     if (isDragging) return; // Don't auto-advance during dragging
 
-    if (currentItemIndex < timelineItems.length - 1) {
+    if (currentItemIndex !== null && currentItemIndex < timelineItems.length - 1) {
       const nextIndex = currentItemIndex + 1;
-      setCurrentItemIndex(nextIndex);
-      onPlaybackTimeChange(timelineItems[nextIndex].startTime);
-      // Video will auto-play when source changes if was playing (only if next item is video)
+      const nextItem = timelineItems[nextIndex];
+      if (nextItem) {
+        // Advance playbackTime to next item's start - playback controller will handle the transition
+        safeSetPlaybackTime(nextItem.startTime, false);
+        // Video will auto-play when source changes if was playing (only if next item is video)
+      }
     } else {
+      // Reached end of timeline
       onPlaybackStateChange(false);
-      setCurrentItemIndex(0);
-      onPlaybackTimeChange(0);
+      safeSetPlaybackTime(0, false);
       if (videoRef.current) {
         videoRef.current.currentTime = 0;
       }
-      // Reset audio to start
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-      }
+      // Audio position is managed by timeline-driven sync, not scene events
     }
   }, [
     currentItemIndex,
     timelineItems,
-    onPlaybackTimeChange,
+    safeSetPlaybackTime,
     onPlaybackStateChange,
     isDragging,
   ]);
@@ -391,7 +442,7 @@ export default function VideoLibraryView({
       // During dragging, only update playback time, don't switch items
       // Item switching will happen when drag ends
       if (isDragging) {
-        onPlaybackTimeChange(seekTime);
+        safeSetPlaybackTime(seekTime, true);
         // Still seek within current video if possible
         if (videoRef.current && currentVideo) {
           const videoTime = seekTime - currentVideo.startTime;
@@ -399,56 +450,26 @@ export default function VideoLibraryView({
             videoRef.current.currentTime = videoTime;
           }
         }
-        // Seek audio to match timeline position
-        if (audioRef.current && currentAudio) {
-          audioRef.current.currentTime = Math.max(0, Math.min(seekTime, currentAudio.duration));
-        }
+        // Audio position is managed by timeline-driven sync, not scene logic
         setTimeout(() => {
           isSeekingRef.current = false;
         }, 50);
         return;
       }
 
-      // Normal seek (not dragging) - allow item switching
-      // Find which item contains this time
-      const itemIndex = timelineItems.findIndex(
-        (item) =>
-          seekTime >= item.startTime &&
-          seekTime < item.endTime,
-      );
+      // Normal seek (not dragging) - playback controller will handle item switching automatically
+      // Just update playbackTime and let the controller determine which item should be active
+      safeSetPlaybackTime(seekTime, true);
 
-      if (itemIndex >= 0) {
-        const item = timelineItems[itemIndex];
-        onPlaybackTimeChange(seekTime);
-
-        if (itemIndex !== currentItemIndex) {
-          setCurrentItemIndex(itemIndex);
-          // Video source will change if item is video, and play state will be handled by useEffect
-        } else if (videoRef.current && item.type === 'video') {
-          // Same video item, just seek within it
-          const videoTime = seekTime - item.startTime;
+      // If seeking within the same video item, update video element directly
+      if (currentVideo && videoRef.current) {
+        const videoTime = seekTime - currentVideo.startTime;
+        if (videoTime >= 0 && videoTime <= currentVideo.duration) {
           videoRef.current.currentTime = videoTime;
         }
-        // Seek audio to match timeline position
-        if (audioRef.current && currentAudio) {
-          audioRef.current.currentTime = Math.max(0, Math.min(seekTime, currentAudio.duration));
-        }
-      } else if (seekTime >= totalDuration) {
-        // Seeked past end - go to last item
-        const lastIndex = timelineItems.length - 1;
-        if (lastIndex >= 0) {
-          const lastItem = timelineItems[lastIndex];
-          setCurrentItemIndex(lastIndex);
-          onPlaybackTimeChange(lastItem.endTime);
-          if (videoRef.current && lastItem.type === 'video') {
-            videoRef.current.currentTime = lastItem.duration;
-          }
-          // Seek audio to end
-          if (audioRef.current && currentAudio) {
-            audioRef.current.currentTime = Math.min(seekTime, currentAudio.duration);
-          }
-        }
       }
+      
+      // Audio position is managed by timeline-driven sync, not scene logic
 
       // Clear seeking flag after a short delay
       setTimeout(() => {
@@ -459,10 +480,9 @@ export default function VideoLibraryView({
       timelineItems,
       currentItemIndex,
       totalDuration,
-      onPlaybackTimeChange,
+      safeSetPlaybackTime,
       isDragging,
       currentVideo,
-      currentAudio,
     ],
   );
 
@@ -480,18 +500,40 @@ export default function VideoLibraryView({
 
   // Construct version-specific path if active version is set (placement-based)
   const versionPath = useMemo(() => {
-    if (!currentVideo) return null;
+    if (!currentVideo) {
+      console.log('[VideoLibraryView] No currentVideo for versionPath');
+      return null;
+    }
+    
+    console.log('[VideoLibraryView] Calculating versionPath:', {
+      currentVideo: {
+        label: currentVideo.label,
+        placementNumber: currentVideo.placementNumber,
+        videoPath: currentVideo.videoPath,
+        startTime: currentVideo.startTime,
+        endTime: currentVideo.endTime,
+      },
+    });
     
     const placementNumber = currentVideo.placementNumber;
     if (placementNumber === undefined) {
       const path = currentVideo.videoPath || null;
       if (!path) {
         console.warn(`[VideoLibraryView] No videoPath for video: ${currentVideo.label}`);
+      } else {
+        console.log(`[VideoLibraryView] Using videoPath directly (no placement number): ${path}`);
       }
       return path;
     }
 
     const activeVideoVersion = activeVersions[placementNumber]?.video;
+    console.log('[VideoLibraryView] Looking for video asset:', {
+      placementNumber,
+      activeVideoVersion,
+      hasAssetManifest: !!assetManifest,
+      totalAssets: assetManifest?.assets?.length || 0,
+    });
+
     if (activeVideoVersion !== undefined && assetManifest?.assets) {
       // Find video asset matching placement number and version
       const videoAsset = assetManifest.assets.find(
@@ -502,6 +544,10 @@ export default function VideoLibraryView({
           asset.version === activeVideoVersion,
       );
       if (videoAsset) {
+        console.log(`[VideoLibraryView] Found video asset for placement ${placementNumber}, version ${activeVideoVersion}:`, {
+          path: videoAsset.path,
+          assetId: videoAsset.id,
+        });
         return videoAsset.path;
       }
       console.warn(
@@ -515,7 +561,11 @@ export default function VideoLibraryView({
       console.warn(
         `[VideoLibraryView] No videoPath found for placement ${placementNumber} (${currentVideo.label})`,
       );
+    } else {
+      console.log(`[VideoLibraryView] Using fallback videoPath: ${fallbackPath}`);
     }
+    
+    console.log('[VideoLibraryView] versionPath result:', fallbackPath);
     return fallbackPath;
   }, [
     currentVideo,
@@ -523,42 +573,109 @@ export default function VideoLibraryView({
     assetManifest,
   ]);
 
+  // If versionPath is null but videoPath exists, use videoPath directly as fallback
+  const effectiveVersionPath = useMemo(() => {
+    if (versionPath) return versionPath;
+    
+    // Fallback: if versionPath is null but videoPath exists, use videoPath directly
+    const fallbackPath = currentVideo?.videoPath;
+    if (!versionPath && fallbackPath) {
+      console.warn('[VideoLibraryView] versionPath is null, using fallback videoPath:', fallbackPath);
+      return fallbackPath;
+    }
+    
+    return versionPath;
+  }, [versionPath, currentVideo]);
+
   // Resolve video path when current video or version changes
   useEffect(() => {
-    if (!versionPath) {
+    console.log('[VideoLibraryView] Resolving video path:', {
+      effectiveVersionPath,
+      versionPath,
+      hasProjectDirectory: !!projectDirectory,
+    });
+
+    if (!effectiveVersionPath) {
+      console.log('[VideoLibraryView] No effectiveVersionPath, clearing currentVideoPath');
       setCurrentVideoPath('');
       return;
     }
 
     resolveAssetPathForDisplay(
-      versionPath,
+      effectiveVersionPath,
       projectDirectory || null,
     )
       .then((resolved) => {
+        console.log('[VideoLibraryView] Video path resolved:', {
+          effectiveVersionPath,
+          resolved,
+        });
         if (resolved && resolved.trim()) {
           setCurrentVideoPath(resolved);
         } else {
-          console.warn(`[VideoLibraryView] Empty resolved path for: ${versionPath}`);
+          console.warn(`[VideoLibraryView] Empty resolved path for: ${effectiveVersionPath}`);
           setCurrentVideoPath('');
         }
       })
       .catch((error) => {
-        console.error(`[VideoLibraryView] Failed to resolve video path: ${versionPath}`, error);
+        console.error(`[VideoLibraryView] Failed to resolve video path: ${effectiveVersionPath}`, error);
         setCurrentVideoPath('');
       });
-  }, [versionPath, projectDirectory]);
+  }, [effectiveVersionPath, projectDirectory]);
 
   // Update video source when current video changes
   // Don't switch videos during dragging - wait until drag ends
   useEffect(() => {
+    console.log('[VideoLibraryView] Video source update effect:', {
+      hasCurrentVideo: !!currentVideo,
+      currentVideoLabel: currentVideo?.label,
+      currentVideoPath,
+      isDragging,
+      hasVideoRef: !!videoRef.current,
+    });
+
     if (!currentVideo || !videoRef.current || isDragging) {
+      console.log('[VideoLibraryView] Skipping video source update:', {
+        hasCurrentVideo: !!currentVideo,
+        hasVideoRef: !!videoRef.current,
+        isDragging,
+      });
       return;
     }
 
     const videoElement = videoRef.current;
 
-    // If path is empty, clear the video source
+    // If path is empty, check if we need to clear existing video
     if (!currentVideoPath || !currentVideoPath.trim()) {
+      // If currentVideo exists and is a video type, we're waiting for path resolution
+      // But we should clear any existing video source to prevent showing stale content
+      if (currentVideo && currentVideo.type === 'video') {
+        if (videoElement.src && videoElement.src !== currentVideoPathRef.current) {
+          // We have an old video loaded, clear it while waiting for new path
+          console.log('[VideoLibraryView] Waiting for video path resolution, clearing old video:', {
+            currentVideoLabel: currentVideo.label,
+            currentVideoPath,
+            oldSrc: videoElement.src,
+            prevPathRef: currentVideoPathRef.current,
+          });
+          videoElement.pause();
+          videoElement.src = '';
+          videoElement.load();
+          currentVideoPathRef.current = null;
+        }
+        console.log('[VideoLibraryView] Waiting for video path resolution:', {
+          currentVideoLabel: currentVideo.label,
+          currentVideoPath,
+          hasExistingSrc: !!videoElement.src,
+        });
+        return; // Wait for path resolution
+      }
+      
+      // Only clear if we're sure there's no video
+      console.warn('[VideoLibraryView] Empty currentVideoPath, clearing video source:', {
+        currentVideoLabel: currentVideo?.label,
+        currentVideoPath,
+      });
       if (videoElement.src) {
         videoElement.pause();
         videoElement.src = '';
@@ -570,6 +687,21 @@ export default function VideoLibraryView({
 
     // Only update if source actually changed to prevent flickering
     if (currentVideoPathRef.current !== currentVideoPath) {
+      console.log('[VideoLibraryView] Video source changing:', {
+        from: currentVideoPathRef.current,
+        to: currentVideoPath,
+        currentVideoLabel: currentVideo.label,
+      });
+
+      // If we're switching to a new video and the old video is different,
+      // clear the video element immediately to prevent showing stale content
+      if (currentVideoPathRef.current && currentVideoPathRef.current !== currentVideoPath) {
+        console.log('[VideoLibraryView] Clearing old video source before loading new one');
+        videoElement.pause();
+        videoElement.src = '';
+        videoElement.load();
+      }
+
       const wasPlaying = !videoElement.paused;
       currentVideoPathRef.current = currentVideoPath;
 
@@ -584,7 +716,32 @@ export default function VideoLibraryView({
             code: error.code,
             message: error.message,
             path: currentVideoPath,
+            effectiveVersionPath,
+            videoPath: currentVideo.videoPath,
           });
+          
+          // Try fallback: use videoPath directly if versionPath failed
+          if (currentVideo?.videoPath && currentVideoPath !== currentVideo.videoPath) {
+            console.log('[VideoLibraryView] Video load error, trying fallback path:', currentVideo.videoPath);
+            // Trigger re-resolution with fallback path
+            resolveAssetPathForDisplay(
+              currentVideo.videoPath,
+              projectDirectory || null,
+            )
+              .then((resolved) => {
+                if (resolved && resolved.trim() && resolved !== currentVideoPath) {
+                  console.log('[VideoLibraryView] Fallback path resolved successfully:', resolved);
+                  // Update the video element src directly
+                  if (videoRef.current) {
+                    videoRef.current.src = resolved;
+                    videoRef.current.load();
+                  }
+                }
+              })
+              .catch((fallbackError) => {
+                console.error('[VideoLibraryView] Fallback path resolution also failed:', fallbackError);
+              });
+          }
         }
       };
 
@@ -632,10 +789,21 @@ export default function VideoLibraryView({
       videoElement.addEventListener('loadstart', handleLoadStart);
 
       // Set new source
+      console.log('[VideoLibraryView] Setting video element src:', {
+        newSrc: currentVideoPath,
+        oldSrc: videoElement.src,
+        currentVideoLabel: currentVideo.label,
+        wasPlaying,
+      });
       videoElement.src = currentVideoPath;
       videoElement.muted = true; // Mute video audio so only imported audio track plays
       // Don't reset currentTime to 0 - let it be set by the loaded event handlers based on playbackTime
       videoElement.load();
+      console.log('[VideoLibraryView] Video element src set and load() called:', {
+        src: videoElement.src,
+        readyState: videoElement.readyState,
+        networkState: videoElement.networkState,
+      });
 
       return () => {
         videoElement.removeEventListener('error', handleError);
@@ -644,58 +812,26 @@ export default function VideoLibraryView({
         videoElement.removeEventListener('loadstart', handleLoadStart);
       };
     }
-  }, [currentVideo, currentVideoPath, isPlaying, isDragging]);
+  }, [currentVideo, currentVideoPath, isPlaying, isDragging, effectiveVersionPath, projectDirectory]);
 
-  // Update current item index based on playbackTime - works for both videos and scenes
-  // This ensures scenes without videos are also tracked during playback
-  // Runs continuously during playback, and when dragging/seeking ends
+  // Item index is now managed by usePlaybackController
+  // No boundary checking logic needed - TimeIndex handles all lookups
+  // Log when currentItem changes for debugging
   useEffect(() => {
-    if (timelineItems.length === 0) return;
-
-    // During dragging or seeking, we handle it differently
-    if (isDragging || isSeekingRef.current) {
-      return;
+    if (currentItem) {
+      console.log('[VideoLibraryView] Current item from playback controller:', {
+        itemIndex: currentItemIndex,
+        itemType: currentItem.type,
+        itemLabel: currentItem.label,
+        playbackTime: playbackTime.toFixed(2),
+        itemStartTime: currentItem.startTime.toFixed(2),
+        itemEndTime: currentItem.endTime.toFixed(2),
+      });
     }
+  }, [currentItem, currentItemIndex, playbackTime]);
 
-    // Find which item contains the current playback time
-    const itemIndex = timelineItems.findIndex(
-      (item) =>
-        playbackTime >= item.startTime &&
-        playbackTime < item.endTime,
-    );
-
-    if (itemIndex >= 0 && itemIndex !== currentItemIndex) {
-      // Switch to the correct item (scene or video)
-      console.log(`[VideoLibraryView] Switching to item ${itemIndex}: ${timelineItems[itemIndex]?.type} - ${timelineItems[itemIndex]?.label}`);
-      setCurrentItemIndex(itemIndex);
-      const item = timelineItems[itemIndex];
-      // If item is video, the video source will update via useEffect
-      // The video will seek to the right position in handleCanPlay/handleLoadedData
-    } else if (itemIndex < 0 && playbackTime >= totalDuration) {
-      // Past end - go to last item
-      const lastIndex = timelineItems.length - 1;
-      if (lastIndex >= 0 && lastIndex !== currentItemIndex) {
-        setCurrentItemIndex(lastIndex);
-      }
-    }
-  }, [
-    playbackTime,
-    timelineItems,
-    currentItemIndex,
-    totalDuration,
-    isDragging,
-  ]);
-
-  // Initialize to first item when timeline loads
-  useEffect(() => {
-    if (timelineItems.length > 0 && currentItemIndex >= timelineItems.length) {
-      setCurrentItemIndex(0);
-      onPlaybackTimeChange(0);
-    } else if (timelineItems.length > 0 && currentItemIndex < 0) {
-      setCurrentItemIndex(0);
-      onPlaybackTimeChange(0);
-    }
-  }, [timelineItems.length, currentItemIndex, onPlaybackTimeChange]);
+  // Initialization is handled by playback controller
+  // No manual initialization needed - controller determines currentItemIndex from playbackTime
 
   // Sync play state with video element
   useEffect(() => {
@@ -767,157 +903,18 @@ export default function VideoLibraryView({
     }
   }, [playbackTime, currentVideo, isDragging]);
 
-  // Update audio source when audio path changes
+  // Audio management is now handled by useAudioController hook
+
+  // Keep lastPlaybackTimeRef updated when playbackTime changes from external source
   useEffect(() => {
-    if (!audioRef.current || !resolvedAudioPath || isDragging) {
-      return;
-    }
+    // Update the ref to track the current playback time
+    // This ensures the ref is always in sync with the prop
+    lastPlaybackTimeRef.current = playbackTime;
+  }, [playbackTime]);
 
-    const audioElement = audioRef.current;
-
-    // Only update if source actually changed
-    if (currentAudioPathRef.current !== resolvedAudioPath) {
-      const wasPlaying = !audioElement.paused;
-      currentAudioPathRef.current = resolvedAudioPath;
-      audioElement.pause();
-      audioElement.src = resolvedAudioPath;
-      audioElement.volume = 1.0; // Ensure volume is set
-      audioElement.load();
-
-      // Add error handler
-      const handleError = () => {
-        const error = audioElement.error;
-        if (error) {
-          console.error('[VideoLibraryView] Audio error:', {
-            code: error.code,
-            message: error.message,
-            path: resolvedAudioPath,
-          });
-        }
-      };
-
-      const handleCanPlay = () => {
-        console.log('[VideoLibraryView] Audio can play:', resolvedAudioPath);
-        // Resume playback if it was playing
-        if (wasPlaying || isPlaying) {
-          audioElement.play().catch((error) => {
-            console.warn('[VideoLibraryView] Audio play error:', error);
-          });
-        }
-        audioElement.removeEventListener('canplay', handleCanPlay);
-      };
-
-      audioElement.addEventListener('error', handleError);
-      audioElement.addEventListener('canplay', handleCanPlay);
-
-      // Resume playback if it was playing (try immediately, but also wait for canplay)
-      if (wasPlaying || isPlaying) {
-        audioElement.play().catch((error) => {
-          console.warn('[VideoLibraryView] Audio play error (immediate):', error);
-        });
-      }
-
-      return () => {
-        audioElement.removeEventListener('error', handleError);
-        audioElement.removeEventListener('canplay', handleCanPlay);
-      };
-    }
-  }, [resolvedAudioPath, isDragging, isPlaying]);
-
-  // Sync audio playback with shared state
-  useEffect(() => {
-    if (!audioRef.current || !currentAudio || isDragging) return;
-
-    const audioElement = audioRef.current;
-
-    // Ensure volume is set
-    if (audioElement.volume !== 1.0) {
-      audioElement.volume = 1.0;
-    }
-
-    // Sync play/pause state
-    if (isPlaying && audioElement.paused) {
-      audioElement.play().catch((error) => {
-        console.warn('[VideoLibraryView] Audio play error during sync:', error);
-      });
-    } else if (!isPlaying && !audioElement.paused) {
-      audioElement.pause();
-    }
-  }, [isPlaying, currentAudio, isDragging]);
-
-  // Sync audio position with playbackTime (when not seeking or dragging)
-  useEffect(() => {
-    if (
-      !audioRef.current ||
-      !currentAudio ||
-      isSeekingRef.current ||
-      isDragging
-    ) {
-      return;
-    }
-
-    const audioElement = audioRef.current;
-    // Audio starts at timeline time 0, so playbackTime directly maps to audio currentTime
-    const expectedAudioTime = playbackTime;
-
-    // Only update if there's a significant difference to avoid jitter
-    if (Math.abs(audioElement.currentTime - expectedAudioTime) > 0.2) {
-      audioElement.currentTime = Math.max(0, Math.min(expectedAudioTime, currentAudio.duration));
-    }
-  }, [playbackTime, currentAudio, isDragging]);
-
-  // Handle audio end event
-  useEffect(() => {
-    if (!audioRef.current || !currentAudio) return;
-
-    const audioElement = audioRef.current;
-
-    const handleEnded = () => {
-      // Audio has ended, pause playback if we're still at the end
-      if (playbackTime >= currentAudio.duration) {
-        onPlaybackStateChange(false);
-      }
-    };
-
-    audioElement.addEventListener('ended', handleEnded);
-
-    return () => {
-      audioElement.removeEventListener('ended', handleEnded);
-    };
-  }, [currentAudio, playbackTime, onPlaybackStateChange]);
-
-  // Handle auto-advance for non-video items (images, placeholders)
-  // When playing a non-video item, check if we've reached the end of the item
-  useEffect(() => {
-    if (!isPlaying || isDragging || isSeekingRef.current) return;
-    if (!currentItem || currentItem.type === 'video') return; // Only handle non-video items
-
-    const itemEndTime = currentItem.endTime;
-    // If playbackTime has reached or passed the end of the current item, move to next item
-    if (
-      playbackTime >= itemEndTime &&
-      currentItemIndex < timelineItems.length - 1
-    ) {
-      const nextIndex = currentItemIndex + 1;
-      setCurrentItemIndex(nextIndex);
-      onPlaybackTimeChange(timelineItems[nextIndex]!.startTime);
-    } else if (playbackTime >= totalDuration) {
-      // Reached end of timeline
-      onPlaybackStateChange(false);
-      setCurrentItemIndex(0);
-      onPlaybackTimeChange(0);
-    }
-  }, [
-    isPlaying,
-    playbackTime,
-    currentItem,
-    currentItemIndex,
-    timelineItems,
-    totalDuration,
-    isDragging,
-    onPlaybackTimeChange,
-    onPlaybackStateChange,
-  ]);
+  // Auto-advance is handled by playback controller
+  // When playbackTime advances, controller automatically determines which item should be active
+  // No manual auto-advance logic needed
 
   // Handle video download
   const handleDownloadVideo = useCallback(async () => {
@@ -931,6 +928,33 @@ export default function VideoLibraryView({
       console.log('[VideoDownload] Starting video download process...');
       console.log('[VideoDownload] Timeline items:', timelineItems.length);
       console.log('[VideoDownload] Project directory:', projectDirectory);
+
+      // Extract audio path before filtering out audio items
+      const audioItems = timelineItems.filter((item) => item.type === 'audio');
+      let resolvedAudioPath: string | null = null;
+
+      if (audioItems.length > 0 && audioItems[0]?.audioPath) {
+        try {
+          // Step 1: Resolve for display (returns file:// URL)
+          const displayPath = await resolveAssetPathForDisplay(
+            audioItems[0].audioPath,
+            projectDirectory,
+          );
+          
+          // Step 2: Normalize for export (strips file://)
+          resolvedAudioPath = normalizePathForExport(displayPath);
+          
+          console.log('[VideoDownload] Audio path resolution:', {
+            original: audioItems[0].audioPath,
+            display: displayPath,
+            normalized: resolvedAudioPath,
+          });
+        } catch (error) {
+          console.warn('[VideoDownload] Failed to resolve audio path:', error);
+        }
+      } else {
+        console.log('[VideoDownload] No audio items found in timeline');
+      }
 
       // Prepare timeline items data with resolved paths
       // Filter out audio items as they're not part of video composition
@@ -1005,10 +1029,24 @@ export default function VideoLibraryView({
         duration: item.duration,
       })));
 
-      // Compose the video
-      const result = await window.electron.project.composeTimelineVideo(
+      // Compose the video with audio track
+      // Type assertion needed due to TypeScript language server cache issue
+      const composeVideo = window.electron.project.composeTimelineVideo as (
+        timelineItems: Array<{
+          type: 'image' | 'video' | 'placeholder';
+          path: string;
+          duration: number;
+          startTime: number;
+          endTime: number;
+        }>,
+        projectDirectory: string,
+        audioPath?: string,
+      ) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
+      
+      const result = await composeVideo(
         itemsData,
         projectDirectory,
+        resolvedAudioPath || undefined, // Pass audio path if available
       );
 
       console.log('[VideoDownload] Composition result:', result);
@@ -1151,6 +1189,7 @@ export default function VideoLibraryView({
               {currentVideoPath ? (
                 <video
                   ref={videoRef}
+                  key={`video-${currentItemIndex}-${currentVideo?.id || currentVideo?.label || 'none'}-${currentVideoPath || 'no-path'}`}
                   className={styles.playerVideo}
                   onTimeUpdate={handleTimeUpdate}
                   onEnded={handleVideoEnd}
@@ -1164,6 +1203,10 @@ export default function VideoLibraryView({
                         path: currentVideoPath,
                         label: currentVideo.label,
                       });
+                      // Try fallback: use videoPath directly if versionPath failed
+                      if (currentVideo?.videoPath && currentVideoPath !== currentVideo.videoPath) {
+                        console.log('[VideoLibraryView] Video load error, will try fallback path:', currentVideo.videoPath);
+                      }
                     }
                   }}
                   preload="auto"
@@ -1283,32 +1326,14 @@ export default function VideoLibraryView({
             </div>
           ) : null}
 
-          {/* Hidden audio element for playback */}
-          {currentAudio && resolvedAudioPath && (
-            <audio
-              ref={audioRef}
-              src={resolvedAudioPath}
-              preload="auto"
-              style={{ display: 'none' }}
-              onError={(e) => {
-                const audio = e.currentTarget;
-                const error = audio.error;
-                if (error) {
-                  console.error('[VideoLibraryView] Audio element error:', {
-                    code: error.code,
-                    message: error.message,
-                    path: resolvedAudioPath,
-                  });
-                }
-              }}
-              onLoadedData={() => {
-                console.log('[VideoLibraryView] Audio loaded:', resolvedAudioPath);
-                if (audioRef.current) {
-                  audioRef.current.volume = 1.0;
-                }
-              }}
-            />
-          )}
+          {/* Hidden audio element for playback - managed by useAudioController */}
+          {/* Always render with stable key to prevent React from recreating it */}
+          <audio
+            ref={audioRef}
+            key="timeline-audio"
+            preload="auto"
+            style={{ display: 'none' }}
+          />
         </div>
       </div>
     </div>
