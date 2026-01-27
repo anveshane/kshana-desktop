@@ -207,6 +207,43 @@ ipcMain.handle('project:watch-directory', async (_event, dirPath: string) => {
   fileSystemManager.watchDirectory(dirPath);
 });
 
+ipcMain.handle('project:watch-manifest', async (_event, manifestPath: string) => {
+  await fileSystemManager.watchManifest(manifestPath);
+});
+
+ipcMain.handle('project:watch-image-placements', async (_event, imagePlacementsDir: string) => {
+  await fileSystemManager.watchImagePlacements(imagePlacementsDir);
+});
+
+ipcMain.handle('project:refresh-assets', async (_event, projectDirectory: string) => {
+  // Trigger a file change event for manifest.json to force refresh
+  const manifestPath = path.join(projectDirectory, '.kshana', 'agent', 'manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    // Emit a change event to trigger refresh
+    fileSystemManager.emit('file-change', {
+      type: 'change',
+      path: manifestPath,
+    });
+    console.log('[Main] Triggered asset refresh for manifest:', manifestPath);
+  }
+});
+
+// Listen for asset update notifications (can be called from backend or external processes)
+// Note: This is optional - file watcher should handle most cases automatically
+ipcMain.on('project:asset-updated', async (_event, data: { projectDirectory: string; assetId: string; assetType: string }) => {
+  console.log('[Main] Asset updated notification received:', data);
+  // Trigger refresh by emitting file change event
+  if (data.projectDirectory) {
+    const manifestPath = path.join(data.projectDirectory, '.kshana', 'agent', 'manifest.json');
+    if (fs.existsSync(manifestPath)) {
+      fileSystemManager.emit('file-change', {
+        type: 'change',
+        path: manifestPath,
+      });
+    }
+  }
+});
+
 ipcMain.handle('project:unwatch-directory', async () => {
   fileSystemManager.unwatchDirectory();
 });

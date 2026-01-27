@@ -15,6 +15,7 @@ export interface AudioControllerOptions {
   isDragging?: boolean;
   isSeeking?: boolean | (() => boolean); // Can be boolean or function to get current state
   onPlaybackStateChange?: (playing: boolean) => void;
+  currentVideoItem?: { endTime: number } | null; // Current video placement end time
 }
 
 export interface AudioController {
@@ -59,6 +60,7 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
     isDragging = false,
     isSeeking = false,
     onPlaybackStateChange,
+    currentVideoItem,
   } = options;
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -307,8 +309,17 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
     const audioElement = audioRef.current;
 
     const handleEnded = () => {
-      // Audio has ended, pause playback if we're still at the end
-      if (playbackTime >= audioFile.duration && onPlaybackStateChange) {
+      // Get current playback time from ref (most up-to-date value)
+      const currentPlaybackTime = playbackTimeRef.current;
+      
+      // Check if we're still within a video placement
+      const videoEndTime = currentVideoItem?.endTime;
+      const shouldStop = videoEndTime 
+        ? currentPlaybackTime >= Math.max(audioFile.duration, videoEndTime)
+        : currentPlaybackTime >= audioFile.duration;
+      
+      // Only pause playback if we're past both audio duration AND video end time (if video exists)
+      if (shouldStop && onPlaybackStateChange) {
         onPlaybackStateChange(false);
       }
     };
@@ -318,7 +329,7 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
     return () => {
       audioElement.removeEventListener('ended', handleEnded);
     };
-  }, [audioFile, playbackTime, onPlaybackStateChange]);
+  }, [audioFile, playbackTime, onPlaybackStateChange, currentVideoItem]);
 
   // Cleanup on unmount
   useEffect(() => {

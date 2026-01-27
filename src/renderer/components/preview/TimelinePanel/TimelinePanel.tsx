@@ -25,7 +25,7 @@ import {
   useTimelineData,
   type TimelineItem,
 } from '../../../hooks/useTimelineData';
-import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
+import { resolveAssetPathForDisplay, resolveAssetPathWithRetry } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import type { TimelineMarker } from '../../../types/projectState';
 import type { KshanaTimelineMarker, ImportedClip } from '../../../types/kshana';
@@ -60,6 +60,10 @@ function TimelineItemComponent({
   const { assetManifest } = useProject();
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [imagePath, setImagePath] = useState<string | null>(null);
+  const [imageLoading, setImageLoading] = useState<boolean>(false);
+  const [imageLoadError, setImageLoadError] = useState<boolean>(false);
+  const imageRetryCountRef = React.useRef<number>(0);
+  const imageResolveAbortRef = React.useRef<AbortController | null>(null);
 
   // Resolve video path from item
   useEffect(() => {
@@ -79,8 +83,21 @@ function TimelineItemComponent({
   useEffect(() => {
     if (item.type !== 'image') {
       setImagePath(null);
+      setImageLoading(false);
+      setImageLoadError(false);
+      imageRetryCountRef.current = 0;
       return;
     }
+
+    // Abort previous resolution if still pending
+    if (imageResolveAbortRef.current) {
+      imageResolveAbortRef.current.abort();
+    }
+    imageResolveAbortRef.current = new AbortController();
+    const abortController = imageResolveAbortRef.current;
+
+    setImageLoading(true);
+    setImageLoadError(false);
 
     // First, try to use imagePath from item
     let pathToResolve: string | undefined = item.imagePath;
@@ -139,27 +156,64 @@ function TimelineItemComponent({
         projectDirectory,
         placementNumber: item.placementNumber,
       });
-      resolveAssetPathForDisplay(
+
+      // Use retry logic for path resolution
+      resolveAssetPathWithRetry(
         pathToResolve,
         projectDirectory,
+        {
+          maxRetries: 3,
+          retryDelayBase: 500,
+          timeout: 5000,
+          verifyExists: true,
+        },
       )
         .then(async (resolved) => {
+          if (abortController.signal.aborted) return;
+
           console.log(`[TimelineItemComponent] Resolved path for ${item.label}:`, resolved);
+          setImageLoading(false);
+          imageRetryCountRef.current = 0;
+
           // For test images, try to convert to base64
           if (shouldUseBase64(resolved)) {
-            const base64 = await imageToBase64(resolved);
-            if (base64) {
-              console.log(`[TimelineItemComponent] Using base64 for ${item.label}`);
-              setImagePath(base64);
-              return;
+            try {
+              const base64 = await imageToBase64(resolved);
+              if (base64 && !abortController.signal.aborted) {
+                console.log(`[TimelineItemComponent] Using base64 for ${item.label}`);
+                setImagePath(base64);
+                return;
+              }
+            } catch (error) {
+              console.warn(`[TimelineItemComponent] Failed to convert to base64:`, error);
             }
           }
           // Fallback to file:// path
-          setImagePath(resolved);
+          if (!abortController.signal.aborted) {
+            setImagePath(resolved);
+          }
         })
         .catch((error) => {
+          if (abortController.signal.aborted) return;
+
           console.error(`[TimelineItemComponent] Failed to resolve image path for ${item.label}:`, error);
-          setImagePath(null);
+          setImageLoading(false);
+          
+          // Retry mechanism for image load failures
+          if (imageRetryCountRef.current < 3) {
+            imageRetryCountRef.current += 1;
+            const retryDelay = 1000 * imageRetryCountRef.current;
+            console.log(`[TimelineItemComponent] Retrying image load in ${retryDelay}ms (attempt ${imageRetryCountRef.current}/3)`);
+            setTimeout(() => {
+              if (!abortController.signal.aborted) {
+                // Trigger re-resolution by updating a dependency
+                setImageLoadError(true);
+              }
+            }, retryDelay);
+          } else {
+            setImageLoadError(true);
+            setImagePath(null);
+          }
         });
     } else {
       if (item.type === 'image') {
@@ -170,9 +224,18 @@ function TimelineItemComponent({
           assetCount: assetManifest?.assets?.length || 0,
         });
       }
+      setImageLoading(false);
       setImagePath(null);
     }
-  }, [item.type, item.imagePath, item.label, item.placementNumber, projectDirectory, assetManifest, activeVersions]);
+
+    // Cleanup function
+    return () => {
+      if (imageResolveAbortRef.current) {
+        imageResolveAbortRef.current.abort();
+        imageResolveAbortRef.current = null;
+      }
+    };
+  }, [item.type, item.imagePath, item.label, item.placementNumber, projectDirectory, assetManifest, activeVersions, imageLoadError]);
 
   // Handle placeholder type
   if (item.type === 'placeholder') {
@@ -249,7 +312,22 @@ function TimelineItemComponent({
   let thumbnailElement: React.ReactNode;
   if (imagePath) {
     thumbnailElement = (
-      <img src={imagePath} alt={item.label} className={styles.sceneThumbnail} />
+      <img 
+        src={imagePath} 
+        alt={item.label} 
+        className={styles.sceneThumbnail}
+        onError={() => {
+          console.error(`[TimelineItemComponent] Image load error for ${item.label}`);
+          setImagePath(null);
+          setImageLoadError(true);
+        }}
+      />
+    );
+  } else if (imageLoading) {
+    thumbnailElement = (
+      <div className={styles.scenePlaceholder}>
+        <div style={{ fontSize: '10px', opacity: 0.5 }}>Loading...</div>
+      </div>
     );
   } else {
     thumbnailElement = <div className={styles.scenePlaceholder} />;
@@ -1102,6 +1180,9 @@ export default function TimelinePanel({
       const audioFileName =
         audioPath.split('/').pop() || `audio-${Date.now()}.mp3`;
       await window.electron.project.copy(audioPath, audioFolder);
+
+      // Add small delay before refresh to ensure file copy completes
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Refresh audio files without reloading the page
       if ((window as any).refreshAudioFiles) {

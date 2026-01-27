@@ -110,6 +110,15 @@ const projectBridge = {
   watchDirectory(dirPath: string): Promise<void> {
     return ipcRenderer.invoke('project:watch-directory', dirPath);
   },
+  watchManifest(manifestPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:watch-manifest', manifestPath);
+  },
+  watchImagePlacements(imagePlacementsDir: string): Promise<void> {
+    return ipcRenderer.invoke('project:watch-image-placements', imagePlacementsDir);
+  },
+  refreshAssets(projectDirectory: string): Promise<void> {
+    return ipcRenderer.invoke('project:refresh-assets', projectDirectory);
+  },
   unwatchDirectory(dirPath: string): Promise<void> {
     return ipcRenderer.invoke('project:unwatch-directory', dirPath);
   },

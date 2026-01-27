@@ -11,7 +11,7 @@ import { useProject } from '../../../contexts/ProjectContext';
 import { useTimelineData } from '../../../hooks/useTimelineData';
 import { useAudioController } from '../../../hooks/useAudioController';
 import { usePlaybackController } from '../../../hooks/usePlaybackController';
-import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
+import { resolveAssetPathForDisplay, resolveAssetPathWithRetry } from '../../../utils/pathResolver';
 import { normalizePathForExport } from '../../../utils/pathNormalizer';
 import type { Artifact } from '../../../types/projectState';
 import type { SceneRef } from '../../../types/kshana/entities';
@@ -244,7 +244,17 @@ export default function VideoLibraryView({
       return;
     }
 
-    resolveAssetPathForDisplay(audioFile.path, projectDirectory)
+    // Use retry logic similar to image placements to handle file copy timing issues
+    resolveAssetPathWithRetry(
+      audioFile.path,
+      projectDirectory,
+      {
+        maxRetries: 3,
+        retryDelayBase: 500,
+        timeout: 5000,
+        verifyExists: true,
+      },
+    )
       .then((resolved) => {
         setResolvedAudioPath(resolved);
       })
@@ -264,6 +274,7 @@ export default function VideoLibraryView({
     isDragging,
     isSeeking: () => isSeekingRef.current, // Pass function to get current seeking state
     onPlaybackStateChange,
+    currentVideoItem: currentVideo ? { endTime: currentVideo.endTime } : null,
   });
 
   // Resolve image path from current timeline item (placement-based)

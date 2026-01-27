@@ -114,6 +114,9 @@ interface ProjectActions {
 
   /** Add an asset to the asset manifest */
   addAsset: (assetInfo: AssetInfo) => Promise<boolean>;
+
+  /** Explicitly refresh the asset manifest from disk */
+  refreshAssetManifest: () => Promise<void>;
 }
 
 /**
@@ -232,6 +235,18 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           contextIndex: project.contextIndex,
         }));
         lastLoadedDir.current = projectDirectory;
+
+        // Set up explicit watches for manifest and image-placements
+        try {
+          const manifestPath = `${projectDirectory}/.kshana/agent/manifest.json`;
+          const imagePlacementsDir = `${projectDirectory}/.kshana/agent/image-placements`;
+          
+          await window.electron.project.watchManifest(manifestPath);
+          await window.electron.project.watchImagePlacements(imagePlacementsDir);
+          console.log('[ProjectContext] Set up explicit watches for manifest and image-placements');
+        } catch (error) {
+          console.warn('[ProjectContext] Failed to set up explicit watches:', error);
+        }
       } else {
         console.error('[ProjectContext] Failed to load project:', result.error);
         setState((prev) => ({
@@ -268,7 +283,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           clearTimeout(debounceTimeout);
         }
 
-        // Debounce rapid file changes
+        // Debounce rapid file changes (increased to 500ms for better reliability)
         debounceTimeout = setTimeout(async () => {
           try {
             console.log('[ProjectContext] Reloading project due to file change:', filePath);
@@ -300,7 +315,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
             console.error('[ProjectContext] Error reloading project:', error);
             // Don't show error to user - file might be temporarily locked
           }
-        }, 300); // 300ms debounce
+        }, 500); // 500ms debounce for better reliability
       }
     });
 
@@ -312,54 +327,132 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     };
   }, [projectDirectory, state.isLoaded]);
 
+  /**
+   * Deep comparison of asset manifests to detect changes
+   */
+  const compareAssetManifests = (
+    oldManifest: AssetManifest | null,
+    newManifest: AssetManifest | null,
+  ): boolean => {
+    if (!oldManifest && !newManifest) return false;
+    if (!oldManifest || !newManifest) return true;
+    
+    const oldAssets = oldManifest.assets || [];
+    const newAssets = newManifest.assets || [];
+    
+    if (oldAssets.length !== newAssets.length) return true;
+    
+    // Create maps for efficient lookup
+    const oldAssetMap = new Map(oldAssets.map(a => [a.id, a]));
+    const newAssetMap = new Map(newAssets.map(a => [a.id, a]));
+    
+    // Check for added/removed assets
+    for (const id of oldAssetMap.keys()) {
+      if (!newAssetMap.has(id)) return true;
+    }
+    for (const id of newAssetMap.keys()) {
+      if (!oldAssetMap.has(id)) return true;
+    }
+    
+    // Check for changed assets (deep comparison of key fields)
+    for (const [id, oldAsset] of oldAssetMap) {
+      const newAsset = newAssetMap.get(id);
+      if (!newAsset) return true;
+      
+      // Compare key fields that matter for timeline display
+      if (
+        oldAsset.path !== newAsset.path ||
+        oldAsset.version !== newAsset.version ||
+        oldAsset.type !== newAsset.type ||
+        JSON.stringify(oldAsset.metadata) !== JSON.stringify(newAsset.metadata)
+      ) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
   // Poll for manifest updates during image generation (fallback if file watcher fails)
+  // Uses exponential backoff: starts at 1s, max 2s
   useEffect(() => {
     if (!projectDirectory || !state.isLoaded) return;
 
-    // Poll every 2 seconds to check for manifest updates
-    // This is a fallback in case file watching doesn't work
-    const pollInterval = setInterval(async () => {
+    let pollIntervalMs = 1000; // Start at 1 second
+    let consecutiveFailures = 0;
+    const MAX_POLL_INTERVAL = 2000; // Max 2 seconds
+    const BACKOFF_MULTIPLIER = 1.5;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let isCancelled = false;
+
+    const pollForUpdates = async () => {
+      if (isCancelled) return;
+
       try {
         const result = await projectService.openProject(projectDirectory);
         if (result.success) {
           const project = result.data;
-          const currentAssetCount = state.assetManifest?.assets?.length || 0;
-          const newAssetCount = project.assetManifest?.assets?.length || 0;
           
-          // Check if assets have changed (count or content)
-          const currentAssetIds = new Set(state.assetManifest?.assets?.map(a => a.id) || []);
-          const newAssetIds = new Set(project.assetManifest?.assets?.map(a => a.id) || []);
-          const assetsChanged = newAssetCount !== currentAssetCount || 
-            currentAssetIds.size !== newAssetIds.size ||
-            [...newAssetIds].some(id => !currentAssetIds.has(id));
+          // Use deep comparison to detect changes
+          const assetsChanged = compareAssetManifests(
+            state.assetManifest,
+            project.assetManifest,
+          );
           
-          // Update if assets changed (to avoid unnecessary re-renders)
           if (assetsChanged) {
-            console.log('[ProjectContext] Assets changed, updating manifest:', {
-              oldCount: currentAssetCount,
-              newCount: newAssetCount,
-              oldAssetIds: [...currentAssetIds],
-              newAssetIds: [...newAssetIds],
-              addedAssets: project.assetManifest?.assets?.filter(a => !currentAssetIds.has(a.id)).map(a => ({
+            console.log('[ProjectContext] Assets changed (polling), updating manifest:', {
+              oldCount: state.assetManifest?.assets?.length || 0,
+              newCount: project.assetManifest?.assets?.length || 0,
+              addedAssets: project.assetManifest?.assets?.filter(
+                a => !state.assetManifest?.assets?.some(old => old.id === a.id)
+              ).map(a => ({
                 id: a.id,
                 placementNumber: a.metadata?.placementNumber,
                 path: a.path,
               })) || [],
             });
+            
+            // Reset polling interval on successful update
+            pollIntervalMs = 1000;
+            consecutiveFailures = 0;
+            
             setState((prev) => ({
               ...prev,
               assetManifest: project.assetManifest,
             }));
           }
+        } else {
+          consecutiveFailures++;
+          // Exponential backoff on failures
+          pollIntervalMs = Math.min(
+            Math.floor(1000 * Math.pow(BACKOFF_MULTIPLIER, consecutiveFailures)),
+            MAX_POLL_INTERVAL
+          );
         }
       } catch (error) {
-        // Silently fail - polling is just a fallback
+        consecutiveFailures++;
+        // Exponential backoff on errors
+        pollIntervalMs = Math.min(
+          Math.floor(1000 * Math.pow(BACKOFF_MULTIPLIER, consecutiveFailures)),
+          MAX_POLL_INTERVAL
+        );
         console.debug('[ProjectContext] Poll check failed:', error);
       }
-    }, 2000); // Poll every 2 seconds
+
+      // Schedule next poll with dynamic interval
+      if (!isCancelled) {
+        timeoutId = setTimeout(pollForUpdates, pollIntervalMs);
+      }
+    };
+
+    // Start polling
+    pollForUpdates();
 
     return () => {
-      clearInterval(pollInterval);
+      isCancelled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     };
   }, [projectDirectory, state.isLoaded, state.assetManifest]);
 
@@ -604,6 +697,44 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     [],
   );
 
+  // Explicitly refresh asset manifest from disk
+  const refreshAssetManifest = useCallback(async (): Promise<void> => {
+    if (!projectDirectory || !state.isLoaded) {
+      console.warn('[ProjectContext] Cannot refresh manifest: project not loaded');
+      return;
+    }
+
+    try {
+      console.log('[ProjectContext] Explicitly refreshing asset manifest...');
+      const result = await projectService.openProject(projectDirectory);
+      if (result.success) {
+        const project = result.data;
+        const oldManifest = state.assetManifest;
+        const newManifest = project.assetManifest;
+        
+        // Use deep comparison to check if update is needed
+        const changed = compareAssetManifests(oldManifest, newManifest);
+        
+        if (changed) {
+          console.log('[ProjectContext] Asset manifest refreshed:', {
+            oldCount: oldManifest?.assets?.length || 0,
+            newCount: newManifest?.assets?.length || 0,
+          });
+          setState((prev) => ({
+            ...prev,
+            assetManifest: newManifest,
+          }));
+        } else {
+          console.log('[ProjectContext] Asset manifest unchanged after refresh');
+        }
+      } else {
+        console.error('[ProjectContext] Failed to refresh manifest:', result.error);
+      }
+    } catch (error) {
+      console.error('[ProjectContext] Error refreshing manifest:', error);
+    }
+  }, [projectDirectory, state.isLoaded, state.assetManifest]);
+
   // Auto-save timeline state with debouncing
   // Use refs to track previous serialized values to avoid infinite loops with object dependencies
   const prevTimelineStateRef = useRef<string>('');
@@ -713,6 +844,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateMarkers,
       updateImportedClips,
       addAsset,
+      refreshAssetManifest,
     }),
     [
       state,
@@ -729,6 +861,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateMarkers,
       updateImportedClips,
       addAsset,
+      refreshAssetManifest,
     ],
   );
 

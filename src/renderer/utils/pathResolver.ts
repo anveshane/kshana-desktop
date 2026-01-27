@@ -9,6 +9,15 @@
 const TEST_ASSET_FOLDERS = ['test_image', 'test_video'] as const;
 
 /**
+ * Path cache to avoid redundant file system calls
+ */
+const pathCache = new Map<string, { resolved: string; timestamp: number }>();
+const CACHE_TTL = 30000; // 30 seconds cache TTL
+const MAX_RETRIES = 3;
+const RETRY_DELAY_BASE = 500; // Base delay in ms
+const MAX_TIMEOUT = 5000; // 5 seconds max timeout
+
+/**
  * Gets the resources path where test_image and test_video are located
  * Uses IPC to get the path from main process (works in both dev and packaged)
  */
@@ -216,4 +225,138 @@ export async function resolveAssetPathForDisplay(
     `[PathResolver] No project directory provided for relative path: ${trimmedPath}`,
   );
   return `file://${trimmedPath.replace(/\\/g, '/')}`;
+}
+
+/**
+ * Check if a file exists (using IPC to main process)
+ */
+async function checkFileExists(filePath: string): Promise<boolean> {
+  try {
+    if (typeof window !== 'undefined' && window.electron?.project?.readFile) {
+      const content = await window.electron.project.readFile(filePath);
+      return content !== null;
+    }
+    // Fallback: assume file exists if we can't check
+    return true;
+  } catch (error) {
+    console.debug(`[PathResolver] File existence check failed for ${filePath}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Resolve asset path with retry logic and file existence verification
+ * Uses exponential backoff for retries
+ */
+export async function resolveAssetPathWithRetry(
+  assetPath: string,
+  projectDirectory: string | null,
+  options: {
+    maxRetries?: number;
+    retryDelayBase?: number;
+    timeout?: number;
+    verifyExists?: boolean;
+  } = {},
+): Promise<string> {
+  const {
+    maxRetries = MAX_RETRIES,
+    retryDelayBase = RETRY_DELAY_BASE,
+    timeout = MAX_TIMEOUT,
+    verifyExists = true,
+  } = options;
+
+  // Check cache first
+  const cacheKey = `${assetPath}:${projectDirectory || ''}`;
+  const cached = pathCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.resolved;
+  }
+
+  let lastError: Error | null = null;
+  let resolvedPath = '';
+
+  // Create timeout promise
+  const timeoutPromise = new Promise<string>((_, reject) => {
+    setTimeout(() => reject(new Error('Path resolution timeout')), timeout);
+  });
+
+  // Retry logic with exponential backoff
+  const resolveWithRetry = async (attempt: number): Promise<string> => {
+    try {
+      // Resolve path
+      resolvedPath = await Promise.race([
+        resolveAssetPathForDisplay(assetPath, projectDirectory),
+        timeoutPromise,
+      ]);
+
+      // Verify file exists if requested
+      if (verifyExists && resolvedPath) {
+        // Remove file:// prefix for existence check
+        const filePath = resolvedPath.startsWith('file://')
+          ? resolvedPath.slice(7)
+          : resolvedPath;
+
+        const exists = await checkFileExists(filePath);
+        if (!exists && attempt < maxRetries) {
+          // File doesn't exist yet, retry
+          const delay = retryDelayBase * Math.pow(2, attempt);
+          console.log(
+            `[PathResolver] File not found, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries}):`,
+            filePath,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          return resolveWithRetry(attempt + 1);
+        } else if (!exists) {
+          console.warn(`[PathResolver] File not found after ${maxRetries} attempts:`, filePath);
+          // Return path anyway - might be created soon
+        }
+      }
+
+      // Cache successful resolution
+      pathCache.set(cacheKey, {
+        resolved: resolvedPath,
+        timestamp: Date.now(),
+      });
+
+      return resolvedPath;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (attempt < maxRetries) {
+        const delay = retryDelayBase * Math.pow(2, attempt);
+        console.log(
+          `[PathResolver] Resolution failed, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries}):`,
+          lastError.message,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return resolveWithRetry(attempt + 1);
+      }
+
+      // Max retries reached, return empty or last resolved path
+      console.error(`[PathResolver] Failed to resolve path after ${maxRetries} attempts:`, {
+        assetPath,
+        error: lastError.message,
+      });
+      return resolvedPath || '';
+    }
+  };
+
+  return resolveWithRetry(0);
+}
+
+/**
+ * Invalidate path cache for a specific path or all paths
+ */
+export function invalidatePathCache(assetPath?: string): void {
+  if (assetPath) {
+    // Remove specific path from cache
+    for (const [key] of pathCache) {
+      if (key.startsWith(assetPath)) {
+        pathCache.delete(key);
+      }
+    }
+  } else {
+    // Clear all cache
+    pathCache.clear();
+  }
 }

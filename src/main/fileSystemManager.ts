@@ -26,8 +26,17 @@ interface FileSystemStore {
 class FileSystemManager extends EventEmitter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private watcher: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private manifestWatcher: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private imagePlacementsWatcher: any = null;
 
   private store: Store<FileSystemStore>;
+  
+  // Debounced event batching
+  private pendingEvents: Map<string, FileChangeEvent> = new Map();
+  private debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+  private readonly DEBOUNCE_DELAY = 500; // 500ms debounce for rapid changes
 
   constructor() {
     super();
@@ -137,6 +146,128 @@ class FileSystemManager extends EventEmitter {
     };
   }
 
+  /**
+   * Emit change event with debounced batching for rapid changes
+   */
+  private emitDebouncedChange(type: FileChangeEvent['type'], filePath: string): void {
+    // Store the latest event for each file path
+    this.pendingEvents.set(filePath, { type, path: filePath } as FileChangeEvent);
+
+    // Clear existing timeout
+    if (this.debounceTimeout) {
+      clearTimeout(this.debounceTimeout);
+    }
+
+    // Set new timeout to batch events
+    this.debounceTimeout = setTimeout(() => {
+      // Emit all pending events
+      for (const event of this.pendingEvents.values()) {
+        this.emit('file-change', event);
+      }
+      this.pendingEvents.clear();
+      this.debounceTimeout = null;
+    }, this.DEBOUNCE_DELAY);
+  }
+
+  /**
+   * Watch manifest.json with optimized settings for reliability
+   */
+  async watchManifest(manifestPath: string): Promise<void> {
+    if (this.manifestWatcher) {
+      this.manifestWatcher.close();
+    }
+
+    const chokidar = await import('chokidar');
+    this.manifestWatcher = chokidar.watch(manifestPath, {
+      persistent: true,
+      ignoreInitial: true,
+      awaitWriteFinish: {
+        stabilityThreshold: 200, // Wait 200ms after last change
+        pollInterval: 100, // Check every 100ms
+      },
+      usePolling: false, // Use native events when possible
+    });
+
+    const emitChange = (type: FileChangeEvent['type'], filePath: string) => {
+      this.emitDebouncedChange(type, filePath);
+    };
+
+    this.manifestWatcher
+      .on('change', (p: string) => {
+        console.log(`[FileSystemManager] Manifest changed: ${p}`);
+        emitChange('change', p);
+      })
+      .on('error', (error: Error) => {
+        console.error('[FileSystemManager] Manifest watcher error:', error);
+        // Retry watching after a delay
+        setTimeout(() => {
+          if (fs.existsSync(manifestPath)) {
+            this.watchManifest(manifestPath).catch((err) => {
+              console.error('[FileSystemManager] Failed to retry manifest watch:', err);
+            });
+          }
+        }, 1000);
+      });
+  }
+
+  /**
+   * Watch image-placements directory with optimized settings
+   */
+  async watchImagePlacements(imagePlacementsDir: string): Promise<void> {
+    if (this.imagePlacementsWatcher) {
+      this.imagePlacementsWatcher.close();
+    }
+
+    // Ensure directory exists
+    try {
+      await fs.promises.mkdir(imagePlacementsDir, { recursive: true });
+    } catch (error) {
+      console.warn(`[FileSystemManager] Could not create image-placements directory: ${error}`);
+    }
+
+    const chokidar = await import('chokidar');
+    this.imagePlacementsWatcher = chokidar.watch(imagePlacementsDir, {
+      ignored: IGNORED_PATTERNS,
+      persistent: true,
+      ignoreInitial: true,
+      depth: 1, // Only watch direct children
+      awaitWriteFinish: {
+        stabilityThreshold: 300, // Wait 300ms after last change for image files
+        pollInterval: 100,
+      },
+      usePolling: false,
+    });
+
+    const emitChange = (type: FileChangeEvent['type'], filePath: string) => {
+      this.emitDebouncedChange(type, filePath);
+    };
+
+    this.imagePlacementsWatcher
+      .on('add', (p: string) => {
+        console.log(`[FileSystemManager] Image added: ${p}`);
+        emitChange('add', p);
+      })
+      .on('change', (p: string) => {
+        console.log(`[FileSystemManager] Image changed: ${p}`);
+        emitChange('change', p);
+      })
+      .on('unlink', (p: string) => {
+        console.log(`[FileSystemManager] Image removed: ${p}`);
+        emitChange('unlink', p);
+      })
+      .on('error', (error: Error) => {
+        console.error('[FileSystemManager] Image placements watcher error:', error);
+        // Retry watching after a delay
+        setTimeout(() => {
+          if (fs.existsSync(imagePlacementsDir)) {
+            this.watchImagePlacements(imagePlacementsDir).catch((err) => {
+              console.error('[FileSystemManager] Failed to retry image placements watch:', err);
+            });
+          }
+        }, 1000);
+      });
+  }
+
   async watchDirectory(dirPath: string): Promise<void> {
     if (this.watcher) {
       this.watcher.close();
@@ -148,10 +279,14 @@ class FileSystemManager extends EventEmitter {
       persistent: true,
       ignoreInitial: true,
       depth: 5, // Ensure .kshana/agent/content and .kshana/agent/{image,video}-placements are watched
+      awaitWriteFinish: {
+        stabilityThreshold: 200,
+        pollInterval: 100,
+      },
     });
 
     const emitChange = (type: FileChangeEvent['type'], filePath: string) => {
-      this.emit('file-change', { type, path: filePath } as FileChangeEvent);
+      this.emitDebouncedChange(type, filePath);
     };
 
     this.watcher
@@ -167,6 +302,20 @@ class FileSystemManager extends EventEmitter {
       this.watcher.close();
       this.watcher = null;
     }
+    if (this.manifestWatcher) {
+      this.manifestWatcher.close();
+      this.manifestWatcher = null;
+    }
+    if (this.imagePlacementsWatcher) {
+      this.imagePlacementsWatcher.close();
+      this.imagePlacementsWatcher = null;
+    }
+    // Clear debounce timeout
+    if (this.debounceTimeout) {
+      clearTimeout(this.debounceTimeout);
+      this.debounceTimeout = null;
+    }
+    this.pendingEvents.clear();
   }
 
   getRecentProjects(): RecentProject[] {

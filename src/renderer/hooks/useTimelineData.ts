@@ -4,7 +4,7 @@
  * Placement-based timeline architecture: timeline items driven by placement timestamps
  */
 
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useEffect, useState, useCallback } from 'react';
 import { useProject } from '../contexts/ProjectContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { usePlacementFiles } from './usePlacementFiles';
@@ -199,22 +199,35 @@ function fillGapsWithPlaceholders(
 export function useTimelineData(
   activeVersions?: Record<number, SceneVersions>,
 ): TimelineData {
-  const { isLoaded, assetManifest } = useProject();
+  const { isLoaded, assetManifest, refreshAssetManifest } = useProject();
   const { projectDirectory } = useWorkspace();
   const { imagePlacements, videoPlacements } = usePlacementFiles();
   const { entries: transcriptEntries, totalDuration: transcriptDuration } = useTranscript();
   const [audioFiles, setAudioFiles] = useState<Array<{ path: string; duration: number }>>([]);
   const [audioRefreshTrigger, setAudioRefreshTrigger] = useState(0);
+  const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
 
-  // Expose refresh function via window for external triggers
+  // Refresh timeline function - triggers asset manifest refresh
+  const refreshTimeline = useCallback(async () => {
+    console.log('[useTimelineData] Refreshing timeline...');
+    if (refreshAssetManifest) {
+      await refreshAssetManifest();
+    }
+    // Also trigger a local refresh
+    setTimelineRefreshTrigger((prev) => prev + 1);
+  }, [refreshAssetManifest]);
+
+  // Expose refresh functions via window for external triggers
   useEffect(() => {
     (window as any).refreshAudioFiles = () => {
       setAudioRefreshTrigger((prev) => prev + 1);
     };
+    (window as any).refreshTimeline = refreshTimeline;
     return () => {
       delete (window as any).refreshAudioFiles;
+      delete (window as any).refreshTimeline;
     };
-  }, []);
+  }, [refreshTimeline]);
 
   // Load audio files from .kshana/agent/audio directory
   useEffect(() => {
@@ -281,7 +294,15 @@ export function useTimelineData(
         path: a.path,
       })) || [],
     });
-  }, [isLoaded, assetManifest]);
+  }, [isLoaded, assetManifest, timelineRefreshTrigger]);
+
+  // Listen for asset manifest changes and trigger refresh if needed
+  useEffect(() => {
+    if (assetManifest && isLoaded) {
+      // Asset manifest changed - timeline will automatically update via useMemo dependencies
+      console.log('[useTimelineData] Asset manifest updated, timeline will refresh');
+    }
+  }, [assetManifest, isLoaded]);
 
   // Convert placements to timeline items
   const placementItems: TimelineItem[] = useMemo(() => {
