@@ -399,6 +399,35 @@ export function useTimelineData(
     return items;
   }, [imagePlacements, videoPlacements, assetManifest, activeVersions]);
 
+  // Calculate total duration from all sources (audio, placements, transcript)
+  // Use whichever is longest - audio may be longer than scenes, or scenes may be longer than audio
+  const calculatedTotalDuration = useMemo(() => {
+    // Get max audio duration (if any audio files exist)
+    const maxAudioDuration = audioFiles.length > 0
+      ? Math.max(...audioFiles.map(af => af.duration || 0))
+      : 0;
+
+    // Get last placement endTime (if any placements exist)
+    const lastPlacementEndTime = placementItems.length > 0
+      ? Math.max(...placementItems.map(item => item.endTime))
+      : 0;
+
+    // Get transcript duration
+    const transcriptDur = transcriptDuration || 0;
+
+    // Use the maximum of all three - whichever is longest
+    const maxDuration = Math.max(maxAudioDuration, lastPlacementEndTime, transcriptDur);
+    
+    console.log('[useTimelineData] Calculated total duration:', {
+      maxAudioDuration,
+      lastPlacementEndTime,
+      transcriptDur,
+      maxDuration,
+    });
+
+    return maxDuration;
+  }, [audioFiles, placementItems, transcriptDuration]);
+
   // Resolve asset paths for display
   const timelineItems: TimelineItem[] = useMemo(() => {
     // Start with placement items
@@ -419,38 +448,31 @@ export function useTimelineData(
 
     // Fill gaps with placeholders (but don't fill gaps for audio items)
     const nonAudioItems = items.filter((item) => item.type !== 'audio');
-    const totalDuration = transcriptDuration || 0;
-    const filledItems = fillGapsWithPlaceholders(nonAudioItems, totalDuration);
+    // Use calculated total duration instead of just transcriptDuration
+    const filledItems = fillGapsWithPlaceholders(nonAudioItems, calculatedTotalDuration);
 
     // Add audio items back
     const audioItems = items.filter((item) => item.type === 'audio');
     filledItems.push(...audioItems);
 
     // If no placements and no transcript, return empty
-    if (filledItems.length === 0 && totalDuration === 0) {
+    if (filledItems.length === 0 && calculatedTotalDuration === 0) {
       return [];
     }
 
-    // If no placements but transcript exists, return single placeholder
-    if (filledItems.length === 0 && totalDuration > 0) {
-      return [createPlaceholderItem(0, totalDuration)];
+    // If no placements but content exists, return single placeholder
+    if (filledItems.length === 0 && calculatedTotalDuration > 0) {
+      return [createPlaceholderItem(0, calculatedTotalDuration)];
     }
 
     // Sort all items by startTime
     filledItems.sort((a, b) => a.startTime - b.startTime);
 
     return filledItems;
-  }, [placementItems, transcriptDuration, audioFiles]);
+  }, [placementItems, transcriptDuration, audioFiles, calculatedTotalDuration]);
 
-  // Calculate total duration from transcript or timeline items
-  const totalDuration = useMemo(() => {
-    if (transcriptDuration > 0) {
-      return transcriptDuration;
-    }
-    if (timelineItems.length === 0) return 0;
-    const lastItem = timelineItems[timelineItems.length - 1];
-    return lastItem.endTime;
-  }, [transcriptDuration, timelineItems]);
+  // Return the calculated total duration (already considers all sources)
+  const totalDuration = calculatedTotalDuration;
 
   return {
     timelineItems,

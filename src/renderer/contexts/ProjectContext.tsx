@@ -183,10 +183,19 @@ interface ProjectProviderProps {
  */
 export function ProjectProvider({ children }: ProjectProviderProps) {
   const [state, setState] = useState<ProjectState>(initialState);
+  
+  // Track if image generation is active (via WebSocket status)
+  const [isImageGenerationActive, setIsImageGenerationActive] = useState(false);
 
   // Get workspace context for sync
   const { projectDirectory } = useWorkspace();
   const lastLoadedDir = useRef<string | null>(null);
+  
+  // WebSocket connection refs to prevent duplicate connections
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectingRef = useRef(false);
+  const currentProjectDirRef = useRef<string | null>(null);
 
   // Sync with WorkspaceContext - auto-load project when directory changes
   useEffect(() => {
@@ -283,7 +292,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           clearTimeout(debounceTimeout);
         }
 
-        // Debounce rapid file changes (increased to 500ms for better reliability)
+        // Debounce rapid file changes (reduced to 300ms for faster response)
         debounceTimeout = setTimeout(async () => {
           try {
             console.log('[ProjectContext] Reloading project due to file change:', filePath);
@@ -315,7 +324,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
             console.error('[ProjectContext] Error reloading project:', error);
             // Don't show error to user - file might be temporarily locked
           }
-        }, 500); // 500ms debounce for better reliability
+        }, 300); // 300ms debounce for faster response
       }
     });
 
@@ -373,14 +382,173 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     return false;
   };
 
+  // Explicitly refresh asset manifest from disk
+  const refreshAssetManifest = useCallback(async (): Promise<void> => {
+    if (!projectDirectory || !state.isLoaded) {
+      console.warn('[ProjectContext] Cannot refresh manifest: project not loaded');
+      return;
+    }
+
+    try {
+      console.log('[ProjectContext] Explicitly refreshing asset manifest...');
+      const result = await projectService.openProject(projectDirectory);
+      if (result.success) {
+        const project = result.data;
+        const oldManifest = state.assetManifest;
+        const newManifest = project.assetManifest;
+        
+        // Use deep comparison to check if update is needed
+        const changed = compareAssetManifests(oldManifest, newManifest);
+        
+        if (changed) {
+          console.log('[ProjectContext] Asset manifest refreshed:', {
+            oldCount: oldManifest?.assets?.length || 0,
+            newCount: newManifest?.assets?.length || 0,
+          });
+          setState((prev) => ({
+            ...prev,
+            assetManifest: newManifest,
+          }));
+        } else {
+          console.log('[ProjectContext] Asset manifest unchanged after refresh');
+        }
+      } else {
+        console.error('[ProjectContext] Failed to refresh manifest:', result.error);
+      }
+    } catch (error) {
+      console.error('[ProjectContext] Error refreshing manifest:', error);
+    }
+  }, [projectDirectory, state.isLoaded, state.assetManifest]);
+
+  // Listen for WebSocket asset_added events
+  useEffect(() => {
+    if (!projectDirectory || !state.isLoaded) {
+      // Clean up if project directory is cleared
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      currentProjectDirRef.current = null;
+      return;
+    }
+
+    // Skip if already connected to the same project directory
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && currentProjectDirRef.current === projectDirectory) {
+      return;
+    }
+
+    // Close existing connection if project directory changed
+    if (wsRef.current && currentProjectDirRef.current !== projectDirectory) {
+      wsRef.current.close();
+      wsRef.current = null;
+      currentProjectDirRef.current = null;
+    }
+
+    // Prevent concurrent connection attempts
+    if (connectingRef.current) {
+      return;
+    }
+
+    const connectWebSocket = async () => {
+      try {
+        connectingRef.current = true;
+        const backendState = await window.electron.backend.getState();
+        if (backendState.status !== 'ready') {
+          console.log('[ProjectContext] Backend not ready, skipping WebSocket connection');
+          connectingRef.current = false;
+          return;
+        }
+
+        const wsUrl = `ws://localhost:${backendState.port || 8000}/api/v1/ws/chat?project_dir=${encodeURIComponent(projectDirectory)}`;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        currentProjectDirRef.current = projectDirectory;
+
+        ws.onopen = () => {
+          console.log('[ProjectContext] WebSocket connected for asset events');
+          connectingRef.current = false;
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            if (message.type === 'asset_added' && message.data) {
+              const assetData = message.data;
+              console.log('[ProjectContext] Received asset_added event:', assetData);
+              // Immediately refresh asset manifest
+              refreshAssetManifest();
+            } else if (message.type === 'status' && message.data) {
+              // Track image generation activity based on status
+              const status = message.data.status;
+              const isActive = status === 'busy' || status === 'processing';
+              setIsImageGenerationActive(isActive);
+            } else if (message.type === 'tool_call' && message.data) {
+              // Also track tool calls for image generation
+              const toolName = message.data.toolName;
+              if (toolName === 'generate_image' || toolName === 'generate_all_images') {
+                setIsImageGenerationActive(true);
+              }
+            }
+          } catch (error) {
+            // Not a JSON message or not a relevant event, ignore
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.warn('[ProjectContext] WebSocket error for asset events:', error);
+          connectingRef.current = false;
+        };
+
+        ws.onclose = () => {
+          console.log('[ProjectContext] WebSocket closed for asset events');
+          wsRef.current = null;
+          connectingRef.current = false;
+          
+          // Only reconnect if project directory hasn't changed
+          if (currentProjectDirRef.current === projectDirectory && projectDirectory) {
+            if (reconnectTimeoutRef.current) {
+              clearTimeout(reconnectTimeoutRef.current);
+            }
+            reconnectTimeoutRef.current = setTimeout(() => {
+              reconnectTimeoutRef.current = null;
+              if (currentProjectDirRef.current === projectDirectory) {
+                connectWebSocket();
+              }
+            }, 3000);
+          } else {
+            currentProjectDirRef.current = null;
+          }
+        };
+      } catch (error) {
+        console.warn('[ProjectContext] Failed to connect WebSocket for asset events:', error);
+        connectingRef.current = false;
+      }
+    };
+
+    connectWebSocket();
+
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      // Don't close WebSocket here - let it persist across re-renders
+      // Only close if project directory actually changes (handled above)
+    };
+  }, [projectDirectory, state.isLoaded, refreshAssetManifest]);
+
   // Poll for manifest updates during image generation (fallback if file watcher fails)
-  // Uses exponential backoff: starts at 1s, max 2s
+  // Uses dynamic polling: faster (500ms) during active generation, slower (1-2s) when idle
   useEffect(() => {
     if (!projectDirectory || !state.isLoaded) return;
 
-    let pollIntervalMs = 1000; // Start at 1 second
+    let pollIntervalMs = isImageGenerationActive ? 500 : 1000; // 500ms during generation, 1s when idle
     let consecutiveFailures = 0;
-    const MAX_POLL_INTERVAL = 2000; // Max 2 seconds
+    const MAX_POLL_INTERVAL = isImageGenerationActive ? 1000 : 2000; // Max 1s during generation, 2s when idle
     const BACKOFF_MULTIPLIER = 1.5;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let isCancelled = false;
@@ -412,8 +580,8 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
               })) || [],
             });
             
-            // Reset polling interval on successful update
-            pollIntervalMs = 1000;
+            // Reset polling interval on successful update (use dynamic interval based on activity)
+            pollIntervalMs = isImageGenerationActive ? 500 : 1000;
             consecutiveFailures = 0;
             
             setState((prev) => ({
@@ -454,7 +622,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         clearTimeout(timeoutId);
       }
     };
-  }, [projectDirectory, state.isLoaded, state.assetManifest]);
+  }, [projectDirectory, state.isLoaded, state.assetManifest, isImageGenerationActive]);
 
   // Load project from directory
   const loadProject = useCallback(
@@ -696,44 +864,6 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     },
     [],
   );
-
-  // Explicitly refresh asset manifest from disk
-  const refreshAssetManifest = useCallback(async (): Promise<void> => {
-    if (!projectDirectory || !state.isLoaded) {
-      console.warn('[ProjectContext] Cannot refresh manifest: project not loaded');
-      return;
-    }
-
-    try {
-      console.log('[ProjectContext] Explicitly refreshing asset manifest...');
-      const result = await projectService.openProject(projectDirectory);
-      if (result.success) {
-        const project = result.data;
-        const oldManifest = state.assetManifest;
-        const newManifest = project.assetManifest;
-        
-        // Use deep comparison to check if update is needed
-        const changed = compareAssetManifests(oldManifest, newManifest);
-        
-        if (changed) {
-          console.log('[ProjectContext] Asset manifest refreshed:', {
-            oldCount: oldManifest?.assets?.length || 0,
-            newCount: newManifest?.assets?.length || 0,
-          });
-          setState((prev) => ({
-            ...prev,
-            assetManifest: newManifest,
-          }));
-        } else {
-          console.log('[ProjectContext] Asset manifest unchanged after refresh');
-        }
-      } else {
-        console.error('[ProjectContext] Failed to refresh manifest:', result.error);
-      }
-    } catch (error) {
-      console.error('[ProjectContext] Error refreshing manifest:', error);
-    }
-  }, [projectDirectory, state.isLoaded, state.assetManifest]);
 
   // Auto-save timeline state with debouncing
   // Use refs to track previous serialized values to avoid infinite loops with object dependencies

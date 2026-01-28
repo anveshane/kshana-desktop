@@ -445,8 +445,26 @@ export default function TimelinePanel({
   );
   const [internalIsPlaying, setInternalIsPlaying] = useState(false);
 
-  const currentPosition = externalPlaybackTime ?? internalPlaybackTime;
+  // Calculate total duration from timeline (placement-based)
+  const totalDuration = useMemo(() => {
+    if (timelineTotalDuration > 0) return timelineTotalDuration;
+    if (timelineItems.length === 0) return 10;
+    const lastItem = timelineItems[timelineItems.length - 1];
+    return Math.max(lastItem.endTime, 10);
+  }, [timelineTotalDuration, timelineItems]);
+
+  // Clamp playback position to totalDuration to prevent playhead from going beyond content
+  const rawCurrentPosition = externalPlaybackTime ?? internalPlaybackTime;
+  const currentPosition = Math.max(0, Math.min(rawCurrentPosition, totalDuration));
   const isPlaying = externalIsPlaying ?? internalIsPlaying;
+
+  // If position was clamped, update internal state
+  useEffect(() => {
+    // Only clamp if using internal state and position exceeds duration
+    if (!externalPlaybackTime && internalPlaybackTime > totalDuration) {
+      setInternalPlaybackTime(totalDuration);
+    }
+  }, [internalPlaybackTime, totalDuration, externalPlaybackTime, setInternalPlaybackTime]);
 
   // Sync playhead position to timeline state (debounced)
   useEffect(() => {
@@ -707,15 +725,6 @@ export default function TimelinePanel({
   const { sendTimelineMarker } = useTimelineWebSocket(handleMarkerUpdate);
 
   // Scene-based functionality removed for placement-based timeline
-
-
-  // Calculate total duration from timeline (placement-based)
-  const totalDuration = useMemo(() => {
-    if (timelineTotalDuration > 0) return timelineTotalDuration;
-    if (timelineItems.length === 0) return 10;
-    const lastItem = timelineItems[timelineItems.length - 1];
-    return Math.max(lastItem.endTime, 10);
-  }, [timelineTotalDuration, timelineItems]);
 
   // Load imported videos from asset manifest (for local video import feature)
   // Note: Imported videos are handled separately and appended after timeline items
@@ -1307,14 +1316,23 @@ export default function TimelinePanel({
 
   const effectiveProjectDir = projectDirectory || '/mock';
 
-  // Calculate timeline width based on total duration (ensure minimum width)
-  const minDuration = Math.max(totalDuration, 10); // At least 10 seconds
-  // Round up to next multiple of 5 for better visibility (e.g., 38s -> 40s)
-  const maxMarkerTime = Math.ceil(minDuration / 5) * 5;
-  const timelineWidth = secondsToPixels(maxMarkerTime, zoomLevel);
-  const playheadPosition = secondsToPixels(currentPosition, zoomLevel);
+  // Calculate timeline width based on total duration
+  // Don't extend beyond actual content - use exact totalDuration
+  // Only use minimum for empty state (when totalDuration is 0)
+  const displayDuration = totalDuration > 0 ? totalDuration : 10;
+  
+  // Round up to next multiple of 5 for time markers, but don't extend beyond content
+  // Only round if it doesn't add more than 5 seconds beyond actual content
+  const maxMarkerTime = totalDuration > 0
+    ? Math.min(Math.ceil(displayDuration / 5) * 5, displayDuration + 2)
+    : 10;
+  
+  // Timeline width matches actual content duration exactly - stops at content end
+  const timelineWidth = secondsToPixels(displayDuration, zoomLevel);
+  // Clamp playhead position to timeline width to prevent it from going beyond content visually
+  const playheadPosition = Math.min(secondsToPixels(currentPosition, zoomLevel), timelineWidth);
 
-  // Generate time markers for ruler
+  // Generate time markers for ruler (up to maxMarkerTime, but timeline stops at displayDuration)
   const timeMarkers: number[] = [];
   for (let i = 0; i <= maxMarkerTime; i += 5) {
     timeMarkers.push(i);

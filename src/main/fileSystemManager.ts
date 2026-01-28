@@ -36,7 +36,7 @@ class FileSystemManager extends EventEmitter {
   // Debounced event batching
   private pendingEvents: Map<string, FileChangeEvent> = new Map();
   private debounceTimeout: ReturnType<typeof setTimeout> | null = null;
-  private readonly DEBOUNCE_DELAY = 500; // 500ms debounce for rapid changes
+  private readonly DEBOUNCE_DELAY = 200; // 200ms debounce for rapid changes (reduced for faster response)
 
   constructor() {
     super();
@@ -182,8 +182,8 @@ class FileSystemManager extends EventEmitter {
       persistent: true,
       ignoreInitial: true,
       awaitWriteFinish: {
-        stabilityThreshold: 200, // Wait 200ms after last change
-        pollInterval: 100, // Check every 100ms
+        stabilityThreshold: 100, // Wait 100ms after last change (reduced for faster detection)
+        pollInterval: 50, // Check every 50ms (increased frequency)
       },
       usePolling: false, // Use native events when possible
     });
