@@ -4,6 +4,7 @@ import type { AppSettings } from '../../../../shared/settingsTypes';
 import type { BackendEnvOverrides } from '../../../../shared/backendTypes';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
+import { TimelineDataProvider } from '../../../contexts/TimelineDataContext';
 import { useBackendHealth } from '../../../hooks/useBackendHealth';
 import type { SceneVersions } from '../../../types/kshana/timeline';
 import PreviewPlaceholder from '../PreviewPlaceholder/PreviewPlaceholder';
@@ -81,7 +82,7 @@ export default function PreviewPanel() {
   // Update activeVersions when timelineState changes (with migration)
   // Use ref to track previous serialized state to avoid infinite loops
   const prevActiveVersionsRef = useRef<string>('');
-  
+
   useEffect(() => {
     if (!timelineState?.active_versions) {
       prevActiveVersionsRef.current = '';
@@ -107,7 +108,7 @@ export default function PreviewPanel() {
 
     // Serialize to compare if content actually changed
     const serializedVersions = JSON.stringify(versions);
-    
+
     // Only update if content actually changed
     if (serializedVersions !== prevActiveVersionsRef.current) {
       prevActiveVersionsRef.current = serializedVersions;
@@ -286,47 +287,49 @@ export default function PreviewPanel() {
       </div>
 
       <div className={styles.contentWrapper}>
-        <div className={styles.content}>
-          {/* Storyboard view hidden for now */}
-          {/* {activeTab === 'storyboard' && <StoryboardView />} */}
-          {activeTab === 'assets' && <AssetsView />}
-          {activeTab === 'video-library' && (
-            <VideoLibraryView
-              playbackTime={playbackTime}
-              isPlaying={isPlaying}
-              isDragging={isDragging}
-              onPlaybackTimeChange={setPlaybackTime}
-              onPlaybackStateChange={setIsPlaying}
-              activeVersions={activeVersions}
-              projectScenes={projectScenes}
-            />
-          )}
-          {activeTab === 'preview' && <PlansView />}
-        </div>
-
-        {projectDirectory && (
-          <div
-            className={styles.timelineContainer}
-            style={
-              timelineOpen
-                ? { height: `${timelineHeight}px` }
-                : { height: '28px' }
-            }
-          >
-            <TimelinePanel
-              isOpen={timelineOpen}
-              onToggle={() => setTimelineOpen(!timelineOpen)}
-              onResize={handleTimelineResize}
-              playbackTime={playbackTime}
-              isPlaying={isPlaying}
-              onSeek={setPlaybackTime}
-              onPlayPause={setIsPlaying}
-              onDragStateChange={setIsDragging}
-              activeVersions={activeVersions}
-              onActiveVersionsChange={setActiveVersions}
-            />
+        <TimelineDataProvider activeVersions={activeVersions}>
+          <div className={styles.content}>
+            {/* Storyboard view hidden for now */}
+            {/* {activeTab === 'storyboard' && <StoryboardView />} */}
+            {activeTab === 'assets' && <AssetsView />}
+            {activeTab === 'video-library' && (
+              <VideoLibraryView
+                playbackTime={playbackTime}
+                isPlaying={isPlaying}
+                isDragging={isDragging}
+                onPlaybackTimeChange={setPlaybackTime}
+                onPlaybackStateChange={setIsPlaying}
+                activeVersions={activeVersions}
+                projectScenes={projectScenes}
+              />
+            )}
+            {activeTab === 'preview' && <PlansView />}
           </div>
-        )}
+
+          {projectDirectory && (
+            <div
+              className={styles.timelineContainer}
+              style={
+                timelineOpen
+                  ? { height: `${timelineHeight}px` }
+                  : { height: '28px' }
+              }
+            >
+              <TimelinePanel
+                isOpen={timelineOpen}
+                onToggle={() => setTimelineOpen(!timelineOpen)}
+                onResize={handleTimelineResize}
+                playbackTime={playbackTime}
+                isPlaying={isPlaying}
+                onSeek={setPlaybackTime}
+                onPlayPause={setIsPlaying}
+                onDragStateChange={setIsDragging}
+                activeVersions={activeVersions}
+                onActiveVersionsChange={setActiveVersions}
+              />
+            </div>
+          )}
+        </TimelineDataProvider>
       </div>
 
       <SettingsPanel

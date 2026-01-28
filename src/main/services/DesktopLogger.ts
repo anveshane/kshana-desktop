@@ -28,7 +28,7 @@ function ensureLogDir(): void {
 function writeLog(filePath: string, line: string): void {
   try {
     ensureLogDir();
-    fs.appendFileSync(filePath, line + '\n');
+    fs.appendFileSync(filePath, `${line}\n`);
   } catch {
     // Ignore write errors
   }
@@ -57,13 +57,19 @@ export function initUILog(): void {
  */
 export function logUserInput(content: string): void {
   writeLog(UI_LOG_PATH, '');
-  writeLog(UI_LOG_PATH, '┌──────────────────────────────────────────────────────────────────────────────┐');
+  writeLog(
+    UI_LOG_PATH,
+    '┌──────────────────────────────────────────────────────────────────────────────┐',
+  );
   writeLog(UI_LOG_PATH, '│ 👤 You:');
   const lines = content.split('\n');
   for (const line of lines) {
     writeLog(UI_LOG_PATH, `│ ${line}`);
   }
-  writeLog(UI_LOG_PATH, '└──────────────────────────────────────────────────────────────────────────────┘');
+  writeLog(
+    UI_LOG_PATH,
+    '└──────────────────────────────────────────────────────────────────────────────┘',
+  );
 }
 
 /**
@@ -83,9 +89,15 @@ export function logAgentText(text: string, agentName?: string): void {
  * Log tool call start - matches tool execution state.
  * Format: "◉ [Spinner] Running toolname"
  */
-export function logToolStart(toolName: string, args?: Record<string, unknown>): void {
+export function logToolStart(
+  toolName: string,
+  args?: Record<string, unknown>,
+): void {
   writeLog(UI_LOG_PATH, '');
-  writeLog(UI_LOG_PATH, `┌─ 🔧 ${getToolDisplayName(toolName, true)} ─────────────────────────────────────`);
+  writeLog(
+    UI_LOG_PATH,
+    `┌─ 🔧 ${getToolDisplayName(toolName, true)} ─────────────────────────────────────`,
+  );
   if (args && Object.keys(args).length > 0) {
     writeLog(UI_LOG_PATH, `│ ${formatToolCall(toolName, args)}`);
   }
@@ -99,11 +111,14 @@ export function logToolComplete(
   toolName: string,
   result: unknown,
   duration?: number,
-  isError = false
+  isError = false,
 ): void {
   const icon = isError ? '✗' : '✓';
   const durationStr = duration ? ` (${formatDuration(duration)})` : '';
-  writeLog(UI_LOG_PATH, `│ ${icon} ${getToolDisplayName(toolName, false)}${durationStr}`);
+  writeLog(
+    UI_LOG_PATH,
+    `│ ${icon} ${getToolDisplayName(toolName, false)}${durationStr}`,
+  );
 
   // Log result for non-hidden tools
   if (!isHiddenTool(toolName)) {
@@ -115,7 +130,10 @@ export function logToolComplete(
       }
     }
   }
-  writeLog(UI_LOG_PATH, '└──────────────────────────────────────────────────────────────────────────────');
+  writeLog(
+    UI_LOG_PATH,
+    '└──────────────────────────────────────────────────────────────────────────────',
+  );
 }
 
 /**
@@ -125,10 +143,13 @@ export function logQuestion(
   question: string,
   options?: Array<{ label: string; description?: string }>,
   isConfirmation = false,
-  autoApproveTimeoutMs?: number
+  autoApproveTimeoutMs?: number,
 ): void {
   writeLog(UI_LOG_PATH, '');
-  writeLog(UI_LOG_PATH, '┌─ ❓ Question ────────────────────────────────────────────────────────────────┐');
+  writeLog(
+    UI_LOG_PATH,
+    '┌─ ❓ Question ────────────────────────────────────────────────────────────────┐',
+  );
   writeLog(UI_LOG_PATH, `│ ${question}`);
 
   if (options && options.length > 0) {
@@ -145,15 +166,25 @@ export function logQuestion(
 
   if (autoApproveTimeoutMs) {
     writeLog(UI_LOG_PATH, '│');
-    writeLog(UI_LOG_PATH, `│ Auto-approve in ${Math.ceil(autoApproveTimeoutMs / 1000)}s`);
+    writeLog(
+      UI_LOG_PATH,
+      `│ Auto-approve in ${Math.ceil(autoApproveTimeoutMs / 1000)}s`,
+    );
   }
-  writeLog(UI_LOG_PATH, '└──────────────────────────────────────────────────────────────────────────────┘');
+  writeLog(
+    UI_LOG_PATH,
+    '└──────────────────────────────────────────────────────────────────────────────┘',
+  );
 }
 
 /**
  * Log status bar change - matches StatusBar component.
  */
-export function logStatusChange(status: string, agentName?: string, message?: string): void {
+export function logStatusChange(
+  status: string,
+  agentName?: string,
+  message?: string,
+): void {
   const statusDisplay: Record<string, string> = {
     idle: '○ Idle',
     thinking: '● Thinking...',
@@ -175,20 +206,26 @@ export function logPhaseTransition(
   fromPhase: string,
   toPhase: string,
   success: boolean,
-  reason?: string
+  reason?: string,
 ): void {
   const timestamp = new Date().toISOString();
   const icon = success ? '✓' : '✗';
-  
+
   // Log to UI log
   writeLog(UI_LOG_PATH, '');
-  writeLog(UI_LOG_PATH, `════════════════════════════════════════════════════════════════════════════════`);
+  writeLog(
+    UI_LOG_PATH,
+    `════════════════════════════════════════════════════════════════════════════════`,
+  );
   writeLog(UI_LOG_PATH, `${icon} Phase Transition: ${fromPhase} → ${toPhase}`);
   if (reason) {
     writeLog(UI_LOG_PATH, `   Reason: ${reason}`);
   }
-  writeLog(UI_LOG_PATH, `════════════════════════════════════════════════════════════════════════════════`);
-  
+  writeLog(
+    UI_LOG_PATH,
+    `════════════════════════════════════════════════════════════════════════════════`,
+  );
+
   // Log to phase log
   try {
     ensureLogDir();
@@ -197,7 +234,7 @@ export function logPhaseTransition(
   } catch {
     // Ignore write errors
   }
-  
+
   // Log to workflow log
   try {
     ensureLogDir();
@@ -211,24 +248,40 @@ export function logPhaseTransition(
 /**
  * Log todo list - matches TodoList component.
  */
-export function logTodoUpdate(todos: Array<{ content: string; status: string }>): void {
+export function logTodoUpdate(
+  todos: Array<{ content: string; status: string }>,
+): void {
   if (todos.length === 0) return;
 
-  const completed = todos.filter(t => t.status === 'completed').length;
+  const completed = todos.filter((t) => t.status === 'completed').length;
 
   writeLog(UI_LOG_PATH, '');
-  writeLog(UI_LOG_PATH, `┌─ 📋 Todos (${completed}/${todos.length}) ─────────────────────────────────────────────────`);
-  todos.forEach(todo => {
-    const icon = todo.status === 'completed' ? '✓' : todo.status === 'in_progress' ? '●' : '○';
+  writeLog(
+    UI_LOG_PATH,
+    `┌─ 📋 Todos (${completed}/${todos.length}) ─────────────────────────────────────────────────`,
+  );
+  todos.forEach((todo) => {
+    const icon =
+      todo.status === 'completed'
+        ? '✓'
+        : todo.status === 'in_progress'
+          ? '●'
+          : '○';
     writeLog(UI_LOG_PATH, `│ ${icon} ${todo.content}`);
   });
-  writeLog(UI_LOG_PATH, '└──────────────────────────────────────────────────────────────────────────────');
+  writeLog(
+    UI_LOG_PATH,
+    '└──────────────────────────────────────────────────────────────────────────────',
+  );
 }
 
 /**
  * Log error display - matches error state.
  */
-export function logError(error: string, context?: Record<string, unknown>): void {
+export function logError(
+  error: string,
+  context?: Record<string, unknown>,
+): void {
   writeLog(UI_LOG_PATH, '');
   writeLog(UI_LOG_PATH, `✗ Error: ${error}`);
   if (context) {
@@ -253,16 +306,26 @@ export function logStreamChunk(chunk: string): void {
  */
 export function logSessionEnd(): void {
   writeLog(UI_LOG_PATH, '');
-  writeLog(UI_LOG_PATH, '════════════════════════════════════════════════════════════════════════════════');
+  writeLog(
+    UI_LOG_PATH,
+    '════════════════════════════════════════════════════════════════════════════════',
+  );
   writeLog(UI_LOG_PATH, ' SESSION ENDED');
   writeLog(UI_LOG_PATH, ` Ended: ${new Date().toISOString()}`);
-  writeLog(UI_LOG_PATH, '════════════════════════════════════════════════════════════════════════════════');
+  writeLog(
+    UI_LOG_PATH,
+    '════════════════════════════════════════════════════════════════════════════════',
+  );
 }
 
 /**
  * Get the log file paths.
  */
-export function getLogPaths(): { uiLog: string; phaseLog: string; workflowLog: string } {
+export function getLogPaths(): {
+  uiLog: string;
+  phaseLog: string;
+  workflowLog: string;
+} {
   return {
     uiLog: UI_LOG_PATH,
     phaseLog: PHASE_LOG_PATH,
@@ -283,8 +346,14 @@ const TOOL_DISPLAY_NAMES: Record<string, { gerund: string; past: string }> = {
   generate_video: { gerund: 'Generating video', past: 'Generated video' },
   edit_image: { gerund: 'Editing image', past: 'Edited image' },
   wait_for_job: { gerund: 'Waiting for job', past: 'Job completed' },
-  read_project_state: { gerund: 'Reading project state', past: 'Read project state' },
-  write_project_state: { gerund: 'Saving project state', past: 'Saved project state' },
+  read_project_state: {
+    gerund: 'Reading project state',
+    past: 'Read project state',
+  },
+  write_project_state: {
+    gerund: 'Saving project state',
+    past: 'Saved project state',
+  },
   read_project: { gerund: 'Reading project', past: 'Read project' },
   update_project: { gerund: 'Updating project', past: 'Updated project' },
   read_file: { gerund: 'Reading file', past: 'Read file' },
@@ -293,7 +362,14 @@ const TOOL_DISPLAY_NAMES: Record<string, { gerund: string; past: string }> = {
   todo_write: { gerund: 'Updating todos', past: 'Updated todos' },
 };
 
-const HIDDEN_TOOLS = new Set(['TodoWrite', 'todo_write', 'update_project', 'read_project', 'read_file', 'write_file']);
+const HIDDEN_TOOLS = new Set([
+  'TodoWrite',
+  'todo_write',
+  'update_project',
+  'read_project',
+  'read_file',
+  'write_file',
+]);
 
 function isHiddenTool(toolName: string): boolean {
   return HIDDEN_TOOLS.has(toolName);
@@ -316,7 +392,8 @@ function formatToolCall(name: string, args?: Record<string, unknown>): string {
   for (const [key, value] of Object.entries(args)) {
     if (typeof value === 'string') {
       // Truncate very long strings
-      const truncated = value.length > 200 ? value.substring(0, 200) + '...' : value;
+      const truncated =
+        value.length > 200 ? `${value.substring(0, 200)}...` : value;
       parts.push(`${key}="${truncated}"`);
     } else if (typeof value === 'number' || typeof value === 'boolean') {
       parts.push(`${key}=${String(value)}`);
@@ -342,53 +419,68 @@ function formatResult(result: unknown, isError: boolean): string {
   const resultObj = result as Record<string, unknown>;
 
   // For errors, show the error
-  if (isError || resultObj['status'] === 'error') {
-    return `Error: ${resultObj['error'] || resultObj['warning'] || JSON.stringify(result, null, 2)}`;
+  if (isError || resultObj.status === 'error') {
+    return `Error: ${resultObj.error || resultObj.warning || JSON.stringify(result, null, 2)}`;
   }
 
   // For loop warnings
-  if (resultObj['status'] === 'loop_warning' || resultObj['status'] === 'loop_blocked') {
-    return String(resultObj['warning']);
+  if (
+    resultObj.status === 'loop_warning' ||
+    resultObj.status === 'loop_blocked'
+  ) {
+    return String(resultObj.warning);
   }
 
   // Special handling for subagent file save results
-  if (resultObj['status'] === 'completed' && (resultObj['file_saved'] || resultObj['file_path'] || resultObj['output_file'])) {
+  if (
+    resultObj.status === 'completed' &&
+    (resultObj.file_saved || resultObj.file_path || resultObj.output_file)
+  ) {
     const lines: string[] = [];
-    const filePath = (resultObj['file_path'] || resultObj['output_file']) as string | undefined;
-    
+    const filePath = (resultObj.file_path || resultObj.output_file) as
+      | string
+      | undefined;
+
     if (filePath) {
       lines.push(`✓ Saved: ${filePath}`);
     }
-    
-    if (resultObj['bytes_written'] !== undefined) {
-      const bytes = Number(resultObj['bytes_written']);
-      const totalLines = resultObj['total_lines'] !== undefined ? Number(resultObj['total_lines']) : 0;
-      lines.push(`  Size: ${bytes.toLocaleString()} bytes (${totalLines} lines)`);
+
+    if (resultObj.bytes_written !== undefined) {
+      const bytes = Number(resultObj.bytes_written);
+      const totalLines =
+        resultObj.total_lines !== undefined ? Number(resultObj.total_lines) : 0;
+      lines.push(
+        `  Size: ${bytes.toLocaleString()} bytes (${totalLines} lines)`,
+      );
     }
-    
-    if (resultObj['preview']) {
+
+    if (resultObj.preview) {
       lines.push('');
       lines.push('  Preview:');
-      lines.push('  ┌────────────────────────────────────────────────────────────');
-      const previewLines = String(resultObj['preview']).split('\n');
-      previewLines.forEach(line => {
+      lines.push(
+        '  ┌────────────────────────────────────────────────────────────',
+      );
+      const previewLines = String(resultObj.preview).split('\n');
+      previewLines.forEach((line) => {
         lines.push(`  │ ${line}`);
       });
-      lines.push('  └────────────────────────────────────────────────────────────');
+      lines.push(
+        '  └────────────────────────────────────────────────────────────',
+      );
     }
-    
+
     return lines.join('\n');
   }
 
   // For simple status results
-  if (resultObj['status'] === 'success' && resultObj['message']) {
-    return String(resultObj['message']);
+  if (resultObj.status === 'success' && resultObj.message) {
+    return String(resultObj.message);
   }
 
   // Default: JSON output (truncated for very large results)
   const jsonStr = JSON.stringify(result, null, 2);
   if (jsonStr.length > 1000) {
-    return jsonStr.substring(0, 1000) + '\n... (truncated)';
+    return `${jsonStr.substring(0, 1000)}\n... (truncated)`;
   }
   return jsonStr;
 }

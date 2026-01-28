@@ -11,11 +11,7 @@ type ViewType = 'grid' | 'list';
 
 export default function StoryboardView() {
   const { projectDirectory } = useWorkspace();
-  const {
-    isLoaded,
-    isLoading,
-    scenes: projectScenes,
-  } = useProject();
+  const { isLoaded, isLoading, scenes: projectScenes } = useProject();
   const [filter, setFilter] = useState<FilterType>('all');
   const [viewType, setViewType] = useState<ViewType>('grid');
 

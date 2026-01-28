@@ -109,11 +109,13 @@ export default function TodoDisplay({
           const statusConfig = STATUS_ICONS[status];
           const indent = todo.depth || 0;
           const content = todo.task || todo.content || 'Task';
-          
+
           return (
             <div key={todo.id || i} className={styles.todoItem}>
               <span className={styles.todoIndent}>{'  '.repeat(indent)}</span>
-              <span className={statusConfig.className}>{statusConfig.icon}</span>
+              <span className={statusConfig.className}>
+                {statusConfig.icon}
+              </span>
               <span
                 className={
                   status === 'pending' || status === 'cancelled'

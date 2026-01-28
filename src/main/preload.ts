@@ -114,7 +114,10 @@ const projectBridge = {
     return ipcRenderer.invoke('project:watch-manifest', manifestPath);
   },
   watchImagePlacements(imagePlacementsDir: string): Promise<void> {
-    return ipcRenderer.invoke('project:watch-image-placements', imagePlacementsDir);
+    return ipcRenderer.invoke(
+      'project:watch-image-placements',
+      imagePlacementsDir,
+    );
   },
   refreshAssets(projectDirectory: string): Promise<void> {
     return ipcRenderer.invoke('project:refresh-assets', projectDirectory);
@@ -176,37 +179,69 @@ const loggerBridge = {
   logAgentText(text: string, agentName?: string): Promise<void> {
     return ipcRenderer.invoke('logger:agent-text', text, agentName);
   },
-  logToolStart(toolName: string, args?: Record<string, unknown>): Promise<void> {
+  logToolStart(
+    toolName: string,
+    args?: Record<string, unknown>,
+  ): Promise<void> {
     return ipcRenderer.invoke('logger:tool-start', toolName, args);
   },
   logToolComplete(
     toolName: string,
     result: unknown,
     duration?: number,
-    isError?: boolean
+    isError?: boolean,
   ): Promise<void> {
-    return ipcRenderer.invoke('logger:tool-complete', toolName, result, duration, isError);
+    return ipcRenderer.invoke(
+      'logger:tool-complete',
+      toolName,
+      result,
+      duration,
+      isError,
+    );
   },
   logQuestion(
     question: string,
     options?: Array<{ label: string; description?: string }>,
     isConfirmation?: boolean,
-    autoApproveTimeoutMs?: number
+    autoApproveTimeoutMs?: number,
   ): Promise<void> {
-    return ipcRenderer.invoke('logger:question', question, options, isConfirmation, autoApproveTimeoutMs);
+    return ipcRenderer.invoke(
+      'logger:question',
+      question,
+      options,
+      isConfirmation,
+      autoApproveTimeoutMs,
+    );
   },
-  logStatusChange(status: string, agentName?: string, message?: string): Promise<void> {
-    return ipcRenderer.invoke('logger:status-change', status, agentName, message);
+  logStatusChange(
+    status: string,
+    agentName?: string,
+    message?: string,
+  ): Promise<void> {
+    return ipcRenderer.invoke(
+      'logger:status-change',
+      status,
+      agentName,
+      message,
+    );
   },
   logPhaseTransition(
     fromPhase: string,
     toPhase: string,
     success: boolean,
-    reason?: string
+    reason?: string,
   ): Promise<void> {
-    return ipcRenderer.invoke('logger:phase-transition', fromPhase, toPhase, success, reason);
+    return ipcRenderer.invoke(
+      'logger:phase-transition',
+      fromPhase,
+      toPhase,
+      success,
+      reason,
+    );
   },
-  logTodoUpdate(todos: Array<{ content: string; status: string }>): Promise<void> {
+  logTodoUpdate(
+    todos: Array<{ content: string; status: string }>,
+  ): Promise<void> {
     return ipcRenderer.invoke('logger:todo-update', todos);
   },
   logError(error: string, context?: Record<string, unknown>): Promise<void> {
@@ -215,7 +250,11 @@ const loggerBridge = {
   logSessionEnd(): Promise<void> {
     return ipcRenderer.invoke('logger:session-end');
   },
-  getLogPaths(): Promise<{ uiLog: string; phaseLog: string; workflowLog: string }> {
+  getLogPaths(): Promise<{
+    uiLog: string;
+    phaseLog: string;
+    workflowLog: string;
+  }> {
     return ipcRenderer.invoke('logger:get-paths');
   },
 };

@@ -120,7 +120,7 @@ export class ProjectService {
       }
 
       // Read agent state (primary source - required)
-      let agentState = await this.readAgentState(directory);
+      const agentState = await this.readAgentState(directory);
       if (!agentState) {
         return { success: false, error: 'Failed to read agent project file' };
       }
@@ -140,13 +140,17 @@ export class ProjectService {
       // Read asset manifest (create default if missing)
       let assetManifest = await this.readAssetManifest(directory);
       if (!assetManifest) {
-        console.log('[ProjectService] Asset manifest not found, creating default');
+        console.log(
+          '[ProjectService] Asset manifest not found, creating default',
+        );
         assetManifest = createDefaultAssetManifest();
         await this.writeAssetManifest(directory, assetManifest);
       } else {
         console.log('[ProjectService] Asset manifest loaded:', {
           assetCount: assetManifest.assets.length,
-          imageAssets: assetManifest.assets.filter(a => a.type === 'scene_image').length,
+          imageAssets: assetManifest.assets.filter(
+            (a) => a.type === 'scene_image',
+          ).length,
         });
       }
 
@@ -374,7 +378,10 @@ export class ProjectService {
       if (content === null) return null;
       return JSON.parse(content) as T;
     } catch (error) {
-      console.error(`[ProjectService] Failed to read JSON from ${path}:`, error);
+      console.error(
+        `[ProjectService] Failed to read JSON from ${path}:`,
+        error,
+      );
       return null;
     }
   }
@@ -429,7 +436,7 @@ export class ProjectService {
   ): Promise<AssetManifest | null> {
     const manifestPath = `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`;
     console.log('[ProjectService] Reading asset manifest from:', manifestPath);
-    
+
     const manifest = await this.readJSON<{
       schema_version?: string;
       assets: Array<{
@@ -444,26 +451,31 @@ export class ProjectService {
         metadata?: Record<string, unknown>;
       }>;
     }>(manifestPath);
-    
+
     if (!manifest) {
-      console.warn('[ProjectService] Asset manifest file not found or empty:', manifestPath);
+      console.warn(
+        '[ProjectService] Asset manifest file not found or empty:',
+        manifestPath,
+      );
       return null;
     }
-    
+
     console.log('[ProjectService] Asset manifest read successfully:', {
       schemaVersion: manifest.schema_version,
       assetCount: manifest.assets?.length || 0,
     });
-    
+
     // Normalize createdAt to created_at for compatibility
     const normalizedAssets = manifest.assets.map((asset) => ({
       ...asset,
       created_at: asset.created_at ?? asset.createdAt ?? Date.now(),
     }));
-    
+
     // Remove createdAt if it exists (keep only created_at)
-    const cleanedAssets = normalizedAssets.map(({ createdAt, ...rest }) => rest);
-    
+    const cleanedAssets = normalizedAssets.map(
+      ({ createdAt, ...rest }) => rest,
+    );
+
     return {
       schema_version: (manifest.schema_version as '1') || '1',
       assets: cleanedAssets as AssetManifest['assets'],

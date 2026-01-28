@@ -14,7 +14,7 @@ interface MediaAsset {
 
 export default function AssetsView() {
   const { projectDirectory } = useWorkspace();
-  
+
   const [generatedImages, setGeneratedImages] = useState<MediaAsset[]>([]);
   const [generatedVideos, setGeneratedVideos] = useState<MediaAsset[]>([]);
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
@@ -39,9 +39,12 @@ export default function AssetsView() {
 
         // Load images
         try {
-          const imageTree = await window.electron.project.readTree(imagePlacementsDir, 1);
+          const imageTree = await window.electron.project.readTree(
+            imagePlacementsDir,
+            1,
+          );
           const imageFiles: MediaAsset[] = [];
-          
+
           const collectImageFiles = (node: FileNode) => {
             if (node.type === 'file' && node.extension) {
               const fileType = getFileType(node.extension);
@@ -57,7 +60,7 @@ export default function AssetsView() {
               node.children.forEach(collectImageFiles);
             }
           };
-          
+
           collectImageFiles(imageTree);
           setGeneratedImages(imageFiles);
         } catch (err) {
@@ -67,9 +70,12 @@ export default function AssetsView() {
 
         // Load videos
         try {
-          const videoTree = await window.electron.project.readTree(videoPlacementsDir, 1);
+          const videoTree = await window.electron.project.readTree(
+            videoPlacementsDir,
+            1,
+          );
           const videoFiles: MediaAsset[] = [];
-          
+
           const collectVideoFiles = (node: FileNode) => {
             if (node.type === 'file' && node.extension) {
               const fileType = getFileType(node.extension);
@@ -85,11 +91,10 @@ export default function AssetsView() {
               node.children.forEach(collectVideoFiles);
             }
           };
-          
+
           collectVideoFiles(videoTree);
           setGeneratedVideos(videoFiles);
         } catch (err) {
-          // Directory might not exist yet
           setGeneratedVideos([]);
         }
       } catch (err) {
@@ -104,7 +109,11 @@ export default function AssetsView() {
     // Listen for file changes to refresh media files
     const unsubscribe = window.electron.project.onFileChange((event) => {
       // Refresh if files changed in placement directories
-      if (event.path.includes('image-placements') || event.path.includes('video-placements')) {
+      if (
+        event.path.includes('image-placements') ||
+        event.path.includes('video-placements') ||
+        event.path.includes('infographic-placements')
+      ) {
         loadMediaFiles();
       }
     });
@@ -125,7 +134,10 @@ export default function AssetsView() {
       const paths: Record<string, string> = {};
       for (const image of generatedImages) {
         try {
-          const resolved = await resolveAssetPathForDisplay(image.path, projectDirectory);
+          const resolved = await resolveAssetPathForDisplay(
+            image.path,
+            projectDirectory,
+          );
           if (shouldUseBase64(resolved)) {
             const base64 = await imageToBase64(resolved);
             if (base64) {
@@ -155,7 +167,10 @@ export default function AssetsView() {
       const paths: Record<string, string> = {};
       for (const video of generatedVideos) {
         try {
-          const resolved = await resolveAssetPathForDisplay(video.path, projectDirectory);
+          const resolved = await resolveAssetPathForDisplay(
+            video.path,
+            projectDirectory,
+          );
           paths[video.path] = resolved;
         } catch (err) {
           console.error(`Failed to resolve video path for ${video.name}:`, err);
@@ -182,7 +197,7 @@ export default function AssetsView() {
 
   // Show empty state if no assets
   const hasAnyAssets = generatedImages.length > 0 || generatedVideos.length > 0;
-  
+
   if (!isLoadingMedia && !hasAnyAssets) {
     return (
       <div className={styles.container}>
@@ -305,8 +320,14 @@ export default function AssetsView() {
 
       {/* Image Modal */}
       {selectedImage && imagePaths[selectedImage.path] && (
-        <div className={styles.modalOverlay} onClick={() => setSelectedImage(null)}>
-          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => setSelectedImage(null)}
+        >
+          <div
+            className={styles.modalContent}
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               className={styles.modalClose}
               onClick={() => setSelectedImage(null)}
@@ -326,8 +347,14 @@ export default function AssetsView() {
 
       {/* Video Modal */}
       {selectedVideo && videoPaths[selectedVideo.path] && (
-        <div className={styles.modalOverlay} onClick={() => setSelectedVideo(null)}>
-          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => setSelectedVideo(null)}
+        >
+          <div
+            className={styles.modalContent}
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               className={styles.modalClose}
               onClick={() => setSelectedVideo(null)}

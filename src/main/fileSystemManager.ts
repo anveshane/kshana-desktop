@@ -26,16 +26,20 @@ interface FileSystemStore {
 class FileSystemManager extends EventEmitter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private watcher: any = null;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private manifestWatcher: any = null;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private imagePlacementsWatcher: any = null;
 
   private store: Store<FileSystemStore>;
-  
+
   // Debounced event batching
   private pendingEvents: Map<string, FileChangeEvent> = new Map();
+
   private debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
   private readonly DEBOUNCE_DELAY = 200; // 200ms debounce for rapid changes (reduced for faster response)
 
   constructor() {
@@ -53,7 +57,6 @@ class FileSystemManager extends EventEmitter {
   }
 
   async readDirectory(dirPath: string, depth: number = 1): Promise<FileNode> {
-    
     let stats;
     try {
       stats = await fs.promises.stat(dirPath);
@@ -149,9 +152,15 @@ class FileSystemManager extends EventEmitter {
   /**
    * Emit change event with debounced batching for rapid changes
    */
-  private emitDebouncedChange(type: FileChangeEvent['type'], filePath: string): void {
+  private emitDebouncedChange(
+    type: FileChangeEvent['type'],
+    filePath: string,
+  ): void {
     // Store the latest event for each file path
-    this.pendingEvents.set(filePath, { type, path: filePath } as FileChangeEvent);
+    this.pendingEvents.set(filePath, {
+      type,
+      path: filePath,
+    } as FileChangeEvent);
 
     // Clear existing timeout
     if (this.debounceTimeout) {
@@ -203,7 +212,10 @@ class FileSystemManager extends EventEmitter {
         setTimeout(() => {
           if (fs.existsSync(manifestPath)) {
             this.watchManifest(manifestPath).catch((err) => {
-              console.error('[FileSystemManager] Failed to retry manifest watch:', err);
+              console.error(
+                '[FileSystemManager] Failed to retry manifest watch:',
+                err,
+              );
             });
           }
         }, 1000);
@@ -222,7 +234,9 @@ class FileSystemManager extends EventEmitter {
     try {
       await fs.promises.mkdir(imagePlacementsDir, { recursive: true });
     } catch (error) {
-      console.warn(`[FileSystemManager] Could not create image-placements directory: ${error}`);
+      console.warn(
+        `[FileSystemManager] Could not create image-placements directory: ${error}`,
+      );
     }
 
     const chokidar = await import('chokidar');
@@ -256,12 +270,18 @@ class FileSystemManager extends EventEmitter {
         emitChange('unlink', p);
       })
       .on('error', (error: Error) => {
-        console.error('[FileSystemManager] Image placements watcher error:', error);
+        console.error(
+          '[FileSystemManager] Image placements watcher error:',
+          error,
+        );
         // Retry watching after a delay
         setTimeout(() => {
           if (fs.existsSync(imagePlacementsDir)) {
             this.watchImagePlacements(imagePlacementsDir).catch((err) => {
-              console.error('[FileSystemManager] Failed to retry image placements watch:', err);
+              console.error(
+                '[FileSystemManager] Failed to retry image placements watch:',
+                err,
+              );
             });
           }
         }, 1000);

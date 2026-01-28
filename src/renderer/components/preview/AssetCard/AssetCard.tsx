@@ -70,21 +70,20 @@ export default function AssetCard({
       return;
     }
 
-    resolveAssetPathForDisplay(
-      imagePath,
-      projectDirectory || null,
-    ).then(async (resolved) => {
-      // For test images, try to convert to base64
-      if (shouldUseBase64(resolved)) {
-        const base64 = await imageToBase64(resolved);
-        if (base64) {
-          setFullImagePath(base64);
-          return;
+    resolveAssetPathForDisplay(imagePath, projectDirectory || null).then(
+      async (resolved) => {
+        // For test images, try to convert to base64
+        if (shouldUseBase64(resolved)) {
+          const base64 = await imageToBase64(resolved);
+          if (base64) {
+            setFullImagePath(base64);
+            return;
+          }
         }
-      }
-      // Fallback to file:// path
-      setFullImagePath(resolved);
-    });
+        // Fallback to file:// path
+        setFullImagePath(resolved);
+      },
+    );
   }, [imagePath, projectDirectory]);
 
   const hasImage = fullImagePath && !imageError;

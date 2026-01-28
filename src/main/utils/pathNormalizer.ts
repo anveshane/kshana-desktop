@@ -11,7 +11,7 @@ import path from 'path';
  * - Strips file:// protocol if present
  * - Resolves relative paths against project directory
  * - Returns absolute path ready for FFmpeg
- * 
+ *
  * @param filePath - Path that may contain file:// protocol or be relative
  * @param projectDirectory - Project directory to resolve relative paths against
  * @returns Normalized absolute path, or null if path is empty/invalid
@@ -21,22 +21,22 @@ export async function normalizePathForFFmpeg(
   projectDirectory: string,
 ): Promise<string | null> {
   if (!filePath) return null;
-  
+
   // Strip file:// protocol if present
-  let cleanPath = filePath.replace(/^file:\/\//, '');
-  
+  const cleanPath = filePath.replace(/^file:\/\//, '');
+
   if (!cleanPath.trim()) return null;
-  
+
   // Resolve to absolute path
   const absolutePath = path.isAbsolute(cleanPath)
     ? cleanPath
     : path.join(projectDirectory, cleanPath);
-  
+
   // Normalize path separators (handles ../, ./, etc.)
   const normalizedPath = path.normalize(absolutePath);
-  
+
   // Note: File existence validation happens at the call site
   // This function just normalizes the path structure
-  
+
   return normalizedPath;
 }

@@ -16,7 +16,9 @@ export type PlaybackState =
 
 export class PlaybackStateMachine {
   private state: PlaybackState = { type: 'IDLE' };
+
   private timeIndex: TimeIndex;
+
   private lastItemIndex: number | null = null;
 
   constructor(timeIndex: TimeIndex) {
@@ -38,8 +40,10 @@ export class PlaybackStateMachine {
     }
 
     const item = this.timeIndex.findItemAtTime(playbackTime);
-    let itemIndex = item ? this.timeIndex.getItemIndexAtTime(playbackTime) : null;
-    
+    let itemIndex = item
+      ? this.timeIndex.getItemIndexAtTime(playbackTime)
+      : null;
+
     // If itemIndex is null but we have an item, try to get index from item ID
     // This handles cases where TimeIndex returns an item but index lookup fails
     if (item && itemIndex === null) {

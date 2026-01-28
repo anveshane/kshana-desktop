@@ -206,13 +206,14 @@ export default function MessageBubble({
 
   // Check if user message should be truncated
   const isUserMessage = message.role === 'user';
-  const shouldTruncate = isUserMessage && message.content.length > USER_MESSAGE_TRUNCATE_LIMIT;
+  const shouldTruncate =
+    isUserMessage && message.content.length > USER_MESSAGE_TRUNCATE_LIMIT;
   const [isUserMessageExpanded, setIsUserMessageExpanded] = useState(false);
-  
+
   // Get truncated content for user messages
   const getTruncatedContent = (content: string) => {
     if (!shouldTruncate) return content;
-    return content.substring(0, USER_MESSAGE_TRUNCATE_LIMIT) + '...';
+    return `${content.substring(0, USER_MESSAGE_TRUNCATE_LIMIT)}...`;
   };
 
   return (
@@ -237,9 +238,12 @@ export default function MessageBubble({
             <span className={styles.role}>{roleLabels[message.role]}</span>
           )}
 
-          {message.type && message.type !== 'message' && message.type !== 'agent_text' && message.type !== 'stream_chunk' && (
-            <span className={styles.type}>{message.type}</span>
-          )}
+          {message.type &&
+            message.type !== 'message' &&
+            message.type !== 'agent_text' &&
+            message.type !== 'stream_chunk' && (
+              <span className={styles.type}>{message.type}</span>
+            )}
           <span className={styles.time}>
             {formatter.format(new Date(message.timestamp))}
           </span>

@@ -37,6 +37,12 @@ const PLAN_FILES: PlanFile[] = [
     path: 'content/video-placements.md',
     category: 'content',
   },
+  {
+    name: 'infographic-placements.md',
+    displayName: 'Infographic Placements',
+    path: 'content/infographic-placements.md',
+    category: 'content',
+  },
 ];
 
 export default function PlansView() {

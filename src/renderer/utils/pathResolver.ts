@@ -239,7 +239,10 @@ async function checkFileExists(filePath: string): Promise<boolean> {
     // Fallback: assume file exists if we can't check
     return true;
   } catch (error) {
-    console.debug(`[PathResolver] File existence check failed for ${filePath}:`, error);
+    console.debug(
+      `[PathResolver] File existence check failed for ${filePath}:`,
+      error,
+    );
     return false;
   }
 }
@@ -299,15 +302,19 @@ export async function resolveAssetPathWithRetry(
         const exists = await checkFileExists(filePath);
         if (!exists && attempt < maxRetries) {
           // File doesn't exist yet, retry
-          const delay = retryDelayBase * Math.pow(2, attempt);
+          const delay = retryDelayBase * 2 ** attempt;
           console.log(
             `[PathResolver] File not found, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries}):`,
             filePath,
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
           return resolveWithRetry(attempt + 1);
-        } else if (!exists) {
-          console.warn(`[PathResolver] File not found after ${maxRetries} attempts:`, filePath);
+        }
+        if (!exists) {
+          console.warn(
+            `[PathResolver] File not found after ${maxRetries} attempts:`,
+            filePath,
+          );
           // Return path anyway - might be created soon
         }
       }
@@ -323,7 +330,7 @@ export async function resolveAssetPathWithRetry(
       lastError = error instanceof Error ? error : new Error(String(error));
 
       if (attempt < maxRetries) {
-        const delay = retryDelayBase * Math.pow(2, attempt);
+        const delay = retryDelayBase * 2 ** attempt;
         console.log(
           `[PathResolver] Resolution failed, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries}):`,
           lastError.message,
@@ -333,10 +340,13 @@ export async function resolveAssetPathWithRetry(
       }
 
       // Max retries reached, return empty or last resolved path
-      console.error(`[PathResolver] Failed to resolve path after ${maxRetries} attempts:`, {
-        assetPath,
-        error: lastError.message,
-      });
+      console.error(
+        `[PathResolver] Failed to resolve path after ${maxRetries} attempts:`,
+        {
+          assetPath,
+          error: lastError.message,
+        },
+      );
       return resolvedPath || '';
     }
   };

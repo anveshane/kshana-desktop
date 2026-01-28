@@ -82,9 +82,7 @@ export default function MarkdownEditor({
     <div className={styles.container}>
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          {fileName && (
-            <span className={styles.fileName}>{fileName}</span>
-          )}
+          {fileName && <span className={styles.fileName}>{fileName}</span>}
           {isDirty && <span className={styles.dirtyIndicator}>●</span>}
         </div>
         <button

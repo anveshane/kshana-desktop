@@ -8,10 +8,13 @@ import React, {
 import { Film, Play, Calendar, Pause, Download } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
-import { useTimelineData } from '../../../hooks/useTimelineData';
+import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
 import { useAudioController } from '../../../hooks/useAudioController';
 import { usePlaybackController } from '../../../hooks/usePlaybackController';
-import { resolveAssetPathForDisplay, resolveAssetPathWithRetry } from '../../../utils/pathResolver';
+import {
+  resolveAssetPathForDisplay,
+  resolveAssetPathWithRetry,
+} from '../../../utils/pathResolver';
 import { normalizePathForExport } from '../../../utils/pathNormalizer';
 import type { Artifact } from '../../../types/projectState';
 import type { SceneRef } from '../../../types/kshana/entities';
@@ -25,20 +28,15 @@ interface VideoCardProps {
   projectDirectory: string | null;
 }
 
-function VideoCard({
-  artifact,
-  formatDate,
-  projectDirectory,
-}: VideoCardProps) {
+function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
   const [videoPath, setVideoPath] = useState<string>('');
 
   useEffect(() => {
-    resolveAssetPathForDisplay(
-      artifact.file_path,
-      projectDirectory,
-    ).then((resolved) => {
-      setVideoPath(resolved);
-    });
+    resolveAssetPathForDisplay(artifact.file_path, projectDirectory).then(
+      (resolved) => {
+        setVideoPath(resolved);
+      },
+    );
   }, [artifact.file_path, projectDirectory]);
 
   return (
@@ -103,14 +101,16 @@ export default function VideoLibraryView({
     return map;
   }, [projectScenes]);
 
-  // Use unified timeline data hook (placement-based)
-  const { timelineItems, totalDuration } = useTimelineData(activeVersions);
-  
+  // Use unified timeline data from context (single source of truth for TimelinePanel + VideoLibraryView)
+  const { timelineItems, totalDuration } = useTimelineDataContext();
+
   // Get video artifacts from asset manifest for the sidebar
   const videoArtifacts = useMemo(() => {
     if (!assetManifest?.assets) return [];
     return assetManifest.assets
-      .filter((asset) => asset.type === 'scene_video' || asset.type === 'final_video')
+      .filter(
+        (asset) => asset.type === 'scene_video' || asset.type === 'final_video',
+      )
       .map((asset) => {
         let createdAt: string;
         if (asset.created_at) {
@@ -192,10 +192,13 @@ export default function VideoLibraryView({
         onPlaybackTimeChange(newTime);
         lastPlaybackTimeRef.current = newTime;
       } else {
-        console.warn('[VideoLibraryView] Prevented backward jump during playback:', {
-          from: lastTime,
-          to: newTime,
-        });
+        console.warn(
+          '[VideoLibraryView] Prevented backward jump during playback:',
+          {
+            from: lastTime,
+            to: newTime,
+          },
+        );
       }
     },
     [onPlaybackTimeChange],
@@ -203,7 +206,10 @@ export default function VideoLibraryView({
 
   // Get current video and image from playback controller
   // currentItem is already provided by usePlaybackController
-  const currentVideo = currentItem?.type === 'video' ? currentItem : null;
+  const currentVideo =
+    currentItem?.type === 'video' || currentItem?.type === 'infographic'
+      ? currentItem
+      : null;
   const currentImage = currentItem?.type === 'image' ? currentItem : null;
 
   // Log when currentVideo changes
@@ -225,10 +231,10 @@ export default function VideoLibraryView({
   const audioFile = useMemo(() => {
     const audioItems = timelineItems.filter((item) => item.type === 'audio');
     if (audioItems.length === 0) return null;
-    
+
     const firstAudio = audioItems[0];
     if (!firstAudio.audioPath) return null;
-    
+
     return {
       path: firstAudio.audioPath,
       duration: firstAudio.duration,
@@ -236,7 +242,9 @@ export default function VideoLibraryView({
   }, [timelineItems]); // ✅ Stable - only changes when audio file actually changes
 
   // Resolve audio path
-  const [resolvedAudioPath, setResolvedAudioPath] = useState<string | null>(null);
+  const [resolvedAudioPath, setResolvedAudioPath] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!audioFile?.path || !projectDirectory) {
@@ -245,21 +253,20 @@ export default function VideoLibraryView({
     }
 
     // Use retry logic similar to image placements to handle file copy timing issues
-    resolveAssetPathWithRetry(
-      audioFile.path,
-      projectDirectory,
-      {
-        maxRetries: 3,
-        retryDelayBase: 500,
-        timeout: 5000,
-        verifyExists: true,
-      },
-    )
+    resolveAssetPathWithRetry(audioFile.path, projectDirectory, {
+      maxRetries: 3,
+      retryDelayBase: 500,
+      timeout: 5000,
+      verifyExists: true,
+    })
       .then((resolved) => {
         setResolvedAudioPath(resolved);
       })
       .catch((error) => {
-        console.error('[VideoLibraryView] Failed to resolve audio path:', error);
+        console.error(
+          '[VideoLibraryView] Failed to resolve audio path:',
+          error,
+        );
         setResolvedAudioPath(null);
       });
   }, [audioFile?.path, projectDirectory]);
@@ -292,7 +299,7 @@ export default function VideoLibraryView({
       return currentImage.imagePath || null;
     }
 
-    const placementNumber = currentImage.placementNumber;
+    const { placementNumber } = currentImage;
     if (placementNumber === undefined) {
       console.warn('[VideoLibraryView] Current image has no placement number');
       return currentImage.imagePath || null;
@@ -310,14 +317,18 @@ export default function VideoLibraryView({
           asset.version === activeImageVersion,
       );
       if (imageAsset?.path) {
-        console.log(`[VideoLibraryView] Found asset for placement ${placementNumber} (version ${activeImageVersion}):`, {
-          path: imageAsset.path,
-          assetId: imageAsset.id,
-        });
+        console.log(
+          `[VideoLibraryView] Found asset for placement ${placementNumber} (version ${activeImageVersion}):`,
+          {
+            path: imageAsset.path,
+            assetId: imageAsset.id,
+          },
+        );
         return imageAsset.path;
-      } else {
-        console.warn(`[VideoLibraryView] Specified version ${activeImageVersion} not found for placement ${placementNumber}, trying latest`);
       }
+      console.warn(
+        `[VideoLibraryView] Specified version ${activeImageVersion} not found for placement ${placementNumber}, trying latest`,
+      );
     }
 
     // Fallback: find latest image asset for this placement
@@ -332,33 +343,45 @@ export default function VideoLibraryView({
       const sorted = imageAssets.sort((a, b) => b.version - a.version);
       const latest = sorted[0]!;
       if (latest.path) {
-        console.log(`[VideoLibraryView] Using latest asset for placement ${placementNumber}:`, {
-          path: latest.path,
-          version: latest.version,
-          assetId: latest.id,
-        });
+        console.log(
+          `[VideoLibraryView] Using latest asset for placement ${placementNumber}:`,
+          {
+            path: latest.path,
+            version: latest.version,
+            assetId: latest.id,
+          },
+        );
         return latest.path;
-      } else {
-        console.error(`[VideoLibraryView] Latest asset for placement ${placementNumber} has no path:`, {
+      }
+      console.error(
+        `[VideoLibraryView] Latest asset for placement ${placementNumber} has no path:`,
+        {
           assetId: latest.id,
           version: latest.version,
-        });
-      }
+        },
+      );
     } else {
-      console.warn(`[VideoLibraryView] No image assets found for placement ${placementNumber}`, {
-        totalAssets: assetManifest.assets.length,
-        imageAssets: assetManifest.assets.filter(a => a.type === 'scene_image').map(a => ({
-          id: a.id,
-          placementNumber: a.metadata?.placementNumber,
-          scene_number: a.scene_number,
-          path: a.path,
-        })),
-      });
+      console.warn(
+        `[VideoLibraryView] No image assets found for placement ${placementNumber}`,
+        {
+          totalAssets: assetManifest.assets.length,
+          imageAssets: assetManifest.assets
+            .filter((a) => a.type === 'scene_image')
+            .map((a) => ({
+              id: a.id,
+              placementNumber: a.metadata?.placementNumber,
+              scene_number: a.scene_number,
+              path: a.path,
+            })),
+        },
+      );
     }
 
     // Use imagePath from timeline item if available
     if (currentImage.imagePath) {
-      console.log(`[VideoLibraryView] Using imagePath from timeline item for placement ${placementNumber}`);
+      console.log(
+        `[VideoLibraryView] Using imagePath from timeline item for placement ${placementNumber}`,
+      );
       return currentImage.imagePath;
     }
 
@@ -385,12 +408,11 @@ export default function VideoLibraryView({
       });
   }, [sceneImagePath, projectDirectory]);
 
-
   // Handle video play/pause
   const handlePlayPause = useCallback(() => {
     const newPlayingState = !isPlaying;
     onPlaybackStateChange(newPlayingState);
-    
+
     // Audio play/pause is handled by audio controller
   }, [isPlaying, onPlaybackStateChange]);
 
@@ -420,7 +442,10 @@ export default function VideoLibraryView({
   const handleVideoEnd = useCallback(() => {
     if (isDragging) return; // Don't auto-advance during dragging
 
-    if (currentItemIndex !== null && currentItemIndex < timelineItems.length - 1) {
+    if (
+      currentItemIndex !== null &&
+      currentItemIndex < timelineItems.length - 1
+    ) {
       const nextIndex = currentItemIndex + 1;
       const nextItem = timelineItems[nextIndex];
       if (nextItem) {
@@ -479,7 +504,7 @@ export default function VideoLibraryView({
           videoRef.current.currentTime = videoTime;
         }
       }
-      
+
       // Audio position is managed by timeline-driven sync, not scene logic
 
       // Clear seeking flag after a short delay
@@ -515,7 +540,7 @@ export default function VideoLibraryView({
       console.log('[VideoLibraryView] No currentVideo for versionPath');
       return null;
     }
-    
+
     console.log('[VideoLibraryView] Calculating versionPath:', {
       currentVideo: {
         label: currentVideo.label,
@@ -525,14 +550,18 @@ export default function VideoLibraryView({
         endTime: currentVideo.endTime,
       },
     });
-    
-    const placementNumber = currentVideo.placementNumber;
+
+    const { placementNumber } = currentVideo;
     if (placementNumber === undefined) {
       const path = currentVideo.videoPath || null;
       if (!path) {
-        console.warn(`[VideoLibraryView] No videoPath for video: ${currentVideo.label}`);
+        console.warn(
+          `[VideoLibraryView] No videoPath for video: ${currentVideo.label}`,
+        );
       } else {
-        console.log(`[VideoLibraryView] Using videoPath directly (no placement number): ${path}`);
+        console.log(
+          `[VideoLibraryView] Using videoPath directly (no placement number): ${path}`,
+        );
       }
       return path;
     }
@@ -555,10 +584,13 @@ export default function VideoLibraryView({
           asset.version === activeVideoVersion,
       );
       if (videoAsset) {
-        console.log(`[VideoLibraryView] Found video asset for placement ${placementNumber}, version ${activeVideoVersion}:`, {
-          path: videoAsset.path,
-          assetId: videoAsset.id,
-        });
+        console.log(
+          `[VideoLibraryView] Found video asset for placement ${placementNumber}, version ${activeVideoVersion}:`,
+          {
+            path: videoAsset.path,
+            assetId: videoAsset.id,
+          },
+        );
         return videoAsset.path;
       }
       console.warn(
@@ -573,28 +605,29 @@ export default function VideoLibraryView({
         `[VideoLibraryView] No videoPath found for placement ${placementNumber} (${currentVideo.label})`,
       );
     } else {
-      console.log(`[VideoLibraryView] Using fallback videoPath: ${fallbackPath}`);
+      console.log(
+        `[VideoLibraryView] Using fallback videoPath: ${fallbackPath}`,
+      );
     }
-    
+
     console.log('[VideoLibraryView] versionPath result:', fallbackPath);
     return fallbackPath;
-  }, [
-    currentVideo,
-    activeVersions,
-    assetManifest,
-  ]);
+  }, [currentVideo, activeVersions, assetManifest]);
 
   // If versionPath is null but videoPath exists, use videoPath directly as fallback
   const effectiveVersionPath = useMemo(() => {
     if (versionPath) return versionPath;
-    
+
     // Fallback: if versionPath is null but videoPath exists, use videoPath directly
     const fallbackPath = currentVideo?.videoPath;
     if (!versionPath && fallbackPath) {
-      console.warn('[VideoLibraryView] versionPath is null, using fallback videoPath:', fallbackPath);
+      console.warn(
+        '[VideoLibraryView] versionPath is null, using fallback videoPath:',
+        fallbackPath,
+      );
       return fallbackPath;
     }
-    
+
     return versionPath;
   }, [versionPath, currentVideo]);
 
@@ -607,15 +640,14 @@ export default function VideoLibraryView({
     });
 
     if (!effectiveVersionPath) {
-      console.log('[VideoLibraryView] No effectiveVersionPath, clearing currentVideoPath');
+      console.log(
+        '[VideoLibraryView] No effectiveVersionPath, clearing currentVideoPath',
+      );
       setCurrentVideoPath('');
       return;
     }
 
-    resolveAssetPathForDisplay(
-      effectiveVersionPath,
-      projectDirectory || null,
-    )
+    resolveAssetPathForDisplay(effectiveVersionPath, projectDirectory || null)
       .then((resolved) => {
         console.log('[VideoLibraryView] Video path resolved:', {
           effectiveVersionPath,
@@ -624,12 +656,17 @@ export default function VideoLibraryView({
         if (resolved && resolved.trim()) {
           setCurrentVideoPath(resolved);
         } else {
-          console.warn(`[VideoLibraryView] Empty resolved path for: ${effectiveVersionPath}`);
+          console.warn(
+            `[VideoLibraryView] Empty resolved path for: ${effectiveVersionPath}`,
+          );
           setCurrentVideoPath('');
         }
       })
       .catch((error) => {
-        console.error(`[VideoLibraryView] Failed to resolve video path: ${effectiveVersionPath}`, error);
+        console.error(
+          `[VideoLibraryView] Failed to resolve video path: ${effectiveVersionPath}`,
+          error,
+        );
         setCurrentVideoPath('');
       });
   }, [effectiveVersionPath, projectDirectory]);
@@ -661,14 +698,20 @@ export default function VideoLibraryView({
       // If currentVideo exists and is a video type, we're waiting for path resolution
       // But we should clear any existing video source to prevent showing stale content
       if (currentVideo && currentVideo.type === 'video') {
-        if (videoElement.src && videoElement.src !== currentVideoPathRef.current) {
+        if (
+          videoElement.src &&
+          videoElement.src !== currentVideoPathRef.current
+        ) {
           // We have an old video loaded, clear it while waiting for new path
-          console.log('[VideoLibraryView] Waiting for video path resolution, clearing old video:', {
-            currentVideoLabel: currentVideo.label,
-            currentVideoPath,
-            oldSrc: videoElement.src,
-            prevPathRef: currentVideoPathRef.current,
-          });
+          console.log(
+            '[VideoLibraryView] Waiting for video path resolution, clearing old video:',
+            {
+              currentVideoLabel: currentVideo.label,
+              currentVideoPath,
+              oldSrc: videoElement.src,
+              prevPathRef: currentVideoPathRef.current,
+            },
+          );
           videoElement.pause();
           videoElement.src = '';
           videoElement.load();
@@ -681,12 +724,15 @@ export default function VideoLibraryView({
         });
         return; // Wait for path resolution
       }
-      
+
       // Only clear if we're sure there's no video
-      console.warn('[VideoLibraryView] Empty currentVideoPath, clearing video source:', {
-        currentVideoLabel: currentVideo?.label,
-        currentVideoPath,
-      });
+      console.warn(
+        '[VideoLibraryView] Empty currentVideoPath, clearing video source:',
+        {
+          currentVideoLabel: currentVideo?.label,
+          currentVideoPath,
+        },
+      );
       if (videoElement.src) {
         videoElement.pause();
         videoElement.src = '';
@@ -706,8 +752,13 @@ export default function VideoLibraryView({
 
       // If we're switching to a new video and the old video is different,
       // clear the video element immediately to prevent showing stale content
-      if (currentVideoPathRef.current && currentVideoPathRef.current !== currentVideoPath) {
-        console.log('[VideoLibraryView] Clearing old video source before loading new one');
+      if (
+        currentVideoPathRef.current &&
+        currentVideoPathRef.current !== currentVideoPath
+      ) {
+        console.log(
+          '[VideoLibraryView] Clearing old video source before loading new one',
+        );
         videoElement.pause();
         videoElement.src = '';
         videoElement.load();
@@ -721,27 +772,43 @@ export default function VideoLibraryView({
 
       // Clear previous error handlers
       const handleError = (e: Event) => {
-        const error = videoElement.error;
+        const { error } = videoElement;
         if (error) {
-          console.error(`[VideoLibraryView] Video error for ${currentVideo.label}:`, {
-            code: error.code,
-            message: error.message,
-            path: currentVideoPath,
-            effectiveVersionPath,
-            videoPath: currentVideo.videoPath,
-          });
-          
+          console.error(
+            `[VideoLibraryView] Video error for ${currentVideo.label}:`,
+            {
+              code: error.code,
+              message: error.message,
+              path: currentVideoPath,
+              effectiveVersionPath,
+              videoPath: currentVideo.videoPath,
+            },
+          );
+
           // Try fallback: use videoPath directly if versionPath failed
-          if (currentVideo?.videoPath && currentVideoPath !== currentVideo.videoPath) {
-            console.log('[VideoLibraryView] Video load error, trying fallback path:', currentVideo.videoPath);
+          if (
+            currentVideo?.videoPath &&
+            currentVideoPath !== currentVideo.videoPath
+          ) {
+            console.log(
+              '[VideoLibraryView] Video load error, trying fallback path:',
+              currentVideo.videoPath,
+            );
             // Trigger re-resolution with fallback path
             resolveAssetPathForDisplay(
               currentVideo.videoPath,
               projectDirectory || null,
             )
               .then((resolved) => {
-                if (resolved && resolved.trim() && resolved !== currentVideoPath) {
-                  console.log('[VideoLibraryView] Fallback path resolved successfully:', resolved);
+                if (
+                  resolved &&
+                  resolved.trim() &&
+                  resolved !== currentVideoPath
+                ) {
+                  console.log(
+                    '[VideoLibraryView] Fallback path resolved successfully:',
+                    resolved,
+                  );
                   // Update the video element src directly
                   if (videoRef.current) {
                     videoRef.current.src = resolved;
@@ -750,7 +817,10 @@ export default function VideoLibraryView({
                 }
               })
               .catch((fallbackError) => {
-                console.error('[VideoLibraryView] Fallback path resolution also failed:', fallbackError);
+                console.error(
+                  '[VideoLibraryView] Fallback path resolution also failed:',
+                  fallbackError,
+                );
               });
           }
         }
@@ -766,7 +836,10 @@ export default function VideoLibraryView({
         // Resume playback if it was playing
         if (wasPlaying || isPlaying) {
           videoElement.play().catch((playError) => {
-            console.warn(`[VideoLibraryView] Play error for ${currentVideo.label}:`, playError);
+            console.warn(
+              `[VideoLibraryView] Play error for ${currentVideo.label}:`,
+              playError,
+            );
           });
         }
         videoElement.removeEventListener('canplay', handleCanPlay);
@@ -782,14 +855,19 @@ export default function VideoLibraryView({
         // Resume playback if it was playing
         if (wasPlaying || isPlaying) {
           videoElement.play().catch((playError) => {
-            console.warn(`[VideoLibraryView] Play error for ${currentVideo.label}:`, playError);
+            console.warn(
+              `[VideoLibraryView] Play error for ${currentVideo.label}:`,
+              playError,
+            );
           });
         }
         videoElement.removeEventListener('loadeddata', handleLoadedData);
       };
 
       const handleLoadStart = () => {
-        console.log(`[VideoLibraryView] Loading video: ${currentVideo.label} from ${currentVideoPath}`);
+        console.log(
+          `[VideoLibraryView] Loading video: ${currentVideo.label} from ${currentVideoPath}`,
+        );
         isVideoLoadingRef.current = true;
       };
 
@@ -810,11 +888,14 @@ export default function VideoLibraryView({
       videoElement.muted = true; // Mute video audio so only imported audio track plays
       // Don't reset currentTime to 0 - let it be set by the loaded event handlers based on playbackTime
       videoElement.load();
-      console.log('[VideoLibraryView] Video element src set and load() called:', {
-        src: videoElement.src,
-        readyState: videoElement.readyState,
-        networkState: videoElement.networkState,
-      });
+      console.log(
+        '[VideoLibraryView] Video element src set and load() called:',
+        {
+          src: videoElement.src,
+          readyState: videoElement.readyState,
+          networkState: videoElement.networkState,
+        },
+      );
 
       return () => {
         videoElement.removeEventListener('error', handleError);
@@ -823,7 +904,14 @@ export default function VideoLibraryView({
         videoElement.removeEventListener('loadstart', handleLoadStart);
       };
     }
-  }, [currentVideo, currentVideoPath, isPlaying, isDragging, effectiveVersionPath, projectDirectory]);
+  }, [
+    currentVideo,
+    currentVideoPath,
+    isPlaying,
+    isDragging,
+    effectiveVersionPath,
+    projectDirectory,
+  ]);
 
   // Item index is now managed by usePlaybackController
   // No boundary checking logic needed - TimeIndex handles all lookups
@@ -895,12 +983,12 @@ export default function VideoLibraryView({
     }
 
     const videoElement = videoRef.current;
-    
+
     // Don't sync if video is not ready (still loading)
     if (videoElement.readyState < 2) {
       return;
     }
-    
+
     const expectedVideoTime = playbackTime - currentVideo.startTime;
 
     // Only update if there's a significant difference to avoid jitter
@@ -951,10 +1039,10 @@ export default function VideoLibraryView({
             audioItems[0].audioPath,
             projectDirectory,
           );
-          
+
           // Step 2: Normalize for export (strips file://)
           resolvedAudioPath = normalizePathForExport(displayPath);
-          
+
           console.log('[VideoDownload] Audio path resolution:', {
             original: audioItems[0].audioPath,
             display: displayPath,
@@ -975,24 +1063,33 @@ export default function VideoLibraryView({
           .filter((item) => item.type !== 'audio') // Exclude audio items
           .map(async (item, index) => {
             let resolvedPath = '';
-            if (item.type === 'video' && item.videoPath) {
+            if (
+              (item.type === 'video' || item.type === 'infographic') &&
+              item.videoPath
+            ) {
               resolvedPath = await resolveAssetPathForDisplay(
                 item.videoPath,
                 projectDirectory,
               );
-              console.log(`[VideoDownload] Resolved video ${index + 1}: ${item.videoPath} -> ${resolvedPath}`);
+              console.log(
+                `[VideoDownload] Resolved ${item.type} ${index + 1}: ${item.videoPath} -> ${resolvedPath}`,
+              );
             } else if (item.type === 'image' && item.imagePath) {
               resolvedPath = await resolveAssetPathForDisplay(
                 item.imagePath,
                 projectDirectory,
               );
-              console.log(`[VideoDownload] Resolved image ${index + 1}: ${item.imagePath} -> ${resolvedPath}`);
+              console.log(
+                `[VideoDownload] Resolved image ${index + 1}: ${item.imagePath} -> ${resolvedPath}`,
+              );
             }
 
-            const finalPath = resolvedPath || item.videoPath || item.imagePath || '';
-            
+            const finalPath =
+              resolvedPath || item.videoPath || item.imagePath || '';
+            const exportType =
+              item.type === 'infographic' ? 'video' : item.type;
             return {
-              type: item.type as 'video' | 'image' | 'placeholder',
+              type: exportType as 'video' | 'image' | 'placeholder',
               path: finalPath,
               duration: item.duration,
               startTime: item.startTime,
@@ -1004,7 +1101,11 @@ export default function VideoLibraryView({
       );
 
       // Filter out items with empty paths and log warnings
-      const skippedItems: Array<{ index: number; type: string; label?: string }> = [];
+      const skippedItems: Array<{
+        index: number;
+        type: string;
+        label?: string;
+      }> = [];
       const itemsData = itemsDataWithPaths.filter((item, index) => {
         const hasValidPath = item.path && item.path.trim() !== '';
         if (!hasValidPath) {
@@ -1013,32 +1114,45 @@ export default function VideoLibraryView({
             type: item.type,
             label: item.label,
           });
-          console.warn(`[VideoDownload] Skipping timeline item ${item.originalIndex + 1} (${item.type}): no file path`, {
-            type: item.type,
-            label: item.label,
-          });
+          console.warn(
+            `[VideoDownload] Skipping timeline item ${item.originalIndex + 1} (${item.type}): no file path`,
+            {
+              type: item.type,
+              label: item.label,
+            },
+          );
         }
         return hasValidPath;
       });
 
       if (skippedItems.length > 0) {
-        console.warn(`[VideoDownload] Skipped ${skippedItems.length} timeline item(s) with missing paths:`, skippedItems);
+        console.warn(
+          `[VideoDownload] Skipped ${skippedItems.length} timeline item(s) with missing paths:`,
+          skippedItems,
+        );
       }
 
       if (itemsData.length === 0) {
         console.error('[VideoDownload] No valid timeline items to compose');
-        alert('No valid timeline items found. Please ensure at least one timeline item has a valid video or image path.');
+        alert(
+          'No valid timeline items found. Please ensure at least one timeline item has a valid video or image path.',
+        );
         setIsDownloading(false);
         return;
       }
 
-      console.log(`[VideoDownload] Starting video composition with ${itemsData.length} valid item(s) (${skippedItems.length} skipped)...`);
-      console.log('[VideoDownload] Items data:', itemsData.map((item, i) => ({
-        index: i + 1,
-        type: item.type,
-        path: item.path.substring(0, 80) + '...',
-        duration: item.duration,
-      })));
+      console.log(
+        `[VideoDownload] Starting video composition with ${itemsData.length} valid item(s) (${skippedItems.length} skipped)...`,
+      );
+      console.log(
+        '[VideoDownload] Items data:',
+        itemsData.map((item, i) => ({
+          index: i + 1,
+          type: item.type,
+          path: `${item.path.substring(0, 80)}...`,
+          duration: item.duration,
+        })),
+      );
 
       // Compose the video with audio track
       // Type assertion needed due to TypeScript language server cache issue
@@ -1053,7 +1167,7 @@ export default function VideoLibraryView({
         projectDirectory: string,
         audioPath?: string,
       ) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
-      
+
       const result = await composeVideo(
         itemsData,
         projectDirectory,
@@ -1074,7 +1188,10 @@ export default function VideoLibraryView({
         return;
       }
 
-      console.log('[VideoDownload] Composition successful. Output:', result.outputPath);
+      console.log(
+        '[VideoDownload] Composition successful. Output:',
+        result.outputPath,
+      );
       console.log('[VideoDownload] Opening save dialog...');
 
       // Open save dialog
@@ -1090,7 +1207,8 @@ export default function VideoLibraryView({
       // Extract directory and filename from savePath
       const lastSlash = savePath.lastIndexOf('/');
       const saveDir = lastSlash >= 0 ? savePath.substring(0, lastSlash) : '';
-      const saveFileName = lastSlash >= 0 ? savePath.substring(lastSlash + 1) : savePath;
+      const saveFileName =
+        lastSlash >= 0 ? savePath.substring(lastSlash + 1) : savePath;
 
       console.log('[VideoDownload] Copying video to:', saveDir);
       console.log('[VideoDownload] Target filename:', saveFileName);
@@ -1206,7 +1324,7 @@ export default function VideoLibraryView({
                   onEnded={handleVideoEnd}
                   onError={(e) => {
                     const video = e.currentTarget;
-                    const error = video.error;
+                    const { error } = video;
                     if (error) {
                       console.error(`[VideoLibraryView] Video element error:`, {
                         code: error.code,
@@ -1215,8 +1333,14 @@ export default function VideoLibraryView({
                         label: currentVideo.label,
                       });
                       // Try fallback: use videoPath directly if versionPath failed
-                      if (currentVideo?.videoPath && currentVideoPath !== currentVideo.videoPath) {
-                        console.log('[VideoLibraryView] Video load error, will try fallback path:', currentVideo.videoPath);
+                      if (
+                        currentVideo?.videoPath &&
+                        currentVideoPath !== currentVideo.videoPath
+                      ) {
+                        console.log(
+                          '[VideoLibraryView] Video load error, will try fallback path:',
+                          currentVideo.videoPath,
+                        );
                       }
                     }
                   }}
@@ -1228,7 +1352,9 @@ export default function VideoLibraryView({
                 <div className={styles.videoPlaceholder}>
                   <Film size={48} className={styles.videoPlaceholderIcon} />
                   <p>Loading video...</p>
-                  <p className={styles.videoPlaceholderSubtext}>{currentVideo.label}</p>
+                  <p className={styles.videoPlaceholderSubtext}>
+                    {currentVideo.label}
+                  </p>
                 </div>
               )}
               <div className={styles.currentVideoLabel}>
@@ -1270,12 +1396,15 @@ export default function VideoLibraryView({
                     : undefined
                 }
               >
-                {currentItem && (currentItem.type === 'image' || currentItem.type === 'placeholder') && !resolvedSceneImagePath && (
-                  <div className={styles.scenePlaceholderContent}>
-                    <Film size={64} className={styles.scenePlaceholderIcon} />
-                    <h3>{currentItem.label}</h3>
-                  </div>
-                )}
+                {currentItem &&
+                  (currentItem.type === 'image' ||
+                    currentItem.type === 'placeholder') &&
+                  !resolvedSceneImagePath && (
+                    <div className={styles.scenePlaceholderContent}>
+                      <Film size={64} className={styles.scenePlaceholderIcon} />
+                      <h3>{currentItem.label}</h3>
+                    </div>
+                  )}
               </div>
               <div className={styles.playerControls}>
                 <button
@@ -1305,9 +1434,12 @@ export default function VideoLibraryView({
             <div className={styles.sceneInfoPanelCompact}>
               {currentItem.type === 'placeholder' ? (
                 <div className={styles.sceneMetadataCompact}>
-                  <span className={styles.sceneTitleCompact}>{currentItem.label}</span>
+                  <span className={styles.sceneTitleCompact}>
+                    {currentItem.label}
+                  </span>
                   <span className={styles.sceneMetaCompact}>
-                    {currentItem.startTime.toFixed(1)}s - {currentItem.endTime.toFixed(1)}s
+                    {currentItem.startTime.toFixed(1)}s -{' '}
+                    {currentItem.endTime.toFixed(1)}s
                   </span>
                 </div>
               ) : (
@@ -1316,12 +1448,14 @@ export default function VideoLibraryView({
                     {currentItem.label}
                     {currentItem.placementNumber && (
                       <span className={styles.sceneName}>
-                        {' '}(Placement {currentItem.placementNumber})
+                        {' '}
+                        (Placement {currentItem.placementNumber})
                       </span>
                     )}
                   </span>
                   <span className={styles.sceneMetaCompact}>
-                    {currentItem.startTime.toFixed(1)}s - {currentItem.endTime.toFixed(1)}s
+                    {currentItem.startTime.toFixed(1)}s -{' '}
+                    {currentItem.endTime.toFixed(1)}s
                   </span>
                 </div>
               )}

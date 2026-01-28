@@ -31,7 +31,9 @@ export default function ChatPanel() {
   const [agentName, setAgentName] = useState('Kshana');
   const [statusMessage, setStatusMessage] = useState('');
   const [currentPhase, setCurrentPhase] = useState<string | undefined>();
-  const [phaseDisplayName, setPhaseDisplayName] = useState<string | undefined>();
+  const [phaseDisplayName, setPhaseDisplayName] = useState<
+    string | undefined
+  >();
   const [showProjectDialog, setShowProjectDialog] = useState(false);
   const [projectDialogResolved, setProjectDialogResolved] = useState(false);
   const [hasUserSentMessage, setHasUserSentMessage] = useState(false);
@@ -132,7 +134,7 @@ export default function ChatPanel() {
     (content: string, type: string, author?: string) => {
       // Always process chunks - create message even with empty content to show thinking state
       const trimmedContent = content || '';
-      
+
       // Streaming types that should accumulate in the same message
       const streamingTypes = [
         'text_chunk',
@@ -151,7 +153,7 @@ export default function ChatPanel() {
           const existingMessage = prev.find(
             (msg) => msg.id === lastAssistantIdRef.current,
           );
-          
+
           if (
             existingMessage &&
             existingMessage.role === 'assistant' &&
@@ -181,9 +183,13 @@ export default function ChatPanel() {
         // Check for duplicate content only for substantial chunks (not during active streaming)
         // This prevents duplicate messages when stream restarts
         // Note: We check if we're currently streaming by seeing if lastAssistantIdRef points to a message
-        const currentlyStreaming = lastAssistantIdRef.current && 
-          prev.some(msg => msg.id === lastAssistantIdRef.current && msg.role === 'assistant');
-        
+        const currentlyStreaming =
+          lastAssistantIdRef.current &&
+          prev.some(
+            (msg) =>
+              msg.id === lastAssistantIdRef.current && msg.role === 'assistant',
+          );
+
         if (trimmedContent.length > 50 && !currentlyStreaming) {
           const contentHash = trimmedContent.substring(0, 100);
           for (
@@ -222,8 +228,10 @@ export default function ChatPanel() {
           lastMessage.role === 'assistant' &&
           lastMessage.type !== 'tool_call' &&
           lastMessage.type !== 'agent_question' && // Don't reuse questions
-          (lastMessage.type === normalizedType || 
-           (isStreamingType && (lastMessage.type === 'agent_text' || lastMessage.type === 'stream_chunk'))) &&
+          (lastMessage.type === normalizedType ||
+            (isStreamingType &&
+              (lastMessage.type === 'agent_text' ||
+                lastMessage.type === 'stream_chunk'))) &&
           (!lastMessage.content || lastMessage.content.trim().length === 0)
         ) {
           // Reuse the empty message
@@ -274,30 +282,37 @@ export default function ChatPanel() {
   }, []);
 
   // Internal tools that should not be displayed to users
-  const HIDDEN_TOOLS = useRef(new Set([
-    'todo_write',
-    'update_project',
-    'write_file',
-    'read_file',
-    'read_project',
-    'write_placement_plan',
-    'read_placement_plan',
-    'update_phase',
-    'transition_phase',
-    'update_plan_stage',
-  ]));
+  const HIDDEN_TOOLS = useRef(
+    new Set([
+      'todo_write',
+      'update_project',
+      'write_file',
+      'read_file',
+      'read_project',
+      'write_placement_plan',
+      'read_placement_plan',
+      'update_phase',
+      'transition_phase',
+      'update_plan_stage',
+    ]),
+  );
 
   // Debounce status updates to prevent flicker
-  const statusUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const debouncedSetStatus = useCallback((status: AgentStatus, message: string) => {
-    if (statusUpdateTimeoutRef.current) {
-      clearTimeout(statusUpdateTimeoutRef.current);
-    }
-    statusUpdateTimeoutRef.current = setTimeout(() => {
-      setAgentStatus(status);
-      setStatusMessage(message);
-    }, 100); // 100ms debounce
-  }, []);
+  const statusUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const debouncedSetStatus = useCallback(
+    (status: AgentStatus, message: string) => {
+      if (statusUpdateTimeoutRef.current) {
+        clearTimeout(statusUpdateTimeoutRef.current);
+      }
+      statusUpdateTimeoutRef.current = setTimeout(() => {
+        setAgentStatus(status);
+        setStatusMessage(message);
+      }, 100); // 100ms debounce
+    },
+    [],
+  );
 
   /**
    * Handle server payload from kshana-ink WebSocket.
@@ -339,7 +354,11 @@ export default function ChatPanel() {
             case 'connected':
               setAgentStatus('idle');
               setStatusMessage('Connected');
-              window.electron.logger.logStatusChange('idle', agentNameFromStatus, 'Connected');
+              window.electron.logger.logStatusChange(
+                'idle',
+                agentNameFromStatus,
+                'Connected',
+              );
               // Initial greeting logic with example prompts
               setMessages((prev) => {
                 const hasGreeting = prev.some((msg) => msg.type === 'greeting');
@@ -361,23 +380,46 @@ export default function ChatPanel() {
               // Update status only - don't create placeholder messages
               // Real agent text will come through stream_chunk messages
               debouncedSetStatus('thinking', statusMsg || 'Thinking...');
-              window.electron.logger.logStatusChange('thinking', agentNameFromStatus, statusMsg || 'Thinking...');
+              window.electron.logger.logStatusChange(
+                'thinking',
+                agentNameFromStatus,
+                statusMsg || 'Thinking...',
+              );
               break;
             case 'ready':
-              debouncedSetStatus('waiting', statusMsg || 'Waiting for input...');
-              window.electron.logger.logStatusChange('waiting', agentNameFromStatus, statusMsg || 'Waiting for input...');
+              debouncedSetStatus(
+                'waiting',
+                statusMsg || 'Waiting for input...',
+              );
+              window.electron.logger.logStatusChange(
+                'waiting',
+                agentNameFromStatus,
+                statusMsg || 'Waiting for input...',
+              );
               break;
             case 'completed':
               debouncedSetStatus('completed', statusMsg || 'Task completed');
-              window.electron.logger.logStatusChange('completed', agentNameFromStatus, statusMsg || 'Task completed');
+              window.electron.logger.logStatusChange(
+                'completed',
+                agentNameFromStatus,
+                statusMsg || 'Task completed',
+              );
               break;
             case 'error':
               debouncedSetStatus('error', statusMsg);
-              window.electron.logger.logStatusChange('error', agentNameFromStatus, statusMsg);
+              window.electron.logger.logStatusChange(
+                'error',
+                agentNameFromStatus,
+                statusMsg,
+              );
               break;
             default:
               setStatusMessage(statusMsg);
-              window.electron.logger.logStatusChange(status, agentNameFromStatus, statusMsg);
+              window.electron.logger.logStatusChange(
+                status,
+                agentNameFromStatus,
+                statusMsg,
+              );
           }
           break;
         }
@@ -419,22 +461,33 @@ export default function ChatPanel() {
             /^I need to (create|transition)/i,
             /^Please manually/i,
           ];
-          
+
           const trimmedContent = content.trim();
           const isBlockedMessage = /^I am blocked/i.test(trimmedContent);
-          const shouldSkip = skipPatterns.some(pattern => pattern.test(trimmedContent));
-          
+          const shouldSkip = skipPatterns.some((pattern) =>
+            pattern.test(trimmedContent),
+          );
+
           // Show warning for blocked messages instead of hiding them completely
           if (isBlockedMessage && !done) {
-            console.warn('[ChatPanel] Agent loop detected - blocked message:', trimmedContent.substring(0, 100));
+            console.warn(
+              '[ChatPanel] Agent loop detected - blocked message:',
+              trimmedContent.substring(0, 100),
+            );
             // Show a condensed warning message to user
-            appendSystemMessage('⚠️ Agent retrying phase transition (circuit breaker will activate if needed)...', 'status');
+            appendSystemMessage(
+              '⚠️ Agent retrying phase transition (circuit breaker will activate if needed)...',
+              'status',
+            );
             // Still skip the actual blocked message text to avoid clutter
             break;
           }
-          
+
           if (shouldSkip && !done) {
-            console.log('[ChatPanel] Skipping redundant thinking message:', trimmedContent.substring(0, 50));
+            console.log(
+              '[ChatPanel] Skipping redundant thinking message:',
+              trimmedContent.substring(0, 50),
+            );
             break;
           }
 
@@ -499,9 +552,14 @@ export default function ChatPanel() {
 
             // Calculate duration if available
             const duration = (data.duration as number) ?? 0;
-            
+
             // Log tool completion
-            window.electron.logger.logToolComplete(toolName, cleanedResult, duration, toolStatus === 'error');
+            window.electron.logger.logToolComplete(
+              toolName,
+              cleanedResult,
+              duration,
+              toolStatus === 'error',
+            );
 
             // Create message for completed tool call
             lastAssistantIdRef.current = null;
@@ -521,11 +579,15 @@ export default function ChatPanel() {
                 duration,
               },
             });
-            
+
             // Check for phase transitions in update_project results
-            if (toolName === 'update_project' && cleanedResult && typeof cleanedResult === 'object') {
+            if (
+              toolName === 'update_project' &&
+              cleanedResult &&
+              typeof cleanedResult === 'object'
+            ) {
               const resultObj = cleanedResult as Record<string, unknown>;
-              
+
               // Update current phase from any update_project result
               if (resultObj.current_phase) {
                 setCurrentPhase(resultObj.current_phase as string);
@@ -533,7 +595,7 @@ export default function ChatPanel() {
               if (resultObj.new_phase_name) {
                 setPhaseDisplayName(resultObj.new_phase_name as string);
               }
-              
+
               if (resultObj._phaseTransition) {
                 const transition = resultObj._phaseTransition as {
                   fromPhase: string;
@@ -544,11 +606,13 @@ export default function ChatPanel() {
                   transition.fromPhase,
                   transition.toPhase,
                   true,
-                  `Transitioned to ${transition.displayName || transition.toPhase}`
+                  `Transitioned to ${transition.displayName || transition.toPhase}`,
                 );
                 // Update phase state
                 setCurrentPhase(transition.toPhase);
-                setPhaseDisplayName(transition.displayName || transition.toPhase);
+                setPhaseDisplayName(
+                  transition.displayName || transition.toPhase,
+                );
               }
             }
           } else if (toolStatus === 'started') {
@@ -556,7 +620,11 @@ export default function ChatPanel() {
             // This matches CLI which doesn't show "started" messages
             debouncedSetStatus('executing', `Running ${toolName}...`);
             window.electron.logger.logToolStart(toolName, args);
-            window.electron.logger.logStatusChange('executing', agentName, `Running ${toolName}...`);
+            window.electron.logger.logStatusChange(
+              'executing',
+              agentName,
+              `Running ${toolName}...`,
+            );
           }
           break;
         }
@@ -567,7 +635,7 @@ export default function ChatPanel() {
           if (output) {
             // Log agent response
             window.electron.logger.logAgentText(output, agentName);
-            
+
             // Replace last assistant message if it exists (could be agent_text or stream_chunk)
             // to avoid duplicates
             setMessages((prev) => {
@@ -640,12 +708,18 @@ export default function ChatPanel() {
           if (responseStatus === 'completed') {
             setAgentStatus('completed');
             setStatusMessage('Completed');
-            window.electron.logger.logStatusChange('completed', agentName, 'Completed');
+            window.electron.logger.logStatusChange(
+              'completed',
+              agentName,
+              'Completed',
+            );
           } else if (responseStatus === 'error') {
             setAgentStatus('error');
             setStatusMessage('Error');
             window.electron.logger.logStatusChange('error', agentName, 'Error');
-            window.electron.logger.logError('An error occurred while processing your request.');
+            window.electron.logger.logError(
+              'An error occurred while processing your request.',
+            );
             appendSystemMessage(
               'An error occurred while processing your request.',
               'error',
@@ -674,8 +748,12 @@ export default function ChatPanel() {
           if (question) {
             setAgentStatus('waiting');
             setStatusMessage('Waiting for your input');
-            window.electron.logger.logStatusChange('waiting', agentName, 'Waiting for your input');
-            
+            window.electron.logger.logStatusChange(
+              'waiting',
+              agentName,
+              'Waiting for your input',
+            );
+
             // Log question
             const questionOptions = rawOptions
               ? rawOptions.map((opt) =>
@@ -686,7 +764,7 @@ export default function ChatPanel() {
               question,
               questionOptions,
               questionType === 'confirm',
-              timeout
+              timeout,
             );
 
             // Update existing question message if it exists to avoid duplicates
@@ -762,9 +840,12 @@ export default function ChatPanel() {
           if (todos?.length) {
             // Log todo update
             window.electron.logger.logTodoUpdate(
-              todos.map((t) => ({ content: t.content || t.id, status: t.status }))
+              todos.map((t) => ({
+                content: t.content || t.id,
+                status: t.status,
+              })),
             );
-            
+
             if (lastTodoMessageIdRef.current) {
               setMessages((prev) =>
                 prev.map((msg) =>
@@ -794,7 +875,10 @@ export default function ChatPanel() {
           appendSystemMessage(errorMsg, 'error');
           setAgentStatus('error');
           setStatusMessage(errorMsg);
-          window.electron.logger.logError(errorMsg, data as Record<string, unknown>);
+          window.electron.logger.logError(
+            errorMsg,
+            data as Record<string, unknown>,
+          );
           window.electron.logger.logStatusChange('error', agentName, errorMsg);
           break;
         }
@@ -809,13 +893,20 @@ export default function ChatPanel() {
           break;
       }
     },
-    [appendAssistantChunk, appendMessage, appendSystemMessage, debouncedSetStatus],
+    [
+      appendAssistantChunk,
+      appendMessage,
+      appendSystemMessage,
+      debouncedSetStatus,
+    ],
   );
 
   const connectWebSocket = useCallback(async (): Promise<WebSocket> => {
     // Block connection if project dialog is showing
     if (showProjectDialog && !projectDialogResolved) {
-      throw new Error('Project selection dialog is open. Please choose an option first.');
+      throw new Error(
+        'Project selection dialog is open. Please choose an option first.',
+      );
     }
 
     // Prevent duplicate connections
@@ -850,7 +941,7 @@ export default function ChatPanel() {
 
     connectingRef.current = true;
     setConnectionState('connecting');
-    
+
     try {
       const currentState = await window.electron.backend.getState();
       if (currentState.status !== 'ready') {
@@ -872,9 +963,14 @@ export default function ChatPanel() {
 
       if (projectDirectory) {
         url.searchParams.set('project_dir', projectDirectory);
-        console.log('[ChatPanel] Set project_dir query param:', projectDirectory);
+        console.log(
+          '[ChatPanel] Set project_dir query param:',
+          projectDirectory,
+        );
       } else {
-        console.warn('[ChatPanel] No projectDirectory available - files may not be saved correctly');
+        console.warn(
+          '[ChatPanel] No projectDirectory available - files may not be saved correctly',
+        );
       }
 
       console.log('[ChatPanel] Final WebSocket URL:', url.toString());
@@ -924,7 +1020,10 @@ export default function ChatPanel() {
               reconnectTimeoutRef.current = null;
               connectWebSocket()
                 .then(() => {
-                  appendSystemMessage('Reconnected to backend successfully', 'status');
+                  appendSystemMessage(
+                    'Reconnected to backend successfully',
+                    'status',
+                  );
                 })
                 .catch((err) => {
                   appendSystemMessage(
@@ -950,7 +1049,13 @@ export default function ChatPanel() {
       setConnectionState('disconnected');
       throw error;
     }
-  }, [handleServerPayload, projectDirectory, appendSystemMessage, showProjectDialog, projectDialogResolved]);
+  }, [
+    handleServerPayload,
+    projectDirectory,
+    appendSystemMessage,
+    showProjectDialog,
+    projectDialogResolved,
+  ]);
 
   const sendResponse = useCallback(
     async (content: string) => {
@@ -958,10 +1063,10 @@ export default function ChatPanel() {
       try {
         // Log user response
         window.electron.logger.logUserInput(content);
-        
+
         // Mark that user has sent their first message
         setHasUserSentMessage(true);
-        
+
         const socket = await connectWebSocket();
         socket.send(
           JSON.stringify({
@@ -984,7 +1089,9 @@ export default function ChatPanel() {
         });
       } catch (error) {
         console.error('Failed to send response', error);
-        window.electron.logger.logError('Failed to send response', { error: (error as Error).message });
+        window.electron.logger.logError('Failed to send response', {
+          error: (error as Error).message,
+        });
       }
     },
     [appendMessage, connectWebSocket],
@@ -994,10 +1101,10 @@ export default function ChatPanel() {
     async (content: string) => {
       // Log user input
       window.electron.logger.logUserInput(content);
-      
+
       // Mark that user has sent their first message
       setHasUserSentMessage(true);
-      
+
       appendMessage({
         role: 'user',
         type: 'message',
@@ -1006,7 +1113,11 @@ export default function ChatPanel() {
 
       setAgentStatus('thinking');
       setStatusMessage('Processing...');
-      window.electron.logger.logStatusChange('thinking', agentName, 'Processing...');
+      window.electron.logger.logStatusChange(
+        'thinking',
+        agentName,
+        'Processing...',
+      );
 
       try {
         const socket = await connectWebSocket();
@@ -1031,7 +1142,9 @@ export default function ChatPanel() {
         const errorMsg = `Unable to send message: ${(error as Error).message}`;
         appendSystemMessage(errorMsg, 'error');
         setAgentStatus('error');
-        window.electron.logger.logError(errorMsg, { error: (error as Error).message });
+        window.electron.logger.logError(errorMsg, {
+          error: (error as Error).message,
+        });
       }
     },
     [appendMessage, connectWebSocket, appendSystemMessage, agentName],
@@ -1040,7 +1153,11 @@ export default function ChatPanel() {
   useEffect(() => {
     const bootstrap = async () => {
       const state = await window.electron.backend.getState();
-      if (state.status === 'ready' && !wsRef.current && !connectingRef.current) {
+      if (
+        state.status === 'ready' &&
+        !wsRef.current &&
+        !connectingRef.current
+      ) {
         // Check for existing project before connecting
         if (projectDirectory && !projectDialogResolved) {
           try {
@@ -1088,7 +1205,13 @@ export default function ChatPanel() {
         clearTimeout(statusUpdateTimeoutRef.current);
       }
     };
-  }, [connectWebSocket, appendSystemMessage, disconnectWebSocket, projectDirectory, projectDialogResolved]);
+  }, [
+    connectWebSocket,
+    appendSystemMessage,
+    disconnectWebSocket,
+    projectDirectory,
+    projectDialogResolved,
+  ]);
 
   // Clear chat and reconnect when workspace changes
   const prevProjectDirectoryRef = useRef<string | null>(null);
@@ -1097,9 +1220,9 @@ export default function ChatPanel() {
     if (projectDirectory === prevProjectDirectoryRef.current) {
       return;
     }
-    
+
     prevProjectDirectoryRef.current = projectDirectory || null;
-    
+
     console.log('[ChatPanel] projectDirectory changed:', {
       newValue: projectDirectory,
       hasValue: !!projectDirectory,
@@ -1110,11 +1233,11 @@ export default function ChatPanel() {
       setShowProjectDialog(false);
       return;
     }
-    
+
     clearChat();
     setProjectDialogResolved(false);
     setShowProjectDialog(false);
-    
+
     // Reconnect with new project directory (will check for project in bootstrap)
     const reconnect = async () => {
       if (wsRef.current) {

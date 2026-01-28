@@ -1,21 +1,23 @@
 /**
  * Hook to read and watch placement markdown files
- * Watches for changes to image-placements.md and video-placements.md
+ * Watches for changes to image-placements.md, video-placements.md, and infographic-placements.md
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import {
-  parseImagePlacements,
   parseImagePlacementsWithErrors,
   parseVideoPlacements,
+  parseInfographicPlacementsWithErrors,
   type ParsedImagePlacement,
   type ParsedVideoPlacement,
+  type ParsedInfographicPlacement,
 } from '../utils/placementParsers';
 
 interface PlacementFilesState {
   imagePlacements: ParsedImagePlacement[];
   videoPlacements: ParsedVideoPlacement[];
+  infographicPlacements: ParsedInfographicPlacement[];
   isLoading: boolean;
   error: string | null;
 }
@@ -29,6 +31,7 @@ export function usePlacementFiles(): PlacementFilesState {
   const [state, setState] = useState<PlacementFilesState>({
     imagePlacements: [],
     videoPlacements: [],
+    infographicPlacements: [],
     isLoading: true,
     error: null,
   });
@@ -40,6 +43,7 @@ export function usePlacementFiles(): PlacementFilesState {
       setState({
         imagePlacements: [],
         videoPlacements: [],
+        infographicPlacements: [],
         isLoading: false,
         error: null,
       });
@@ -51,33 +55,53 @@ export function usePlacementFiles(): PlacementFilesState {
     try {
       const imagePlacementsPath = `${projectDirectory}/.kshana/agent/content/image-placements.md`;
       const videoPlacementsPath = `${projectDirectory}/.kshana/agent/content/video-placements.md`;
+      const infographicPlacementsPath = `${projectDirectory}/.kshana/agent/content/infographic-placements.md`;
 
-      // Read both files in parallel
-      const [imageContent, videoContent] = await Promise.all([
-        window.electron.project.readFile(imagePlacementsPath).catch(() => null),
-        window.electron.project.readFile(videoPlacementsPath).catch(() => null),
-      ]);
+      const [imageContent, videoContent, infographicContent] =
+        await Promise.all([
+          window.electron.project
+            .readFile(imagePlacementsPath)
+            .catch(() => null),
+          window.electron.project
+            .readFile(videoPlacementsPath)
+            .catch(() => null),
+          window.electron.project
+            .readFile(infographicPlacementsPath)
+            .catch(() => null),
+        ]);
 
-      // Parse placements (empty arrays if files don't exist)
       let imagePlacements: ParsedImagePlacement[] = [];
       let videoPlacements: ParsedVideoPlacement[] = [];
+      let infographicPlacements: ParsedInfographicPlacement[] = [];
       let parseError: string | null = null;
 
       if (imageContent) {
         try {
-          const parseResult = parseImagePlacementsWithErrors(imageContent, false);
+          const parseResult = parseImagePlacementsWithErrors(
+            imageContent,
+            false,
+          );
           imagePlacements = parseResult.placements;
 
           // Log warnings and errors
           if (parseResult.warnings.length > 0) {
-            console.warn('[usePlacementFiles] Image placement parser warnings:', parseResult.warnings);
+            console.warn(
+              '[usePlacementFiles] Image placement parser warnings:',
+              parseResult.warnings,
+            );
           }
           if (parseResult.errors.length > 0) {
-            console.error('[usePlacementFiles] Image placement parser errors:', parseResult.errors);
+            console.error(
+              '[usePlacementFiles] Image placement parser errors:',
+              parseResult.errors,
+            );
             parseError = `Found ${parseResult.errors.length} parsing error(s) in image-placements.md. Check console for details.`;
           }
         } catch (error) {
-          console.error('[usePlacementFiles] Failed to parse image placements:', error);
+          console.error(
+            '[usePlacementFiles] Failed to parse image placements:',
+            error,
+          );
           parseError = `Failed to parse image-placements.md: ${error instanceof Error ? error.message : String(error)}`;
         }
       }
@@ -86,26 +110,67 @@ export function usePlacementFiles(): PlacementFilesState {
         try {
           videoPlacements = parseVideoPlacements(videoContent);
         } catch (error) {
-          console.error('[usePlacementFiles] Failed to parse video placements:', error);
+          console.error(
+            '[usePlacementFiles] Failed to parse video placements:',
+            error,
+          );
           parseError = parseError
             ? `${parseError}; Failed to parse video-placements.md: ${error instanceof Error ? error.message : String(error)}`
             : `Failed to parse video-placements.md: ${error instanceof Error ? error.message : String(error)}`;
         }
       }
 
+      if (infographicContent) {
+        try {
+          const infographicResult = parseInfographicPlacementsWithErrors(
+            infographicContent,
+            false,
+          );
+          infographicPlacements = infographicResult.placements;
+          if (infographicResult.warnings?.length) {
+            console.warn(
+              '[usePlacementFiles] Infographic placement warnings:',
+              infographicResult.warnings,
+            );
+          }
+          if (infographicResult.errors?.length) {
+            console.warn(
+              '[usePlacementFiles] Infographic placement errors:',
+              infographicResult.errors,
+            );
+          }
+        } catch (error) {
+          console.error(
+            '[usePlacementFiles] Failed to parse infographic placements:',
+            error,
+          );
+          parseError = parseError
+            ? `${parseError}; Failed to parse infographic-placements.md: ${error instanceof Error ? error.message : String(error)}`
+            : `Failed to parse infographic-placements.md: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      }
+
       setState({
         imagePlacements,
         videoPlacements,
+        infographicPlacements,
         isLoading: false,
         error: parseError,
       });
     } catch (error) {
-      console.error('[usePlacementFiles] Failed to load placement files:', error);
+      console.error(
+        '[usePlacementFiles] Failed to load placement files:',
+        error,
+      );
       setState({
         imagePlacements: [],
         videoPlacements: [],
+        infographicPlacements: [],
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to load placement files',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Failed to load placement files',
       });
     }
   }, [projectDirectory]);
@@ -125,7 +190,8 @@ export function usePlacementFiles(): PlacementFilesState {
       // Check if placement files changed
       if (
         filePath.includes('image-placements.md') ||
-        filePath.includes('video-placements.md')
+        filePath.includes('video-placements.md') ||
+        filePath.includes('infographic-placements.md')
       ) {
         // Clear existing timeout
         if (debounceTimeoutRef.current) {

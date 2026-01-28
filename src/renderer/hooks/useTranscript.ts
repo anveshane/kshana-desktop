@@ -36,7 +36,9 @@ function parseTranscript(content: string): TranscriptEntry[] {
 
     // Match format: - N [HH:MM:SS,mmm --> HH:MM:SS,mmm] text
     // Example: - 1 [00:00:08,000 --> 00:00:24,000] The river Ganga...
-    const match = trimmedLine.match(/^-\s+(\d+)\s+\[(\d{2}):(\d{2}):(\d{2}),(\d{3})\s+-->\s+(\d{2}):(\d{2}):(\d{2}),(\d{3})\]\s+(.+)$/);
+    const match = trimmedLine.match(
+      /^-\s+(\d+)\s+\[(\d{2}):(\d{2}):(\d{2}),(\d{3})\s+-->\s+(\d{2}):(\d{2}):(\d{2}),(\d{3})\]\s+(.+)$/,
+    );
 
     if (match) {
       const index = parseInt(match[1] ?? '0', 10);
@@ -50,8 +52,10 @@ function parseTranscript(content: string): TranscriptEntry[] {
       const endMs = parseInt(match[9] ?? '0', 10);
       const text = match[10] ?? '';
 
-      const startTime = startHours * 3600 + startMinutes * 60 + startSeconds + startMs / 1000;
-      const endTime = endHours * 3600 + endMinutes * 60 + endSeconds + endMs / 1000;
+      const startTime =
+        startHours * 3600 + startMinutes * 60 + startSeconds + startMs / 1000;
+      const endTime =
+        endHours * 3600 + endMinutes * 60 + endSeconds + endMs / 1000;
 
       entries.push({
         index,
@@ -98,7 +102,9 @@ export function useTranscript(): TranscriptState {
 
     try {
       const transcriptPath = `${projectDirectory}/.kshana/agent/content/transcript.md`;
-      const content = await window.electron.project.readFile(transcriptPath).catch(() => null);
+      const content = await window.electron.project
+        .readFile(transcriptPath)
+        .catch(() => null);
 
       if (!content) {
         setState({
@@ -111,9 +117,8 @@ export function useTranscript(): TranscriptState {
       }
 
       const entries = parseTranscript(content);
-      const totalDuration = entries.length > 0
-        ? entries[entries.length - 1]!.endTime
-        : 0;
+      const totalDuration =
+        entries.length > 0 ? entries[entries.length - 1]!.endTime : 0;
 
       setState({
         entries,
@@ -127,7 +132,8 @@ export function useTranscript(): TranscriptState {
         entries: [],
         totalDuration: 0,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to load transcript',
+        error:
+          error instanceof Error ? error.message : 'Failed to load transcript',
       });
     }
   }, [projectDirectory]);

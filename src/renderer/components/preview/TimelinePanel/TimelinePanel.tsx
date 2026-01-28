@@ -21,11 +21,12 @@ import {
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
+import { type TimelineItem } from '../../../hooks/useTimelineData';
+import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
 import {
-  useTimelineData,
-  type TimelineItem,
-} from '../../../hooks/useTimelineData';
-import { resolveAssetPathForDisplay, resolveAssetPathWithRetry } from '../../../utils/pathResolver';
+  resolveAssetPathForDisplay,
+  resolveAssetPathWithRetry,
+} from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import type { TimelineMarker } from '../../../types/projectState';
 import type { KshanaTimelineMarker, ImportedClip } from '../../../types/kshana';
@@ -45,7 +46,10 @@ interface TimelineItemComponentProps {
   projectDirectory: string | null;
   isSelected: boolean;
   activeVersions?: Record<number, SceneVersions>; // placementNumber -> { image?: number, video?: number }
-  onItemClick?: (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => void;
+  onItemClick?: (
+    e: React.MouseEvent<HTMLDivElement>,
+    item: TimelineItem,
+  ) => void;
 }
 
 function TimelineItemComponent({
@@ -65,15 +69,17 @@ function TimelineItemComponent({
   const imageRetryCountRef = React.useRef<number>(0);
   const imageResolveAbortRef = React.useRef<AbortController | null>(null);
 
-  // Resolve video path from item
+  // Resolve video path from item (video and infographic both use videoPath for mp4)
   useEffect(() => {
-    if (item.type === 'video' && item.videoPath) {
-      resolveAssetPathForDisplay(
-        item.videoPath,
-        projectDirectory,
-      ).then((resolved) => {
-        setVideoPath(resolved);
-      });
+    if (
+      (item.type === 'video' || item.type === 'infographic') &&
+      item.videoPath
+    ) {
+      resolveAssetPathForDisplay(item.videoPath, projectDirectory).then(
+        (resolved) => {
+          setVideoPath(resolved);
+        },
+      );
     } else {
       setVideoPath(null);
     }
@@ -103,30 +109,36 @@ function TimelineItemComponent({
     let pathToResolve: string | undefined = item.imagePath;
 
     // If no imagePath, try to find asset from manifest
-    if (!pathToResolve && item.placementNumber !== undefined && assetManifest?.assets) {
+    if (
+      !pathToResolve &&
+      item.placementNumber !== undefined &&
+      assetManifest?.assets
+    ) {
       const activeVersion = activeVersions[item.placementNumber]?.image;
-      const matchingAssets = assetManifest.assets.filter(
-        (a) => {
-          if (a.type !== 'scene_image') return false;
-          
-          // Handle type coercion (placementNumber might be number or string)
-          const assetPlacementNumber = a.metadata?.placementNumber;
-          const assetSceneNumber = a.scene_number;
-          const placementMatch = assetPlacementNumber !== undefined && 
-            (Number(assetPlacementNumber) === item.placementNumber || 
-             String(assetPlacementNumber) === String(item.placementNumber));
-          const sceneMatch = assetSceneNumber !== undefined &&
-            (Number(assetSceneNumber) === item.placementNumber ||
-             String(assetSceneNumber) === String(item.placementNumber));
-          
-          return placementMatch || sceneMatch;
-        }
-      );
+      const matchingAssets = assetManifest.assets.filter((a) => {
+        if (a.type !== 'scene_image') return false;
+
+        // Handle type coercion (placementNumber might be number or string)
+        const assetPlacementNumber = a.metadata?.placementNumber;
+        const assetSceneNumber = a.scene_number;
+        const placementMatch =
+          assetPlacementNumber !== undefined &&
+          (Number(assetPlacementNumber) === item.placementNumber ||
+            String(assetPlacementNumber) === String(item.placementNumber));
+        const sceneMatch =
+          assetSceneNumber !== undefined &&
+          (Number(assetSceneNumber) === item.placementNumber ||
+            String(assetSceneNumber) === String(item.placementNumber));
+
+        return placementMatch || sceneMatch;
+      });
 
       if (matchingAssets.length > 0) {
         let asset = matchingAssets[0]!;
         if (activeVersion !== undefined) {
-          const versionAsset = matchingAssets.find((a) => a.version === activeVersion);
+          const versionAsset = matchingAssets.find(
+            (a) => a.version === activeVersion,
+          );
           if (versionAsset) {
             asset = versionAsset;
           }
@@ -139,39 +151,44 @@ function TimelineItemComponent({
 
         if (asset.path) {
           pathToResolve = asset.path;
-          console.log(`[TimelineItemComponent] Found asset from manifest for ${item.label}:`, {
-            placementNumber: item.placementNumber,
-            assetPath: asset.path,
-            assetId: asset.id,
-            version: asset.version,
-          });
+          console.log(
+            `[TimelineItemComponent] Found asset from manifest for ${item.label}:`,
+            {
+              placementNumber: item.placementNumber,
+              assetPath: asset.path,
+              assetId: asset.id,
+              version: asset.version,
+            },
+          );
         }
       }
     }
 
     if (pathToResolve) {
-      console.log(`[TimelineItemComponent] Resolving image path for ${item.label}:`, {
-        itemImagePath: item.imagePath,
-        resolvedPath: pathToResolve,
-        projectDirectory,
-        placementNumber: item.placementNumber,
-      });
+      console.log(
+        `[TimelineItemComponent] Resolving image path for ${item.label}:`,
+        {
+          itemImagePath: item.imagePath,
+          resolvedPath: pathToResolve,
+          projectDirectory,
+          placementNumber: item.placementNumber,
+        },
+      );
 
       // Use retry logic for path resolution
-      resolveAssetPathWithRetry(
-        pathToResolve,
-        projectDirectory,
-        {
-          maxRetries: 3,
-          retryDelayBase: 500,
-          timeout: 5000,
-          verifyExists: true,
-        },
-      )
+      resolveAssetPathWithRetry(pathToResolve, projectDirectory, {
+        maxRetries: 3,
+        retryDelayBase: 500,
+        timeout: 5000,
+        verifyExists: true,
+      })
         .then(async (resolved) => {
           if (abortController.signal.aborted) return;
 
-          console.log(`[TimelineItemComponent] Resolved path for ${item.label}:`, resolved);
+          console.log(
+            `[TimelineItemComponent] Resolved path for ${item.label}:`,
+            resolved,
+          );
           setImageLoading(false);
           imageRetryCountRef.current = 0;
 
@@ -180,12 +197,17 @@ function TimelineItemComponent({
             try {
               const base64 = await imageToBase64(resolved);
               if (base64 && !abortController.signal.aborted) {
-                console.log(`[TimelineItemComponent] Using base64 for ${item.label}`);
+                console.log(
+                  `[TimelineItemComponent] Using base64 for ${item.label}`,
+                );
                 setImagePath(base64);
                 return;
               }
             } catch (error) {
-              console.warn(`[TimelineItemComponent] Failed to convert to base64:`, error);
+              console.warn(
+                `[TimelineItemComponent] Failed to convert to base64:`,
+                error,
+              );
             }
           }
           // Fallback to file:// path
@@ -196,14 +218,19 @@ function TimelineItemComponent({
         .catch((error) => {
           if (abortController.signal.aborted) return;
 
-          console.error(`[TimelineItemComponent] Failed to resolve image path for ${item.label}:`, error);
+          console.error(
+            `[TimelineItemComponent] Failed to resolve image path for ${item.label}:`,
+            error,
+          );
           setImageLoading(false);
-          
+
           // Retry mechanism for image load failures
           if (imageRetryCountRef.current < 3) {
             imageRetryCountRef.current += 1;
             const retryDelay = 1000 * imageRetryCountRef.current;
-            console.log(`[TimelineItemComponent] Retrying image load in ${retryDelay}ms (attempt ${imageRetryCountRef.current}/3)`);
+            console.log(
+              `[TimelineItemComponent] Retrying image load in ${retryDelay}ms (attempt ${imageRetryCountRef.current}/3)`,
+            );
             setTimeout(() => {
               if (!abortController.signal.aborted) {
                 // Trigger re-resolution by updating a dependency
@@ -217,12 +244,15 @@ function TimelineItemComponent({
         });
     } else {
       if (item.type === 'image') {
-        console.warn(`[TimelineItemComponent] No imagePath for ${item.label}:`, {
-          itemImagePath: item.imagePath,
-          placementNumber: item.placementNumber,
-          hasAssetManifest: !!assetManifest,
-          assetCount: assetManifest?.assets?.length || 0,
-        });
+        console.warn(
+          `[TimelineItemComponent] No imagePath for ${item.label}:`,
+          {
+            itemImagePath: item.imagePath,
+            placementNumber: item.placementNumber,
+            hasAssetManifest: !!assetManifest,
+            assetCount: assetManifest?.assets?.length || 0,
+          },
+        );
       }
       setImageLoading(false);
       setImagePath(null);
@@ -235,7 +265,16 @@ function TimelineItemComponent({
         imageResolveAbortRef.current = null;
       }
     };
-  }, [item.type, item.imagePath, item.label, item.placementNumber, projectDirectory, assetManifest, activeVersions, imageLoadError]);
+  }, [
+    item.type,
+    item.imagePath,
+    item.label,
+    item.placementNumber,
+    projectDirectory,
+    assetManifest,
+    activeVersions,
+    imageLoadError,
+  ]);
 
   // Handle placeholder type
   if (item.type === 'placeholder') {
@@ -308,16 +347,59 @@ function TimelineItemComponent({
     );
   }
 
+  // Handle infographic type (mp4 from Remotion, same as video block)
+  if (item.type === 'infographic' && videoPath) {
+    return (
+      <div
+        className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        title={item.prompt || item.label}
+      >
+        <video
+          src={videoPath}
+          className={styles.videoThumbnail}
+          preload="metadata"
+          muted
+        />
+        <div className={styles.videoLabel}>{item.label}</div>
+      </div>
+    );
+  }
+
+  if (item.type === 'infographic' && !videoPath) {
+    return (
+      <div
+        className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
+        style={{ left: `${left}px`, width: `${width}px` }}
+        onClick={(e) => onItemClick && onItemClick(e, item)}
+        title={item.prompt || item.label}
+      >
+        <div className={styles.scenePlaceholder}>Info</div>
+        <div className={styles.videoLabel}>{item.label}</div>
+      </div>
+    );
+  }
+
   // Handle image type
   let thumbnailElement: React.ReactNode;
   if (imagePath) {
     thumbnailElement = (
-      <img 
-        src={imagePath} 
-        alt={item.label} 
+      <img
+        src={imagePath}
+        alt={item.label}
         className={styles.sceneThumbnail}
         onError={() => {
-          console.error(`[TimelineItemComponent] Image load error for ${item.label}`);
+          console.error(
+            `[TimelineItemComponent] Image load error for ${item.label}`,
+          );
           setImagePath(null);
           setImageLoadError(true);
         }}
@@ -351,7 +433,9 @@ function TimelineItemComponent({
       <div className={styles.sceneId}>{item.label}</div>
       {item.prompt && (
         <div className={styles.sceneDescription} title={item.prompt}>
-          {item.prompt.length > 50 ? `${item.prompt.substring(0, 50)}...` : item.prompt}
+          {item.prompt.length > 50
+            ? `${item.prompt.substring(0, 50)}...`
+            : item.prompt}
         </div>
       )}
     </div>
@@ -378,6 +462,9 @@ const pixelsToSeconds = (pixels: number, zoomLevel: number): number => {
   const pixelsPerSecond = 50 * zoomLevel;
   return pixels / pixelsPerSecond;
 };
+
+/** Seconds of empty space after last scene so the timeline can be scrolled past content. Playhead stays within content only. */
+const TAIL_PADDING_SECONDS = 5;
 
 interface TimelinePanelProps {
   isOpen: boolean;
@@ -425,9 +512,12 @@ export default function TimelinePanel({
     addAsset,
   } = useProject();
 
-  // Use unified timeline data hook with placement-based architecture
-  const { timelineItems, totalDuration: timelineTotalDuration } =
-    useTimelineData(externalActiveVersions);
+  // Use unified timeline data from context (single source of truth for TimelinePanel + VideoLibraryView)
+  const {
+    timelineItems,
+    totalDuration: timelineTotalDuration,
+    refreshAudioFiles,
+  } = useTimelineDataContext();
 
   // Initialize zoom level from timeline state
   const [zoomLevel, setZoomLevel] = useState(timelineState.zoom_level);
@@ -455,7 +545,10 @@ export default function TimelinePanel({
 
   // Clamp playback position to totalDuration to prevent playhead from going beyond content
   const rawCurrentPosition = externalPlaybackTime ?? internalPlaybackTime;
-  const currentPosition = Math.max(0, Math.min(rawCurrentPosition, totalDuration));
+  const currentPosition = Math.max(
+    0,
+    Math.min(rawCurrentPosition, totalDuration),
+  );
   const isPlaying = externalIsPlaying ?? internalIsPlaying;
 
   // If position was clamped, update internal state
@@ -464,7 +557,12 @@ export default function TimelinePanel({
     if (!externalPlaybackTime && internalPlaybackTime > totalDuration) {
       setInternalPlaybackTime(totalDuration);
     }
-  }, [internalPlaybackTime, totalDuration, externalPlaybackTime, setInternalPlaybackTime]);
+  }, [
+    internalPlaybackTime,
+    totalDuration,
+    externalPlaybackTime,
+    setInternalPlaybackTime,
+  ]);
 
   // Sync playhead position to timeline state (debounced)
   useEffect(() => {
@@ -480,15 +578,16 @@ export default function TimelinePanel({
 
   const setCurrentPosition = useCallback(
     (value: number | ((prev: number) => number)) => {
+      const newValue =
+        typeof value === 'function' ? value(currentPosition) : value;
+      const clamped = Math.max(0, Math.min(totalDuration, newValue));
       if (onSeek) {
-        const newValue =
-          typeof value === 'function' ? value(currentPosition) : value;
-        onSeek(newValue);
+        onSeek(clamped);
       } else {
-        setInternalPlaybackTime(value);
+        setInternalPlaybackTime(clamped);
       }
     },
-    [onSeek, currentPosition],
+    [onSeek, currentPosition, totalDuration],
   );
 
   const setIsPlaying = useCallback(
@@ -682,11 +781,7 @@ export default function TimelinePanel({
         }
       },
     );
-  }, [
-    activeVersions,
-    projectDirectory,
-    setActiveVersion,
-  ]);
+  }, [activeVersions, projectDirectory, setActiveVersion]);
   // Scene selection and drag/drop removed for placement-based timeline
   // Placements are timestamp-based and cannot be reordered
 
@@ -762,9 +857,7 @@ export default function TimelinePanel({
       try {
         // Get current timeline item context (placement-based)
         const currentItem = timelineItems.find(
-          (item) =>
-            position >= item.startTime &&
-            position < item.endTime,
+          (item) => position >= item.startTime && position < item.endTime,
         );
 
         const previousItems = timelineItems
@@ -1193,15 +1286,13 @@ export default function TimelinePanel({
       // Add small delay before refresh to ensure file copy completes
       await new Promise((resolve) => setTimeout(resolve, 200));
 
-      // Refresh audio files without reloading the page
-      if ((window as any).refreshAudioFiles) {
-        (window as any).refreshAudioFiles();
-      }
+      // Refresh audio files so both timeline and video library view update
+      refreshAudioFiles();
       console.log('Audio file imported successfully');
     } catch (error) {
       console.error('Failed to import audio file:', error);
     }
-  }, [projectDirectory]);
+  }, [projectDirectory, refreshAudioFiles]);
 
   // YouTube audio import removed - can be re-added later if needed
   const handleImportAudioFromYouTube = useCallback(
@@ -1316,27 +1407,22 @@ export default function TimelinePanel({
 
   const effectiveProjectDir = projectDirectory || '/mock';
 
-  // Calculate timeline width based on total duration
-  // Don't extend beyond actual content - use exact totalDuration
-  // Only use minimum for empty state (when totalDuration is 0)
-  const displayDuration = totalDuration > 0 ? totalDuration : 10;
-  
-  // Round up to next multiple of 5 for time markers, but don't extend beyond content
-  // Only round if it doesn't add more than 5 seconds beyond actual content
-  const maxMarkerTime = totalDuration > 0
-    ? Math.min(Math.ceil(displayDuration / 5) * 5, displayDuration + 2)
-    : 10;
-  
-  // Timeline width matches actual content duration exactly - stops at content end
+  // Timeline extends past content by TAIL_PADDING_SECONDS so user can scroll into empty space. Playhead stays in [0, totalDuration].
+  const displayDuration =
+    totalDuration > 0 ? totalDuration + TAIL_PADDING_SECONDS : 10;
   const timelineWidth = secondsToPixels(displayDuration, zoomLevel);
-  // Clamp playhead position to timeline width to prevent it from going beyond content visually
-  const playheadPosition = Math.min(secondsToPixels(currentPosition, zoomLevel), timelineWidth);
+  const maxMarkerTime = Math.ceil(displayDuration / 5) * 5;
 
-  // Generate time markers for ruler (up to maxMarkerTime, but timeline stops at displayDuration)
   const timeMarkers: number[] = [];
   for (let i = 0; i <= maxMarkerTime; i += 5) {
     timeMarkers.push(i);
   }
+
+  // Playhead stays within content only; currentPosition is already clamped to [0, totalDuration]
+  const playheadPosition = Math.min(
+    secondsToPixels(currentPosition, zoomLevel),
+    secondsToPixels(totalDuration, zoomLevel),
+  );
 
   return (
     <div className={styles.container}>
@@ -1495,14 +1581,21 @@ export default function TimelinePanel({
                 />
 
                 {/* Unified Track */}
-                {timelineItems.filter((item) => item.type !== 'audio').length > 0 && (
+                {timelineItems.filter((item) => item.type !== 'audio').length >
+                  0 && (
                   <div className={styles.track}>
                     <div className={styles.trackContent}>
                       {timelineItems
                         .filter((item) => item.type !== 'audio')
                         .map((item) => {
-                          const left = secondsToPixels(item.startTime, zoomLevel);
-                          const width = secondsToPixels(item.duration, zoomLevel);
+                          const left = secondsToPixels(
+                            item.startTime,
+                            zoomLevel,
+                          );
+                          const width = secondsToPixels(
+                            item.duration,
+                            zoomLevel,
+                          );
 
                           return (
                             <TimelineItemComponent
@@ -1522,14 +1615,21 @@ export default function TimelinePanel({
                 )}
 
                 {/* Audio Track */}
-                {timelineItems.filter((item) => item.type === 'audio').length > 0 && (
+                {timelineItems.filter((item) => item.type === 'audio').length >
+                  0 && (
                   <div className={`${styles.track} ${styles.audioTrack}`}>
                     <div className={styles.trackContent}>
                       {timelineItems
                         .filter((item) => item.type === 'audio')
                         .map((item) => {
-                          const left = secondsToPixels(item.startTime, zoomLevel);
-                          const width = secondsToPixels(item.duration, zoomLevel);
+                          const left = secondsToPixels(
+                            item.startTime,
+                            zoomLevel,
+                          );
+                          const width = secondsToPixels(
+                            item.duration,
+                            zoomLevel,
+                          );
 
                           return (
                             <TimelineItemComponent
@@ -1582,7 +1682,6 @@ export default function TimelinePanel({
             onImportFromFile={handleImportAudioFromFile}
             onImportFromYouTube={handleImportAudioFromYouTube}
           />
-
         </>
       )}
     </div>

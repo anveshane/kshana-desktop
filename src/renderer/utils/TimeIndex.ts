@@ -20,7 +20,7 @@ export class TimeIndex {
     // Build sorted array of non-overlapping ranges
     // Filter out audio items as they span the entire timeline
     const nonAudioItems = timelineItems.filter((item) => item.type !== 'audio');
-    
+
     // Map to ranges, preserving original index from timelineItems array
     this.ranges = timelineItems
       .map((item, originalIndex) => ({
@@ -56,7 +56,7 @@ export class TimeIndex {
   getItemIndexAtTime(time: number): number | null {
     const range = this.binarySearch(time);
     if (!range) return null;
-    
+
     // Find the original index in timelineItems by matching the item
     // We need to search through ranges to find which one matches
     return range.itemIndex;
@@ -89,7 +89,8 @@ export class TimeIndex {
       // Check if time is within this range
       if (time >= range.startTime && time < range.endTime) {
         return range;
-      } else if (time < range.startTime) {
+      }
+      if (time < range.startTime) {
         right = mid - 1;
       } else {
         left = mid + 1;
@@ -99,7 +100,7 @@ export class TimeIndex {
     // Handle exact boundary: if time equals an item's endTime, return next item
     // This ensures smooth transitions between items
     const exactEndMatch = this.ranges.find(
-      (r) => Math.abs(time - r.endTime) < 0.001
+      (r) => Math.abs(time - r.endTime) < 0.001,
     );
     if (exactEndMatch) {
       const matchIndex = this.ranges.indexOf(exactEndMatch);

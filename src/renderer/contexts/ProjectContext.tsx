@@ -183,17 +183,19 @@ interface ProjectProviderProps {
  */
 export function ProjectProvider({ children }: ProjectProviderProps) {
   const [state, setState] = useState<ProjectState>(initialState);
-  
+
   // Track if image generation is active (via WebSocket status)
   const [isImageGenerationActive, setIsImageGenerationActive] = useState(false);
 
   // Get workspace context for sync
   const { projectDirectory } = useWorkspace();
   const lastLoadedDir = useRef<string | null>(null);
-  
+
   // WebSocket connection refs to prevent duplicate connections
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const connectingRef = useRef(false);
   const currentProjectDirRef = useRef<string | null>(null);
 
@@ -230,7 +232,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           hasAgentState: !!project.agentState,
           hasAssetManifest: !!project.assetManifest,
           assetCount: project.assetManifest?.assets?.length || 0,
-          imageAssets: project.assetManifest?.assets?.filter(a => a.type === 'scene_image').length || 0,
+          imageAssets:
+            project.assetManifest?.assets?.filter(
+              (a) => a.type === 'scene_image',
+            ).length || 0,
         });
         setState((prev) => ({
           ...prev,
@@ -249,12 +254,19 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         try {
           const manifestPath = `${projectDirectory}/.kshana/agent/manifest.json`;
           const imagePlacementsDir = `${projectDirectory}/.kshana/agent/image-placements`;
-          
+
           await window.electron.project.watchManifest(manifestPath);
-          await window.electron.project.watchImagePlacements(imagePlacementsDir);
-          console.log('[ProjectContext] Set up explicit watches for manifest and image-placements');
+          await window.electron.project.watchImagePlacements(
+            imagePlacementsDir,
+          );
+          console.log(
+            '[ProjectContext] Set up explicit watches for manifest and image-placements',
+          );
         } catch (error) {
-          console.warn('[ProjectContext] Failed to set up explicit watches:', error);
+          console.warn(
+            '[ProjectContext] Failed to set up explicit watches:',
+            error,
+          );
         }
       } else {
         console.error('[ProjectContext] Failed to load project:', result.error);
@@ -279,7 +291,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
     const unsubscribe = window.electron.project.onFileChange((event) => {
       const filePath = event.path;
-      
+
       // Reload project when key files change
       if (
         filePath.includes('.kshana/agent/project.json') ||
@@ -295,18 +307,24 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         // Debounce rapid file changes (reduced to 300ms for faster response)
         debounceTimeout = setTimeout(async () => {
           try {
-            console.log('[ProjectContext] Reloading project due to file change:', filePath);
+            console.log(
+              '[ProjectContext] Reloading project due to file change:',
+              filePath,
+            );
             const result = await projectService.openProject(projectDirectory);
             if (result.success) {
               const project = result.data;
               console.log('[ProjectContext] Project reloaded successfully:', {
                 hasAssetManifest: !!project.assetManifest,
                 assetCount: project.assetManifest?.assets?.length || 0,
-                imageAssets: project.assetManifest?.assets?.filter(a => a.type === 'scene_image').map(a => ({
-                  id: a.id,
-                  placementNumber: a.metadata?.placementNumber,
-                  path: a.path,
-                })) || [],
+                imageAssets:
+                  project.assetManifest?.assets
+                    ?.filter((a) => a.type === 'scene_image')
+                    .map((a) => ({
+                      id: a.id,
+                      placementNumber: a.metadata?.placementNumber,
+                      path: a.path,
+                    })) || [],
               });
               setState((prev) => ({
                 ...prev,
@@ -317,7 +335,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
                 contextIndex: project.contextIndex,
               }));
             } else {
-              console.error('[ProjectContext] Failed to reload project:', result.error);
+              console.error(
+                '[ProjectContext] Failed to reload project:',
+                result.error,
+              );
               // Don't show error to user - file might be temporarily locked
             }
           } catch (error) {
@@ -345,16 +366,16 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   ): boolean => {
     if (!oldManifest && !newManifest) return false;
     if (!oldManifest || !newManifest) return true;
-    
+
     const oldAssets = oldManifest.assets || [];
     const newAssets = newManifest.assets || [];
-    
+
     if (oldAssets.length !== newAssets.length) return true;
-    
+
     // Create maps for efficient lookup
-    const oldAssetMap = new Map(oldAssets.map(a => [a.id, a]));
-    const newAssetMap = new Map(newAssets.map(a => [a.id, a]));
-    
+    const oldAssetMap = new Map(oldAssets.map((a) => [a.id, a]));
+    const newAssetMap = new Map(newAssets.map((a) => [a.id, a]));
+
     // Check for added/removed assets
     for (const id of oldAssetMap.keys()) {
       if (!newAssetMap.has(id)) return true;
@@ -362,12 +383,12 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     for (const id of newAssetMap.keys()) {
       if (!oldAssetMap.has(id)) return true;
     }
-    
+
     // Check for changed assets (deep comparison of key fields)
     for (const [id, oldAsset] of oldAssetMap) {
       const newAsset = newAssetMap.get(id);
       if (!newAsset) return true;
-      
+
       // Compare key fields that matter for timeline display
       if (
         oldAsset.path !== newAsset.path ||
@@ -378,14 +399,16 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         return true;
       }
     }
-    
+
     return false;
   };
 
   // Explicitly refresh asset manifest from disk
   const refreshAssetManifest = useCallback(async (): Promise<void> => {
     if (!projectDirectory || !state.isLoaded) {
-      console.warn('[ProjectContext] Cannot refresh manifest: project not loaded');
+      console.warn(
+        '[ProjectContext] Cannot refresh manifest: project not loaded',
+      );
       return;
     }
 
@@ -396,10 +419,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         const project = result.data;
         const oldManifest = state.assetManifest;
         const newManifest = project.assetManifest;
-        
+
         // Use deep comparison to check if update is needed
         const changed = compareAssetManifests(oldManifest, newManifest);
-        
+
         if (changed) {
           console.log('[ProjectContext] Asset manifest refreshed:', {
             oldCount: oldManifest?.assets?.length || 0,
@@ -410,10 +433,15 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
             assetManifest: newManifest,
           }));
         } else {
-          console.log('[ProjectContext] Asset manifest unchanged after refresh');
+          console.log(
+            '[ProjectContext] Asset manifest unchanged after refresh',
+          );
         }
       } else {
-        console.error('[ProjectContext] Failed to refresh manifest:', result.error);
+        console.error(
+          '[ProjectContext] Failed to refresh manifest:',
+          result.error,
+        );
       }
     } catch (error) {
       console.error('[ProjectContext] Error refreshing manifest:', error);
@@ -437,7 +465,11 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     }
 
     // Skip if already connected to the same project directory
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && currentProjectDirRef.current === projectDirectory) {
+    if (
+      wsRef.current &&
+      wsRef.current.readyState === WebSocket.OPEN &&
+      currentProjectDirRef.current === projectDirectory
+    ) {
       return;
     }
 
@@ -458,7 +490,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         connectingRef.current = true;
         const backendState = await window.electron.backend.getState();
         if (backendState.status !== 'ready') {
-          console.log('[ProjectContext] Backend not ready, skipping WebSocket connection');
+          console.log(
+            '[ProjectContext] Backend not ready, skipping WebSocket connection',
+          );
           connectingRef.current = false;
           return;
         }
@@ -478,18 +512,24 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
             const message = JSON.parse(event.data);
             if (message.type === 'asset_added' && message.data) {
               const assetData = message.data;
-              console.log('[ProjectContext] Received asset_added event:', assetData);
+              console.log(
+                '[ProjectContext] Received asset_added event:',
+                assetData,
+              );
               // Immediately refresh asset manifest
               refreshAssetManifest();
             } else if (message.type === 'status' && message.data) {
               // Track image generation activity based on status
-              const status = message.data.status;
+              const { status } = message.data;
               const isActive = status === 'busy' || status === 'processing';
               setIsImageGenerationActive(isActive);
             } else if (message.type === 'tool_call' && message.data) {
               // Also track tool calls for image generation
-              const toolName = message.data.toolName;
-              if (toolName === 'generate_image' || toolName === 'generate_all_images') {
+              const { toolName } = message.data;
+              if (
+                toolName === 'generate_image' ||
+                toolName === 'generate_all_images'
+              ) {
                 setIsImageGenerationActive(true);
               }
             }
@@ -499,7 +539,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         };
 
         ws.onerror = (error) => {
-          console.warn('[ProjectContext] WebSocket error for asset events:', error);
+          console.warn(
+            '[ProjectContext] WebSocket error for asset events:',
+            error,
+          );
           connectingRef.current = false;
         };
 
@@ -507,9 +550,12 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           console.log('[ProjectContext] WebSocket closed for asset events');
           wsRef.current = null;
           connectingRef.current = false;
-          
+
           // Only reconnect if project directory hasn't changed
-          if (currentProjectDirRef.current === projectDirectory && projectDirectory) {
+          if (
+            currentProjectDirRef.current === projectDirectory &&
+            projectDirectory
+          ) {
             if (reconnectTimeoutRef.current) {
               clearTimeout(reconnectTimeoutRef.current);
             }
@@ -524,7 +570,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           }
         };
       } catch (error) {
-        console.warn('[ProjectContext] Failed to connect WebSocket for asset events:', error);
+        console.warn(
+          '[ProjectContext] Failed to connect WebSocket for asset events:',
+          error,
+        );
         connectingRef.current = false;
       }
     };
@@ -560,30 +609,39 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         const result = await projectService.openProject(projectDirectory);
         if (result.success) {
           const project = result.data;
-          
+
           // Use deep comparison to detect changes
           const assetsChanged = compareAssetManifests(
             state.assetManifest,
             project.assetManifest,
           );
-          
+
           if (assetsChanged) {
-            console.log('[ProjectContext] Assets changed (polling), updating manifest:', {
-              oldCount: state.assetManifest?.assets?.length || 0,
-              newCount: project.assetManifest?.assets?.length || 0,
-              addedAssets: project.assetManifest?.assets?.filter(
-                a => !state.assetManifest?.assets?.some(old => old.id === a.id)
-              ).map(a => ({
-                id: a.id,
-                placementNumber: a.metadata?.placementNumber,
-                path: a.path,
-              })) || [],
-            });
-            
+            console.log(
+              '[ProjectContext] Assets changed (polling), updating manifest:',
+              {
+                oldCount: state.assetManifest?.assets?.length || 0,
+                newCount: project.assetManifest?.assets?.length || 0,
+                addedAssets:
+                  project.assetManifest?.assets
+                    ?.filter(
+                      (a) =>
+                        !state.assetManifest?.assets?.some(
+                          (old) => old.id === a.id,
+                        ),
+                    )
+                    .map((a) => ({
+                      id: a.id,
+                      placementNumber: a.metadata?.placementNumber,
+                      path: a.path,
+                    })) || [],
+              },
+            );
+
             // Reset polling interval on successful update (use dynamic interval based on activity)
             pollIntervalMs = isImageGenerationActive ? 500 : 1000;
             consecutiveFailures = 0;
-            
+
             setState((prev) => ({
               ...prev,
               assetManifest: project.assetManifest,
@@ -593,16 +651,16 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           consecutiveFailures++;
           // Exponential backoff on failures
           pollIntervalMs = Math.min(
-            Math.floor(1000 * Math.pow(BACKOFF_MULTIPLIER, consecutiveFailures)),
-            MAX_POLL_INTERVAL
+            Math.floor(1000 * BACKOFF_MULTIPLIER ** consecutiveFailures),
+            MAX_POLL_INTERVAL,
           );
         }
       } catch (error) {
         consecutiveFailures++;
         // Exponential backoff on errors
         pollIntervalMs = Math.min(
-          Math.floor(1000 * Math.pow(BACKOFF_MULTIPLIER, consecutiveFailures)),
-          MAX_POLL_INTERVAL
+          Math.floor(1000 * BACKOFF_MULTIPLIER ** consecutiveFailures),
+          MAX_POLL_INTERVAL,
         );
         console.debug('[ProjectContext] Poll check failed:', error);
       }
@@ -622,7 +680,12 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         clearTimeout(timeoutId);
       }
     };
-  }, [projectDirectory, state.isLoaded, state.assetManifest, isImageGenerationActive]);
+  }, [
+    projectDirectory,
+    state.isLoaded,
+    state.assetManifest,
+    isImageGenerationActive,
+  ]);
 
   // Load project from directory
   const loadProject = useCallback(
@@ -870,12 +933,12 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   const prevTimelineStateRef = useRef<string>('');
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timelineStateRef = useRef(state.timelineState);
-  
+
   // Keep ref in sync with state
   useEffect(() => {
     timelineStateRef.current = state.timelineState;
   }, [state.timelineState]);
-  
+
   useEffect(() => {
     if (!state.isLoaded) {
       prevTimelineStateRef.current = '';
@@ -897,7 +960,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
     // Only save if state actually changed
     if (currentState === prevTimelineStateRef.current) return;
-    
+
     // Clear any pending save
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);

@@ -28,13 +28,17 @@ export interface AudioController {
  */
 function normalizePathForComparison(path: string | null): string | null {
   if (!path) return null;
-  
+
   // If it's a URL, extract the filename
-  if (path.startsWith('file://') || path.startsWith('http://') || path.startsWith('https://')) {
+  if (
+    path.startsWith('file://') ||
+    path.startsWith('http://') ||
+    path.startsWith('https://')
+  ) {
     const url = new URL(path);
     return url.pathname.split('/').pop() || null;
   }
-  
+
   // If it's a relative path, extract the filename
   return path.split('/').pop() || null;
 }
@@ -44,14 +48,16 @@ function normalizePathForComparison(path: string | null): string | null {
  */
 function pathsMatch(path1: string | null, path2: string | null): boolean {
   if (!path1 || !path2) return false;
-  
+
   const normalized1 = normalizePathForComparison(path1);
   const normalized2 = normalizePathForComparison(path2);
-  
+
   return normalized1 === normalized2 && normalized1 !== null;
 }
 
-export function useAudioController(options: AudioControllerOptions): AudioController {
+export function useAudioController(
+  options: AudioControllerOptions,
+): AudioController {
   const {
     playbackTime,
     isPlaying,
@@ -69,7 +75,9 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
   const isInitializedRef = useRef(false);
   const lastPlaybackTimeRef = useRef(0);
   const isTransitioningRef = useRef(false);
-  const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const preservedTimeRef = useRef(0);
   const wasPlayingRef = useRef(false);
   const playbackTimeRef = useRef(playbackTime);
@@ -86,7 +94,7 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
 
     // Error handler
     const handleError = () => {
-      const error = audioElement.error;
+      const { error } = audioElement;
       if (error) {
         console.error('[useAudioController] Audio error:', {
           code: error.code,
@@ -151,7 +159,9 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
 
     // Preserve playback state before reload
     wasPlayingRef.current = !audioElement.paused;
-    preservedTimeRef.current = isInitializedRef.current ? audioElement.currentTime : 0;
+    preservedTimeRef.current = isInitializedRef.current
+      ? audioElement.currentTime
+      : 0;
 
     // Mark as transitioning to prevent sync during reload
     isTransitioningRef.current = true;
@@ -167,19 +177,25 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
 
     // Restore playback state after load completes
     const handleCanPlay = () => {
-      console.log('[useAudioController] Audio can play, restoring position:', preservedTimeRef.current);
-      
+      console.log(
+        '[useAudioController] Audio can play, restoring position:',
+        preservedTimeRef.current,
+      );
+
       // Restore position if we had a previous position
       if (preservedTimeRef.current > 0) {
         audioElement.currentTime = preservedTimeRef.current;
       }
-      
+
       isInitializedRef.current = true;
-      
+
       // Resume playback if it was playing
       if (wasPlayingRef.current && isPlaying) {
         audioElement.play().catch((error) => {
-          console.warn('[useAudioController] Audio play error after load:', error);
+          console.warn(
+            '[useAudioController] Audio play error after load:',
+            error,
+          );
         });
       }
 
@@ -205,7 +221,8 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
 
   // Handle play/pause commands (imperative)
   useEffect(() => {
-    if (!audioRef.current || !audioFile || !resolvedAudioPath || isDragging) return;
+    if (!audioRef.current || !audioFile || !resolvedAudioPath || isDragging)
+      return;
     if (!isInitializedRef.current) return; // Don't control until initialized
 
     const audioElement = audioRef.current;
@@ -218,7 +235,10 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
     // Sync play/pause state from timeline clock
     if (isPlaying && audioElement.paused) {
       audioElement.play().catch((error) => {
-        console.warn('[useAudioController] Audio play error during sync:', error);
+        console.warn(
+          '[useAudioController] Audio play error during sync:',
+          error,
+        );
       });
     } else if (!isPlaying && !audioElement.paused) {
       audioElement.pause();
@@ -241,7 +261,8 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
     // Sync function that runs in animation frame loop
     const syncPosition = () => {
       // Get current seeking state (handle both boolean and function)
-      const currentIsSeeking = typeof isSeeking === 'function' ? isSeeking() : isSeeking;
+      const currentIsSeeking =
+        typeof isSeeking === 'function' ? isSeeking() : isSeeking;
 
       // Skip sync during transitions, seeking, dragging, or if not initialized
       if (
@@ -272,7 +293,10 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
       // Don't reset to 0 if audio is playing
       if (difference > 0.2 && expectedAudioTime > 0) {
         // Clamp to valid range
-        const clampedTime = Math.max(0, Math.min(expectedAudioTime, audioFile.duration));
+        const clampedTime = Math.max(
+          0,
+          Math.min(expectedAudioTime, audioFile.duration),
+        );
 
         // Only update if clamped time is different from current
         if (Math.abs(audioElement.currentTime - clampedTime) > 0.1) {
@@ -311,13 +335,13 @@ export function useAudioController(options: AudioControllerOptions): AudioContro
     const handleEnded = () => {
       // Get current playback time from ref (most up-to-date value)
       const currentPlaybackTime = playbackTimeRef.current;
-      
+
       // Check if we're still within a video placement
       const videoEndTime = currentVideoItem?.endTime;
-      const shouldStop = videoEndTime 
+      const shouldStop = videoEndTime
         ? currentPlaybackTime >= Math.max(audioFile.duration, videoEndTime)
         : currentPlaybackTime >= audioFile.duration;
-      
+
       // Only pause playback if we're past both audio duration AND video end time (if video exists)
       if (shouldStop && onPlaybackStateChange) {
         onPlaybackStateChange(false);

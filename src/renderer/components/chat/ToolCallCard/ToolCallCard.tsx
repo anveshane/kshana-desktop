@@ -339,17 +339,17 @@ export default function ToolCallCard({
 
   // CLI-style format: [TOOL] toolName
   const prefix = agentName ? `[${agentName}]` : '[TOOL]';
-  
+
   // Format result for display - extract key information like file paths
   let resultDisplay = '';
   let filePath: string | undefined;
   let fileSize: string | undefined;
   let preview: string | undefined;
-  
+
   if (result !== undefined) {
     if (typeof result === 'object' && result !== null) {
       const resultObj = result as Record<string, unknown>;
-      
+
       // Extract file information (common in Task tool results)
       if ('file_path' in resultObj || 'filePath' in resultObj) {
         filePath = (resultObj.file_path || resultObj.filePath) as string;
@@ -359,16 +359,20 @@ export default function ToolCallCard({
       }
       if ('size' in resultObj) {
         const size = resultObj.size as number;
-        fileSize = size < 1024 ? `${size} bytes` : `${(size / 1024).toFixed(1)} KB`;
+        fileSize =
+          size < 1024 ? `${size} bytes` : `${(size / 1024).toFixed(1)} KB`;
       }
       if ('preview' in resultObj) {
         preview = String(resultObj.preview);
       }
-      
+
       // Check if result has content field (like dispatch_content_agent results)
       if ('content' in resultObj && typeof resultObj.content === 'string') {
         resultDisplay = String(resultObj.content);
-      } else if ('output' in resultObj && typeof resultObj.output === 'string') {
+      } else if (
+        'output' in resultObj &&
+        typeof resultObj.output === 'string'
+      ) {
         resultDisplay = String(resultObj.output);
       } else if (filePath && !resultDisplay) {
         // If we have a file path but no content, show the file path
@@ -390,7 +394,7 @@ export default function ToolCallCard({
   // Truncate long results for cleaner display
   const MAX_RESULT_LENGTH = 500;
   if (resultDisplay.length > MAX_RESULT_LENGTH) {
-    resultDisplay = resultDisplay.substring(0, MAX_RESULT_LENGTH) + '...';
+    resultDisplay = `${resultDisplay.substring(0, MAX_RESULT_LENGTH)}...`;
   }
 
   return (
@@ -402,7 +406,10 @@ export default function ToolCallCard({
           <span className={styles.cliError}> (error)</span>
         )}
         {duration !== undefined && (
-          <span className={styles.cliDuration}> ({formatDuration(duration)})</span>
+          <span className={styles.cliDuration}>
+            {' '}
+            ({formatDuration(duration)})
+          </span>
         )}
       </div>
       {(filePath || fileSize || resultDisplay) && (
@@ -410,7 +417,9 @@ export default function ToolCallCard({
           {filePath && (
             <div className={styles.cliFilePath}>
               📄 {filePath}
-              {fileSize && <span className={styles.cliFileSize}> ({fileSize})</span>}
+              {fileSize && (
+                <span className={styles.cliFileSize}> ({fileSize})</span>
+              )}
             </div>
           )}
           {preview && (
@@ -423,7 +432,9 @@ export default function ToolCallCard({
           )}
           {resultDisplay && (
             <div className={styles.cliResultContent}>
-              {typeof result === 'object' && result !== null && 'content' in result ? (
+              {typeof result === 'object' &&
+              result !== null &&
+              'content' in result ? (
                 <ReactMarkdown>{resultDisplay}</ReactMarkdown>
               ) : (
                 <pre className={styles.cliResultPre}>{resultDisplay}</pre>

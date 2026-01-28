@@ -16,22 +16,27 @@ import type { SceneVersions } from '../types/kshana/timeline';
 import { PROJECT_PATHS } from '../types/kshana';
 
 export interface TimelineItem {
-  id: string; // "PLM-1", "vd-placement-1", "placeholder-start", "audio-1"
-  type: 'image' | 'video' | 'placeholder' | 'audio';
+  id: string; // "PLM-1", "vd-placement-1", "info-placement-1", "placeholder-start", "audio-1"
+  type: 'image' | 'video' | 'infographic' | 'placeholder' | 'audio';
   startTime: number; // seconds
   endTime: number; // seconds
   duration: number; // calculated: endTime - startTime
-  label: string; // "PLM-1", "vd-placement-1", "Original Footage", "Audio Track"
+  label: string;
   prompt?: string;
   placementNumber?: number;
   imagePath?: string; // resolved if asset matched
-  videoPath?: string; // resolved if asset matched
+  videoPath?: string; // resolved if asset matched (also used for infographic mp4)
   audioPath?: string; // path to audio file
 }
 
 export interface TimelineData {
   timelineItems: TimelineItem[];
   totalDuration: number;
+}
+
+export interface TimelineDataWithRefresh extends TimelineData {
+  refreshTimeline: () => Promise<void>;
+  refreshAudioFiles: () => void;
 }
 
 /**
@@ -43,102 +48,125 @@ export interface TimelineData {
 function findAssetByPlacementNumber(
   placementNumber: number,
   assetManifest: AssetManifest | null,
-  assetType: 'scene_image' | 'scene_video',
+  assetType: 'scene_image' | 'scene_video' | 'scene_infographic',
   activeVersions?: Record<number, SceneVersions>,
 ): AssetInfo | undefined {
   if (!assetManifest?.assets) {
-    console.warn(`[findAssetByPlacementNumber] No assetManifest or assets for placement ${placementNumber}`, {
-      hasManifest: !!assetManifest,
-      hasAssets: !!assetManifest?.assets,
-    });
+    console.warn(
+      `[findAssetByPlacementNumber] No assetManifest or assets for placement ${placementNumber}`,
+      {
+        hasManifest: !!assetManifest,
+        hasAssets: !!assetManifest?.assets,
+      },
+    );
     return undefined;
   }
 
-  // Get active version if specified
   const activeVersion = activeVersions?.[placementNumber];
-  const targetVersion = assetType === 'scene_image'
-    ? activeVersion?.image
-    : activeVersion?.video;
+  const targetVersion =
+    assetType === 'scene_image'
+      ? activeVersion?.image
+      : assetType === 'scene_video'
+        ? activeVersion?.video
+        : undefined; // infographic: no versioning yet
 
   // Find matching asset with improved logging
-  const matchingAssets = assetManifest.assets.filter(
-    (a) => {
-      const typeMatch = a.type === assetType;
-      if (!typeMatch) return false;
+  const matchingAssets = assetManifest.assets.filter((a) => {
+    const typeMatch = a.type === assetType;
+    if (!typeMatch) return false;
 
-      // Check both metadata.placementNumber and scene_number
-      // Handle type coercion (placementNumber might be number or string)
-      const assetPlacementNumber = a.metadata?.placementNumber;
-      const assetSceneNumber = a.scene_number;
-      const placementMatch = assetPlacementNumber !== undefined && 
-        (Number(assetPlacementNumber) === placementNumber || 
-         String(assetPlacementNumber) === String(placementNumber));
-      const sceneMatch = assetSceneNumber !== undefined &&
-        (Number(assetSceneNumber) === placementNumber ||
-         String(assetSceneNumber) === String(placementNumber));
-      const matches = placementMatch || sceneMatch;
-      
-      if (!matches) {
-        // Only log if it's the same type but wrong placement (to reduce noise)
-        console.debug(`[findAssetByPlacementNumber] Asset ${a.id} type matches but placement doesn't:`, {
+    // Check both metadata.placementNumber and scene_number
+    // Handle type coercion (placementNumber might be number or string)
+    const assetPlacementNumber = a.metadata?.placementNumber;
+    const assetSceneNumber = a.scene_number;
+    const placementMatch =
+      assetPlacementNumber !== undefined &&
+      (Number(assetPlacementNumber) === placementNumber ||
+        String(assetPlacementNumber) === String(placementNumber));
+    const sceneMatch =
+      assetSceneNumber !== undefined &&
+      (Number(assetSceneNumber) === placementNumber ||
+        String(assetSceneNumber) === String(placementNumber));
+    const matches = placementMatch || sceneMatch;
+
+    if (!matches) {
+      // Only log if it's the same type but wrong placement (to reduce noise)
+      console.debug(
+        `[findAssetByPlacementNumber] Asset ${a.id} type matches but placement doesn't:`,
+        {
           assetType: a.type,
           targetType: assetType,
-          assetPlacementNumber: assetPlacementNumber,
-          assetSceneNumber: assetSceneNumber,
+          assetPlacementNumber,
+          assetSceneNumber,
           targetPlacementNumber: placementNumber,
           placementMatch,
           sceneMatch,
-        });
-      }
-      
-      return matches;
+        },
+      );
     }
-  );
+
+    return matches;
+  });
 
   if (matchingAssets.length === 0) {
     // Enhanced logging when no match found
-    const allAssetsOfType = assetManifest.assets.filter(a => a.type === assetType);
-    console.warn(`[findAssetByPlacementNumber] No matching asset found for placement ${placementNumber}, type ${assetType}`, {
-      totalAssets: assetManifest.assets.length,
-      assetsOfType: allAssetsOfType.length,
-      availablePlacements: allAssetsOfType.map(a => ({
+    const allAssetsOfType = assetManifest.assets.filter(
+      (a) => a.type === assetType,
+    );
+    console.warn(
+      `[findAssetByPlacementNumber] No matching asset found for placement ${placementNumber}, type ${assetType}`,
+      {
+        totalAssets: assetManifest.assets.length,
+        assetsOfType: allAssetsOfType.length,
+        availablePlacements: allAssetsOfType.map((a) => ({
+          id: a.id,
+          placementNumber: a.metadata?.placementNumber,
+          scene_number: a.scene_number,
+          version: a.version,
+          path: a.path,
+        })),
+      },
+    );
+    return undefined;
+  }
+
+  console.log(
+    `[findAssetByPlacementNumber] Found ${matchingAssets.length} matching asset(s) for placement ${placementNumber}, type ${assetType}:`,
+    {
+      matchingAssets: matchingAssets.map((a) => ({
         id: a.id,
         placementNumber: a.metadata?.placementNumber,
         scene_number: a.scene_number,
         version: a.version,
         path: a.path,
       })),
-    });
-    return undefined;
-  }
-
-  console.log(`[findAssetByPlacementNumber] Found ${matchingAssets.length} matching asset(s) for placement ${placementNumber}, type ${assetType}:`, {
-    matchingAssets: matchingAssets.map(a => ({
-      id: a.id,
-      placementNumber: a.metadata?.placementNumber,
-      scene_number: a.scene_number,
-      version: a.version,
-      path: a.path,
-    })),
-    targetVersion,
-  });
+      targetVersion,
+    },
+  );
 
   // If version is specified, find that version; otherwise get latest
   if (targetVersion !== undefined) {
-    const versionAsset = matchingAssets.find((a) => a.version === targetVersion);
+    const versionAsset = matchingAssets.find(
+      (a) => a.version === targetVersion,
+    );
     if (versionAsset) {
-      console.log(`[findAssetByPlacementNumber] Using specified version ${targetVersion} for placement ${placementNumber}`);
+      console.log(
+        `[findAssetByPlacementNumber] Using specified version ${targetVersion} for placement ${placementNumber}`,
+      );
       return versionAsset;
-    } else {
-      console.warn(`[findAssetByPlacementNumber] Specified version ${targetVersion} not found, using latest`);
     }
+    console.warn(
+      `[findAssetByPlacementNumber] Specified version ${targetVersion} not found, using latest`,
+    );
   }
 
   // Return latest version
   const latest = matchingAssets.reduce((latest, current) =>
     current.version > latest.version ? current : latest,
   );
-  console.log(`[findAssetByPlacementNumber] Using latest version ${latest.version} for placement ${placementNumber}`);
+  console.log(
+    `[findAssetByPlacementNumber] Using latest version ${latest.version} for placement ${placementNumber}`,
+  );
   return latest;
 }
 
@@ -198,12 +226,16 @@ function fillGapsWithPlaceholders(
  */
 export function useTimelineData(
   activeVersions?: Record<number, SceneVersions>,
-): TimelineData {
+): TimelineDataWithRefresh {
   const { isLoaded, assetManifest, refreshAssetManifest } = useProject();
   const { projectDirectory } = useWorkspace();
-  const { imagePlacements, videoPlacements } = usePlacementFiles();
-  const { entries: transcriptEntries, totalDuration: transcriptDuration } = useTranscript();
-  const [audioFiles, setAudioFiles] = useState<Array<{ path: string; duration: number }>>([]);
+  const { imagePlacements, videoPlacements, infographicPlacements } =
+    usePlacementFiles();
+  const { entries: transcriptEntries, totalDuration: transcriptDuration } =
+    useTranscript();
+  const [audioFiles, setAudioFiles] = useState<
+    Array<{ path: string; duration: number }>
+  >([]);
   const [audioRefreshTrigger, setAudioRefreshTrigger] = useState(0);
   const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
 
@@ -217,17 +249,33 @@ export function useTimelineData(
     setTimelineRefreshTrigger((prev) => prev + 1);
   }, [refreshAssetManifest]);
 
-  // Expose refresh functions via window for external triggers
+  // Refresh audio files - invoked by import handler or file watcher
+  const refreshAudioFiles = useCallback(() => {
+    setAudioRefreshTrigger((prev) => prev + 1);
+  }, []);
+
+  // Subscribe to file changes under .kshana/agent/audio so UI updates when audio is added by agent or elsewhere
   useEffect(() => {
-    (window as any).refreshAudioFiles = () => {
-      setAudioRefreshTrigger((prev) => prev + 1);
-    };
-    (window as any).refreshTimeline = refreshTimeline;
+    if (!projectDirectory) return;
+
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const filePath = event.path;
+      if (!filePath.includes('.kshana/agent/audio')) return;
+
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        setAudioRefreshTrigger((prev) => prev + 1);
+        debounceTimeout = null;
+      }, 250);
+    });
+
     return () => {
-      delete (window as any).refreshAudioFiles;
-      delete (window as any).refreshTimeline;
+      unsubscribe();
+      if (debounceTimeout) clearTimeout(debounceTimeout);
     };
-  }, [refreshTimeline]);
+  }, [projectDirectory]);
 
   // Load audio files from .kshana/agent/audio directory
   useEffect(() => {
@@ -237,21 +285,30 @@ export function useTimelineData(
       try {
         const audioDir = `${projectDirectory}/${PROJECT_PATHS.AGENT_AUDIO}`;
         const files = await window.electron.project.readTree(audioDir, 1);
-        
+
         const audioFilesList: Array<{ path: string; duration: number }> = [];
-        
+
         if (files && files.children) {
           for (const file of files.children) {
-            if (file.type === 'file' && file.name.match(/\.(mp3|wav|m4a|aac|ogg|flac)$/i)) {
+            if (
+              file.type === 'file' &&
+              file.name.match(/\.(mp3|wav|m4a|aac|ogg|flac)$/i)
+            ) {
               const audioPath = `${PROJECT_PATHS.AGENT_AUDIO}/${file.name}`;
               // Get actual duration from audio file
               const fullAudioPath = `${projectDirectory}/${audioPath}`;
               let duration = 0;
               try {
-                duration = await window.electron.project.getAudioDuration(fullAudioPath);
-                console.log(`[useTimelineData] Got audio duration for ${file.name}: ${duration}s`);
+                duration =
+                  await window.electron.project.getAudioDuration(fullAudioPath);
+                console.log(
+                  `[useTimelineData] Got audio duration for ${file.name}: ${duration}s`,
+                );
               } catch (error) {
-                console.warn(`[useTimelineData] Failed to get duration for ${file.name}:`, error);
+                console.warn(
+                  `[useTimelineData] Failed to get duration for ${file.name}:`,
+                  error,
+                );
                 // Fallback to transcript duration if available
                 duration = transcriptDuration || 0;
               }
@@ -262,11 +319,14 @@ export function useTimelineData(
             }
           }
         }
-        
+
         setAudioFiles(audioFilesList);
       } catch (error) {
         // Directory might not exist yet, that's okay
-        console.debug('[useTimelineData] Audio directory not found or error loading:', error);
+        console.debug(
+          '[useTimelineData] Audio directory not found or error loading:',
+          error,
+        );
         setAudioFiles([]);
       }
     };
@@ -280,19 +340,33 @@ export function useTimelineData(
       isLoaded,
       hasManifest: !!assetManifest,
       totalAssets: assetManifest?.assets?.length || 0,
-      imageAssets: assetManifest?.assets?.filter(a => a.type === 'scene_image').map(a => ({
-        id: a.id,
-        placementNumber: a.metadata?.placementNumber,
-        scene_number: a.scene_number,
-        path: a.path,
-        metadata: a.metadata,
-      })) || [],
-      videoAssets: assetManifest?.assets?.filter(a => a.type === 'scene_video').map(a => ({
-        id: a.id,
-        placementNumber: a.metadata?.placementNumber,
-        scene_number: a.scene_number,
-        path: a.path,
-      })) || [],
+      imageAssets:
+        assetManifest?.assets
+          ?.filter((a) => a.type === 'scene_image')
+          .map((a) => ({
+            id: a.id,
+            placementNumber: a.metadata?.placementNumber,
+            scene_number: a.scene_number,
+            path: a.path,
+            metadata: a.metadata,
+          })) || [],
+      videoAssets:
+        assetManifest?.assets
+          ?.filter((a) => a.type === 'scene_video')
+          .map((a) => ({
+            id: a.id,
+            placementNumber: a.metadata?.placementNumber,
+            scene_number: a.scene_number,
+            path: a.path,
+          })) || [],
+      infographicAssets:
+        assetManifest?.assets
+          ?.filter((a) => a.type === 'scene_infographic')
+          .map((a) => ({
+            id: a.id,
+            placementNumber: a.metadata?.placementNumber,
+            path: a.path,
+          })) || [],
     });
   }, [isLoaded, assetManifest, timelineRefreshTrigger]);
 
@@ -300,7 +374,9 @@ export function useTimelineData(
   useEffect(() => {
     if (assetManifest && isLoaded) {
       // Asset manifest changed - timeline will automatically update via useMemo dependencies
-      console.log('[useTimelineData] Asset manifest updated, timeline will refresh');
+      console.log(
+        '[useTimelineData] Asset manifest updated, timeline will refresh',
+      );
     }
   }, [assetManifest, isLoaded]);
 
@@ -324,37 +400,47 @@ export function useTimelineData(
       // Enhanced logging and validation
       if (asset) {
         if (!asset.path) {
-          console.error(`[useTimelineData] Asset found for placement ${placement.placementNumber} but has no path:`, {
-            placementNumber: placement.placementNumber,
-            assetId: asset.id,
-            assetPath: asset.path,
-            metadata: asset.metadata,
-          });
+          console.error(
+            `[useTimelineData] Asset found for placement ${placement.placementNumber} but has no path:`,
+            {
+              placementNumber: placement.placementNumber,
+              assetId: asset.id,
+              assetPath: asset.path,
+              metadata: asset.metadata,
+            },
+          );
         } else {
-          console.log(`[useTimelineData] Found asset for placement ${placement.placementNumber}:`, {
-            placementNumber: placement.placementNumber,
-            assetPath: asset.path,
-            assetId: asset.id,
-            version: asset.version,
-            metadata: asset.metadata,
-          });
+          console.log(
+            `[useTimelineData] Found asset for placement ${placement.placementNumber}:`,
+            {
+              placementNumber: placement.placementNumber,
+              assetPath: asset.path,
+              assetId: asset.id,
+              version: asset.version,
+              metadata: asset.metadata,
+            },
+          );
         }
       } else {
-        const imageAssets = assetManifest?.assets?.filter(a => a.type === 'scene_image') || [];
-        console.warn(`[useTimelineData] No asset found for placement ${placement.placementNumber}`, {
-          placementNumber: placement.placementNumber,
-          totalAssets: assetManifest?.assets?.length || 0,
-          imageAssetsCount: imageAssets.length,
-          imageAssetsPlacementNumbers: imageAssets.map(a => ({
-            id: a.id,
-            placementNumber: a.metadata?.placementNumber,
-            scene_number: a.scene_number,
-            path: a.path,
-            version: a.version,
-          })),
-          assetManifestExists: !!assetManifest,
-          assetsArrayExists: !!assetManifest?.assets,
-        });
+        const imageAssets =
+          assetManifest?.assets?.filter((a) => a.type === 'scene_image') || [];
+        console.warn(
+          `[useTimelineData] No asset found for placement ${placement.placementNumber}`,
+          {
+            placementNumber: placement.placementNumber,
+            totalAssets: assetManifest?.assets?.length || 0,
+            imageAssetsCount: imageAssets.length,
+            imageAssetsPlacementNumbers: imageAssets.map((a) => ({
+              id: a.id,
+              placementNumber: a.metadata?.placementNumber,
+              scene_number: a.scene_number,
+              path: a.path,
+              version: a.version,
+            })),
+            assetManifestExists: !!assetManifest,
+            assetsArrayExists: !!assetManifest?.assets,
+          },
+        );
       }
 
       items.push({
@@ -375,7 +461,6 @@ export function useTimelineData(
       const startSeconds = timeStringToSeconds(placement.startTime);
       const endSeconds = timeStringToSeconds(placement.endTime);
 
-      // Find matching asset
       const asset = findAssetByPlacementNumber(
         placement.placementNumber,
         assetManifest,
@@ -392,32 +477,69 @@ export function useTimelineData(
         label: `vd-placement-${placement.placementNumber}`,
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
-        videoPath: asset?.path, // Will be resolved later
+        videoPath: asset?.path,
+      });
+    });
+
+    // Convert infographic placements to timeline items
+    infographicPlacements.forEach((placement) => {
+      const startSeconds = timeStringToSeconds(placement.startTime);
+      const endSeconds = timeStringToSeconds(placement.endTime);
+
+      const asset = findAssetByPlacementNumber(
+        placement.placementNumber,
+        assetManifest,
+        'scene_infographic',
+        activeVersions,
+      );
+
+      items.push({
+        id: `info-placement-${placement.placementNumber}`,
+        type: 'infographic',
+        startTime: startSeconds,
+        endTime: endSeconds,
+        duration: endSeconds - startSeconds,
+        label: `info-placement-${placement.placementNumber}`,
+        prompt: placement.prompt,
+        placementNumber: placement.placementNumber,
+        videoPath: asset?.path, // infographics are mp4 clips
       });
     });
 
     return items;
-  }, [imagePlacements, videoPlacements, assetManifest, activeVersions]);
+  }, [
+    imagePlacements,
+    videoPlacements,
+    infographicPlacements,
+    assetManifest,
+    activeVersions,
+  ]);
 
   // Calculate total duration from all sources (audio, placements, transcript)
   // Use whichever is longest - audio may be longer than scenes, or scenes may be longer than audio
   const calculatedTotalDuration = useMemo(() => {
     // Get max audio duration (if any audio files exist)
-    const maxAudioDuration = audioFiles.length > 0
-      ? Math.max(...audioFiles.map(af => af.duration || 0))
-      : 0;
+    const maxAudioDuration =
+      audioFiles.length > 0
+        ? Math.max(...audioFiles.map((af) => af.duration || 0))
+        : 0;
 
     // Get last placement endTime (if any placements exist)
-    const lastPlacementEndTime = placementItems.length > 0
-      ? Math.max(...placementItems.map(item => item.endTime))
-      : 0;
+    const lastPlacementEndTime =
+      placementItems.length > 0
+        ? Math.max(...placementItems.map((item) => item.endTime))
+        : 0;
 
     // Get transcript duration
     const transcriptDur = transcriptDuration || 0;
 
     // Use the maximum of all three - whichever is longest
-    const maxDuration = Math.max(maxAudioDuration, lastPlacementEndTime, transcriptDur);
-    
+    const maxDuration = Math.max(
+      maxAudioDuration,
+      lastPlacementEndTime,
+      transcriptDur,
+    );
+
     console.log('[useTimelineData] Calculated total duration:', {
       maxAudioDuration,
       lastPlacementEndTime,
@@ -449,7 +571,10 @@ export function useTimelineData(
     // Fill gaps with placeholders (but don't fill gaps for audio items)
     const nonAudioItems = items.filter((item) => item.type !== 'audio');
     // Use calculated total duration instead of just transcriptDuration
-    const filledItems = fillGapsWithPlaceholders(nonAudioItems, calculatedTotalDuration);
+    const filledItems = fillGapsWithPlaceholders(
+      nonAudioItems,
+      calculatedTotalDuration,
+    );
 
     // Add audio items back
     const audioItems = items.filter((item) => item.type === 'audio');
@@ -477,5 +602,7 @@ export function useTimelineData(
   return {
     timelineItems,
     totalDuration,
+    refreshTimeline,
+    refreshAudioFiles,
   };
 }

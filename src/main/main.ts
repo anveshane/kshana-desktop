@@ -10,11 +10,11 @@
  */
 import path from 'path';
 import fs from 'fs/promises';
-import { normalizePathForFFmpeg } from './utils/pathNormalizer';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import log from 'electron-log';
 import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { normalizePathForFFmpeg } from './utils/pathNormalizer';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import backendManager, {
@@ -165,7 +165,6 @@ ipcMain.handle('project:select-audio-file', async () => {
   return result.filePaths[0];
 });
 
-
 async function getAudioDuration(audioPath: string): Promise<number> {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(audioPath, (err, metadata) => {
@@ -190,7 +189,10 @@ ipcMain.handle(
         : path.resolve(audioPath);
       return await getAudioDuration(fullPath);
     } catch (error) {
-      log.warn(`[Audio Duration IPC] Error getting duration for ${audioPath}:`, error);
+      log.warn(
+        `[Audio Duration IPC] Error getting duration for ${audioPath}:`,
+        error,
+      );
       return 0;
     }
   },
@@ -207,42 +209,67 @@ ipcMain.handle('project:watch-directory', async (_event, dirPath: string) => {
   fileSystemManager.watchDirectory(dirPath);
 });
 
-ipcMain.handle('project:watch-manifest', async (_event, manifestPath: string) => {
-  await fileSystemManager.watchManifest(manifestPath);
-});
+ipcMain.handle(
+  'project:watch-manifest',
+  async (_event, manifestPath: string) => {
+    await fileSystemManager.watchManifest(manifestPath);
+  },
+);
 
-ipcMain.handle('project:watch-image-placements', async (_event, imagePlacementsDir: string) => {
-  await fileSystemManager.watchImagePlacements(imagePlacementsDir);
-});
+ipcMain.handle(
+  'project:watch-image-placements',
+  async (_event, imagePlacementsDir: string) => {
+    await fileSystemManager.watchImagePlacements(imagePlacementsDir);
+  },
+);
 
-ipcMain.handle('project:refresh-assets', async (_event, projectDirectory: string) => {
-  // Trigger a file change event for manifest.json to force refresh
-  const manifestPath = path.join(projectDirectory, '.kshana', 'agent', 'manifest.json');
-  if (fs.existsSync(manifestPath)) {
-    // Emit a change event to trigger refresh
-    fileSystemManager.emit('file-change', {
-      type: 'change',
-      path: manifestPath,
-    });
-    console.log('[Main] Triggered asset refresh for manifest:', manifestPath);
-  }
-});
-
-// Listen for asset update notifications (can be called from backend or external processes)
-// Note: This is optional - file watcher should handle most cases automatically
-ipcMain.on('project:asset-updated', async (_event, data: { projectDirectory: string; assetId: string; assetType: string }) => {
-  console.log('[Main] Asset updated notification received:', data);
-  // Trigger refresh by emitting file change event
-  if (data.projectDirectory) {
-    const manifestPath = path.join(data.projectDirectory, '.kshana', 'agent', 'manifest.json');
+ipcMain.handle(
+  'project:refresh-assets',
+  async (_event, projectDirectory: string) => {
+    // Trigger a file change event for manifest.json to force refresh
+    const manifestPath = path.join(
+      projectDirectory,
+      '.kshana',
+      'agent',
+      'manifest.json',
+    );
     if (fs.existsSync(manifestPath)) {
+      // Emit a change event to trigger refresh
       fileSystemManager.emit('file-change', {
         type: 'change',
         path: manifestPath,
       });
+      console.log('[Main] Triggered asset refresh for manifest:', manifestPath);
     }
-  }
-});
+  },
+);
+
+// Listen for asset update notifications (can be called from backend or external processes)
+// Note: This is optional - file watcher should handle most cases automatically
+ipcMain.on(
+  'project:asset-updated',
+  async (
+    _event,
+    data: { projectDirectory: string; assetId: string; assetType: string },
+  ) => {
+    console.log('[Main] Asset updated notification received:', data);
+    // Trigger refresh by emitting file change event
+    if (data.projectDirectory) {
+      const manifestPath = path.join(
+        data.projectDirectory,
+        '.kshana',
+        'agent',
+        'manifest.json',
+      );
+      if (fs.existsSync(manifestPath)) {
+        fileSystemManager.emit('file-change', {
+          type: 'change',
+          path: manifestPath,
+        });
+      }
+    }
+  },
+);
 
 ipcMain.handle('project:unwatch-directory', async () => {
   fileSystemManager.unwatchDirectory();
@@ -482,7 +509,7 @@ ipcMain.handle(
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
     console.log('[VideoComposition] Starting video composition...');
     console.log('[VideoComposition] Timeline items:', timelineItems.length);
-    
+
     if (!timelineItems || timelineItems.length === 0) {
       console.error('[VideoComposition] No timeline items to compose');
       return { success: false, error: 'No timeline items to compose' };
@@ -500,44 +527,63 @@ ipcMain.handle(
       for (let i = 0; i < timelineItems.length; i++) {
         const item = timelineItems[i]!;
         const segmentPath = path.join(tempDir, `segment-${i}.mp4`);
-        console.log(`[VideoComposition] Processing segment ${i + 1}/${timelineItems.length}: ${item.type} (${item.duration}s)`);
+        console.log(
+          `[VideoComposition] Processing segment ${i + 1}/${timelineItems.length}: ${item.type} (${item.duration}s)`,
+        );
 
         if (item.type === 'video') {
           // For video segments, use the full video file
           // The timeline startTime/endTime are for positioning, not extraction
           // Strip file:// protocol if present
-          let cleanPath = item.path.replace(/^file:\/\//, '');
-          
+          const cleanPath = item.path.replace(/^file:\/\//, '');
+
           // Skip items with empty paths
           if (!cleanPath || cleanPath.trim() === '') {
-            console.warn(`[VideoComposition] Skipping video segment ${i + 1}: empty path`);
+            console.warn(
+              `[VideoComposition] Skipping video segment ${i + 1}: empty path`,
+            );
             continue;
           }
-          
+
           const absolutePath = path.isAbsolute(cleanPath)
             ? cleanPath
             : path.join(projectDirectory, cleanPath);
 
-          console.log(`[VideoComposition] Video segment ${i + 1}: ${absolutePath}`);
+          console.log(
+            `[VideoComposition] Video segment ${i + 1}: ${absolutePath}`,
+          );
 
           // Check if path exists and is a file (not a directory)
           try {
             const stats = await fs.stat(absolutePath);
             if (stats.isDirectory()) {
-              console.warn(`[VideoComposition] Skipping video segment ${i + 1}: path is a directory: ${absolutePath}`);
+              console.warn(
+                `[VideoComposition] Skipping video segment ${i + 1}: path is a directory: ${absolutePath}`,
+              );
               continue;
             }
-            console.log(`[VideoComposition] Video file exists: ${absolutePath}`);
+            console.log(
+              `[VideoComposition] Video file exists: ${absolutePath}`,
+            );
           } catch (error) {
-            if (error instanceof Error && error.message.includes('is a directory')) {
-              console.warn(`[VideoComposition] Skipping video segment ${i + 1}: path is a directory`);
+            if (
+              error instanceof Error &&
+              error.message.includes('is a directory')
+            ) {
+              console.warn(
+                `[VideoComposition] Skipping video segment ${i + 1}: path is a directory`,
+              );
               continue;
             }
-            console.warn(`[VideoComposition] Skipping video segment ${i + 1}: file not found: ${absolutePath}`);
+            console.warn(
+              `[VideoComposition] Skipping video segment ${i + 1}: file not found: ${absolutePath}`,
+            );
             continue;
           }
 
-          console.log(`[VideoComposition] Converting video segment ${i + 1}...`);
+          console.log(
+            `[VideoComposition] Converting video segment ${i + 1}...`,
+          );
           await new Promise<void>((resolve, reject) => {
             ffmpeg(absolutePath)
               .outputOptions([
@@ -547,23 +593,33 @@ ipcMain.handle(
                 '-crf 23',
                 '-pix_fmt yuv420p',
                 '-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
-                '-t', item.duration.toString(), // Limit to segment duration
+                '-t',
+                item.duration.toString(), // Limit to segment duration
               ])
               .output(segmentPath)
               .on('start', (commandLine) => {
-                console.log(`[VideoComposition] FFmpeg command: ${commandLine}`);
+                console.log(
+                  `[VideoComposition] FFmpeg command: ${commandLine}`,
+                );
               })
               .on('progress', (progress) => {
                 if (progress.percent) {
-                  console.log(`[VideoComposition] Video segment ${i + 1} progress: ${Math.round(progress.percent)}%`);
+                  console.log(
+                    `[VideoComposition] Video segment ${i + 1} progress: ${Math.round(progress.percent)}%`,
+                  );
                 }
               })
               .on('end', () => {
-                console.log(`[VideoComposition] Video segment ${i + 1} completed`);
+                console.log(
+                  `[VideoComposition] Video segment ${i + 1} completed`,
+                );
                 resolve();
               })
               .on('error', (err) => {
-                console.error(`[VideoComposition] Video segment ${i + 1} error:`, err);
+                console.error(
+                  `[VideoComposition] Video segment ${i + 1} error:`,
+                  err,
+                );
                 reject(err);
               })
               .run();
@@ -574,35 +630,46 @@ ipcMain.handle(
         } else if (item.type === 'image') {
           // Convert image to video
           // Strip file:// protocol if present
-          let cleanPath = item.path.replace(/^file:\/\//, '');
-          
+          const cleanPath = item.path.replace(/^file:\/\//, '');
+
           // Skip items with empty paths
           if (!cleanPath || cleanPath.trim() === '') {
-            console.warn(`[VideoComposition] Skipping image segment ${i + 1}: empty path`);
+            console.warn(
+              `[VideoComposition] Skipping image segment ${i + 1}: empty path`,
+            );
             continue;
           }
-          
+
           const absolutePath = path.isAbsolute(cleanPath)
             ? cleanPath
             : path.join(projectDirectory, cleanPath);
 
-          console.log(`[VideoComposition] Image segment ${i + 1}: ${absolutePath}`);
+          console.log(
+            `[VideoComposition] Image segment ${i + 1}: ${absolutePath}`,
+          );
 
           // Check if file exists
           try {
             await fs.access(absolutePath);
-            console.log(`[VideoComposition] Image file exists: ${absolutePath}`);
+            console.log(
+              `[VideoComposition] Image file exists: ${absolutePath}`,
+            );
           } catch {
-            console.warn(`[VideoComposition] Skipping image segment ${i + 1}: file not found: ${absolutePath}`);
+            console.warn(
+              `[VideoComposition] Skipping image segment ${i + 1}: file not found: ${absolutePath}`,
+            );
             continue;
           }
 
-          console.log(`[VideoComposition] Converting image segment ${i + 1} to video (${item.duration}s)...`);
+          console.log(
+            `[VideoComposition] Converting image segment ${i + 1} to video (${item.duration}s)...`,
+          );
           await new Promise<void>((resolve, reject) => {
             ffmpeg(absolutePath)
               .inputOptions(['-loop 1'])
               .outputOptions([
-                '-t', item.duration.toString(),
+                '-t',
+                item.duration.toString(),
                 '-c:v libx264',
                 '-preset medium',
                 '-crf 23',
@@ -611,19 +678,28 @@ ipcMain.handle(
               ])
               .output(segmentPath)
               .on('start', (commandLine) => {
-                console.log(`[VideoComposition] FFmpeg command: ${commandLine}`);
+                console.log(
+                  `[VideoComposition] FFmpeg command: ${commandLine}`,
+                );
               })
               .on('progress', (progress) => {
                 if (progress.percent) {
-                  console.log(`[VideoComposition] Image segment ${i + 1} progress: ${Math.round(progress.percent)}%`);
+                  console.log(
+                    `[VideoComposition] Image segment ${i + 1} progress: ${Math.round(progress.percent)}%`,
+                  );
                 }
               })
               .on('end', () => {
-                console.log(`[VideoComposition] Image segment ${i + 1} completed`);
+                console.log(
+                  `[VideoComposition] Image segment ${i + 1} completed`,
+                );
                 resolve();
               })
               .on('error', (err) => {
-                console.error(`[VideoComposition] Image segment ${i + 1} error:`, err);
+                console.error(
+                  `[VideoComposition] Image segment ${i + 1} error:`,
+                  err,
+                );
                 reject(err);
               })
               .run();
@@ -633,10 +709,12 @@ ipcMain.handle(
           cleanupFiles.push(segmentPath);
         } else if (item.type === 'placeholder') {
           // Create black video frames
-          console.log(`[VideoComposition] Creating placeholder segment ${i + 1} (${item.duration}s)...`);
+          console.log(
+            `[VideoComposition] Creating placeholder segment ${i + 1} (${item.duration}s)...`,
+          );
           await new Promise<void>((resolve, reject) => {
             ffmpeg()
-              .input('color=c=black:s=1920x1080:d=' + item.duration)
+              .input(`color=c=black:s=1920x1080:d=${item.duration}`)
               .inputOptions(['-f lavfi'])
               .outputOptions([
                 '-c:v libx264',
@@ -646,14 +724,21 @@ ipcMain.handle(
               ])
               .output(segmentPath)
               .on('start', (commandLine) => {
-                console.log(`[VideoComposition] FFmpeg command: ${commandLine}`);
+                console.log(
+                  `[VideoComposition] FFmpeg command: ${commandLine}`,
+                );
               })
               .on('end', () => {
-                console.log(`[VideoComposition] Placeholder segment ${i + 1} completed`);
+                console.log(
+                  `[VideoComposition] Placeholder segment ${i + 1} completed`,
+                );
                 resolve();
               })
               .on('error', (err) => {
-                console.error(`[VideoComposition] Placeholder segment ${i + 1} error:`, err);
+                console.error(
+                  `[VideoComposition] Placeholder segment ${i + 1} error:`,
+                  err,
+                );
                 reject(err);
               })
               .run();
@@ -666,14 +751,19 @@ ipcMain.handle(
 
       // Check if we have any valid segments
       if (segmentFiles.length === 0) {
-        console.error('[VideoComposition] No valid segments to compose. All timeline items were skipped.');
-        return { 
-          success: false, 
-          error: 'No valid segments found. All timeline items were skipped due to missing or invalid file paths.' 
+        console.error(
+          '[VideoComposition] No valid segments to compose. All timeline items were skipped.',
+        );
+        return {
+          success: false,
+          error:
+            'No valid segments found. All timeline items were skipped due to missing or invalid file paths.',
         };
       }
 
-      console.log(`[VideoComposition] All ${segmentFiles.length} segments processed. Creating concat list...`);
+      console.log(
+        `[VideoComposition] All ${segmentFiles.length} segments processed. Creating concat list...`,
+      );
 
       // Create concat file list
       const concatListPath = path.join(tempDir, 'concat-list.txt');
@@ -682,11 +772,18 @@ ipcMain.handle(
         .join('\n');
       await fs.writeFile(concatListPath, concatList, 'utf-8');
       cleanupFiles.push(concatListPath);
-      console.log(`[VideoComposition] Concat list created with ${segmentFiles.length} files`);
+      console.log(
+        `[VideoComposition] Concat list created with ${segmentFiles.length} files`,
+      );
 
       // Step 1: Concatenate all video segments
-      const concatenatedVideoPath = path.join(tempDir, 'concatenated-video.mp4');
-      console.log(`[VideoComposition] Concatenating segments into video: ${concatenatedVideoPath}`);
+      const concatenatedVideoPath = path.join(
+        tempDir,
+        'concatenated-video.mp4',
+      );
+      console.log(
+        `[VideoComposition] Concatenating segments into video: ${concatenatedVideoPath}`,
+      );
       await new Promise<void>((resolve, reject) => {
         ffmpeg()
           .input(concatListPath)
@@ -696,11 +793,15 @@ ipcMain.handle(
           ])
           .output(concatenatedVideoPath)
           .on('start', (commandLine) => {
-            console.log(`[VideoComposition] FFmpeg concat command: ${commandLine}`);
+            console.log(
+              `[VideoComposition] FFmpeg concat command: ${commandLine}`,
+            );
           })
           .on('progress', (progress) => {
             if (progress.percent) {
-              console.log(`[VideoComposition] Concatenation progress: ${Math.round(progress.percent)}%`);
+              console.log(
+                `[VideoComposition] Concatenation progress: ${Math.round(progress.percent)}%`,
+              );
             }
           })
           .on('end', () => {
@@ -718,18 +819,27 @@ ipcMain.handle(
       const outputPath = path.join(tempDir, 'composed-video.mp4');
       if (audioPath) {
         // Normalize audio path (strips file://, resolves relative paths)
-        const normalizedAudioPath = await normalizePathForFFmpeg(audioPath, projectDirectory);
-        
+        const normalizedAudioPath = await normalizePathForFFmpeg(
+          audioPath,
+          projectDirectory,
+        );
+
         if (!normalizedAudioPath) {
-          console.warn('[VideoComposition] Audio path is empty after normalization');
+          console.warn(
+            '[VideoComposition] Audio path is empty after normalization',
+          );
           await fs.copyFile(concatenatedVideoPath, outputPath);
-          console.log('[VideoComposition] No audio track provided, using video only');
+          console.log(
+            '[VideoComposition] No audio track provided, using video only',
+          );
         } else {
           // Check if audio file exists
           try {
             await fs.access(normalizedAudioPath);
-            console.log(`[VideoComposition] Mixing audio track: ${normalizedAudioPath}`);
-            
+            console.log(
+              `[VideoComposition] Mixing audio track: ${normalizedAudioPath}`,
+            );
+
             await new Promise<void>((resolve, reject) => {
               ffmpeg()
                 .input(concatenatedVideoPath)
@@ -743,11 +853,15 @@ ipcMain.handle(
                 ])
                 .output(outputPath)
                 .on('start', (commandLine) => {
-                  console.log(`[VideoComposition] FFmpeg audio mix command: ${commandLine}`);
+                  console.log(
+                    `[VideoComposition] FFmpeg audio mix command: ${commandLine}`,
+                  );
                 })
                 .on('progress', (progress) => {
                   if (progress.percent) {
-                    console.log(`[VideoComposition] Audio mixing progress: ${Math.round(progress.percent)}%`);
+                    console.log(
+                      `[VideoComposition] Audio mixing progress: ${Math.round(progress.percent)}%`,
+                    );
                   }
                 })
                 .on('end', () => {
@@ -757,11 +871,16 @@ ipcMain.handle(
                 .on('error', (err) => {
                   console.error(`[VideoComposition] Audio mixing error:`, err);
                   // Fall back to video-only if audio mixing fails
-                  console.warn('[VideoComposition] Falling back to video-only output');
+                  console.warn(
+                    '[VideoComposition] Falling back to video-only output',
+                  );
                   fs.copyFile(concatenatedVideoPath, outputPath)
                     .then(() => resolve())
                     .catch((copyErr) => {
-                      console.error('[VideoComposition] Failed to copy video-only output:', copyErr);
+                      console.error(
+                        '[VideoComposition] Failed to copy video-only output:',
+                        copyErr,
+                      );
                       reject(err);
                     });
                 })
@@ -769,31 +888,43 @@ ipcMain.handle(
             });
           } catch (error) {
             // Audio file doesn't exist - use video only
-            console.warn(`[VideoComposition] Audio file not found: ${normalizedAudioPath}, using video only`);
+            console.warn(
+              `[VideoComposition] Audio file not found: ${normalizedAudioPath}, using video only`,
+            );
             await fs.copyFile(concatenatedVideoPath, outputPath);
           }
         }
       } else {
         // No audio provided - just use concatenated video
-        console.log('[VideoComposition] No audio track provided, using video only');
+        console.log(
+          '[VideoComposition] No audio track provided, using video only',
+        );
         await fs.copyFile(concatenatedVideoPath, outputPath);
       }
 
       // Verify output file exists
       try {
         const stats = await fs.stat(outputPath);
-        console.log(`[VideoComposition] Output file created: ${outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+        console.log(
+          `[VideoComposition] Output file created: ${outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`,
+        );
       } catch {
-        console.error(`[VideoComposition] Output file not found: ${outputPath}`);
+        console.error(
+          `[VideoComposition] Output file not found: ${outputPath}`,
+        );
         throw new Error('Composed video file was not created');
       }
 
-      console.log('[VideoComposition] Video composition completed successfully!');
+      console.log(
+        '[VideoComposition] Video composition completed successfully!',
+      );
       return { success: true, outputPath };
     } catch (error) {
       console.error('[VideoComposition] Error during composition:', error);
       // Clean up temporary files on error
-      console.log(`[VideoComposition] Cleaning up ${cleanupFiles.length} temporary files...`);
+      console.log(
+        `[VideoComposition] Cleaning up ${cleanupFiles.length} temporary files...`,
+      );
       for (const file of cleanupFiles) {
         try {
           await fs.unlink(file);
@@ -801,7 +932,8 @@ ipcMain.handle(
           // Ignore cleanup errors
         }
       }
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
       console.error(`[VideoComposition] Composition failed: ${errorMessage}`);
       return {
         success: false,
@@ -827,37 +959,84 @@ ipcMain.handle('logger:user-input', (_event, content: string) => {
   desktopLogger.logUserInput(content);
 });
 
-ipcMain.handle('logger:agent-text', (_event, text: string, agentName?: string) => {
-  desktopLogger.logAgentText(text, agentName);
-});
+ipcMain.handle(
+  'logger:agent-text',
+  (_event, text: string, agentName?: string) => {
+    desktopLogger.logAgentText(text, agentName);
+  },
+);
 
-ipcMain.handle('logger:tool-start', (_event, toolName: string, args?: Record<string, unknown>) => {
-  desktopLogger.logToolStart(toolName, args);
-});
+ipcMain.handle(
+  'logger:tool-start',
+  (_event, toolName: string, args?: Record<string, unknown>) => {
+    desktopLogger.logToolStart(toolName, args);
+  },
+);
 
-ipcMain.handle('logger:tool-complete', (_event, toolName: string, result: unknown, duration?: number, isError?: boolean) => {
-  desktopLogger.logToolComplete(toolName, result, duration, isError);
-});
+ipcMain.handle(
+  'logger:tool-complete',
+  (
+    _event,
+    toolName: string,
+    result: unknown,
+    duration?: number,
+    isError?: boolean,
+  ) => {
+    desktopLogger.logToolComplete(toolName, result, duration, isError);
+  },
+);
 
-ipcMain.handle('logger:question', (_event, question: string, options?: Array<{ label: string; description?: string }>, isConfirmation?: boolean, autoApproveTimeoutMs?: number) => {
-  desktopLogger.logQuestion(question, options, isConfirmation, autoApproveTimeoutMs);
-});
+ipcMain.handle(
+  'logger:question',
+  (
+    _event,
+    question: string,
+    options?: Array<{ label: string; description?: string }>,
+    isConfirmation?: boolean,
+    autoApproveTimeoutMs?: number,
+  ) => {
+    desktopLogger.logQuestion(
+      question,
+      options,
+      isConfirmation,
+      autoApproveTimeoutMs,
+    );
+  },
+);
 
-ipcMain.handle('logger:status-change', (_event, status: string, agentName?: string, message?: string) => {
-  desktopLogger.logStatusChange(status, agentName, message);
-});
+ipcMain.handle(
+  'logger:status-change',
+  (_event, status: string, agentName?: string, message?: string) => {
+    desktopLogger.logStatusChange(status, agentName, message);
+  },
+);
 
-ipcMain.handle('logger:phase-transition', (_event, fromPhase: string, toPhase: string, success: boolean, reason?: string) => {
-  desktopLogger.logPhaseTransition(fromPhase, toPhase, success, reason);
-});
+ipcMain.handle(
+  'logger:phase-transition',
+  (
+    _event,
+    fromPhase: string,
+    toPhase: string,
+    success: boolean,
+    reason?: string,
+  ) => {
+    desktopLogger.logPhaseTransition(fromPhase, toPhase, success, reason);
+  },
+);
 
-ipcMain.handle('logger:todo-update', (_event, todos: Array<{ content: string; status: string }>) => {
-  desktopLogger.logTodoUpdate(todos);
-});
+ipcMain.handle(
+  'logger:todo-update',
+  (_event, todos: Array<{ content: string; status: string }>) => {
+    desktopLogger.logTodoUpdate(todos);
+  },
+);
 
-ipcMain.handle('logger:error', (_event, error: string, context?: Record<string, unknown>) => {
-  desktopLogger.logError(error, context);
-});
+ipcMain.handle(
+  'logger:error',
+  (_event, error: string, context?: Record<string, unknown>) => {
+    desktopLogger.logError(error, context);
+  },
+);
 
 ipcMain.handle('logger:session-end', () => {
   desktopLogger.logSessionEnd();
@@ -1050,7 +1229,7 @@ app
   .then(async () => {
     // Initialize logger for this session
     desktopLogger.initUILog();
-    
+
     // Create window first so UI appears immediately
     await createWindow();
 

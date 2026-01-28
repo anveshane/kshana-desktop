@@ -127,7 +127,10 @@ function setupEnvironment(overrides: BackendEnvOverrides): void {
   // In packaged: process.resourcesPath/workflows or app.getAppPath()/workflows
   if (app.isPackaged) {
     // In production, try process.resourcesPath first, then app path
-    const resourcesWorkflows = path.join(process.resourcesPath || '', 'workflows');
+    const resourcesWorkflows = path.join(
+      process.resourcesPath || '',
+      'workflows',
+    );
     if (fs.existsSync(resourcesWorkflows)) {
       process.env.KSHANA_WORKFLOWS_DIR = resourcesWorkflows;
     } else {
@@ -140,6 +143,53 @@ function setupEnvironment(overrides: BackendEnvOverrides): void {
     // In development, __dirname is dist/main, so ../../workflows gives us kshana-desktop/workflows
     const devWorkflows = path.join(__dirname, '../../workflows');
     process.env.KSHANA_WORKFLOWS_DIR = path.resolve(devWorkflows);
+  }
+
+  // Set remotion-infographics directory
+  // In development: find kshana-ink source and use its remotion-infographics directory
+  // In packaged: remotion-infographics should be copied alongside kshana-ink
+  if (app.isPackaged) {
+    // In production, remotion-infographics is copied to node_modules/kshana-ink/remotion-infographics
+    // First check node_modules/kshana-ink/remotion-infographics (primary location)
+    const kshanaInkRemotion = path.join(__dirname, '../../node_modules/kshana-ink/remotion-infographics');
+    if (fs.existsSync(kshanaInkRemotion)) {
+      process.env.KSHANA_REMOTION_INFographics_DIR = path.resolve(kshanaInkRemotion);
+    } else {
+      // Fallback: check resources directory
+      const resourcesRemotion = path.join(
+        process.resourcesPath || '',
+        'remotion-infographics',
+      );
+      if (fs.existsSync(resourcesRemotion)) {
+        process.env.KSHANA_REMOTION_INFographics_DIR = resourcesRemotion;
+      } else {
+        // Try app directory
+        const appPath = app.getAppPath();
+        const appRemotion = path.join(path.dirname(appPath), 'remotion-infographics');
+        if (fs.existsSync(appRemotion)) {
+          process.env.KSHANA_REMOTION_INFographics_DIR = appRemotion;
+        }
+      }
+    }
+  } else {
+    // In development, find kshana-ink source directory
+    // __dirname is dist/main, so ../../node_modules/kshana-ink or ../../kshana-ink
+    const devRemotionInKshanaInk = path.join(__dirname, '../../node_modules/kshana-ink/remotion-infographics');
+    if (fs.existsSync(devRemotionInKshanaInk)) {
+      process.env.KSHANA_REMOTION_INFographics_DIR = path.resolve(devRemotionInKshanaInk);
+    } else {
+      // Try sibling directory (monorepo structure)
+      const siblingRemotion = path.join(__dirname, '../../kshana-ink/remotion-infographics');
+      if (fs.existsSync(siblingRemotion)) {
+        process.env.KSHANA_REMOTION_INFographics_DIR = path.resolve(siblingRemotion);
+      } else {
+        // Try ../remotion-infographics (if kshana-ink is at root)
+        const rootRemotion = path.join(__dirname, '../../../remotion-infographics');
+        if (fs.existsSync(rootRemotion)) {
+          process.env.KSHANA_REMOTION_INFographics_DIR = path.resolve(rootRemotion);
+        }
+      }
+    }
   }
 }
 

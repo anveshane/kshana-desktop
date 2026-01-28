@@ -60,7 +60,8 @@ export function usePlaybackController(
 
     // Get current seeking state (handle both boolean and function)
     // Call function here, not during render
-    const currentIsSeeking = typeof isSeeking === 'function' ? isSeeking() : isSeeking;
+    const currentIsSeeking =
+      typeof isSeeking === 'function' ? isSeeking() : isSeeking;
 
     return stateMachineRef.current.update(
       playbackTime,

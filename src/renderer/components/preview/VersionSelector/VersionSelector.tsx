@@ -70,12 +70,14 @@ export default function VersionSelector({
       // Extract and sort version numbers - only for the matching type
       // For image items, only store image versions
       // For video items, only store video versions
-      const imageVersions = item.type === 'image'
-        ? imageAssets.map((asset) => asset.version).sort((a, b) => a - b)
-        : [];
-      const videoVersions = item.type === 'video'
-        ? videoAssets.map((asset) => asset.version).sort((a, b) => a - b)
-        : [];
+      const imageVersions =
+        item.type === 'image'
+          ? imageAssets.map((asset) => asset.version).sort((a, b) => a - b)
+          : [];
+      const videoVersions =
+        item.type === 'video'
+          ? videoAssets.map((asset) => asset.version).sort((a, b) => a - b)
+          : [];
 
       // Only create entry if there are versions for the matching type
       const hasMatchingVersions =
@@ -165,7 +167,10 @@ export default function VersionSelector({
           } else {
             displayLabel = displayLabel
               .replace(/-/g, '_')
-              .replace(/PLM_(\d+)/, (_, num) => `PLM_${String(num).padStart(2, '0')}`);
+              .replace(
+                /PLM_(\d+)/,
+                (_, num) => `PLM_${String(num).padStart(2, '0')}`,
+              );
           }
 
           return (

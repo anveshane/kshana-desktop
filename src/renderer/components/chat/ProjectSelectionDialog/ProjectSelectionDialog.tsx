@@ -20,7 +20,9 @@ export default function ProjectSelectionDialog({
   onStartNew,
 }: ProjectSelectionDialogProps) {
   const [loading, setLoading] = useState(true);
-  const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null);
+  const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(
+    null,
+  );
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
@@ -49,7 +51,10 @@ export default function ProjectSelectionDialog({
         const data = await response.json();
         setProjectStatus(data);
       } catch (error) {
-        console.error('[ProjectSelectionDialog] Error checking project:', error);
+        console.error(
+          '[ProjectSelectionDialog] Error checking project:',
+          error,
+        );
         setProjectStatus({ exists: false });
       } finally {
         setLoading(false);
@@ -75,20 +80,24 @@ export default function ProjectSelectionDialog({
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Failed to delete project: ${response.status} ${errorText}`);
+        throw new Error(
+          `Failed to delete project: ${response.status} ${errorText}`,
+        );
       }
 
       const data = await response.json();
       if (data.success) {
         // Wait a bit for file system to sync
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
         onStartNew();
       } else {
         throw new Error('Delete operation returned success: false');
       }
     } catch (error) {
       console.error('[ProjectSelectionDialog] Error deleting project:', error);
-      alert(`Failed to delete project: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      alert(
+        `Failed to delete project: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
       setDeleting(false);
     }
   };
@@ -108,7 +117,7 @@ export default function ProjectSelectionDialog({
     return null;
   }
 
-  const project = projectStatus.project;
+  const { project } = projectStatus;
   const currentPhase = project.current_phase || 'unknown';
   const phaseDisplayName = currentPhase
     .split('_')
@@ -139,7 +148,9 @@ export default function ProjectSelectionDialog({
             {project.characters && project.characters.length > 0 && (
               <div className={styles.detail}>
                 <span className={styles.label}>Characters:</span>
-                <span className={styles.value}>{project.characters.length}</span>
+                <span className={styles.value}>
+                  {project.characters.length}
+                </span>
               </div>
             )}
             {project.scenes && project.scenes.length > 0 && (
