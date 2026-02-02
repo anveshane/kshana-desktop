@@ -11,9 +11,12 @@ export interface BackendEnvOverrides {
   comfyuiUrl?: string;
   lmStudioUrl?: string;
   lmStudioModel?: string;
-  llmProvider?: 'gemini' | 'lmstudio' | 'openrouter';
+  llmProvider?: 'gemini' | 'lmstudio' | 'openai' | 'openrouter';
   googleApiKey?: string;
   geminiModel?: string;
+  openaiApiKey?: string;
+  openaiBaseUrl?: string;
+  openaiModel?: string;
   openRouterApiKey?: string;
   openRouterModel?: string;
   projectDir?: string;

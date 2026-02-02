@@ -17,6 +17,9 @@ const emptySettings: AppSettings = {
   llmProvider: 'lmstudio',
   googleApiKey: '',
   geminiModel: 'gemini-2.5-flash',
+  openaiApiKey: '',
+  openaiBaseUrl: 'https://api.openai.com/v1',
+  openaiModel: 'gpt-4o',
   openRouterApiKey: '',
   openRouterModel: 'z-ai/glm-4.7-flash',
 };
@@ -164,6 +167,22 @@ export default function SettingsPanel({
                   type="radio"
                   className={styles.radioInput}
                   name="llm-provider"
+                  value="openai"
+                  checked={form.llmProvider === 'openai'}
+                  onChange={(event) =>
+                    handleInput(
+                      'llmProvider',
+                      event.target.value as AppSettings['llmProvider'],
+                    )
+                  }
+                />
+                OpenAI (cloud)
+              </label>
+              <label className={styles.radioLabel}>
+                <input
+                  type="radio"
+                  className={styles.radioInput}
+                  name="llm-provider"
                   value="openrouter"
                   checked={form.llmProvider === 'openrouter'}
                   onChange={(event) =>
@@ -234,6 +253,50 @@ export default function SettingsPanel({
                     handleInput('geminiModel', event.target.value)
                   }
                   placeholder="gemini-2.5-flash"
+                  required
+                />
+              </label>
+            </>
+          )}
+
+          {form.llmProvider === 'openai' && (
+            <>
+              <label className={styles.label}>
+                OpenAI API Key
+                <input
+                  type="password"
+                  className={styles.input}
+                  value={form.openaiApiKey}
+                  onChange={(event) =>
+                    handleInput('openaiApiKey', event.target.value)
+                  }
+                  placeholder="sk-..."
+                  required
+                />
+              </label>
+              <label className={styles.label}>
+                OpenAI Base URL
+                <input
+                  type="url"
+                  className={styles.input}
+                  value={form.openaiBaseUrl}
+                  onChange={(event) =>
+                    handleInput('openaiBaseUrl', event.target.value)
+                  }
+                  placeholder="https://api.openai.com/v1"
+                  required
+                />
+              </label>
+              <label className={styles.label}>
+                OpenAI Model ID
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={form.openaiModel}
+                  onChange={(event) =>
+                    handleInput('openaiModel', event.target.value)
+                  }
+                  placeholder="gpt-4o"
                   required
                 />
               </label>

@@ -40,7 +40,7 @@ class FileSystemManager extends EventEmitter {
 
   private debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  private readonly DEBOUNCE_DELAY = 200; // 200ms debounce for rapid changes (reduced for faster response)
+  private readonly DEBOUNCE_DELAY = 50; // 50ms debounce for faster real-time asset detection
 
   constructor() {
     super();
@@ -180,6 +180,8 @@ class FileSystemManager extends EventEmitter {
 
   /**
    * Watch manifest.json with optimized settings for reliability
+   * Uses polling to ensure cross-process file changes are detected (native events
+   * can miss writes from child processes on macOS)
    */
   async watchManifest(manifestPath: string): Promise<void> {
     if (this.manifestWatcher) {
@@ -191,10 +193,13 @@ class FileSystemManager extends EventEmitter {
       persistent: true,
       ignoreInitial: true,
       awaitWriteFinish: {
-        stabilityThreshold: 100, // Wait 100ms after last change (reduced for faster detection)
-        pollInterval: 50, // Check every 50ms (increased frequency)
+        stabilityThreshold: 100, // Increased stability for reliable cross-process detection
+        pollInterval: 50, // Check every 50ms
       },
-      usePolling: false, // Use native events when possible
+      // Use polling to reliably detect cross-process writes from kshana-ink backend
+      usePolling: true,
+      interval: 250, // Poll every 250ms for faster detection
+      binaryInterval: 300,
     });
 
     const emitChange = (type: FileChangeEvent['type'], filePath: string) => {
@@ -246,8 +251,8 @@ class FileSystemManager extends EventEmitter {
       ignoreInitial: true,
       depth: 1, // Only watch direct children
       awaitWriteFinish: {
-        stabilityThreshold: 300, // Wait 300ms after last change for image files
-        pollInterval: 100,
+        stabilityThreshold: 50, // Wait 50ms after last change for faster real-time detection
+        pollInterval: 25,
       },
       usePolling: false,
     });
@@ -300,8 +305,8 @@ class FileSystemManager extends EventEmitter {
       ignoreInitial: true,
       depth: 5, // Ensure .kshana/agent/content and .kshana/agent/{image,video}-placements are watched
       awaitWriteFinish: {
-        stabilityThreshold: 200,
-        pollInterval: 100,
+        stabilityThreshold: 50, // Faster detection for real-time asset updates
+        pollInterval: 25,
       },
     });
 

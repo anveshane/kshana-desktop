@@ -8,6 +8,12 @@ import type {
   RecentProject,
   FileChangeEvent,
 } from '../shared/fileSystemTypes';
+import type {
+  RemotionJob,
+  RemotionProgress,
+  RemotionTimelineItem,
+  ParsedInfographicPlacement,
+} from '../shared/remotionTypes';
 
 export type Channels = 'ipc-example';
 
@@ -169,6 +175,39 @@ const projectBridge = {
   },
 };
 
+const remotionBridge = {
+  renderInfographics(
+    projectDirectory: string,
+    timelineItems: RemotionTimelineItem[],
+    infographicPlacements: ParsedInfographicPlacement[],
+  ): Promise<{ jobId: string; error?: string }> {
+    return ipcRenderer.invoke(
+      'remotion:render-infographics',
+      projectDirectory,
+      timelineItems,
+      infographicPlacements,
+    );
+  },
+  cancelJob(jobId: string): Promise<void> {
+    return ipcRenderer.invoke('remotion:cancel-job', jobId);
+  },
+  getJob(jobId: string): Promise<RemotionJob | null> {
+    return ipcRenderer.invoke('remotion:get-job', jobId);
+  },
+  onProgress(callback: (progress: RemotionProgress) => void) {
+    const subscription = (_event: IpcRendererEvent, progress: RemotionProgress) =>
+      callback(progress);
+    ipcRenderer.on('remotion:progress', subscription);
+    return () => ipcRenderer.removeListener('remotion:progress', subscription);
+  },
+  onJobComplete(callback: (job: RemotionJob) => void) {
+    const subscription = (_event: IpcRendererEvent, job: RemotionJob) =>
+      callback(job);
+    ipcRenderer.on('remotion:job-complete', subscription);
+    return () => ipcRenderer.removeListener('remotion:job-complete', subscription);
+  },
+};
+
 const loggerBridge = {
   init(): Promise<void> {
     return ipcRenderer.invoke('logger:init');
@@ -280,6 +319,7 @@ const electronHandler = {
   backend: backendBridge,
   settings: settingsBridge,
   project: projectBridge,
+  remotion: remotionBridge,
   logger: loggerBridge,
 };
 

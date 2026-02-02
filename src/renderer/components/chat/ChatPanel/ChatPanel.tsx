@@ -3,6 +3,7 @@ import { Bot, Trash2 } from 'lucide-react';
 import type { BackendState } from '../../../../shared/backendTypes';
 import type { ChatMessage } from '../../../types/chat';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import { useAgent } from '../../../contexts/AgentContext';
 import MessageList from '../MessageList';
 import ChatInput from '../ChatInput';
 import StatusBar, { AgentStatus } from '../StatusBar';
@@ -39,6 +40,7 @@ export default function ChatPanel() {
   const [hasUserSentMessage, setHasUserSentMessage] = useState(false);
 
   const { setConnectionStatus, projectDirectory } = useWorkspace();
+  const agentContext = useAgent();
 
   const wsRef = useRef<WebSocket | null>(null);
   const lastAssistantIdRef = useRef<string | null>(null);
@@ -1149,6 +1151,13 @@ export default function ChatPanel() {
     },
     [appendMessage, connectWebSocket, appendSystemMessage, agentName],
   );
+
+  // Register sendMessage so other components can trigger agent tasks (e.g. Render Infographics)
+  useEffect(() => {
+    if (agentContext?.registerSendTask) {
+      return agentContext.registerSendTask(sendMessage);
+    }
+  }, [agentContext?.registerSendTask, sendMessage]);
 
   useEffect(() => {
     const bootstrap = async () => {

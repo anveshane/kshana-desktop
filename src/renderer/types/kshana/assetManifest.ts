@@ -68,6 +68,9 @@ export interface AssetManifest {
 
   /** List of all assets */
   assets: AssetInfo[];
+
+  /** Internal timestamp to force React re-renders (not persisted to disk) */
+  _refreshedAt?: number;
 }
 
 /**

@@ -28,7 +28,12 @@ import {
   updateSettings,
 } from './settingsManager';
 import fileSystemManager from './fileSystemManager';
+import { remotionManager } from './remotionManager';
 import type { FileChangeEvent } from '../shared/fileSystemTypes';
+import type {
+  RemotionTimelineItem,
+  ParsedInfographicPlacement,
+} from '../shared/remotionTypes';
 import * as desktopLogger from './services/DesktopLogger';
 
 const buildBackendEnv = (
@@ -950,6 +955,43 @@ fileSystemManager.on('file-change', (event: FileChangeEvent) => {
   }
 });
 
+// Remotion IPC handlers
+ipcMain.handle(
+  'remotion:render-infographics',
+  async (
+    _event,
+    projectDirectory: string,
+    timelineItems: RemotionTimelineItem[],
+    infographicPlacements: ParsedInfographicPlacement[],
+  ) => {
+    return remotionManager.startRender(
+      projectDirectory,
+      timelineItems,
+      infographicPlacements,
+    );
+  },
+);
+
+ipcMain.handle('remotion:cancel-job', async (_event, jobId: string) => {
+  remotionManager.cancelJob(jobId);
+});
+
+ipcMain.handle('remotion:get-job', async (_event, jobId: string) => {
+  return remotionManager.getJob(jobId);
+});
+
+remotionManager.on('progress', (progress) => {
+  if (mainWindow) {
+    mainWindow.webContents.send('remotion:progress', progress);
+  }
+});
+
+remotionManager.on('job-complete', (job) => {
+  if (mainWindow) {
+    mainWindow.webContents.send('remotion:job-complete', job);
+  }
+});
+
 // Logger IPC handlers
 ipcMain.handle('logger:init', () => {
   desktopLogger.initUILog();
@@ -1229,6 +1271,11 @@ app
   .then(async () => {
     // Initialize logger for this session
     desktopLogger.initUILog();
+
+    // Clean up stale Remotion temp jobs from previous sessions
+    remotionManager.cleanupOnStartup().catch((err) => {
+      log.warn('[RemotionManager] Startup cleanup error:', err);
+    });
 
     // Create window first so UI appears immediately
     await createWindow();

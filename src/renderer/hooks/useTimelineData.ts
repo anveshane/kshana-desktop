@@ -71,8 +71,12 @@ function findAssetByPlacementNumber(
         : undefined; // infographic: no versioning yet
 
   // Find matching asset with improved logging
+  // Matching priority: 1) metadata.placementNumber, 2) scene_number, 3) path pattern (image1_, video1_, info1_)
+  // Type comparison is case-insensitive to handle manifest variations
   const matchingAssets = assetManifest.assets.filter((a) => {
-    const typeMatch = a.type === assetType;
+    const assetTypeNorm = String(a.type || '').toLowerCase();
+    const targetTypeNorm = assetType.toLowerCase();
+    const typeMatch = assetTypeNorm === targetTypeNorm;
     if (!typeMatch) return false;
 
     // Check both metadata.placementNumber and scene_number
@@ -87,7 +91,21 @@ function findAssetByPlacementNumber(
       assetSceneNumber !== undefined &&
       (Number(assetSceneNumber) === placementNumber ||
         String(assetSceneNumber) === String(placementNumber));
-    const matches = placementMatch || sceneMatch;
+
+    // Fallback: match by path pattern (e.g., agent/image-placements/image1_xxx.png, agent/video-placements/video2_xxx.mp4)
+    let pathMatch = false;
+    if (!placementMatch && !sceneMatch && a.path) {
+      const pathLower = a.path.replace(/\\/g, '/');
+      const prefix =
+        assetType === 'scene_image'
+          ? `image${placementNumber}_`
+          : assetType === 'scene_video'
+            ? `video${placementNumber}_`
+            : `info${placementNumber}_`;
+      pathMatch = pathLower.includes(prefix);
+    }
+
+    const matches = placementMatch || sceneMatch || pathMatch;
 
     if (!matches) {
       // Only log if it's the same type but wrong placement (to reduce noise)
@@ -506,6 +524,14 @@ export function useTimelineData(
       });
     });
 
+    console.log('[useTimelineData] placementItems useMemo computed:', {
+      totalItems: items.length,
+      itemsWithImages: items.filter((i) => i.imagePath).length,
+      itemsWithoutImages: items.filter((i) => i.type === 'image' && !i.imagePath).length,
+      assetManifestAssetCount: assetManifest?.assets?.length || 0,
+      timelineRefreshTrigger,
+    });
+
     return items;
   }, [
     imagePlacements,
@@ -513,6 +539,7 @@ export function useTimelineData(
     infographicPlacements,
     assetManifest,
     activeVersions,
+    timelineRefreshTrigger, // Add this to force recompute on manual refresh
   ]);
 
   // Calculate total duration from all sources (audio, placements, transcript)

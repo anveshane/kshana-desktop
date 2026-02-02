@@ -246,9 +246,11 @@ export default function PreviewPanel() {
               <span className={styles.statusLabel}>
                 {settings?.llmProvider === 'gemini'
                   ? 'Gemini'
-                  : settings?.llmProvider === 'openrouter'
-                    ? 'OpenRouter'
-                    : 'LM Studio'}
+                  : settings?.llmProvider === 'openai'
+                    ? 'OpenAI'
+                    : settings?.llmProvider === 'openrouter'
+                      ? 'OpenRouter'
+                      : 'LM Studio'}
                 :{' '}
                 {connectionState.lmStudio === 'connected'
                   ? 'Connected'
