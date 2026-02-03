@@ -57,39 +57,53 @@ export interface ParseResult {
  * Convert time string to seconds.
  * Handles formats: "M:SS", "MM:SS", "H:MM:SS", "HH:MM:SS"
  */
+function sanitizeTimeToken(timeStr: string): string {
+  return timeStr
+    .trim()
+    .replace(/^[\[\(]+/, '')
+    .replace(/[\]\)]+$/, '')
+    .replace(/,/g, '.');
+}
+
 export function timeStringToSeconds(timeStr: string): number {
-  const parts = timeStr.split(':');
+  const cleaned = sanitizeTimeToken(timeStr);
+  const parts = cleaned.split(':');
+  const parseSeconds = (value: string): number => {
+    const parsed = Number.parseFloat(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
   if (parts.length === 3) {
-    // HH:MM:SS format
+    // HH:MM:SS[.mmm] format
     const hours = parseInt(parts[0] ?? '0', 10) || 0;
     const minutes = parseInt(parts[1] ?? '0', 10) || 0;
-    const seconds = parseInt(parts[2] ?? '0', 10) || 0;
+    const seconds = parseSeconds(parts[2] ?? '0');
     return hours * 3600 + minutes * 60 + seconds;
   }
   if (parts.length === 2) {
-    // M:SS or MM:SS format
+    // M:SS[.mmm] or MM:SS[.mmm] format
     const minutes = parseInt(parts[0] ?? '0', 10) || 0;
-    const seconds = parseInt(parts[1] ?? '0', 10) || 0;
+    const seconds = parseSeconds(parts[1] ?? '0');
     return minutes * 60 + seconds;
   }
-  // If it's just seconds (e.g., "15")
-  return parseInt(timeStr, 10) || 0;
+  // If it's just seconds (e.g., "15" or "15.500")
+  return parseSeconds(cleaned);
 }
 
 /**
  * Normalize time string to standard format (M:SS or MM:SS)
  */
 function normalizeTime(timeStr: string): string {
-  const parts = timeStr.split(':');
+  const cleaned = sanitizeTimeToken(timeStr);
+  const parts = cleaned.split(':');
   if (parts.length === 3) {
     // HH:MM:SS -> MM:SS (if hours is 0) or keep as is
     const hours = parseInt(parts[0] ?? '0', 10) || 0;
     if (hours === 0) {
       return `${parts[1]}:${parts[2]}`;
     }
-    return timeStr;
+    return cleaned;
   }
-  return timeStr;
+  return cleaned;
 }
 
 /**
@@ -100,7 +114,7 @@ function parseTimeRange(
   timeRange: string,
 ): { startTime: string; endTime: string } | null {
   // More flexible time range matching - handles various formats
-  const timeMatch = timeRange.match(/^([\d:]+)\s*-\s*([\d:]+)$/);
+  const timeMatch = timeRange.match(/^(\[?[\d:.,]+\]?)\s*-\s*(\[?[\d:.,]+\]?)$/);
   if (!timeMatch || !timeMatch[1] || !timeMatch[2]) {
     return null;
   }

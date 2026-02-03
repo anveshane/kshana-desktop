@@ -2,6 +2,8 @@ export type LlmProvider = 'gemini' | 'lmstudio' | 'openai' | 'openrouter';
 
 export interface AppSettings {
   comfyuiUrl: string;
+  /** Video generation timeout in seconds (default: 1800 = 30 min). LTX-2 is compute-intensive. */
+  comfyuiTimeout?: number;
   lmStudioUrl: string;
   lmStudioModel: string;
   llmProvider: LlmProvider;

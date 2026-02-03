@@ -5,6 +5,7 @@ import type { AppSettings } from './settingsTypes';
 export const toBackendEnv = (settings: AppSettings): BackendEnvOverrides => ({
   port: settings.preferredPort,
   comfyuiUrl: settings.comfyuiUrl,
+  comfyuiTimeout: settings.comfyuiTimeout,
   lmStudioUrl: settings.lmStudioUrl,
   lmStudioModel: settings.lmStudioModel,
   llmProvider: settings.llmProvider,
