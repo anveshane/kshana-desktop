@@ -49,8 +49,7 @@ export default function ChatPanel() {
     null,
   );
   const awaitingResponseRef = useRef(false);
-  // Track active tool calls by toolName (since server sends empty toolCallId)
-  // Key format: `${toolName}-${sequenceNumber}` to handle multiple calls of same tool
+  // Track active tool calls by toolCallId or by toolName+sequence when toolCallId is missing
   const activeToolCallsRef = useRef<
     Map<string, { messageId: string; startTime: number; toolName: string }>
   >(new Map());
@@ -283,22 +282,6 @@ export default function ChatPanel() {
     }
   }, []);
 
-  // Internal tools that should not be displayed to users
-  const HIDDEN_TOOLS = useRef(
-    new Set([
-      'todo_write',
-      'update_project',
-      'write_file',
-      'read_file',
-      'read_project',
-      'write_placement_plan',
-      'read_placement_plan',
-      'update_phase',
-      'transition_phase',
-      'update_plan_stage',
-    ]),
-  );
-
   // Debounce status updates to prevent flicker
   const statusUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -519,14 +502,8 @@ export default function ChatPanel() {
           const args = (data.arguments as Record<string, unknown>) ?? {};
           const { result } = data;
           const { error } = data;
+          const toolCallId = (data.toolCallId as string) || '';
 
-          // Skip hidden/internal tools entirely
-          if (HIDDEN_TOOLS.current.has(toolName)) {
-            break;
-          }
-
-          // Only show tool calls when completed (not when started)
-          // This matches CLI behavior and reduces noise
           if (toolStatus === 'completed' || toolStatus === 'error') {
             debouncedSetStatus('thinking', 'Processing...');
 
@@ -552,8 +529,31 @@ export default function ChatPanel() {
               cleanedResult = cleanThinkingTags(cleanedResult);
             }
 
-            // Calculate duration if available
-            const duration = (data.duration as number) ?? 0;
+            const now = Date.now();
+            let duration = (data.duration as number) ?? 0;
+            let activeKey: string | null = null;
+
+            if (toolCallId) {
+              activeKey = toolCallId;
+            }
+
+            let activeEntry = activeKey
+              ? activeToolCallsRef.current.get(activeKey)
+              : undefined;
+
+            if (!activeEntry) {
+              // Find the oldest active tool call for this toolName (FIFO)
+              for (const [key, value] of activeToolCallsRef.current.entries()) {
+                if (value.toolName === toolName) {
+                  activeKey = key;
+                  activeEntry = value;
+                  break;
+                }
+              }
+            }
+            if (!duration && activeEntry) {
+              duration = Math.max(0, now - activeEntry.startTime);
+            }
 
             // Log tool completion
             window.electron.logger.logToolComplete(
@@ -563,24 +563,47 @@ export default function ChatPanel() {
               toolStatus === 'error',
             );
 
-            // Create message for completed tool call
+            // Update existing tool call message (if it exists), otherwise append
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
 
-            appendMessage({
-              role: 'system',
-              type: 'tool_call',
-              content: '',
-              author: agentName,
-              meta: {
-                toolCallId: makeId(),
-                toolName,
-                args,
-                status: toolStatus === 'error' ? 'error' : 'completed',
-                result: cleanedResult,
-                duration,
-              },
-            });
+            if (activeEntry) {
+              activeToolCallsRef.current.delete(activeKey as string);
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === activeEntry.messageId
+                    ? {
+                        ...msg,
+                        meta: {
+                          ...(msg.meta || {}),
+                          toolCallId: toolCallId || activeKey,
+                          toolName,
+                          args,
+                          status: toolStatus === 'error' ? 'error' : 'completed',
+                          result: cleanedResult,
+                          duration,
+                        },
+                        timestamp: Date.now(),
+                      }
+                    : msg,
+                ),
+              );
+            } else {
+              appendMessage({
+                role: 'system',
+                type: 'tool_call',
+                content: '',
+                author: agentName,
+                meta: {
+                  toolCallId: toolCallId || makeId(),
+                  toolName,
+                  args,
+                  status: toolStatus === 'error' ? 'error' : 'completed',
+                  result: cleanedResult,
+                  duration,
+                },
+              });
+            }
 
             // Check for phase transitions in update_project results
             if (
@@ -618,8 +641,12 @@ export default function ChatPanel() {
               }
             }
           } else if (toolStatus === 'started') {
-            // For started tools, only update status (don't create message)
-            // This matches CLI which doesn't show "started" messages
+            const now = Date.now();
+            const sequence = (toolCallSequenceRef.current.get(toolName) ?? 0) + 1;
+            toolCallSequenceRef.current.set(toolName, sequence);
+            const fallbackKey = `${toolName}-${sequence}`;
+            const key = toolCallId || fallbackKey;
+
             debouncedSetStatus('executing', `Running ${toolName}...`);
             window.electron.logger.logToolStart(toolName, args);
             window.electron.logger.logStatusChange(
@@ -627,6 +654,27 @@ export default function ChatPanel() {
               agentName,
               `Running ${toolName}...`,
             );
+
+            const messageId = appendMessage({
+              role: 'system',
+              type: 'tool_call',
+              content: '',
+              author: agentName,
+              meta: {
+                toolCallId: toolCallId || key,
+                toolName,
+                args,
+                status: 'executing',
+                result: undefined,
+                duration: undefined,
+              },
+            });
+
+            activeToolCallsRef.current.set(key, {
+              messageId,
+              startTime: now,
+              toolName,
+            });
           }
           break;
         }

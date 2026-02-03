@@ -104,22 +104,6 @@ export default function MessageBubble({
   // Render tool call card
   if (isToolCall && message.meta) {
     const toolName = (message.meta.toolName as string) || 'tool';
-    // Hide internal tools that shouldn't be displayed to users
-    const HIDDEN_TOOLS = new Set([
-      'todo_write',
-      'update_project',
-      'write_file',
-      'read_file',
-      'read_project',
-      'write_placement_plan',
-      'read_placement_plan',
-      'update_phase',
-      'transition_phase',
-      'update_plan_stage',
-    ]);
-    if (HIDDEN_TOOLS.has(toolName)) {
-      return null; // Don't render hidden tools
-    }
     const status = (message.meta.status as string) || 'executing';
     const args = (message.meta.args as Record<string, unknown>) || {};
     const { result } = message.meta;

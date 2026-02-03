@@ -1,11 +1,4 @@
-import { useState, useEffect } from 'react';
-import {
-  CheckCircle2,
-  XCircle,
-  AlertCircle,
-  ChevronDown,
-  ChevronRight,
-} from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import styles from './ToolCallCard.module.scss';
 
@@ -331,11 +324,9 @@ export default function ToolCallCard({
   agentName,
   streamingContent,
 }: ToolCallCardProps) {
-  // CLI-style: Only show completed/error tools (not executing/started)
-  // This matches the behavior we set in ChatPanel where we only show completed tools
-  if (status === 'executing' || status === 'started') {
-    return null; // Don't show executing/started state - matches CLI behavior
-  }
+  const isExecuting = status === 'executing' || status === 'started';
+  const isError = status === 'error';
+  const isCompleted = status === 'completed';
 
   // CLI-style format: [TOOL] toolName
   const prefix = agentName ? `[${agentName}]` : '[TOOL]';
@@ -397,52 +388,80 @@ export default function ToolCallCard({
     resultDisplay = `${resultDisplay.substring(0, MAX_RESULT_LENGTH)}...`;
   }
 
+  const borderClass = isExecuting
+    ? styles.borderExecuting
+    : isError
+      ? styles.borderError
+      : isCompleted
+        ? styles.borderCompleted
+        : styles.borderDefault;
+
+  const toolCallText = formatToolCall(toolName, args);
+
   return (
-    <div className={styles.container}>
-      <div className={styles.cliStyle}>
-        <span className={styles.cliPrefix}>{prefix}</span>
-        <span className={styles.cliToolName}>{toolName}</span>
-        {status === 'error' && (
-          <span className={styles.cliError}> (error)</span>
+    <div className={`${styles.container} ${borderClass}`}>
+      <div className={styles.header}>
+        {isExecuting ? (
+          <AlertCircle className={styles.statusIconExecuting} />
+        ) : isError ? (
+          <XCircle className={styles.statusIconError} />
+        ) : (
+          <CheckCircle2 className={styles.statusIconCompleted} />
         )}
-        {duration !== undefined && (
-          <span className={styles.cliDuration}>
-            {' '}
-            ({formatDuration(duration)})
-          </span>
+        <span className={styles.toolName}>{toolName}</span>
+        <span className={styles.cliPrefix}>{prefix}</span>
+        <span className={styles.cliToolName}>
+          {isExecuting ? 'Running' : isError ? 'Failed' : 'Success'}
+        </span>
+        {!isExecuting && duration !== undefined && duration > 0 && (
+          <span className={styles.duration}>{formatDuration(duration)}</span>
         )}
       </div>
-      {(filePath || fileSize || resultDisplay) && (
-        <div className={styles.cliResult}>
-          {filePath && (
-            <div className={styles.cliFilePath}>
-              📄 {filePath}
-              {fileSize && (
-                <span className={styles.cliFileSize}> ({fileSize})</span>
-              )}
-            </div>
-          )}
-          {preview && (
-            <div className={styles.cliPreview}>
-              <details>
-                <summary>Preview</summary>
-                <pre className={styles.cliResultPre}>{preview}</pre>
-              </details>
-            </div>
-          )}
-          {resultDisplay && (
-            <div className={styles.cliResultContent}>
-              {typeof result === 'object' &&
-              result !== null &&
-              'content' in result ? (
-                <ReactMarkdown>{resultDisplay}</ReactMarkdown>
-              ) : (
-                <pre className={styles.cliResultPre}>{resultDisplay}</pre>
-              )}
-            </div>
-          )}
+
+      <div className={styles.content}>
+        <div className={styles.toolCall}>
+          <span className={styles.toolCallCode}>{toolCallText}</span>
         </div>
-      )}
+
+        {!isExecuting && (filePath || fileSize || resultDisplay) && (
+          <div className={styles.cliResult}>
+            {filePath && (
+              <div className={styles.cliFilePath}>
+                📄 {filePath}
+                {fileSize && (
+                  <span className={styles.cliFileSize}> ({fileSize})</span>
+                )}
+              </div>
+            )}
+            {preview && (
+              <div className={styles.cliPreview}>
+                <details>
+                  <summary>Preview</summary>
+                  <pre className={styles.cliResultPre}>{preview}</pre>
+                </details>
+              </div>
+            )}
+            {resultDisplay && (
+              <div className={styles.cliResultContent}>
+                {typeof result === 'object' &&
+                result !== null &&
+                'content' in result ? (
+                  <ReactMarkdown>{resultDisplay}</ReactMarkdown>
+                ) : (
+                  <pre className={styles.cliResultPre}>{resultDisplay}</pre>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {isError && !resultDisplay && (
+          <div className={styles.errorResult}>
+            <div className={styles.errorLabel}>Error</div>
+            <pre className={styles.errorMessage}>Tool failed.</pre>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
