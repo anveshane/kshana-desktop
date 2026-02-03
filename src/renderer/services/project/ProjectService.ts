@@ -465,14 +465,10 @@ export class ProjectService {
       assetCount: manifest.assets?.length || 0,
     });
 
-    // Normalize createdAt to created_at and ensure type is lowercase for consistent matching
+    // Normalize createdAt to created_at for compatibility
     const normalizedAssets = manifest.assets.map((asset) => ({
       ...asset,
       created_at: asset.created_at ?? asset.createdAt ?? Date.now(),
-      type:
-        typeof asset.type === 'string'
-          ? (asset.type.toLowerCase() as AssetManifest['assets'][0]['type'])
-          : asset.type,
     }));
 
     // Remove createdAt if it exists (keep only created_at)

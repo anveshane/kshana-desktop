@@ -116,7 +116,7 @@ function TimelineItemComponent({
     ) {
       const activeVersion = activeVersions[item.placementNumber]?.image;
       const matchingAssets = assetManifest.assets.filter((a) => {
-        if (String(a.type || '').toLowerCase() !== 'scene_image') return false;
+        if (a.type !== 'scene_image') return false;
 
         // Handle type coercion (placementNumber might be number or string)
         const assetPlacementNumber = a.metadata?.placementNumber;
@@ -130,14 +130,7 @@ function TimelineItemComponent({
           (Number(assetSceneNumber) === item.placementNumber ||
             String(assetSceneNumber) === String(item.placementNumber));
 
-        // Fallback: match by path pattern (image1_xxx.png)
-        const pathMatch =
-          !placementMatch &&
-          !sceneMatch &&
-          a.path &&
-          a.path.includes(`image${item.placementNumber}_`);
-
-        return placementMatch || sceneMatch || pathMatch;
+        return placementMatch || sceneMatch;
       });
 
       if (matchingAssets.length > 0) {

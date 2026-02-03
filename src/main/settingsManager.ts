@@ -1,6 +1,6 @@
 import Store from 'electron-store';
-import type { BackendEnvOverrides } from '../shared/backendTypes';
 import type { AppSettings } from '../shared/settingsTypes';
+import { toBackendEnv } from '../shared/settingsUtils';
 
 const defaults: AppSettings = {
   comfyuiUrl: 'http://localhost:8000',
@@ -31,20 +31,5 @@ export const updateSettings = (patch: Partial<AppSettings>): AppSettings => {
   return store.store;
 };
 
-export const toBackendEnv = (settings: AppSettings): BackendEnvOverrides => ({
-  port: settings.preferredPort,
-  comfyuiUrl: settings.comfyuiUrl,
-  lmStudioUrl: settings.lmStudioUrl,
-  lmStudioModel: settings.lmStudioModel,
-  llmProvider: settings.llmProvider,
-  googleApiKey: settings.googleApiKey,
-  geminiModel: settings.geminiModel,
-  openaiApiKey: settings.openaiApiKey,
-  openaiBaseUrl: settings.openaiBaseUrl,
-  openaiModel: settings.openaiModel,
-  openRouterApiKey: settings.openRouterApiKey,
-  openRouterModel: settings.openRouterModel,
-  projectDir: settings.projectDir,
-});
-
 export type { AppSettings } from '../shared/settingsTypes';
+export { toBackendEnv };

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Settings } from 'lucide-react';
 import type { AppSettings } from '../../../../shared/settingsTypes';
-import type { BackendEnvOverrides } from '../../../../shared/backendTypes';
+import { toBackendEnv } from '../../../../shared/settingsUtils';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { TimelineDataProvider } from '../../../contexts/TimelineDataContext';
@@ -18,19 +18,6 @@ import SettingsPanel from '../../SettingsPanel';
 import styles from './PreviewPanel.module.scss';
 
 type Tab = 'storyboard' | 'assets' | 'video-library' | 'preview';
-
-const mapSettingsToEnv = (settings: AppSettings): BackendEnvOverrides => ({
-  port: settings.preferredPort,
-  comfyuiUrl: settings.comfyuiUrl,
-  lmStudioUrl: settings.lmStudioUrl,
-  lmStudioModel: settings.lmStudioModel,
-  llmProvider: settings.llmProvider,
-  googleApiKey: settings.googleApiKey,
-  geminiModel: settings.geminiModel,
-  openRouterApiKey: settings.openRouterApiKey,
-  openRouterModel: settings.openRouterModel,
-  projectDir: settings.projectDir,
-});
 
 export default function PreviewPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('video-library');
@@ -188,7 +175,7 @@ export default function PreviewPanel() {
     try {
       const updated = await window.electron.settings.update(next);
       setSettings(updated);
-      await window.electron.backend.restart(mapSettingsToEnv(updated));
+      await window.electron.backend.restart(toBackendEnv(updated));
       setSettingsOpen(false);
     } catch (error) {
       console.error('Failed to restart backend:', error);

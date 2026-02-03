@@ -4,7 +4,7 @@
  * Placement-based timeline architecture: timeline items driven by placement timestamps
  */
 
-import { useMemo, useEffect, useState, useCallback } from 'react';
+import { useMemo, useEffect, useState, useCallback, useRef } from 'react';
 import { useProject } from '../contexts/ProjectContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { usePlacementFiles } from './usePlacementFiles';
@@ -71,12 +71,8 @@ function findAssetByPlacementNumber(
         : undefined; // infographic: no versioning yet
 
   // Find matching asset with improved logging
-  // Matching priority: 1) metadata.placementNumber, 2) scene_number, 3) path pattern (image1_, video1_, info1_)
-  // Type comparison is case-insensitive to handle manifest variations
   const matchingAssets = assetManifest.assets.filter((a) => {
-    const assetTypeNorm = String(a.type || '').toLowerCase();
-    const targetTypeNorm = assetType.toLowerCase();
-    const typeMatch = assetTypeNorm === targetTypeNorm;
+    const typeMatch = a.type === assetType;
     if (!typeMatch) return false;
 
     // Check both metadata.placementNumber and scene_number
@@ -92,20 +88,7 @@ function findAssetByPlacementNumber(
       (Number(assetSceneNumber) === placementNumber ||
         String(assetSceneNumber) === String(placementNumber));
 
-    // Fallback: match by path pattern (e.g., agent/image-placements/image1_xxx.png, agent/video-placements/video2_xxx.mp4)
-    let pathMatch = false;
-    if (!placementMatch && !sceneMatch && a.path) {
-      const pathLower = a.path.replace(/\\/g, '/');
-      const prefix =
-        assetType === 'scene_image'
-          ? `image${placementNumber}_`
-          : assetType === 'scene_video'
-            ? `video${placementNumber}_`
-            : `info${placementNumber}_`;
-      pathMatch = pathLower.includes(prefix);
-    }
-
-    const matches = placementMatch || sceneMatch || pathMatch;
+    const matches = placementMatch || sceneMatch;
 
     if (!matches) {
       // Only log if it's the same type but wrong placement (to reduce noise)
@@ -245,7 +228,12 @@ function fillGapsWithPlaceholders(
 export function useTimelineData(
   activeVersions?: Record<number, SceneVersions>,
 ): TimelineDataWithRefresh {
-  const { isLoaded, assetManifest, refreshAssetManifest } = useProject();
+  const {
+    isLoaded,
+    assetManifest,
+    refreshAssetManifest,
+    isImageGenerationActive,
+  } = useProject();
   const { projectDirectory } = useWorkspace();
   const { imagePlacements, videoPlacements, infographicPlacements } =
     usePlacementFiles();
@@ -256,6 +244,15 @@ export function useTimelineData(
   >([]);
   const [audioRefreshTrigger, setAudioRefreshTrigger] = useState(0);
   const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
+  const [imagePlacementFiles, setImagePlacementFiles] = useState<
+    Record<number, string>
+  >({});
+  const [imagePlacementRefreshTrigger, setImagePlacementRefreshTrigger] =
+    useState(0);
+  const stalenessCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const stalenessRefreshInFlightRef = useRef(false);
 
   // Refresh timeline function - triggers asset manifest refresh
   const refreshTimeline = useCallback(async () => {
@@ -285,6 +282,29 @@ export function useTimelineData(
       if (debounceTimeout) clearTimeout(debounceTimeout);
       debounceTimeout = setTimeout(() => {
         setAudioRefreshTrigger((prev) => prev + 1);
+        debounceTimeout = null;
+      }, 250);
+    });
+
+    return () => {
+      unsubscribe();
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+    };
+  }, [projectDirectory]);
+
+  // Subscribe to file changes under .kshana/agent/image-placements for fallback image loading
+  useEffect(() => {
+    if (!projectDirectory) return;
+
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const filePath = event.path;
+      if (!filePath.includes('.kshana/agent/image-placements')) return;
+
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        setImagePlacementRefreshTrigger((prev) => prev + 1);
         debounceTimeout = null;
       }, 250);
     });
@@ -352,6 +372,47 @@ export function useTimelineData(
     loadAudioFiles();
   }, [projectDirectory, isLoaded, transcriptDuration, audioRefreshTrigger]);
 
+  // Load image placement files for fallback resolution
+  useEffect(() => {
+    if (!projectDirectory || !isLoaded) return;
+
+    const loadImagePlacementFiles = async () => {
+      try {
+        const imageDir = `${projectDirectory}/.kshana/agent/image-placements`;
+        const files = await window.electron.project.readTree(imageDir, 1);
+
+        const placementMap: Record<number, string> = {};
+        if (files && files.children) {
+          for (const file of files.children) {
+            if (file.type !== 'file') continue;
+            const match = file.name.match(
+              /^image(\d+)[-_].+\.(png|jpe?g|webp)$/i,
+            );
+            if (!match) continue;
+            const placementNumber = parseInt(match[1], 10);
+            if (!Number.isNaN(placementNumber)) {
+              if (!placementMap[placementNumber]) {
+                placementMap[
+                  placementNumber
+                ] = `agent/image-placements/${file.name}`;
+              }
+            }
+          }
+        }
+
+        setImagePlacementFiles(placementMap);
+      } catch (error) {
+        console.debug(
+          '[useTimelineData] Image placements directory not found or error loading:',
+          error,
+        );
+        setImagePlacementFiles({});
+      }
+    };
+
+    loadImagePlacementFiles();
+  }, [projectDirectory, isLoaded, imagePlacementRefreshTrigger]);
+
   // Debug: Log assetManifest state
   useEffect(() => {
     console.log('[useTimelineData] AssetManifest state:', {
@@ -397,6 +458,61 @@ export function useTimelineData(
       );
     }
   }, [assetManifest, isLoaded]);
+
+  // Staleness check during image generation
+  useEffect(() => {
+    if (!isImageGenerationActive) {
+      if (stalenessCheckTimeoutRef.current) {
+        clearTimeout(stalenessCheckTimeoutRef.current);
+        stalenessCheckTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    const expectedPlacements = new Set(
+      imagePlacements.map((p) => p.placementNumber),
+    );
+    if (expectedPlacements.size === 0) return;
+
+    const imageAssets =
+      assetManifest?.assets?.filter((a) => a.type === 'scene_image') || [];
+    const matchedPlacements = new Set<number>();
+    for (const asset of imageAssets) {
+      const placementNumber = asset.metadata?.placementNumber;
+      const sceneNumber = asset.scene_number;
+      const candidate =
+        placementNumber !== undefined
+          ? Number(placementNumber)
+          : sceneNumber !== undefined
+            ? Number(sceneNumber)
+            : undefined;
+      if (candidate !== undefined && expectedPlacements.has(candidate)) {
+        matchedPlacements.add(candidate);
+      }
+    }
+
+    const missingCount = expectedPlacements.size - matchedPlacements.size;
+    if (missingCount <= 0) return;
+
+    if (stalenessCheckTimeoutRef.current) {
+      clearTimeout(stalenessCheckTimeoutRef.current);
+    }
+
+    stalenessCheckTimeoutRef.current = setTimeout(async () => {
+      if (stalenessRefreshInFlightRef.current) return;
+      stalenessRefreshInFlightRef.current = true;
+      try {
+        await refreshTimeline();
+      } finally {
+        stalenessRefreshInFlightRef.current = false;
+      }
+    }, 1000);
+  }, [
+    isImageGenerationActive,
+    imagePlacements,
+    assetManifest,
+    refreshTimeline,
+  ]);
 
   // Convert placements to timeline items
   const placementItems: TimelineItem[] = useMemo(() => {
@@ -461,6 +577,15 @@ export function useTimelineData(
         );
       }
 
+      const fallbackImagePath = imagePlacementFiles[placement.placementNumber];
+
+      if (!asset && fallbackImagePath) {
+        console.warn(
+          `[useTimelineData] Using fallback image for placement ${placement.placementNumber}:`,
+          fallbackImagePath,
+        );
+      }
+
       items.push({
         id: `PLM-${placement.placementNumber}`,
         type: 'image',
@@ -470,7 +595,7 @@ export function useTimelineData(
         label: `PLM-${placement.placementNumber}`,
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
-        imagePath: asset?.path || undefined, // Ensure path is set if asset exists
+        imagePath: asset?.path || fallbackImagePath || undefined, // Ensure path is set if asset exists
       });
     });
 
@@ -524,14 +649,6 @@ export function useTimelineData(
       });
     });
 
-    console.log('[useTimelineData] placementItems useMemo computed:', {
-      totalItems: items.length,
-      itemsWithImages: items.filter((i) => i.imagePath).length,
-      itemsWithoutImages: items.filter((i) => i.type === 'image' && !i.imagePath).length,
-      assetManifestAssetCount: assetManifest?.assets?.length || 0,
-      timelineRefreshTrigger,
-    });
-
     return items;
   }, [
     imagePlacements,
@@ -539,7 +656,7 @@ export function useTimelineData(
     infographicPlacements,
     assetManifest,
     activeVersions,
-    timelineRefreshTrigger, // Add this to force recompute on manual refresh
+    imagePlacementFiles,
   ]);
 
   // Calculate total duration from all sources (audio, placements, transcript)

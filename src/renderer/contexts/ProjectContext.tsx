@@ -143,6 +143,9 @@ interface ProjectComputed {
 
   /** Completion percentage */
   completionPercentage: number;
+
+  /** Whether image generation is active (used for refresh heuristics) */
+  isImageGenerationActive: boolean;
 }
 
 /**
@@ -307,7 +310,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           clearTimeout(debounceTimeout);
         }
 
-        // Debounce rapid file changes (100ms for faster real-time asset updates)
+        // Debounce rapid file changes (reduced to 300ms for faster response)
         debounceTimeout = setTimeout(async () => {
           try {
             console.log(
@@ -351,7 +354,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
             console.error('[ProjectContext] Error reloading project:', error);
             // Don't show error to user - file might be temporarily locked
           }
-        }, 100); // 100ms debounce for faster real-time asset updates
+        }, 300); // 300ms debounce for faster response
       }
     });
 
@@ -463,6 +466,31 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     }
   }, [projectDirectory, state.isLoaded]);
 
+  const upsertAssetInManifest = useCallback((assetInfo: AssetInfo) => {
+    setState((prev) => {
+      if (!prev.assetManifest) return prev;
+
+      const existingIndex = prev.assetManifest.assets.findIndex(
+        (asset) => asset.id === assetInfo.id,
+      );
+      const nextAssets =
+        existingIndex >= 0
+          ? prev.assetManifest.assets.map((asset, index) =>
+              index === existingIndex ? assetInfo : asset,
+            )
+          : [...prev.assetManifest.assets, assetInfo];
+
+      return {
+        ...prev,
+        assetManifest: {
+          ...prev.assetManifest,
+          assets: nextAssets,
+          _refreshedAt: Date.now(),
+        },
+      };
+    });
+  }, []);
+
   // Listen for WebSocket asset_added events
   useEffect(() => {
     if (!projectDirectory || !state.isLoaded) {
@@ -522,36 +550,44 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           connectingRef.current = false;
         };
 
+        let refreshTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
         ws.onmessage = (event) => {
           try {
             const message = JSON.parse(event.data);
             if (message.type === 'asset_added' && message.data) {
               const assetData = message.data;
-              console.log('[ProjectContext] Received asset_added event', {
-                ...assetData,
-                mechanism: 'websocket',
-                timestamp: Date.now(),
-              });
-              // Wait for manifest write to complete, then refresh with retry
-              setTimeout(async () => {
-                try {
-                  await refreshAssetManifest();
-                } catch (error) {
-                  console.error(
-                    '[ProjectContext] Failed to refresh after asset_added:',
-                    error,
-                  );
-                  // Retry once after additional delay
-                  setTimeout(() => {
-                    refreshAssetManifest().catch((err) =>
-                      console.error(
-                        '[ProjectContext] Retry refresh failed:',
-                        err,
-                      ),
-                    );
-                  }, 200);
-                }
-              }, 100); // Wait 100ms for manifest write
+              console.log(
+                '[ProjectContext] Received asset_added event:',
+                assetData,
+              );
+              if (
+                assetData.projectDirectory &&
+                assetData.projectDirectory !== projectDirectory
+              ) {
+                return;
+              }
+
+              const optimisticAsset: AssetInfo = {
+                id: assetData.assetId,
+                type: assetData.assetType,
+                path: assetData.path,
+                scene_number: assetData.sceneNumber,
+                version: assetData.version ?? 1,
+                created_at: Date.now(),
+                metadata: assetData.placementNumber
+                  ? { placementNumber: assetData.placementNumber }
+                  : undefined,
+              };
+              upsertAssetInManifest(optimisticAsset);
+
+              if (refreshTimeoutId) {
+                clearTimeout(refreshTimeoutId);
+              }
+              refreshTimeoutId = setTimeout(() => {
+                refreshTimeoutId = null;
+                refreshAssetManifest();
+              }, 250);
             } else if (message.type === 'status' && message.data) {
               // Track image generation activity based on status
               const { status } = message.data;
@@ -584,6 +620,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           console.log('[ProjectContext] WebSocket closed for asset events');
           wsRef.current = null;
           connectingRef.current = false;
+          if (refreshTimeoutId) {
+            clearTimeout(refreshTimeoutId);
+            refreshTimeoutId = null;
+          }
 
           // Only reconnect if project directory hasn't changed
           if (
@@ -624,17 +664,15 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     };
   }, [projectDirectory, state.isLoaded, refreshAssetManifest]);
 
-  // Poll for manifest updates (fallback if file watcher/WebSocket miss changes)
-  // Use consistent 500ms interval for reliable real-time updates - does not depend on isImageGenerationActive
-  // which may not be set for ProjectContext's WebSocket connection
+  // Poll for manifest updates during image generation (fallback if file watcher fails)
+  // Uses dynamic polling: faster (500ms) during active generation, slower (1-2s) when idle
   useEffect(() => {
     if (!projectDirectory || !state.isLoaded) return;
 
-    const POLL_INTERVAL_MS = 500; // Consistent 500ms for reliable detection
-    const MAX_POLL_INTERVAL = 2000; // Max 2s on repeated failures
-    const BACKOFF_MULTIPLIER = 1.5;
-    let pollIntervalMs = POLL_INTERVAL_MS;
+    let pollIntervalMs = isImageGenerationActive ? 500 : 1000; // 500ms during generation, 1s when idle
     let consecutiveFailures = 0;
+    const MAX_POLL_INTERVAL = isImageGenerationActive ? 1000 : 2000; // Max 1s during generation, 2s when idle
+    const BACKOFF_MULTIPLIER = 1.5;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let isCancelled = false;
 
@@ -654,14 +692,30 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
             );
 
             if (assetsChanged) {
-              console.log('[ProjectContext] ✓ Assets changed (polling)', {
-                oldCount: prev.assetManifest?.assets?.length || 0,
-                newCount: project.assetManifest?.assets?.length || 0,
-                mechanism: 'polling',
-                timestamp: Date.now(),
-              });
+              console.log(
+                '[ProjectContext] Assets changed (polling), updating manifest:',
+                {
+                  oldCount: prev.assetManifest?.assets?.length || 0,
+                  newCount: project.assetManifest?.assets?.length || 0,
+                  addedAssets:
+                    project.assetManifest?.assets
+                      ?.filter(
+                        (a) =>
+                          !prev.assetManifest?.assets?.some(
+                            (old) => old.id === a.id,
+                          ),
+                      )
+                      .map((a) => ({
+                        id: a.id,
+                        placementNumber: a.metadata?.placementNumber,
+                        path: a.path,
+                      })) || [],
+                },
+              );
+
+              // Reset polling interval on successful update (use dynamic interval based on activity)
+              pollIntervalMs = isImageGenerationActive ? 500 : 1000;
               consecutiveFailures = 0;
-              pollIntervalMs = POLL_INTERVAL_MS;
               // Always create new object reference to force React re-renders
               return {
                 ...prev,
@@ -701,62 +755,11 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         clearTimeout(timeoutId);
       }
     };
-  }, [projectDirectory, state.isLoaded]);
-
-  // Aggressive polling during image generation
-  // This runs in parallel with baseline polling to catch rapid writes during generation
-  useEffect(() => {
-    if (!projectDirectory || !state.isLoaded || !isImageGenerationActive) return;
-
-    const AGGRESSIVE_POLL_MS = 100;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let isCancelled = false;
-
-    const aggressivePoll = async () => {
-      if (isCancelled) return;
-
-      try {
-        const result = await projectService.openProject(projectDirectory);
-        if (result.success) {
-          setState((prev) => {
-            const assetsChanged = compareAssetManifests(
-              prev.assetManifest,
-              result.data.assetManifest,
-            );
-
-            if (assetsChanged) {
-              console.log('[ProjectContext] ✓ Assets changed (aggressive poll)', {
-                oldCount: prev.assetManifest?.assets?.length || 0,
-                newCount: result.data.assetManifest?.assets?.length || 0,
-                mechanism: 'aggressive-polling',
-                timestamp: Date.now(),
-              });
-              return {
-                ...prev,
-                assetManifest: result.data.assetManifest
-                  ? { ...result.data.assetManifest, _refreshedAt: Date.now() }
-                  : null,
-              };
-            }
-            return prev;
-          });
-        }
-      } catch (error) {
-        console.debug('[ProjectContext] Aggressive poll failed:', error);
-      }
-
-      if (!isCancelled) {
-        timeoutId = setTimeout(aggressivePoll, AGGRESSIVE_POLL_MS);
-      }
-    };
-
-    aggressivePoll();
-
-    return () => {
-      isCancelled = true;
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [projectDirectory, state.isLoaded, isImageGenerationActive]);
+  }, [
+    projectDirectory,
+    state.isLoaded,
+    isImageGenerationActive,
+  ]);
 
   // Load project from directory
   const loadProject = useCallback(
@@ -1094,8 +1097,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       settings: agentState?.settings ?? [],
       scenes: agentState?.scenes ?? [],
       completionPercentage,
+      isImageGenerationActive,
     };
-  }, [state]);
+  }, [state, isImageGenerationActive]);
 
   // Build context value
   const value = useMemo<ProjectContextType>(
