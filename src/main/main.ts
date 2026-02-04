@@ -229,6 +229,13 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'project:watch-infographic-placements',
+  async (_event, infographicPlacementsDir: string) => {
+    await fileSystemManager.watchInfographicPlacements(infographicPlacementsDir);
+  },
+);
+
+ipcMain.handle(
   'project:refresh-assets',
   async (_event, projectDirectory: string) => {
     // Trigger a file change event for manifest.json to force refresh

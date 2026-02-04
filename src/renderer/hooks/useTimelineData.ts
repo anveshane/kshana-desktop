@@ -249,6 +249,9 @@ export function useTimelineData(
   >({});
   const [imagePlacementRefreshTrigger, setImagePlacementRefreshTrigger] =
     useState(0);
+  // Keep infographic fallback mapping in a ref so we don't introduce new hook state
+  // (avoids React Fast Refresh hook order issues in dev).
+  const infographicPlacementFilesRef = useRef<Record<number, string>>({});
   const stalenessCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -305,6 +308,30 @@ export function useTimelineData(
       if (debounceTimeout) clearTimeout(debounceTimeout);
       debounceTimeout = setTimeout(() => {
         setImagePlacementRefreshTrigger((prev) => prev + 1);
+        debounceTimeout = null;
+      }, 250);
+    });
+
+    return () => {
+      unsubscribe();
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+    };
+  }, [projectDirectory]);
+
+  // Subscribe to file changes under .kshana/agent/infographic-placements for fallback infographic loading
+  useEffect(() => {
+    if (!projectDirectory) return;
+
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const filePath = event.path;
+      if (!filePath.includes('.kshana/agent/infographic-placements')) return;
+
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        // Reuse existing refresh triggers to force a rerender & reload cycle.
+        setTimelineRefreshTrigger((prev) => prev + 1);
         debounceTimeout = null;
       }, 250);
     });
@@ -412,6 +439,45 @@ export function useTimelineData(
 
     loadImagePlacementFiles();
   }, [projectDirectory, isLoaded, imagePlacementRefreshTrigger]);
+
+  // Load infographic placement files for fallback resolution
+  useEffect(() => {
+    if (!projectDirectory || !isLoaded) return;
+
+    const loadInfographicPlacementFiles = async () => {
+      try {
+        const infoDir = `${projectDirectory}/.kshana/agent/infographic-placements`;
+        const files = await window.electron.project.readTree(infoDir, 1);
+
+        const placementMap: Record<number, string> = {};
+        if (files && files.children) {
+          for (const file of files.children) {
+            if (file.type !== 'file') continue;
+            const match = file.name.match(/^info(\d+)[-_].+\.(mp4|mov|webm)$/i);
+            if (!match) continue;
+            const placementNumber = parseInt(match[1], 10);
+            if (!Number.isNaN(placementNumber)) {
+              if (!placementMap[placementNumber]) {
+                placementMap[
+                  placementNumber
+                ] = `agent/infographic-placements/${file.name}`;
+              }
+            }
+          }
+        }
+
+        infographicPlacementFilesRef.current = placementMap;
+      } catch (error) {
+        console.debug(
+          '[useTimelineData] Infographic placements directory not found or error loading:',
+          error,
+        );
+        infographicPlacementFilesRef.current = {};
+      }
+    };
+
+    loadInfographicPlacementFiles();
+  }, [projectDirectory, isLoaded, timelineRefreshTrigger]);
 
   // Debug: Log assetManifest state
   useEffect(() => {
@@ -635,6 +701,8 @@ export function useTimelineData(
         'scene_infographic',
         activeVersions,
       );
+      const fallbackInfoPath =
+        infographicPlacementFilesRef.current[placement.placementNumber];
 
       items.push({
         id: `info-placement-${placement.placementNumber}`,
@@ -645,7 +713,7 @@ export function useTimelineData(
         label: `info-placement-${placement.placementNumber}`,
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
-        videoPath: asset?.path, // infographics are mp4 clips
+        videoPath: asset?.path || fallbackInfoPath, // infographics are mp4 clips
       });
     });
 

@@ -256,17 +256,21 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         }));
         lastLoadedDir.current = projectDirectory;
 
-        // Set up explicit watches for manifest and image-placements
+        // Set up explicit watches for manifest and placements
         try {
           const manifestPath = `${projectDirectory}/.kshana/agent/manifest.json`;
           const imagePlacementsDir = `${projectDirectory}/.kshana/agent/image-placements`;
+          const infographicPlacementsDir = `${projectDirectory}/.kshana/agent/infographic-placements`;
 
           await window.electron.project.watchManifest(manifestPath);
           await window.electron.project.watchImagePlacements(
             imagePlacementsDir,
           );
+          await window.electron.project.watchInfographicPlacements(
+            infographicPlacementsDir,
+          );
           console.log(
-            '[ProjectContext] Set up explicit watches for manifest and image-placements',
+            '[ProjectContext] Set up explicit watches for manifest and placements',
           );
         } catch (error) {
           console.warn(
