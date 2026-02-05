@@ -31,6 +31,7 @@ export interface TimelineItem {
 
 export interface TimelineData {
   timelineItems: TimelineItem[];
+  overlayItems: TimelineItem[];
   totalDuration: number;
 }
 
@@ -580,8 +581,8 @@ export function useTimelineData(
     refreshTimeline,
   ]);
 
-  // Convert placements to timeline items
-  const placementItems: TimelineItem[] = useMemo(() => {
+  // Convert base placements (images + videos) to timeline items
+  const basePlacementItems: TimelineItem[] = useMemo(() => {
     const items: TimelineItem[] = [];
 
     // Convert image placements to timeline items
@@ -690,10 +691,48 @@ export function useTimelineData(
       });
     });
 
-    // Convert infographic placements to timeline items
+    return items;
+  }, [
+    imagePlacements,
+    videoPlacements,
+    assetManifest,
+    activeVersions,
+    imagePlacementFiles,
+  ]);
+
+  // Convert infographic placements to overlay items (contained within images)
+  const overlayItems: TimelineItem[] = useMemo(() => {
+    const items: TimelineItem[] = [];
+
+    if (infographicPlacements.length === 0) {
+      return items;
+    }
+
+    const imageRanges = imagePlacements.map((placement) => ({
+      placementNumber: placement.placementNumber,
+      start: timeStringToSeconds(placement.startTime),
+      end: timeStringToSeconds(placement.endTime),
+    }));
+
     infographicPlacements.forEach((placement) => {
       const startSeconds = timeStringToSeconds(placement.startTime);
       const endSeconds = timeStringToSeconds(placement.endTime);
+
+      const contained = imageRanges.some(
+        (range) => startSeconds >= range.start && endSeconds <= range.end,
+      );
+
+      if (!contained) {
+        console.warn(
+          `[useTimelineData] Dropping infographic placement ${placement.placementNumber}: not contained within any image placement`,
+          {
+            placementNumber: placement.placementNumber,
+            startSeconds,
+            endSeconds,
+          },
+        );
+        return;
+      }
 
       const asset = findAssetByPlacementNumber(
         placement.placementNumber,
@@ -713,18 +752,19 @@ export function useTimelineData(
         label: `info-placement-${placement.placementNumber}`,
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
-        videoPath: asset?.path || fallbackInfoPath, // infographics are mp4 clips
+        videoPath: asset?.path || fallbackInfoPath, // infographics are overlay clips (webm/mp4)
       });
     });
 
+    items.sort((a, b) => a.startTime - b.startTime);
+
     return items;
   }, [
-    imagePlacements,
-    videoPlacements,
     infographicPlacements,
+    imagePlacements,
     assetManifest,
     activeVersions,
-    imagePlacementFiles,
+    timelineRefreshTrigger,
   ]);
 
   // Calculate total duration from all sources (audio, placements, transcript)
@@ -738,8 +778,8 @@ export function useTimelineData(
 
     // Get last placement endTime (if any placements exist)
     const lastPlacementEndTime =
-      placementItems.length > 0
-        ? Math.max(...placementItems.map((item) => item.endTime))
+      basePlacementItems.length > 0
+        ? Math.max(...basePlacementItems.map((item) => item.endTime))
         : 0;
 
     // Get transcript duration
@@ -760,12 +800,12 @@ export function useTimelineData(
     });
 
     return maxDuration;
-  }, [audioFiles, placementItems, transcriptDuration]);
+  }, [audioFiles, basePlacementItems, transcriptDuration]);
 
   // Resolve asset paths for display
   const timelineItems: TimelineItem[] = useMemo(() => {
     // Start with placement items
-    const items = [...placementItems];
+    const items = [...basePlacementItems];
 
     // Add audio items - they span the full duration
     audioFiles.forEach((audioFile, index) => {
@@ -806,13 +846,14 @@ export function useTimelineData(
     filledItems.sort((a, b) => a.startTime - b.startTime);
 
     return filledItems;
-  }, [placementItems, transcriptDuration, audioFiles, calculatedTotalDuration]);
+  }, [basePlacementItems, transcriptDuration, audioFiles, calculatedTotalDuration]);
 
   // Return the calculated total duration (already considers all sources)
   const totalDuration = calculatedTotalDuration;
 
   return {
     timelineItems,
+    overlayItems,
     totalDuration,
     refreshTimeline,
     refreshAudioFiles,

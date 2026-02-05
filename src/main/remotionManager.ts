@@ -8,6 +8,8 @@ import path from 'path';
 import fs from 'fs/promises';
 import { createWriteStream } from 'fs';
 import log from 'electron-log';
+import { app } from 'electron';
+import { selectComposition, renderMedia } from '@remotion/renderer';
 import { getRemotionInfographicsDir } from './utils/remotionPath';
 import {
   buildRemotionPlacements,
@@ -25,6 +27,21 @@ const RENDER_TIMEOUT_MS = 600_000; // 10 minutes
 
 function generateJobId(): string {
   return `remotion-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function timeToSeconds(timeStr: string): number {
+  const parts = timeStr.split(':');
+  if (parts.length === 3) {
+    return (
+      (parseInt(parts[0], 10) || 0) * 3600 +
+      (parseInt(parts[1], 10) || 0) * 60 +
+      (parseInt(parts[2], 10) || 0)
+    );
+  }
+  if (parts.length === 2) {
+    return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+  }
+  return parseInt(timeStr, 10) || 5;
 }
 
 class RemotionManager extends EventEmitter {
@@ -77,10 +94,7 @@ class RemotionManager extends EventEmitter {
     await fs.mkdir(path.join(tempDir, 'output'), { recursive: true });
     await fs.mkdir(path.join(tempDir, 'logs'), { recursive: true });
 
-    const configPath = await writeRenderConfig(tempDir, placements);
     const outDir = path.join(tempDir, 'output');
-    const outputJsonPath = path.join(outDir, '_render_output.json');
-    const logPath = path.join(tempDir, 'logs', 'render.log');
 
     const job: RemotionJob = {
       id: jobId,
@@ -92,6 +106,23 @@ class RemotionManager extends EventEmitter {
     };
     this.jobs.set(jobId, job);
 
+    if (app.isPackaged) {
+      this.executeRenderProgrammatic(jobId, buildDir, placements, outDir, tempDir).catch((error) => {
+        log.error(`[RemotionManager] Job ${jobId} failed:`, error);
+        const job = this.jobs.get(jobId);
+        if (job) {
+          job.status = 'failed';
+          job.endTime = Date.now();
+          job.error = error instanceof Error ? error.message : String(error);
+          this.emit('job-complete', job);
+        }
+      });
+      return { jobId };
+    }
+
+    const configPath = await writeRenderConfig(tempDir, placements);
+    const outputJsonPath = path.join(outDir, '_render_output.json');
+    const logPath = path.join(tempDir, 'logs', 'render.log');
     const logStream = createWriteStream(logPath);
 
     // Clear NODE_OPTIONS to avoid inheriting ts-node/register from Electron dev env
@@ -217,6 +248,127 @@ class RemotionManager extends EventEmitter {
     });
 
     return { jobId };
+  }
+
+  private async executeRenderProgrammatic(
+    jobId: string,
+    buildDir: string,
+    placements: Array<{
+      placementNumber: number;
+      startTime: string;
+      endTime: string;
+      infographicType: string;
+      prompt: string;
+      componentName: string;
+    }>,
+    outDir: string,
+    tempDir: string,
+  ): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) throw new Error(`Job ${jobId} not found`);
+
+    const buildIndex = path.join(buildDir, 'index.html');
+    try {
+      await fs.access(buildIndex);
+    } catch {
+      throw new Error('Remotion bundle not found. Run "generate_all_infographics" to build components first.');
+    }
+
+    const fps = 24;
+    const outputs: string[] = [];
+    const total = placements.length;
+
+    try {
+      for (let i = 0; i < placements.length; i++) {
+        const p = placements[i]!;
+
+        this.emit('progress', {
+          jobId,
+          placementIndex: i,
+          totalPlacements: total,
+          progress: (i / total) * 100,
+          stage: 'rendering',
+        });
+
+        const durationSeconds = Math.max(1, timeToSeconds(p.endTime) - timeToSeconds(p.startTime));
+        const durationInFrames = Math.round(durationSeconds * fps);
+        const inputProps = {
+          prompt: p.prompt,
+          infographicType: p.infographicType,
+        };
+
+        const composition = await selectComposition({
+          serveUrl: buildDir,
+          id: p.componentName,
+          inputProps,
+        });
+        composition.durationInFrames = durationInFrames;
+
+        const baseName = `info${p.placementNumber}_${Date.now().toString(36)}`;
+        const outFilePath = path.join(outDir, `${baseName}.webm`);
+
+        await renderMedia({
+          composition,
+          serveUrl: buildDir,
+          codec: 'vp9',
+          outputLocation: outFilePath,
+          inputProps,
+          logLevel: 'error',
+          pixelFormat: 'yuva420p',
+          imageFormat: 'png',
+        });
+
+        outputs.push(outFilePath);
+
+        this.emit('progress', {
+          jobId,
+          placementIndex: i,
+          totalPlacements: total,
+          progress: ((i + 1) / total) * 100,
+          stage: 'rendering',
+        });
+      }
+
+      job.status = 'completed';
+      job.endTime = Date.now();
+
+      const destDir = path.join(
+        job.projectDirectory,
+        '.kshana',
+        'agent',
+        'infographic-placements',
+      );
+      await fs.mkdir(destDir, { recursive: true });
+
+      const manifestPaths: string[] = [];
+      for (const srcPath of outputs) {
+        const basename = path.basename(srcPath);
+        const destPath = path.join(destDir, basename);
+        await fs.copyFile(srcPath, destPath);
+        manifestPaths.push(`agent/infographic-placements/${basename}`);
+      }
+      job.outputFiles = manifestPaths;
+
+      await this.cleanupJobTempDir(jobId);
+
+      this.emit('job-complete', job);
+    } catch (error) {
+      job.status = 'failed';
+      job.endTime = Date.now();
+      job.error = error instanceof Error ? error.message : String(error);
+
+      try {
+        await fs.writeFile(
+          path.join(tempDir, 'logs', 'error.json'),
+          JSON.stringify({ jobId, error: job.error, timestamp: Date.now() }, null, 2),
+        );
+      } catch {
+        // ignore
+      }
+
+      this.emit('job-complete', job);
+      throw error;
+    }
   }
 
   cancelJob(jobId: string): void {

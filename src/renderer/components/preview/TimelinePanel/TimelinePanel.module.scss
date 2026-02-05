@@ -301,6 +301,30 @@
   }
 }
 
+.overlayTrack {
+  margin-top: 0 !important;
+  padding-top: 0;
+  min-height: 50px;
+  background-color: rgba($color-accent-cyan, 0.03);
+
+  .trackContent {
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+    min-height: 50px;
+  }
+
+  .videoBlock {
+    border-style: dashed;
+    border-color: rgba($color-accent-cyan, 0.6);
+    top: 0;
+    bottom: 0;
+  }
+
+  .scenePlaceholder {
+    background-color: rgba($color-accent-cyan, 0.08);
+  }
+}
+
 .trackLabel {
   width: 80px;
   padding: $spacing-sm;

@@ -36,6 +36,10 @@ import type {
 } from '../shared/remotionTypes';
 import * as desktopLogger from './services/DesktopLogger';
 
+if (app.isPackaged) {
+  process.env.KSHANA_PACKAGED = '1';
+}
+
 const buildBackendEnv = (
   overrides: BackendEnvOverrides = {},
 ): BackendEnvOverrides => {
@@ -511,6 +515,13 @@ interface TimelineItem {
   endTime: number;
 }
 
+interface OverlayItem {
+  path: string;
+  duration: number;
+  startTime: number;
+  endTime: number;
+}
+
 ipcMain.handle(
   'project:compose-timeline-video',
   async (
@@ -518,6 +529,7 @@ ipcMain.handle(
     timelineItems: TimelineItem[],
     projectDirectory: string,
     audioPath?: string,
+    overlayItems?: OverlayItem[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
     console.log('[VideoComposition] Starting video composition...');
     console.log('[VideoComposition] Timeline items:', timelineItems.length);
@@ -533,6 +545,39 @@ ipcMain.handle(
 
     const segmentFiles: string[] = [];
     const cleanupFiles: string[] = [];
+    const normalizedOverlayItems: Array<OverlayItem & { absolutePath: string }> = [];
+
+    if (overlayItems && overlayItems.length > 0) {
+      for (const overlay of overlayItems) {
+        const cleanPath = overlay.path.replace(/^file:\/\//, '');
+        if (!cleanPath || cleanPath.trim() === '') {
+          console.warn('[VideoComposition] Skipping overlay: empty path');
+          continue;
+        }
+
+        const absolutePath = path.isAbsolute(cleanPath)
+          ? cleanPath
+          : path.join(projectDirectory, cleanPath);
+
+        try {
+          const stats = await fs.stat(absolutePath);
+          if (stats.isDirectory()) {
+            console.warn(
+              `[VideoComposition] Skipping overlay: path is a directory: ${absolutePath}`,
+            );
+            continue;
+          }
+        } catch (error) {
+          console.warn(
+            `[VideoComposition] Skipping overlay: file not found: ${absolutePath}`,
+            error,
+          );
+          continue;
+        }
+
+        normalizedOverlayItems.push({ ...overlay, absolutePath });
+      }
+    }
 
     try {
       // Process each timeline item
@@ -717,8 +762,87 @@ ipcMain.handle(
               .run();
           });
 
-          segmentFiles.push(segmentPath);
+          let finalSegmentPath = segmentPath;
           cleanupFiles.push(segmentPath);
+
+          if (normalizedOverlayItems.length > 0) {
+            const overlaysForItem = normalizedOverlayItems.filter(
+              (overlay) =>
+                overlay.startTime >= item.startTime &&
+                overlay.endTime <= item.endTime,
+            );
+
+            if (overlaysForItem.length > 1) {
+              console.warn(
+                `[VideoComposition] Multiple overlays detected for image segment ${i + 1}; using the earliest overlay`,
+                overlaysForItem.map((overlay) => ({
+                  startTime: overlay.startTime,
+                  endTime: overlay.endTime,
+                  path: overlay.absolutePath,
+                })),
+              );
+            }
+
+            const overlay = overlaysForItem.sort(
+              (a, b) => a.startTime - b.startTime,
+            )[0];
+
+            if (overlay) {
+              const overlayOffset = Math.max(
+                0,
+                overlay.startTime - item.startTime,
+              );
+              const overlaySegmentPath = path.join(
+                tempDir,
+                `segment-${i}-overlay.mp4`,
+              );
+
+              console.log(
+                `[VideoComposition] Applying overlay to image segment ${i + 1}:`,
+                {
+                  overlayPath: overlay.absolutePath,
+                  overlayOffset,
+                  overlayDuration: overlay.duration,
+                },
+              );
+
+              await new Promise<void>((resolve, reject) => {
+                ffmpeg(segmentPath)
+                  .input(overlay.absolutePath)
+                  .complexFilter(
+                    `[1:v]format=rgba,setpts=PTS-STARTPTS+${overlayOffset}/TB[ov];[0:v][ov]overlay=(W-w)/2:(H-h)/2:eof_action=pass`,
+                  )
+                  .outputOptions([
+                    '-c:v libx264',
+                    '-preset medium',
+                    '-crf 23',
+                    '-pix_fmt yuv420p',
+                    '-t',
+                    item.duration.toString(),
+                  ])
+                  .output(overlaySegmentPath)
+                  .on('end', () => {
+                    console.log(
+                      `[VideoComposition] Overlay applied for segment ${i + 1}`,
+                    );
+                    resolve();
+                  })
+                  .on('error', (err) => {
+                    console.error(
+                      `[VideoComposition] Overlay error for segment ${i + 1}:`,
+                      err,
+                    );
+                    reject(err);
+                  })
+                  .run();
+              });
+
+              finalSegmentPath = overlaySegmentPath;
+              cleanupFiles.push(overlaySegmentPath);
+            }
+          }
+
+          segmentFiles.push(finalSegmentPath);
         } else if (item.type === 'placeholder') {
           // Create black video frames
           console.log(

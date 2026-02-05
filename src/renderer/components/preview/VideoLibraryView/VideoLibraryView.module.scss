@@ -228,6 +228,16 @@
   background-color: #000;
 }
 
+.overlayVideo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .videoPlaceholder {
   width: 100%;
   height: 100%;
@@ -263,6 +273,7 @@
   display: flex;
   align-items: center;
   gap: $spacing-md;
+  z-index: 2;
 }
 
 .playPauseButton {
@@ -363,6 +374,7 @@
   border-radius: $radius-sm;
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 2;
 }
 
 .importedBadge {
@@ -512,4 +524,3 @@
   font-family: $font-family-mono;
   flex-shrink: 0;
 }
-

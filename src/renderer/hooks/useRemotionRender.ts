@@ -16,15 +16,13 @@ export function useRemotionRender() {
   const { projectDirectory } = useWorkspace();
   const { addAsset, refreshAssetManifest } = useProject();
   const { infographicPlacements } = usePlacementFiles();
-  const { timelineItems } = useTimelineDataContext();
+  const { overlayItems } = useTimelineDataContext();
 
   const [activeJob, setActiveJob] = useState<RemotionJob | null>(null);
   const [progress, setProgress] = useState<RemotionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const infographicItems = timelineItems.filter(
-    (item) => item.type === 'infographic',
-  ) as RemotionTimelineItem[];
+  const infographicItems = overlayItems as RemotionTimelineItem[];
 
   const startRender = useCallback(async () => {
     if (!projectDirectory || infographicItems.length === 0) {

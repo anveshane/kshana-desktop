@@ -108,6 +108,7 @@
     "electron-store": "^8.2.0",
     "electron-updater": "^6.3.9",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@remotion/renderer": "4.0.409",
     "@ts-ffmpeg/fluent-ffmpeg": "^2.2.6",
     "kshana-ink": "file:../kshana-ink",
     "lucide-react": "^0.555.0",

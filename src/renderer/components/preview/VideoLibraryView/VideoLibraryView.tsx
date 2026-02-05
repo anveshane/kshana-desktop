@@ -104,7 +104,7 @@ export default function VideoLibraryView({
   }, [projectScenes]);
 
   // Use unified timeline data from context (single source of truth for TimelinePanel + VideoLibraryView)
-  const { timelineItems, totalDuration } = useTimelineDataContext();
+  const { timelineItems, overlayItems, totalDuration } = useTimelineDataContext();
 
   // Notify parent when totalDuration changes (for playback bounds checking)
   useEffect(() => {
@@ -147,6 +147,7 @@ export default function VideoLibraryView({
 
   // Refs must be declared before usePlaybackController hook
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const overlayVideoRef = useRef<HTMLVideoElement | null>(null);
   const currentVideoPathRef = useRef<string | null>(null);
   const isSeekingRef = useRef(false);
   const isVideoLoadingRef = useRef(false);
@@ -216,10 +217,21 @@ export default function VideoLibraryView({
   // Get current video and image from playback controller
   // currentItem is already provided by usePlaybackController
   const currentVideo =
-    currentItem?.type === 'video' || currentItem?.type === 'infographic'
-      ? currentItem
-      : null;
+    currentItem?.type === 'video' ? currentItem : null;
   const currentImage = currentItem?.type === 'image' ? currentItem : null;
+
+  const currentOverlay = useMemo(() => {
+    if (overlayItems.length === 0) return null;
+    return (
+      overlayItems.find(
+        (item) =>
+          playbackTime >= item.startTime && playbackTime < item.endTime,
+      ) || null
+    );
+  }, [overlayItems, playbackTime]);
+
+  const activeOverlay =
+    currentItem?.type === 'image' ? currentOverlay : null;
 
   // Log when currentVideo changes
   useEffect(() => {
@@ -402,6 +414,10 @@ export default function VideoLibraryView({
     string | null
   >(null);
 
+  const [resolvedOverlayPath, setResolvedOverlayPath] = useState<string | null>(
+    null,
+  );
+
   useEffect(() => {
     if (!sceneImagePath || !projectDirectory) {
       setResolvedSceneImagePath(null);
@@ -416,6 +432,21 @@ export default function VideoLibraryView({
         setResolvedSceneImagePath(null);
       });
   }, [sceneImagePath, projectDirectory]);
+
+  useEffect(() => {
+    if (!activeOverlay?.videoPath || !projectDirectory) {
+      setResolvedOverlayPath(null);
+      return;
+    }
+
+    resolveAssetPathForDisplay(activeOverlay.videoPath, projectDirectory)
+      .then((resolved) => {
+        setResolvedOverlayPath(resolved);
+      })
+      .catch(() => {
+        setResolvedOverlayPath(null);
+      });
+  }, [activeOverlay?.videoPath, activeOverlay?.id, projectDirectory]);
 
   // Handle video play/pause
   const handlePlayPause = useCallback(() => {
@@ -1011,6 +1042,55 @@ export default function VideoLibraryView({
     }
   }, [playbackTime, currentVideo, isDragging]);
 
+  // Load overlay video source when available
+  useEffect(() => {
+    const overlayElement = overlayVideoRef.current;
+    if (!overlayElement) return;
+
+    if (!resolvedOverlayPath || !activeOverlay) {
+      overlayElement.removeAttribute('src');
+      overlayElement.load();
+      return;
+    }
+
+    overlayElement.src = resolvedOverlayPath;
+    overlayElement.muted = true;
+    overlayElement.load();
+  }, [resolvedOverlayPath, activeOverlay?.id]);
+
+  // Sync overlay play/pause state
+  useEffect(() => {
+    const overlayElement = overlayVideoRef.current;
+    if (!overlayElement || !activeOverlay || isDragging) return;
+
+    if (isPlaying && overlayElement.paused) {
+      overlayElement.play().catch(() => {
+        // Ignore play errors
+      });
+    } else if (!isPlaying && !overlayElement.paused) {
+      overlayElement.pause();
+    }
+  }, [isPlaying, activeOverlay, isDragging]);
+
+  // Sync overlay position with playbackTime
+  useEffect(() => {
+    const overlayElement = overlayVideoRef.current;
+    if (!overlayElement || !activeOverlay || isDragging) return;
+
+    if (overlayElement.readyState < 2) {
+      return;
+    }
+
+    const expectedOverlayTime = playbackTime - activeOverlay.startTime;
+    if (
+      expectedOverlayTime >= 0 &&
+      expectedOverlayTime <= activeOverlay.duration &&
+      Math.abs(overlayElement.currentTime - expectedOverlayTime) > 0.2
+    ) {
+      overlayElement.currentTime = Math.max(0, expectedOverlayTime);
+    }
+  }, [playbackTime, activeOverlay, isDragging]);
+
   // Audio management is now handled by useAudioController hook
 
   // Keep lastPlaybackTimeRef updated when playbackTime changes from external source
@@ -1175,12 +1255,69 @@ export default function VideoLibraryView({
         }>,
         projectDirectory: string,
         audioPath?: string,
+        overlayItems?: Array<{
+          path: string;
+          duration: number;
+          startTime: number;
+          endTime: number;
+        }>,
       ) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
+
+      const overlayItemsWithPaths = await Promise.all(
+        overlayItems.map(async (item, index) => {
+          let resolvedPath = '';
+          if (item.videoPath) {
+            resolvedPath = await resolveAssetPathForDisplay(
+              item.videoPath,
+              projectDirectory,
+            );
+            console.log(
+              `[VideoDownload] Resolved overlay ${index + 1}: ${item.videoPath} -> ${resolvedPath}`,
+            );
+          }
+
+          return {
+            path: resolvedPath || item.videoPath || '',
+            duration: item.duration,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            originalIndex: index,
+            label: item.label,
+          };
+        }),
+      );
+
+      const skippedOverlayItems: Array<{
+        index: number;
+        label?: string;
+      }> = [];
+      const overlayItemsData = overlayItemsWithPaths.filter((item) => {
+        const hasValidPath = item.path && item.path.trim() !== '';
+        if (!hasValidPath) {
+          skippedOverlayItems.push({
+            index: item.originalIndex + 1,
+            label: item.label,
+          });
+          console.warn(
+            `[VideoDownload] Skipping overlay item ${item.originalIndex + 1}: no file path`,
+            { label: item.label },
+          );
+        }
+        return hasValidPath;
+      });
+
+      if (skippedOverlayItems.length > 0) {
+        console.warn(
+          `[VideoDownload] Skipped ${skippedOverlayItems.length} overlay item(s) with missing paths:`,
+          skippedOverlayItems,
+        );
+      }
 
       const result = await composeVideo(
         itemsData,
         projectDirectory,
         resolvedAudioPath || undefined, // Pass audio path if available
+        overlayItemsData,
       );
 
       console.log('[VideoDownload] Composition result:', result);
@@ -1249,7 +1386,7 @@ export default function VideoLibraryView({
     } finally {
       setIsDownloading(false);
     }
-  }, [projectDirectory, timelineItems, isDownloading]);
+  }, [projectDirectory, timelineItems, overlayItems, isDownloading]);
 
   // Show empty state if no project
   if (!projectDirectory) {
@@ -1415,6 +1552,16 @@ export default function VideoLibraryView({
                     </div>
                   )}
               </div>
+              {activeOverlay && resolvedOverlayPath && (
+                <video
+                  ref={overlayVideoRef}
+                  className={styles.overlayVideo}
+                  preload="auto"
+                  playsInline
+                  muted
+                  aria-hidden
+                />
+              )}
               <div className={styles.playerControls}>
                 <button
                   type="button"

@@ -515,6 +515,7 @@ export default function TimelinePanel({
   // Use unified timeline data from context (single source of truth for TimelinePanel + VideoLibraryView)
   const {
     timelineItems,
+    overlayItems,
     totalDuration: timelineTotalDuration,
     refreshAudioFiles,
   } = useTimelineDataContext();
@@ -1587,7 +1588,7 @@ export default function TimelinePanel({
                   }}
                 />
 
-                {/* Unified Track */}
+                {/* Main Track */}
                 {timelineItems.filter((item) => item.type !== 'audio').length >
                   0 && (
                   <div className={styles.track}>
@@ -1617,6 +1618,37 @@ export default function TimelinePanel({
                             />
                           );
                         })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Overlay Track (Infographics) */}
+                {overlayItems.length > 0 && (
+                  <div className={`${styles.track} ${styles.overlayTrack}`}>
+                    <div className={styles.trackContent}>
+                      {overlayItems.map((item) => {
+                        const left = secondsToPixels(
+                          item.startTime,
+                          zoomLevel,
+                        );
+                        const width = secondsToPixels(
+                          item.duration,
+                          zoomLevel,
+                        );
+
+                        return (
+                          <TimelineItemComponent
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            isSelected={false}
+                            activeVersions={activeVersions}
+                            onItemClick={handleItemClick}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 )}

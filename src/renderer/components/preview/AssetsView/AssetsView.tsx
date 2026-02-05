@@ -108,18 +108,20 @@ export default function AssetsView() {
           setGeneratedVideos([]);
         }
 
-        // Load infographics (MP4s from Remotion)
+        // Load infographics (MP4s and WebMs from Remotion)
         try {
           const infographicTree = await window.electron.project.readTree(
             infographicPlacementsDir,
-            1,
+            2, // Increased depth to handle subdirectories
           );
           const infographicFiles: MediaAsset[] = [];
 
           const collectInfographicFiles = (node: FileNode) => {
             if (node.type === 'file' && node.extension) {
-              // Only display MP4 files (Remotion outputs .mp4)
-              if (node.extension.toLowerCase() === '.mp4') {
+              // Display both MP4 and WebM files (WebM for transparency support)
+              const ext = node.extension.toLowerCase();
+              if (ext === '.mp4' || ext === '.webm') {
+                console.log('[AssetsView] Found infographic file:', node.name, node.path);
                 infographicFiles.push({
                   name: node.name,
                   path: node.path,
@@ -133,8 +135,10 @@ export default function AssetsView() {
           };
 
           collectInfographicFiles(infographicTree);
+          console.log('[AssetsView] Total infographic files found:', infographicFiles.length);
           setGeneratedInfographics(infographicFiles);
         } catch (err) {
+          console.error('[AssetsView] Error loading infographics:', err);
           setGeneratedInfographics([]);
         }
       } catch (err) {
@@ -233,19 +237,22 @@ export default function AssetsView() {
       const paths: Record<string, string> = {};
       for (const infographic of generatedInfographics) {
         try {
+          console.log('[AssetsView] Resolving infographic path:', infographic.path);
           const resolved = await resolveAssetPathForDisplay(
             infographic.path,
             projectDirectory,
           );
+          console.log('[AssetsView] Resolved to:', resolved);
           paths[infographic.path] = resolved;
         } catch (err) {
           console.error(
-            `Failed to resolve infographic path for ${infographic.name}:`,
+            `[AssetsView] Failed to resolve infographic path for ${infographic.name}:`,
             err,
           );
         }
       }
       setInfographicPaths(paths);
+      console.log('[AssetsView] All infographic paths resolved:', Object.keys(paths).length);
     };
 
     resolvePaths();
@@ -406,6 +413,9 @@ export default function AssetsView() {
                 ) : generatedInfographics.length > 0 ? (
                   generatedInfographics.map((infographic) => {
                     const videoSrc = infographicPaths[infographic.path];
+                    if (!videoSrc) {
+                      console.warn('[AssetsView] No video src for infographic:', infographic.name, infographic.path);
+                    }
                     return (
                       <div
                         key={infographic.path}
