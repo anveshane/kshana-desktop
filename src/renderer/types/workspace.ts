@@ -26,6 +26,7 @@ export interface WorkspaceState {
   recentProjects: RecentProject[];
   connectionState: ConnectionState;
   isLoading: boolean;
+  pendingFileNavigation: string | null;
 }
 
 export interface WorkspaceActions {
@@ -40,6 +41,8 @@ export interface WorkspaceActions {
     status: ConnectionStatus,
   ) => void;
   loadDirectory: (path: string) => Promise<void>;
+  navigateToFile: (filePath: string) => void;
+  clearFileNavigation: () => void;
 }
 
 export type WorkspaceContextType = WorkspaceState & WorkspaceActions;

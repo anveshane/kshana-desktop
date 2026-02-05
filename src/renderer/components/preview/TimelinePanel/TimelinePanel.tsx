@@ -1317,28 +1317,35 @@ export default function TimelinePanel({
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input, textarea, or contenteditable element
+      const target = e.target as HTMLElement;
+      const isTyping = 
+        target.tagName === 'INPUT' || 
+        target.tagName === 'TEXTAREA' || 
+        target.isContentEditable;
+      
       // Space: Play/Pause
       if (e.code === 'Space' && e.target === document.body) {
         e.preventDefault();
         setIsPlaying((prev) => !prev);
       }
-      // Arrow Left: Step back
-      else if (e.code === 'ArrowLeft' && !e.shiftKey) {
+      // Arrow Left: Step back (only when not typing)
+      else if (e.code === 'ArrowLeft' && !e.shiftKey && !isTyping) {
         e.preventDefault();
         setCurrentPosition((prev) => Math.max(0, prev - 0.1));
       }
-      // Arrow Right: Step forward
-      else if (e.code === 'ArrowRight' && !e.shiftKey) {
+      // Arrow Right: Step forward (only when not typing)
+      else if (e.code === 'ArrowRight' && !e.shiftKey && !isTyping) {
         e.preventDefault();
         setCurrentPosition((prev) => Math.min(totalDuration, prev + 0.1));
       }
-      // Shift+Arrow Left: Jump back 1 second
-      else if (e.code === 'ArrowLeft' && e.shiftKey) {
+      // Shift+Arrow Left: Jump back 1 second (only when not typing)
+      else if (e.code === 'ArrowLeft' && e.shiftKey && !isTyping) {
         e.preventDefault();
         setCurrentPosition((prev) => Math.max(0, prev - 1));
       }
-      // Shift+Arrow Right: Jump forward 1 second
-      else if (e.code === 'ArrowRight' && e.shiftKey) {
+      // Shift+Arrow Right: Jump forward 1 second (only when not typing)
+      else if (e.code === 'ArrowRight' && e.shiftKey && !isTyping) {
         e.preventDefault();
         setCurrentPosition((prev) => Math.min(totalDuration, prev + 1));
       }
@@ -1358,13 +1365,13 @@ export default function TimelinePanel({
         e.preventDefault();
         handleZoomOut();
       }
-      // S: Split scene at playhead
-      else if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      // S: Split scene at playhead (only when not typing)
+      else if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !isTyping) {
         e.preventDefault();
         handleSplitScene();
       }
-      // M: Add marker at current playhead position
-      else if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      // M: Add marker at current playhead position (only when not typing)
+      else if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !isTyping) {
         e.preventDefault();
         handleOpenMarkerPopover();
       }

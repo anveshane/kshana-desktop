@@ -11,7 +11,7 @@ import ProjectSelectionDialog from '../ProjectSelectionDialog';
 import styles from './ChatPanel.module.scss';
 
 // Message types that shouldn't create new messages if same type already exists
-const DEDUPE_TYPES = ['progress', 'comfyui_progress'];
+const DEDUPE_TYPES = ['progress', 'comfyui_progress', 'error'];
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 
@@ -38,6 +38,7 @@ export default function ChatPanel() {
   const [showProjectDialog, setShowProjectDialog] = useState(false);
   const [projectDialogResolved, setProjectDialogResolved] = useState(false);
   const [hasUserSentMessage, setHasUserSentMessage] = useState(false);
+  const [isTaskRunning, setIsTaskRunning] = useState(false);
 
   const { setConnectionStatus, projectDirectory } = useWorkspace();
   const agentContext = useAgent();
@@ -58,6 +59,8 @@ export default function ChatPanel() {
   const lastTodoMessageIdRef = useRef<string | null>(null);
   // Track the last question message ID to avoid duplicates
   const lastQuestionMessageIdRef = useRef<string | null>(null);
+  // Track if error was already shown for the current connection attempt
+  const connectionErrorShownRef = useRef(false);
 
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
@@ -124,6 +127,7 @@ export default function ChatPanel() {
     setAgentStatus('idle');
     setStatusMessage('Ready');
     setHasUserSentMessage(false);
+    setIsTaskRunning(false);
     // Backend will send greeting via WebSocket when connection is re-established
   }, []);
 
@@ -365,6 +369,7 @@ export default function ChatPanel() {
               // Update status only - don't create placeholder messages
               // Real agent text will come through stream_chunk messages
               debouncedSetStatus('thinking', statusMsg || 'Thinking...');
+              setIsTaskRunning(true);
               window.electron.logger.logStatusChange(
                 'thinking',
                 agentNameFromStatus,
@@ -376,6 +381,7 @@ export default function ChatPanel() {
                 'waiting',
                 statusMsg || 'Waiting for input...',
               );
+              setIsTaskRunning(false);
               window.electron.logger.logStatusChange(
                 'waiting',
                 agentNameFromStatus,
@@ -384,6 +390,7 @@ export default function ChatPanel() {
               break;
             case 'completed':
               debouncedSetStatus('completed', statusMsg || 'Task completed');
+              setIsTaskRunning(false);
               window.electron.logger.logStatusChange(
                 'completed',
                 agentNameFromStatus,
@@ -392,6 +399,7 @@ export default function ChatPanel() {
               break;
             case 'error':
               debouncedSetStatus('error', statusMsg);
+              setIsTaskRunning(false);
               window.electron.logger.logStatusChange(
                 'error',
                 agentNameFromStatus,
@@ -579,7 +587,8 @@ export default function ChatPanel() {
                           toolCallId: toolCallId || activeKey,
                           toolName,
                           args,
-                          status: toolStatus === 'error' ? 'error' : 'completed',
+                          status:
+                            toolStatus === 'error' ? 'error' : 'completed',
                           result: cleanedResult,
                           duration,
                         },
@@ -642,7 +651,8 @@ export default function ChatPanel() {
             }
           } else if (toolStatus === 'started') {
             const now = Date.now();
-            const sequence = (toolCallSequenceRef.current.get(toolName) ?? 0) + 1;
+            const sequence =
+              (toolCallSequenceRef.current.get(toolName) ?? 0) + 1;
             toolCallSequenceRef.current.set(toolName, sequence);
             const fallbackKey = `${toolName}-${sequence}`;
             const key = toolCallId || fallbackKey;
@@ -758,6 +768,7 @@ export default function ChatPanel() {
           if (responseStatus === 'completed') {
             setAgentStatus('completed');
             setStatusMessage('Completed');
+            setIsTaskRunning(false);
             window.electron.logger.logStatusChange(
               'completed',
               agentName,
@@ -766,6 +777,7 @@ export default function ChatPanel() {
           } else if (responseStatus === 'error') {
             setAgentStatus('error');
             setStatusMessage('Error');
+            setIsTaskRunning(false);
             window.electron.logger.logStatusChange('error', agentName, 'Error');
             window.electron.logger.logError(
               'An error occurred while processing your request.',
@@ -881,6 +893,7 @@ export default function ChatPanel() {
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
             awaitingResponseRef.current = true;
+            setIsTaskRunning(false);
           }
           break;
         }
@@ -925,6 +938,7 @@ export default function ChatPanel() {
           appendSystemMessage(errorMsg, 'error');
           setAgentStatus('error');
           setStatusMessage(errorMsg);
+          setIsTaskRunning(false);
           window.electron.logger.logError(
             errorMsg,
             data as Record<string, unknown>,
@@ -990,6 +1004,7 @@ export default function ChatPanel() {
     }
 
     connectingRef.current = true;
+    connectionErrorShownRef.current = false; // Reset error flag for new connection attempt
     setConnectionState('connecting');
 
     try {
@@ -1041,6 +1056,19 @@ export default function ChatPanel() {
           clearTimeout(timeout);
           connectingRef.current = false;
           setConnectionState('connected');
+          // Clear connection error messages on successful connect
+          setMessages((prev) =>
+            prev.filter(
+              (msg) =>
+                !(
+                  msg.role === 'system' &&
+                  msg.type === 'error' &&
+                  (msg.content?.includes('Connection to backend lost') ||
+                    msg.content?.includes('WebSocket connection error') ||
+                    msg.content?.includes('Reconnection failed'))
+                ),
+            ),
+          );
           resolve(socket);
         };
 
@@ -1048,10 +1076,14 @@ export default function ChatPanel() {
           clearTimeout(timeout);
           connectingRef.current = false;
           console.error('[ChatPanel] WebSocket error:', error);
-          appendSystemMessage(
-            'WebSocket connection error. Check if backend is running.',
-            'error',
-          );
+          // Only show error if not already shown for this connection attempt
+          if (!connectionErrorShownRef.current) {
+            connectionErrorShownRef.current = true;
+            appendSystemMessage(
+              'WebSocket connection error. Check if backend is running.',
+              'error',
+            );
+          }
           reject(error);
         };
 
@@ -1062,19 +1094,18 @@ export default function ChatPanel() {
           wsRef.current = null;
           if (event.code !== 1000 && !reconnectTimeoutRef.current) {
             // Connection lost - attempt reconnection (only if not already reconnecting)
-            appendSystemMessage(
-              'Connection to backend lost. Attempting to reconnect...',
-              'error',
-            );
+            // Only show error if not already shown for this connection attempt
+            if (!connectionErrorShownRef.current) {
+              connectionErrorShownRef.current = true;
+              appendSystemMessage(
+                'Connection to backend lost. Attempting to reconnect...',
+                'error',
+              );
+            }
             reconnectTimeoutRef.current = setTimeout(() => {
               reconnectTimeoutRef.current = null;
               connectWebSocket()
-                .then(() => {
-                  appendSystemMessage(
-                    'Reconnected to backend successfully',
-                    'status',
-                  );
-                })
+                // Error messages are cleared in socket.onopen on successful connect
                 .catch((err) => {
                   appendSystemMessage(
                     `Reconnection failed: ${(err as Error).message}. Will retry...`,
@@ -1154,6 +1185,7 @@ export default function ChatPanel() {
 
       // Mark that user has sent their first message
       setHasUserSentMessage(true);
+      setIsTaskRunning(true);
 
       appendMessage({
         role: 'user',
@@ -1192,6 +1224,7 @@ export default function ChatPanel() {
         const errorMsg = `Unable to send message: ${(error as Error).message}`;
         appendSystemMessage(errorMsg, 'error');
         setAgentStatus('error');
+        setIsTaskRunning(false);
         window.electron.logger.logError(errorMsg, {
           error: (error as Error).message,
         });
@@ -1199,6 +1232,22 @@ export default function ChatPanel() {
     },
     [appendMessage, connectWebSocket, appendSystemMessage, agentName],
   );
+
+  const stopTask = useCallback(async () => {
+    if (!isTaskRunning) return;
+    try {
+      const socket = await connectWebSocket();
+      socket.send(JSON.stringify({ type: 'cancel', data: {} }));
+      setIsTaskRunning(false);
+      appendSystemMessage('Task stopped.', 'status');
+    } catch (error) {
+      const errorMsg = `Unable to stop task: ${(error as Error).message}`;
+      appendSystemMessage(errorMsg, 'error');
+      window.electron.logger.logError(errorMsg, {
+        error: (error as Error).message,
+      });
+    }
+  }, [appendSystemMessage, connectWebSocket, isTaskRunning]);
 
   // Register sendMessage so other components can trigger agent tasks (e.g. Render Infographics)
   useEffect(() => {
@@ -1399,7 +1448,9 @@ export default function ChatPanel() {
 
         <ChatInput
           disabled={connectionState === 'connecting'}
+          isRunning={isTaskRunning}
           onSend={sendMessage}
+          onStop={stopTask}
         />
       </div>
     </>

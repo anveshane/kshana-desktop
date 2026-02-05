@@ -31,11 +31,19 @@ export default function PreviewPanel() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [totalDuration, setTotalDuration] = useState(0);
   const playbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
 
-  const { selectedFile, connectionState, projectDirectory } = useWorkspace();
+  const { selectedFile, connectionState, projectDirectory, pendingFileNavigation, clearFileNavigation } = useWorkspace();
+  
+  // Handle file navigation from chat panel
+  useEffect(() => {
+    if (pendingFileNavigation) {
+      setActiveTab('preview');
+    }
+  }, [pendingFileNavigation]);
   const { timelineState, scenes: projectScenes } = useProject();
 
   // Initialize activeVersions from timelineState with migration support
@@ -104,11 +112,19 @@ export default function PreviewPanel() {
   }, [timelineState?.active_versions]);
 
   // Playback loop - advance playbackTime when playing
-  // VideoLibraryView and TimelinePanel will handle stopping at the end
+  // Includes bounds checking to stop at totalDuration
   useEffect(() => {
     if (isPlaying && !isDragging) {
       playbackIntervalRef.current = setInterval(() => {
-        setPlaybackTime((prev) => prev + 0.1); // Update every 100ms (0.1 seconds)
+        setPlaybackTime((prev) => {
+          const next = prev + 0.1; // Update every 100ms (0.1 seconds)
+          // Stop playback when reaching the end of timeline
+          if (totalDuration > 0 && next >= totalDuration) {
+            setIsPlaying(false);
+            return totalDuration;
+          }
+          return next;
+        });
       }, 100);
     } else if (playbackIntervalRef.current) {
       clearInterval(playbackIntervalRef.current);
@@ -121,7 +137,7 @@ export default function PreviewPanel() {
         playbackIntervalRef.current = null;
       }
     };
-  }, [isPlaying, isDragging]);
+  }, [isPlaying, isDragging, totalDuration]);
 
   // Handle timeline resize
   const handleTimelineResize = useCallback(
@@ -288,11 +304,17 @@ export default function PreviewPanel() {
                 isDragging={isDragging}
                 onPlaybackTimeChange={setPlaybackTime}
                 onPlaybackStateChange={setIsPlaying}
+                onTotalDurationChange={setTotalDuration}
                 activeVersions={activeVersions}
                 projectScenes={projectScenes}
               />
             )}
-            {activeTab === 'preview' && <PlansView />}
+            {activeTab === 'preview' && (
+              <PlansView 
+                fileToOpen={pendingFileNavigation} 
+                onFileOpened={clearFileNavigation}
+              />
+            )}
           </div>
 
           {projectDirectory && (

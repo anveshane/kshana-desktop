@@ -76,6 +76,7 @@ interface VideoLibraryViewProps {
   isDragging?: boolean;
   onPlaybackTimeChange: (time: number) => void;
   onPlaybackStateChange: (playing: boolean) => void;
+  onTotalDurationChange?: (duration: number) => void;
   activeVersions?: Record<number, SceneVersions>; // sceneNumber -> { image?: number, video?: number }
   projectScenes?: SceneRef[];
 }
@@ -86,6 +87,7 @@ export default function VideoLibraryView({
   isDragging = false,
   onPlaybackTimeChange,
   onPlaybackStateChange,
+  onTotalDurationChange,
   activeVersions = {},
   projectScenes = [],
 }: VideoLibraryViewProps) {
@@ -103,6 +105,13 @@ export default function VideoLibraryView({
 
   // Use unified timeline data from context (single source of truth for TimelinePanel + VideoLibraryView)
   const { timelineItems, totalDuration } = useTimelineDataContext();
+
+  // Notify parent when totalDuration changes (for playback bounds checking)
+  useEffect(() => {
+    if (onTotalDurationChange) {
+      onTotalDurationChange(totalDuration);
+    }
+  }, [totalDuration, onTotalDurationChange]);
 
   // Get video artifacts from asset manifest for the sidebar
   const videoArtifacts = useMemo(() => {

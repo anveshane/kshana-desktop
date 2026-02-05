@@ -1,11 +1,13 @@
 import { FormEvent, useState, useRef, useEffect, KeyboardEvent } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Square } from 'lucide-react';
 import styles from './ChatInput.module.scss';
 
 interface ChatInputProps {
   disabled?: boolean;
+  isRunning?: boolean;
   placeholder?: string;
   onSend: (message: string) => void;
+  onStop?: () => void;
 }
 
 const MIN_ROWS = 1;
@@ -14,8 +16,10 @@ const LINE_HEIGHT = 24; // Approximate line height in pixels
 
 export default function ChatInput({
   disabled = false,
+  isRunning = false,
   placeholder = 'Describe your story, ask for a storyboard, or request assets…',
   onSend,
+  onStop,
 }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [rows, setRows] = useState(MIN_ROWS);
@@ -39,7 +43,7 @@ export default function ChatInput({
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (!value.trim()) {
+    if (isRunning || !value.trim()) {
       return;
     }
     onSend(value.trim());
@@ -75,6 +79,7 @@ export default function ChatInput({
   };
 
   const canSend = value.trim().length > 0 && !disabled;
+  const canStop = !disabled && isRunning;
 
   return (
     <form className={styles.container} onSubmit={handleSubmit}>
@@ -91,18 +96,29 @@ export default function ChatInput({
           aria-label="Chat input"
         />
         <button
-          type="submit"
-          disabled={!canSend}
-          className={styles.sendButton}
-          aria-label="Send message"
-          title="Send message (Shift+Enter or Cmd/Ctrl+Enter)"
+          type={isRunning ? 'button' : 'submit'}
+          disabled={isRunning ? !canStop : !canSend}
+          className={`${styles.sendButton} ${isRunning ? styles.stopButton : ''}`}
+          aria-label={isRunning ? 'Stop agent' : 'Send message'}
+          title={
+            isRunning
+              ? 'Stop current task'
+              : 'Send message (Shift+Enter or Cmd/Ctrl+Enter)'
+          }
+          onClick={isRunning ? onStop : undefined}
         >
-          <Send size={16} />
+          {isRunning ? <Square size={14} /> : <Send size={16} />}
         </button>
       </div>
       <div className={styles.hint}>
-        Press <kbd>Enter</kbd> for new line, <kbd>Shift+Enter</kbd> or{' '}
-        <kbd>Cmd+Enter</kbd> to send
+        {isRunning ? (
+          <>Agent is running. Use Stop to cancel this run.</>
+        ) : (
+          <>
+            Press <kbd>Enter</kbd> for new line, <kbd>Shift+Enter</kbd> or{' '}
+            <kbd>Cmd+Enter</kbd> to send
+          </>
+        )}
       </div>
     </form>
   );

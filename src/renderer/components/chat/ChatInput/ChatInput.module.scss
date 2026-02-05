@@ -88,6 +88,17 @@
   }
 }
 
+.stopButton {
+  border-color: rgba($color-error, 0.5);
+  color: $color-error;
+
+  &:hover:not(:disabled) {
+    background: $color-error;
+    color: $color-text-primary;
+    @include glow-effect($color-error, 8px);
+  }
+}
+
 .hint {
   margin-top: $spacing-xs;
   font-size: 11px;

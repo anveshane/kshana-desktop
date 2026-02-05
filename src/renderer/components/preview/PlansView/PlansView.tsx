@@ -45,12 +45,18 @@ const PLAN_FILES: PlanFile[] = [
   },
 ];
 
-export default function PlansView() {
+interface PlansViewProps {
+  fileToOpen?: string | null;
+  onFileOpened?: () => void;
+}
+
+export default function PlansView({ fileToOpen, onFileOpened }: PlansViewProps) {
   const { projectDirectory } = useWorkspace();
   const [selectedPlan, setSelectedPlan] = useState<PlanFile | null>(null);
   const [planContent, setPlanContent] = useState<string>('');
   const [isLoadingPlan, setIsLoadingPlan] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasAutoLoaded, setHasAutoLoaded] = useState(false);
 
   const effectiveProjectDir = projectDirectory || '/mock';
 
@@ -87,12 +93,40 @@ export default function PlansView() {
     [loadPlanFile],
   );
 
-  // Load first plan by default if no project directory
+  // Handle fileToOpen from navigation
   useEffect(() => {
-    if (!projectDirectory) {
+    if (fileToOpen) {
+      // Find matching plan file by path
+      const matchingPlan = PLAN_FILES.find((plan) => {
+        // Match by full path, relative path, or filename
+        const fullPath = `${effectiveProjectDir}/.kshana/agent/${plan.path}`;
+        return (
+          fileToOpen === fullPath ||
+          fileToOpen === plan.path ||
+          fileToOpen.endsWith(plan.path) ||
+          fileToOpen.endsWith(plan.name)
+        );
+      });
+
+      if (matchingPlan) {
+        loadPlanFile(matchingPlan);
+      }
+      
+      // Clear the navigation after handling
+      onFileOpened?.();
     }
-    // Don't auto-load, let user select
-  }, [projectDirectory]);
+  }, [fileToOpen, effectiveProjectDir, loadPlanFile, onFileOpened]);
+
+  // Auto-load transcript.md by default when project directory is set
+  useEffect(() => {
+    if (projectDirectory && !selectedPlan && !hasAutoLoaded) {
+      const defaultFile = PLAN_FILES.find((f) => f.name === 'transcript.md');
+      if (defaultFile) {
+        loadPlanFile(defaultFile);
+        setHasAutoLoaded(true);
+      }
+    }
+  }, [projectDirectory, selectedPlan, hasAutoLoaded, loadPlanFile]);
 
   const getFilePath = (plan: PlanFile | null): string | undefined => {
     if (!plan) return undefined;

@@ -101,6 +101,9 @@ export default function MessageBubble({
   const isQuestion = message.type === 'agent_question';
   const isGreeting = message.type === 'greeting';
 
+  // Get navigateToFile from context
+  const { navigateToFile } = useWorkspace();
+
   // Render tool call card
   if (isToolCall && message.meta) {
     const toolName = (message.meta.toolName as string) || 'tool';
@@ -125,6 +128,7 @@ export default function MessageBubble({
           duration={duration}
           toolCallId={message.meta.toolCallId as string | undefined}
           streamingContent={streamingContent}
+          onFileClick={navigateToFile}
         />
       </div>
     );

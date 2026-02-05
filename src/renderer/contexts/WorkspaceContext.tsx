@@ -48,6 +48,7 @@ const initialState: WorkspaceState = {
     comfyUI: 'disconnected',
   },
   isLoading: false,
+  pendingFileNavigation: null,
 };
 
 const WorkspaceContext = createContext<WorkspaceContextType | null>(null);
@@ -224,6 +225,14 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     }
   }, []);
 
+  const navigateToFile = useCallback((filePath: string) => {
+    setState((prev) => ({ ...prev, pendingFileNavigation: filePath }));
+  }, []);
+
+  const clearFileNavigation = useCallback(() => {
+    setState((prev) => ({ ...prev, pendingFileNavigation: null }));
+  }, []);
+
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -251,6 +260,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       refreshFileTree,
       setConnectionStatus,
       loadDirectory,
+      navigateToFile,
+      clearFileNavigation,
     }),
     [
       state,
@@ -262,6 +273,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       refreshFileTree,
       setConnectionStatus,
       loadDirectory,
+      navigateToFile,
+      clearFileNavigation,
     ],
   );
 

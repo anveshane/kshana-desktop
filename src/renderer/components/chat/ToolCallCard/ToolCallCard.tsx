@@ -1,4 +1,5 @@
-import { CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle2, XCircle, AlertCircle, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import styles from './ToolCallCard.module.scss';
 
@@ -17,6 +18,7 @@ export interface ToolCallCardProps {
   toolCallId?: string;
   agentName?: string;
   streamingContent?: string;
+  onFileClick?: (filePath: string) => void;
 }
 
 // Tools with special rendering
@@ -315,6 +317,9 @@ function renderProjectStateTool(
   );
 }
 
+// Tools that should be expanded by default (not collapsed)
+const EXPANDED_BY_DEFAULT_TOOLS = new Set(['Task', 'dispatch_agent']);
+
 export default function ToolCallCard({
   toolName,
   args,
@@ -323,8 +328,18 @@ export default function ToolCallCard({
   duration,
   agentName,
   streamingContent,
+  onFileClick,
 }: ToolCallCardProps) {
-  const isExecuting = status === 'executing' || status === 'started';
+  const isExecuting = status === 'executing';
+  
+  // Task tool and executing tools stay expanded by default, all others are collapsed
+  const [isExpanded, setIsExpanded] = useState(() => 
+    EXPANDED_BY_DEFAULT_TOOLS.has(toolName) || isExecuting
+  );
+  
+  // Keep expanded while executing (can't collapse running tools)
+  const effectiveExpanded = isExecuting ? true : isExpanded;
+  
   const isError = status === 'error';
   const isCompleted = status === 'completed';
 
@@ -400,13 +415,22 @@ export default function ToolCallCard({
 
   return (
     <div className={`${styles.container} ${borderClass}`}>
-      <div className={styles.header}>
+      <button
+        type="button"
+        className={`${styles.header} ${isExecuting ? styles.headerNoCollapse : ''}`}
+        onClick={() => !isExecuting && setIsExpanded(!isExpanded)}
+        style={isExecuting ? { cursor: 'default' } : undefined}
+      >
+        <ChevronRight
+          size={14}
+          className={effectiveExpanded ? styles.chevronExpanded : styles.chevron}
+        />
         {isExecuting ? (
-          <AlertCircle className={styles.statusIconExecuting} />
+          <AlertCircle size={14} className={styles.statusIconExecuting} />
         ) : isError ? (
-          <XCircle className={styles.statusIconError} />
+          <XCircle size={14} className={styles.statusIconError} />
         ) : (
-          <CheckCircle2 className={styles.statusIconCompleted} />
+          <CheckCircle2 size={14} className={styles.statusIconCompleted} />
         )}
         <span className={styles.toolName}>{toolName}</span>
         <span className={styles.cliPrefix}>{prefix}</span>
@@ -416,52 +440,62 @@ export default function ToolCallCard({
         {!isExecuting && duration !== undefined && duration > 0 && (
           <span className={styles.duration}>{formatDuration(duration)}</span>
         )}
-      </div>
+      </button>
 
-      <div className={styles.content}>
-        <div className={styles.toolCall}>
-          <span className={styles.toolCallCode}>{toolCallText}</span>
+      {effectiveExpanded && (
+        <div className={styles.content}>
+          <div className={styles.toolCall}>
+            <span className={styles.toolCallCode}>{toolCallText}</span>
+          </div>
+
+          {!isExecuting && (filePath || fileSize || resultDisplay) && (
+            <div className={styles.cliResult}>
+              {filePath && (
+                <button
+                  type="button"
+                  className={styles.cliFilePath}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onFileClick?.(filePath);
+                  }}
+                  title="Click to open in Preview"
+                >
+                  📄 {filePath}
+                  {fileSize && (
+                    <span className={styles.cliFileSize}> ({fileSize})</span>
+                  )}
+                </button>
+              )}
+              {preview && (
+                <div className={styles.cliPreview}>
+                  <details>
+                    <summary>Preview</summary>
+                    <pre className={styles.cliResultPre}>{preview}</pre>
+                  </details>
+                </div>
+              )}
+              {resultDisplay && (
+                <div className={styles.cliResultContent}>
+                  {typeof result === 'object' &&
+                  result !== null &&
+                  'content' in result ? (
+                    <ReactMarkdown>{resultDisplay}</ReactMarkdown>
+                  ) : (
+                    <pre className={styles.cliResultPre}>{resultDisplay}</pre>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {isError && !resultDisplay && (
+            <div className={styles.errorResult}>
+              <div className={styles.errorLabel}>Error</div>
+              <pre className={styles.errorMessage}>Tool failed.</pre>
+            </div>
+          )}
         </div>
-
-        {!isExecuting && (filePath || fileSize || resultDisplay) && (
-          <div className={styles.cliResult}>
-            {filePath && (
-              <div className={styles.cliFilePath}>
-                📄 {filePath}
-                {fileSize && (
-                  <span className={styles.cliFileSize}> ({fileSize})</span>
-                )}
-              </div>
-            )}
-            {preview && (
-              <div className={styles.cliPreview}>
-                <details>
-                  <summary>Preview</summary>
-                  <pre className={styles.cliResultPre}>{preview}</pre>
-                </details>
-              </div>
-            )}
-            {resultDisplay && (
-              <div className={styles.cliResultContent}>
-                {typeof result === 'object' &&
-                result !== null &&
-                'content' in result ? (
-                  <ReactMarkdown>{resultDisplay}</ReactMarkdown>
-                ) : (
-                  <pre className={styles.cliResultPre}>{resultDisplay}</pre>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {isError && !resultDisplay && (
-          <div className={styles.errorResult}>
-            <div className={styles.errorLabel}>Error</div>
-            <pre className={styles.errorMessage}>Tool failed.</pre>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
