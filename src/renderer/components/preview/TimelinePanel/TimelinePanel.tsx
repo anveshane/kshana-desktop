@@ -45,20 +45,10 @@ interface TimelineItemComponentProps {
   width: number;
   projectDirectory: string | null;
   isSelected: boolean;
-  activeVersions?: Record<number, SceneVersions>; // placementNumber -> { image?: number, video?: number }
   onItemClick?: (
     e: React.MouseEvent<HTMLDivElement>,
     item: TimelineItem,
   ) => void;
-}
-
-function inferPlacementNumberFromPath(path: string | undefined): number | null {
-  if (!path) return null;
-  const filename = path.split('/').pop() ?? path;
-  const match = filename.match(/image(\d+)(?:[-_]|\.|$)/i);
-  if (!match) return null;
-  const placementNumber = Number(match[1]);
-  return Number.isNaN(placementNumber) ? null : placementNumber;
 }
 
 function TimelineItemComponent({
@@ -67,10 +57,8 @@ function TimelineItemComponent({
   width,
   projectDirectory,
   isSelected,
-  activeVersions = {},
   onItemClick,
 }: TimelineItemComponentProps) {
-  const { assetManifest } = useProject();
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [imagePath, setImagePath] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState<boolean>(false);
@@ -94,7 +82,7 @@ function TimelineItemComponent({
     }
   }, [item.type, item.videoPath, projectDirectory]);
 
-  // Resolve image path from item with fallback to asset manifest
+  // Resolve image path from timeline item only (projection-backed in v2).
   useEffect(() => {
     if (item.type !== 'image') {
       setImagePath(null);
@@ -114,69 +102,7 @@ function TimelineItemComponent({
     setImageLoading(true);
     setImageLoadError(false);
 
-    // First, try to use imagePath from item
-    let pathToResolve: string | undefined = item.imagePath;
-
-    // If no imagePath, try to find asset from manifest
-    if (
-      !pathToResolve &&
-      item.placementNumber !== undefined &&
-      assetManifest?.assets
-    ) {
-      const activeVersion = activeVersions[item.placementNumber]?.image;
-      const matchingAssets = assetManifest.assets.filter((a) => {
-        if (a.type !== 'scene_image') return false;
-
-        // Handle type coercion (placementNumber might be number or string)
-        const assetPlacementNumber = a.metadata?.placementNumber;
-        const assetSceneNumber = a.scene_number;
-        const pathPlacementNumber = inferPlacementNumberFromPath(a.path);
-        const placementMatch =
-          assetPlacementNumber !== undefined &&
-          (Number(assetPlacementNumber) === item.placementNumber ||
-            String(assetPlacementNumber) === String(item.placementNumber));
-        const sceneMatch =
-          assetSceneNumber !== undefined &&
-          (Number(assetSceneNumber) === item.placementNumber ||
-            String(assetSceneNumber) === String(item.placementNumber));
-
-        const pathMatch =
-          pathPlacementNumber !== null &&
-          pathPlacementNumber === item.placementNumber;
-
-        return placementMatch || sceneMatch || pathMatch;
-      });
-
-      if (matchingAssets.length > 0) {
-        let asset = matchingAssets[0]!;
-        if (activeVersion !== undefined) {
-          const versionAsset = matchingAssets.find(
-            (a) => a.version === activeVersion,
-          );
-          if (versionAsset) {
-            asset = versionAsset;
-          }
-        } else {
-          // Get latest version
-          asset = matchingAssets.reduce((latest, current) =>
-            current.version > latest.version ? current : latest,
-          );
-        }
-
-        if (asset.path) {
-          pathToResolve = asset.path;
-          console.log(
-            `[TimelineItemComponent] Found asset from manifest for ${item.label}:`,
-            {
-              placementNumber: item.placementNumber,
-              assetPath: asset.path,
-              assetId: asset.id,
-              version: asset.version,
-            },
-          );
-        }
-      }
-    }
+    const pathToResolve = item.imagePath;
 
     if (pathToResolve) {
       console.log(
@@ -263,8 +189,6 @@ function TimelineItemComponent({
           {
             itemImagePath: item.imagePath,
             placementNumber: item.placementNumber,
-            hasAssetManifest: !!assetManifest,
-            assetCount: assetManifest?.assets?.length || 0,
           },
         );
       }
@@ -285,8 +209,6 @@ function TimelineItemComponent({
     item.label,
     item.placementNumber,
     projectDirectory,
-    assetManifest,
-    activeVersions,
     imageLoadError,
   ]);
 
@@ -1627,7 +1549,6 @@ export default function TimelinePanel({
                               width={width}
                               projectDirectory={projectDirectory || null}
                               isSelected={false}
-                              activeVersions={activeVersions}
                               onItemClick={handleItemClick}
                             />
                           );
@@ -1658,7 +1579,6 @@ export default function TimelinePanel({
                             width={width}
                             projectDirectory={projectDirectory || null}
                             isSelected={false}
-                            activeVersions={activeVersions}
                             onItemClick={handleItemClick}
                           />
                         );
@@ -1692,7 +1612,6 @@ export default function TimelinePanel({
                               width={width}
                               projectDirectory={projectDirectory || null}
                               isSelected={false}
-                              activeVersions={activeVersions}
                               onItemClick={handleItemClick}
                             />
                           );

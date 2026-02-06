@@ -10,9 +10,14 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { usePlacementFiles } from './usePlacementFiles';
 import { useTranscript } from './useTranscript';
 import { timeStringToSeconds } from '../utils/placementParsers';
-import type { AssetInfo, AssetManifest } from '../types/kshana/assetManifest';
+import type { AssetInfo } from '../types/kshana/assetManifest';
 import type { SceneVersions } from '../types/kshana/timeline';
 import { PROJECT_PATHS } from '../types/kshana';
+import {
+  createEmptyImageProjectionSnapshot,
+  selectBestAssetForPlacement,
+  type ImageProjectionSnapshot,
+} from '../services/assets';
 
 export interface TimelineItem {
   id: string; // "PLM-1", "vd-placement-1", "info-placement-1", "placeholder-start", "audio-1"
@@ -49,38 +54,12 @@ function arePlacementMapsEqual(
   return leftKeys.every((key) => left[Number(key)] === right[Number(key)]);
 }
 
-/**
- * Find asset by placement number
- * Matching priority:
- * 1. Primary: asset.metadata?.placementNumber === placementNumber
- * 2. Fallback: asset.scene_number === placementNumber
- */
-function inferPlacementNumberFromPath(path: string | undefined): number | null {
-  if (!path) return null;
-  const filename = path.split('/').pop() ?? path;
-  const match = filename.match(/image(\d+)(?:[-_]|\.|$)/i);
-  if (!match) return null;
-  const placementNumber = Number(match[1]);
-  return Number.isNaN(placementNumber) ? null : placementNumber;
-}
-
 function findAssetByPlacementNumber(
   placementNumber: number,
-  assetManifest: AssetManifest | null,
+  assets: AssetInfo[],
   assetType: 'scene_image' | 'scene_video' | 'scene_infographic',
   activeVersions?: Record<number, SceneVersions>,
 ): AssetInfo | undefined {
-  if (!assetManifest?.assets) {
-    console.warn(
-      `[findAssetByPlacementNumber] No assetManifest or assets for placement ${placementNumber}`,
-      {
-        hasManifest: !!assetManifest,
-        hasAssets: !!assetManifest?.assets,
-      },
-    );
-    return undefined;
-  }
-
   const activeVersion = activeVersions?.[placementNumber];
   const targetVersion =
     assetType === 'scene_image'
@@ -89,110 +68,12 @@ function findAssetByPlacementNumber(
         ? activeVersion?.video
         : undefined; // infographic: no versioning yet
 
-  // Find matching asset with improved logging
-  const matchingAssets = assetManifest.assets.filter((a) => {
-    const typeMatch = a.type === assetType;
-    if (!typeMatch) return false;
-
-    // Check both metadata.placementNumber and scene_number
-    // Handle type coercion (placementNumber might be number or string)
-    const assetPlacementNumber = a.metadata?.placementNumber;
-    const assetSceneNumber = a.scene_number;
-    const pathPlacementNumber = inferPlacementNumberFromPath(a.path);
-    const placementMatch =
-      assetPlacementNumber !== undefined &&
-      (Number(assetPlacementNumber) === placementNumber ||
-        String(assetPlacementNumber) === String(placementNumber));
-    const sceneMatch =
-      assetSceneNumber !== undefined &&
-      (Number(assetSceneNumber) === placementNumber ||
-        String(assetSceneNumber) === String(placementNumber));
-    const pathMatch =
-      pathPlacementNumber !== null && pathPlacementNumber === placementNumber;
-
-    const matches = placementMatch || sceneMatch || pathMatch;
-
-    if (!matches) {
-      // Only log if it's the same type but wrong placement (to reduce noise)
-      console.debug(
-        `[findAssetByPlacementNumber] Asset ${a.id} type matches but placement doesn't:`,
-        {
-          assetType: a.type,
-          targetType: assetType,
-          assetPlacementNumber,
-          assetSceneNumber,
-          pathPlacementNumber,
-          targetPlacementNumber: placementNumber,
-          placementMatch,
-          sceneMatch,
-          pathMatch,
-        },
-      );
-    }
-
-    return matches;
-  });
-
-  if (matchingAssets.length === 0) {
-    // Enhanced logging when no match found
-    const allAssetsOfType = assetManifest.assets.filter(
-      (a) => a.type === assetType,
-    );
-    console.warn(
-      `[findAssetByPlacementNumber] No matching asset found for placement ${placementNumber}, type ${assetType}`,
-      {
-        totalAssets: assetManifest.assets.length,
-        assetsOfType: allAssetsOfType.length,
-        availablePlacements: allAssetsOfType.map((a) => ({
-          id: a.id,
-          placementNumber: a.metadata?.placementNumber,
-          scene_number: a.scene_number,
-          version: a.version,
-          path: a.path,
-        })),
-      },
-    );
-    return undefined;
-  }
-
-  console.log(
-    `[findAssetByPlacementNumber] Found ${matchingAssets.length} matching asset(s) for placement ${placementNumber}, type ${assetType}:`,
-    {
-      matchingAssets: matchingAssets.map((a) => ({
-        id: a.id,
-        placementNumber: a.metadata?.placementNumber,
-        scene_number: a.scene_number,
-        version: a.version,
-        path: a.path,
-      })),
-      targetVersion,
-    },
+  return selectBestAssetForPlacement(
+    assets,
+    placementNumber,
+    assetType,
+    targetVersion,
   );
-
-  // If version is specified, find that version; otherwise get latest
-  if (targetVersion !== undefined) {
-    const versionAsset = matchingAssets.find(
-      (a) => a.version === targetVersion,
-    );
-    if (versionAsset) {
-      console.log(
-        `[findAssetByPlacementNumber] Using specified version ${targetVersion} for placement ${placementNumber}`,
-      );
-      return versionAsset;
-    }
-    console.warn(
-      `[findAssetByPlacementNumber] Specified version ${targetVersion} not found, using latest`,
-    );
-  }
-
-  // Return latest version
-  const latest = matchingAssets.reduce((latest, current) =>
-    current.version > latest.version ? current : latest,
-  );
-  console.log(
-    `[findAssetByPlacementNumber] Using latest version ${latest.version} for placement ${placementNumber}`,
-  );
-  return latest;
 }
 
 /**
@@ -256,6 +137,11 @@ export function useTimelineData(
     isLoaded,
     assetManifest,
     refreshAssetManifest,
+    isImageSyncV2Enabled,
+    subscribeImageProjection,
+    getImageProjectionSnapshot,
+    triggerImageProjectionReconcile,
+    setExpectedImagePlacements,
   } = useProject();
   const { projectDirectory } = useWorkspace();
   const { imagePlacements, videoPlacements, infographicPlacements } =
@@ -271,36 +157,61 @@ export function useTimelineData(
   >({});
   const [imagePlacementRefreshTrigger, setImagePlacementRefreshTrigger] =
     useState(0);
+  const [imageProjectionSnapshot, setImageProjectionSnapshot] =
+    useState<ImageProjectionSnapshot>(() => getImageProjectionSnapshot());
+  const isImageSyncV2CompareEnabled = useMemo(() => {
+    try {
+      return window.localStorage.getItem('renderer.image_sync_v2_compare') === 'true';
+    } catch {
+      return false;
+    }
+  }, []);
   // Keep infographic fallback mapping in a ref so we don't introduce new hook state
   // (avoids React Fast Refresh hook order issues in dev).
   const infographicPlacementFilesRef = useRef<Record<number, string>>({});
-  const reconcileTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reconcileStateRef = useRef<{
-    running: boolean;
-    startedAt: number;
-    tickCount: number;
-  }>({
-    running: false,
-    startedAt: 0,
-    tickCount: 0,
-  });
-  const unresolvedPlacementsRef = useRef<number[]>([]);
-  const unresolvedSinceRef = useRef<Map<number, number>>(new Map());
-  const previousUnresolvedRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (!isImageSyncV2Enabled) {
+      setImageProjectionSnapshot(createEmptyImageProjectionSnapshot(null));
+      return;
+    }
+
+    return subscribeImageProjection((snapshot) => {
+      setImageProjectionSnapshot(snapshot);
+    });
+  }, [isImageSyncV2Enabled, subscribeImageProjection]);
+
+  useEffect(() => {
+    if (!isImageSyncV2Enabled) return;
+    const placementNumbers = imagePlacements.map(
+      (placement) => placement.placementNumber,
+    );
+    setExpectedImagePlacements(placementNumbers);
+    triggerImageProjectionReconcile('manual');
+  }, [
+    isImageSyncV2Enabled,
+    imagePlacements,
+    setExpectedImagePlacements,
+    triggerImageProjectionReconcile,
+  ]);
 
   // Refresh timeline function - triggers asset manifest refresh
   const refreshTimeline = useCallback(async (source: string = 'manual') => {
     console.log('[useTimelineData] Refreshing timeline', {
       source,
     });
+    if (isImageSyncV2Enabled) {
+      triggerImageProjectionReconcile('manual');
+    }
     if (refreshAssetManifest) {
       await refreshAssetManifest();
     }
-    // Avoid forcing rerenders during background reconcile ticks.
-    if (source !== 'reconcile_tick') {
-      setTimelineRefreshTrigger((prev) => prev + 1);
-    }
-  }, [refreshAssetManifest]);
+    setTimelineRefreshTrigger((prev) => prev + 1);
+  }, [
+    refreshAssetManifest,
+    isImageSyncV2Enabled,
+    triggerImageProjectionReconcile,
+  ]);
 
   // Refresh audio files - invoked by import handler or file watcher
   const refreshAudioFiles = useCallback(() => {
@@ -338,7 +249,7 @@ export function useTimelineData(
 
   // Subscribe to file changes under .kshana/agent/image-placements for fallback image loading
   useEffect(() => {
-    if (!projectDirectory) return;
+    if (!projectDirectory || isImageSyncV2Enabled) return;
 
     let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -363,7 +274,7 @@ export function useTimelineData(
       unsubscribe();
       if (debounceTimeout) clearTimeout(debounceTimeout);
     };
-  }, [projectDirectory]);
+  }, [projectDirectory, isImageSyncV2Enabled]);
 
   // Subscribe to file changes under .kshana/agent/infographic-placements for fallback infographic loading
   useEffect(() => {
@@ -454,6 +365,12 @@ export function useTimelineData(
 
   const loadImagePlacementFiles = useCallback(
     async (source: 'file_watch' | 'reconcile_tick' | 'initial_load') => {
+      if (isImageSyncV2Enabled) {
+        setImagePlacementFiles((prev) =>
+          Object.keys(prev).length === 0 ? prev : {},
+        );
+        return;
+      }
       if (!projectDirectory || !isLoaded) {
         setImagePlacementFiles((prev) =>
           Object.keys(prev).length === 0 ? prev : {},
@@ -499,11 +416,12 @@ export function useTimelineData(
         );
       }
     },
-    [projectDirectory, isLoaded],
+    [projectDirectory, isLoaded, isImageSyncV2Enabled],
   );
 
   // Load image placement files for fallback resolution.
   useEffect(() => {
+    if (isImageSyncV2Enabled) return;
     const source = imagePlacementRefreshTrigger > 0 ? 'file_watch' : 'initial_load';
     loadImagePlacementFiles(source).catch((error) => {
       console.warn('[useTimelineData] Failed to load image placement files', {
@@ -511,7 +429,7 @@ export function useTimelineData(
         error: error instanceof Error ? error.message : String(error),
       });
     });
-  }, [loadImagePlacementFiles, imagePlacementRefreshTrigger]);
+  }, [loadImagePlacementFiles, imagePlacementRefreshTrigger, isImageSyncV2Enabled]);
 
   // Load infographic placement files for fallback resolution
   useEffect(() => {
@@ -598,178 +516,10 @@ export function useTimelineData(
     }
   }, [assetManifest, isLoaded]);
 
-  const hasImageAssetForPlacement = useCallback(
-    (placementNumber: number): boolean => {
-      if (!assetManifest?.assets) return false;
-
-      const activeImageVersion = activeVersions?.[placementNumber]?.image;
-      const matches = assetManifest.assets.filter((asset) => {
-        if (asset.type !== 'scene_image') return false;
-        const metadataPlacement = asset.metadata?.placementNumber;
-        const sceneNumber = asset.scene_number;
-        const pathPlacementNumber = inferPlacementNumberFromPath(asset.path);
-        const placementMatch =
-          metadataPlacement !== undefined &&
-          Number(metadataPlacement) === placementNumber;
-        const sceneMatch =
-          sceneNumber !== undefined && Number(sceneNumber) === placementNumber;
-        const pathMatch =
-          pathPlacementNumber !== null && pathPlacementNumber === placementNumber;
-        return placementMatch || sceneMatch || pathMatch;
-      });
-
-      if (matches.length === 0) return false;
-      if (activeImageVersion !== undefined) {
-        return matches.some(
-          (asset) => asset.version === activeImageVersion && !!asset.path,
-        );
-      }
-      return matches.some((asset) => !!asset.path);
-    },
-    [assetManifest, activeVersions],
-  );
-
-  const unresolvedImagePlacements = useMemo(() => {
-    return imagePlacements
-      .filter((placement) => {
-        const hasManifestAsset = hasImageAssetForPlacement(
-          placement.placementNumber,
-        );
-        const hasFallbackFile = !!imagePlacementFiles[placement.placementNumber];
-        return !hasManifestAsset && !hasFallbackFile;
-      })
-      .map((placement) => placement.placementNumber);
-  }, [imagePlacements, hasImageAssetForPlacement, imagePlacementFiles]);
-
-  const unresolvedPlacementsKey = unresolvedImagePlacements.join(',');
-
-  useEffect(() => {
-    const now = Date.now();
-    const previous = previousUnresolvedRef.current;
-    const current = new Set(unresolvedImagePlacements);
-
-    for (const placementNumber of current) {
-      if (!previous.has(placementNumber)) {
-        unresolvedSinceRef.current.set(placementNumber, now);
-      }
-    }
-
-    for (const placementNumber of previous) {
-      if (current.has(placementNumber)) continue;
-      const unresolvedSince = unresolvedSinceRef.current.get(placementNumber);
-      if (unresolvedSince !== undefined) {
-        console.log('[useTimelineData][reconcile_resolved]', {
-          source: 'reconcile_resolved',
-          placementNumber,
-          timeToVisibleMs: now - unresolvedSince,
-          isFirstPlacement: placementNumber === 1,
-        });
-        unresolvedSinceRef.current.delete(placementNumber);
-      }
-    }
-
-    previousUnresolvedRef.current = current;
-    unresolvedPlacementsRef.current = unresolvedImagePlacements;
-  }, [unresolvedPlacementsKey, unresolvedImagePlacements]);
-
-  // Source-agnostic reconcile loop to recover from missed websocket/file-watch events.
-  useEffect(() => {
-    if (!projectDirectory || !isLoaded) {
-      reconcileStateRef.current.running = false;
-      if (reconcileTimeoutRef.current) {
-        clearTimeout(reconcileTimeoutRef.current);
-        reconcileTimeoutRef.current = null;
-      }
-      unresolvedPlacementsRef.current = [];
-      return;
-    }
-
-    if (unresolvedImagePlacements.length === 0) {
-      if (reconcileStateRef.current.running) {
-        const elapsedMs = Date.now() - reconcileStateRef.current.startedAt;
-        console.log('[useTimelineData][reconcile_resolved]', {
-          source: 'reconcile_resolved',
-          elapsedMs,
-          tickCount: reconcileStateRef.current.tickCount,
-          hadPlacement1: unresolvedSinceRef.current.has(1),
-        });
-      }
-      reconcileStateRef.current.running = false;
-      if (reconcileTimeoutRef.current) {
-        clearTimeout(reconcileTimeoutRef.current);
-        reconcileTimeoutRef.current = null;
-      }
-      return;
-    }
-
-    if (reconcileStateRef.current.running) {
-      return;
-    }
-
-    reconcileStateRef.current = {
-      running: true,
-      startedAt: Date.now(),
-      tickCount: 0,
-    };
-
-    const runReconcileTick = async () => {
-      if (!reconcileStateRef.current.running) return;
-
-      reconcileStateRef.current.tickCount += 1;
-      const elapsedMs = Date.now() - reconcileStateRef.current.startedAt;
-      const unresolved = unresolvedPlacementsRef.current;
-      console.log('[useTimelineData][reconcile_tick]', {
-        source: 'reconcile_tick',
-        tick: reconcileStateRef.current.tickCount,
-        elapsedMs,
-        unresolvedCount: unresolved.length,
-        unresolvedPlacements: unresolved,
-      });
-
-      await loadImagePlacementFiles('reconcile_tick');
-      await refreshTimeline('reconcile_tick');
-
-      if (!reconcileStateRef.current.running) return;
-      const nextDelayMs =
-        Date.now() - reconcileStateRef.current.startedAt <= 30000 ? 1000 : 5000;
-      reconcileTimeoutRef.current = setTimeout(() => {
-        runReconcileTick().catch((error) => {
-          console.warn('[useTimelineData][reconcile_tick] Tick failed', {
-            source: 'reconcile_tick',
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-      }, nextDelayMs);
-    };
-
-    runReconcileTick().catch((error) => {
-      console.warn('[useTimelineData][reconcile_tick] Initial tick failed', {
-        source: 'reconcile_tick',
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
-  }, [
-    projectDirectory,
-    isLoaded,
-    unresolvedPlacementsKey,
-    unresolvedImagePlacements.length,
-    loadImagePlacementFiles,
-    refreshTimeline,
-  ]);
-
-  useEffect(() => {
-    return () => {
-      reconcileStateRef.current.running = false;
-      if (reconcileTimeoutRef.current) {
-        clearTimeout(reconcileTimeoutRef.current);
-        reconcileTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
   // Convert base placements (images + videos) to timeline items
   const basePlacementItems: TimelineItem[] = useMemo(() => {
     const items: TimelineItem[] = [];
+    const assets = assetManifest?.assets ?? [];
 
     // Convert image placements to timeline items
     imagePlacements.forEach((placement) => {
@@ -779,7 +529,7 @@ export function useTimelineData(
       // Find matching asset
       const asset = findAssetByPlacementNumber(
         placement.placementNumber,
-        assetManifest,
+        assets,
         'scene_image',
         activeVersions,
       );
@@ -830,12 +580,34 @@ export function useTimelineData(
         );
       }
 
-      const fallbackImagePath = imagePlacementFiles[placement.placementNumber];
+      const projectedImagePath = isImageSyncV2Enabled
+        ? imageProjectionSnapshot.placements[placement.placementNumber]?.path
+        : null;
+      const legacyFallbackPath = imagePlacementFiles[placement.placementNumber];
+      const legacyResolvedPath = asset?.path || legacyFallbackPath || undefined;
 
-      if (!asset && fallbackImagePath) {
+      if (
+        isImageSyncV2Enabled &&
+        isImageSyncV2CompareEnabled &&
+        projectedImagePath !== legacyResolvedPath
+      ) {
+        console.warn('[useTimelineData][image_sync.mismatch]', {
+          placementNumber: placement.placementNumber,
+          v2Path: projectedImagePath ?? null,
+          legacyPath: legacyResolvedPath ?? null,
+          assetPath: asset?.path ?? null,
+          fallbackPath: legacyFallbackPath ?? null,
+        });
+      }
+
+      const selectedImagePath = isImageSyncV2Enabled
+        ? projectedImagePath || legacyResolvedPath
+        : legacyResolvedPath;
+
+      if (!asset && selectedImagePath) {
         console.warn(
           `[useTimelineData] Using fallback image for placement ${placement.placementNumber}:`,
-          fallbackImagePath,
+          selectedImagePath,
         );
       }
 
@@ -848,7 +620,7 @@ export function useTimelineData(
         label: `PLM-${placement.placementNumber}`,
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
-        imagePath: asset?.path || fallbackImagePath || undefined, // Ensure path is set if asset exists
+        imagePath: selectedImagePath,
       });
     });
 
@@ -859,7 +631,7 @@ export function useTimelineData(
 
       const asset = findAssetByPlacementNumber(
         placement.placementNumber,
-        assetManifest,
+        assets,
         'scene_video',
         activeVersions,
       );
@@ -884,11 +656,15 @@ export function useTimelineData(
     assetManifest,
     activeVersions,
     imagePlacementFiles,
+    imageProjectionSnapshot,
+    isImageSyncV2CompareEnabled,
+    isImageSyncV2Enabled,
   ]);
 
   // Convert infographic placements to overlay items (contained within images)
   const overlayItems: TimelineItem[] = useMemo(() => {
     const items: TimelineItem[] = [];
+    const assets = assetManifest?.assets ?? [];
 
     if (infographicPlacements.length === 0) {
       return items;
@@ -922,7 +698,7 @@ export function useTimelineData(
 
       const asset = findAssetByPlacementNumber(
         placement.placementNumber,
-        assetManifest,
+        assets,
         'scene_infographic',
         activeVersions,
       );

@@ -1103,6 +1103,12 @@ ipcMain.handle(
 fileSystemManager.on('file-change', (event: FileChangeEvent) => {
   if (mainWindow) {
     mainWindow.webContents.send('project:file-changed', event);
+    if (event.path.endsWith('.kshana/agent/manifest.json')) {
+      mainWindow.webContents.send('project:manifest-written', {
+        path: event.path,
+        at: Date.now(),
+      });
+    }
   }
 });
 

@@ -188,6 +188,18 @@ const projectBridge = {
       ipcRenderer.removeListener('project:file-changed', subscription);
     };
   },
+  onManifestWritten(callback: (event: { path: string; at: number }) => void) {
+    const subscription = (
+      _event: IpcRendererEvent,
+      manifestEvent: { path: string; at: number },
+    ) => {
+      callback(manifestEvent);
+    };
+    ipcRenderer.on('project:manifest-written', subscription);
+    return () => {
+      ipcRenderer.removeListener('project:manifest-written', subscription);
+    };
+  },
 };
 
 const remotionBridge = {

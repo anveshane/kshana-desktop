@@ -30,6 +30,13 @@ import type {
 import type { SceneVersions } from '../types/kshana/timeline';
 import { DEFAULT_TIMELINE_STATE } from '../types/kshana';
 import { projectService } from '../services/project';
+import {
+  buildAssetDedupeKey,
+  createEmptyImageProjectionSnapshot,
+  createImageAssetSyncEngine,
+  type ImageProjectionSnapshot,
+  type ImageSyncTriggerSource,
+} from '../services/assets';
 import { useWorkspace } from './WorkspaceContext';
 
 /**
@@ -117,6 +124,20 @@ interface ProjectActions {
 
   /** Explicitly refresh the asset manifest from disk */
   refreshAssetManifest: () => Promise<void>;
+
+  /** Subscribe to image placement projections (v2 sync path) */
+  subscribeImageProjection: (
+    listener: (snapshot: ImageProjectionSnapshot) => void,
+  ) => () => void;
+
+  /** Read the current image projection snapshot */
+  getImageProjectionSnapshot: () => ImageProjectionSnapshot;
+
+  /** Trigger image projection reconcile */
+  triggerImageProjectionReconcile: (source: ImageSyncTriggerSource) => void;
+
+  /** Update expected image placement numbers */
+  setExpectedImagePlacements: (placementNumbers: number[]) => void;
 }
 
 /**
@@ -146,6 +167,9 @@ interface ProjectComputed {
 
   /** Whether image generation is active (used for refresh heuristics) */
   isImageGenerationActive: boolean;
+
+  /** Feature flag: image sync v2 */
+  isImageSyncV2Enabled: boolean;
 }
 
 /**
@@ -177,6 +201,14 @@ function normalizeProjectDirectoryPath(
   return normalized || null;
 }
 
+function getImageSyncV2Flag(): boolean {
+  try {
+    return window.localStorage.getItem('renderer.image_sync_v2') === 'true';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Project context
  */
@@ -194,6 +226,7 @@ interface ProjectProviderProps {
  */
 export function ProjectProvider({ children }: ProjectProviderProps) {
   const [state, setState] = useState<ProjectState>(initialState);
+  const isImageSyncV2Enabled = useMemo(() => getImageSyncV2Flag(), []);
 
   // Track if image generation is active (via WebSocket status)
   const [isImageGenerationActive, setIsImageGenerationActive] = useState(false);
@@ -214,6 +247,79 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   const connectAssetWebSocketRef = useRef<(source: string) => void>(() => {});
   const connectingRef = useRef(false);
   const currentProjectDirRef = useRef<string | null>(null);
+  const imageSyncEngineRef = useRef<ReturnType<
+    typeof createImageAssetSyncEngine
+  > | null>(null);
+
+  const readAssetManifestForSync = useCallback(
+    async (directory: string): Promise<AssetManifest | null> => {
+      const result = await projectService.openProject(directory);
+      if (!result.success) {
+        console.warn('[ProjectContext][image_sync] Failed to read manifest', {
+          source: 'image_sync',
+          directory,
+          error: result.error,
+        });
+        return null;
+      }
+      return result.data.assetManifest ?? null;
+    },
+    [],
+  );
+
+  const scanImagePlacementFiles = useCallback(
+    async (directory: string): Promise<Record<number, string>> => {
+      try {
+        const imageDir = `${directory}/.kshana/agent/image-placements`;
+        const files = await window.electron.project.readTree(imageDir, 1);
+        const placementMap: Record<number, string> = {};
+
+        if (files?.children) {
+          const candidateFiles = files.children
+            .filter((file) => file.type === 'file')
+            .map((file) => file.name)
+            .sort((a, b) => b.localeCompare(a));
+
+          for (const filename of candidateFiles) {
+            const match = filename.match(/^image(\d+)[-_].+\.(png|jpe?g|webp)$/i);
+            if (!match) continue;
+
+            const placementNumber = Number(match[1]);
+            if (
+              Number.isFinite(placementNumber) &&
+              !placementMap[placementNumber]
+            ) {
+              placementMap[placementNumber] =
+                `agent/image-placements/${filename}`;
+            }
+          }
+        }
+
+        return placementMap;
+      } catch {
+        return {};
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!isImageSyncV2Enabled) return;
+
+    const engine = createImageAssetSyncEngine({
+      readAssetManifest: readAssetManifestForSync,
+      scanImagePlacements: scanImagePlacementFiles,
+      logger: (event, payload) => {
+        console.log(`[ProjectContext][${event}]`, payload);
+      },
+    });
+
+    imageSyncEngineRef.current = engine;
+    return () => {
+      engine.dispose();
+      imageSyncEngineRef.current = null;
+    };
+  }, [isImageSyncV2Enabled, readAssetManifestForSync, scanImagePlacementFiles]);
 
   // Sync with WorkspaceContext - auto-load project when directory changes
   useEffect(() => {
@@ -260,10 +366,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           error: null,
           manifest: project.manifest,
           agentState: project.agentState,
-          // Add timestamp to ensure fresh reference for React re-renders
-          assetManifest: project.assetManifest
-            ? { ...project.assetManifest, _refreshedAt: Date.now() }
-            : null,
+          assetManifest: project.assetManifest,
           timelineState: project.timelineState,
           contextIndex: project.contextIndex,
         }));
@@ -306,6 +409,34 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     loadProject();
   }, [projectDirectory]);
 
+  useEffect(() => {
+    if (!isImageSyncV2Enabled || !imageSyncEngineRef.current) {
+      return;
+    }
+
+    if (projectDirectory && state.isLoaded) {
+      const normalizedDirectory =
+        normalizeProjectDirectoryPath(projectDirectory);
+      imageSyncEngineRef.current.setProjectDirectory(normalizedDirectory);
+      imageSyncEngineRef.current.triggerReconcile('project_load');
+    } else {
+      imageSyncEngineRef.current.setProjectDirectory(null);
+    }
+  }, [isImageSyncV2Enabled, projectDirectory, state.isLoaded]);
+
+  useEffect(() => {
+    if (!isImageSyncV2Enabled || !projectDirectory) return undefined;
+
+    const unsubscribe = window.electron.project.onManifestWritten((event) => {
+      if (!event.path.includes('.kshana/agent/manifest.json')) return;
+      imageSyncEngineRef.current?.triggerReconcile('manifest_written', event.path);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [isImageSyncV2Enabled, projectDirectory]);
+
   // Listen for file changes and reload project state when relevant files change
   useEffect(() => {
     if (!projectDirectory || !state.isLoaded) return;
@@ -314,19 +445,24 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
     const unsubscribe = window.electron.project.onFileChange((event) => {
       const filePath = event.path;
+      const isManifestFile = filePath.includes('.kshana/agent/manifest.json');
+      const isProjectStateFile =
+        filePath.includes('.kshana/agent/project.json') ||
+        filePath.includes('.kshana/context/index.json');
+      const isImagePlacementFile = filePath.includes(
+        '.kshana/agent/image-placements',
+      );
+
+      if (isImageSyncV2Enabled && (isManifestFile || isImagePlacementFile)) {
+        imageSyncEngineRef.current?.triggerReconcile('file_watch', filePath);
+      }
 
       // Reload project when key files change
-      if (
-        filePath.includes('.kshana/agent/project.json') ||
-        filePath.includes('.kshana/agent/manifest.json') ||
-        filePath.includes('.kshana/context/index.json')
-      ) {
+      if (isProjectStateFile || isManifestFile) {
         console.log('[ProjectContext][file_watch] File change detected', {
           source: 'file_watch',
           path: filePath,
-          target: filePath.includes('manifest.json')
-            ? 'manifest.json'
-            : 'project_state',
+          target: isManifestFile ? 'manifest.json' : 'project_state',
         });
         // Clear existing timeout
         if (debounceTimeout) {
@@ -359,10 +495,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
                 ...prev,
                 manifest: project.manifest,
                 agentState: project.agentState,
-                // Always create new object reference to force React re-renders
-                assetManifest: project.assetManifest
-                  ? { ...project.assetManifest, _refreshedAt: Date.now() }
-                  : null,
+                assetManifest: project.assetManifest,
                 timelineState: project.timelineState,
                 contextIndex: project.contextIndex,
               }));
@@ -387,7 +520,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         clearTimeout(debounceTimeout);
       }
     };
-  }, [projectDirectory, state.isLoaded]);
+  }, [projectDirectory, state.isLoaded, isImageSyncV2Enabled]);
 
   /**
    * Deep comparison of asset manifests to detect changes
@@ -453,6 +586,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     }
 
     try {
+      if (isImageSyncV2Enabled) {
+        imageSyncEngineRef.current?.triggerReconcile('manual');
+      }
       console.log('[ProjectContext] Explicitly refreshing asset manifest...');
       const result = await projectService.openProject(projectDirectory);
       if (result.success) {
@@ -467,12 +603,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
               oldCount: prev.assetManifest?.assets?.length || 0,
               newCount: newManifest?.assets?.length || 0,
             });
-            // Always create new object reference to force React re-renders
             return {
               ...prev,
-              assetManifest: newManifest
-                ? { ...newManifest, _refreshedAt: Date.now() }
-                : null,
+              assetManifest: newManifest,
             };
           }
           console.log('[ProjectContext] Asset manifest unchanged after refresh');
@@ -487,7 +620,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     } catch (error) {
       console.error('[ProjectContext] Error refreshing manifest:', error);
     }
-  }, [projectDirectory, state.isLoaded]);
+  }, [projectDirectory, state.isLoaded, isImageSyncV2Enabled]);
 
   const upsertAssetInManifest = useCallback((assetInfo: AssetInfo) => {
     setState((prev) => {
@@ -508,7 +641,6 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         assetManifest: {
           ...prev.assetManifest,
           assets: nextAssets,
-          _refreshedAt: Date.now(),
         },
       };
     });
@@ -669,7 +801,14 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
                 sceneNumber: optimisticAsset.scene_number,
               });
 
-              upsertAssetInManifest(optimisticAsset);
+              if (isImageSyncV2Enabled) {
+                imageSyncEngineRef.current?.triggerReconcile(
+                  'ws_asset',
+                  buildAssetDedupeKey(optimisticAsset),
+                );
+              } else {
+                upsertAssetInManifest(optimisticAsset);
+              }
               scheduleManifestReconcile('ws_asset');
             } else if (message.type === 'status' && message.data) {
               const statusData = message.data as Record<string, unknown>;
@@ -733,6 +872,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       scheduleAssetSocketReconnect,
       scheduleManifestReconcile,
       upsertAssetInManifest,
+      isImageSyncV2Enabled,
     ],
   );
 
@@ -792,6 +932,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   // Poll for manifest updates as a source-agnostic fallback.
   // This keeps timeline hydration convergent even if websocket/file-watch signals are missed.
   useEffect(() => {
+    if (isImageSyncV2Enabled) return;
     if (!projectDirectory || !state.isLoaded) return;
 
     let pollIntervalMs = 1000;
@@ -841,12 +982,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
               pollIntervalMs = 1000;
               consecutiveFailures = 0;
-              // Always create new object reference to force React re-renders
               return {
                 ...prev,
-                assetManifest: project.assetManifest
-                  ? { ...project.assetManifest, _refreshedAt: Date.now() }
-                  : null,
+                assetManifest: project.assetManifest,
               };
             }
             return prev;
@@ -892,6 +1030,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       }
     };
   }, [
+    isImageSyncV2Enabled,
     projectDirectory,
     state.isLoaded,
   ]);
@@ -912,10 +1051,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           error: null,
           manifest: project.manifest,
           agentState: project.agentState,
-          // Add timestamp to ensure fresh reference for React re-renders
-          assetManifest: project.assetManifest
-            ? { ...project.assetManifest, _refreshedAt: Date.now() }
-            : null,
+          assetManifest: project.assetManifest,
           timelineState: project.timelineState,
           contextIndex: project.contextIndex,
         }));
@@ -955,10 +1091,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           error: null,
           manifest: project.manifest,
           agentState: project.agentState,
-          // Add timestamp to ensure fresh reference for React re-renders
-          assetManifest: project.assetManifest
-            ? { ...project.assetManifest, _refreshedAt: Date.now() }
-            : null,
+          assetManifest: project.assetManifest,
           timelineState: project.timelineState,
           contextIndex: project.contextIndex,
         }));
@@ -1143,6 +1276,41 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     [],
   );
 
+  const subscribeImageProjection = useCallback(
+    (listener: (snapshot: ImageProjectionSnapshot) => void) => {
+      if (!isImageSyncV2Enabled || !imageSyncEngineRef.current) {
+        listener(createEmptyImageProjectionSnapshot(projectDirectory ?? null));
+        return () => {};
+      }
+
+      return imageSyncEngineRef.current.subscribe(listener);
+    },
+    [isImageSyncV2Enabled, projectDirectory],
+  );
+
+  const getImageProjectionSnapshot = useCallback((): ImageProjectionSnapshot => {
+    if (!isImageSyncV2Enabled || !imageSyncEngineRef.current) {
+      return createEmptyImageProjectionSnapshot(projectDirectory ?? null);
+    }
+    return imageSyncEngineRef.current.getSnapshot();
+  }, [isImageSyncV2Enabled, projectDirectory]);
+
+  const triggerImageProjectionReconcile = useCallback(
+    (source: ImageSyncTriggerSource) => {
+      if (!isImageSyncV2Enabled || !imageSyncEngineRef.current) return;
+      imageSyncEngineRef.current.triggerReconcile(source);
+    },
+    [isImageSyncV2Enabled],
+  );
+
+  const setExpectedImagePlacements = useCallback(
+    (placementNumbers: number[]) => {
+      if (!isImageSyncV2Enabled || !imageSyncEngineRef.current) return;
+      imageSyncEngineRef.current.setExpectedPlacements(placementNumbers);
+    },
+    [isImageSyncV2Enabled],
+  );
+
   // Auto-save timeline state with debouncing
   // Use refs to track previous serialized values to avoid infinite loops with object dependencies
   const prevTimelineStateRef = useRef<string>('');
@@ -1233,8 +1401,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       scenes: agentState?.scenes ?? [],
       completionPercentage,
       isImageGenerationActive,
+      isImageSyncV2Enabled,
     };
-  }, [state, isImageGenerationActive]);
+  }, [state, isImageGenerationActive, isImageSyncV2Enabled]);
 
   // Build context value
   const value = useMemo<ProjectContextType>(
@@ -1254,6 +1423,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateImportedClips,
       addAsset,
       refreshAssetManifest,
+      subscribeImageProjection,
+      getImageProjectionSnapshot,
+      triggerImageProjectionReconcile,
+      setExpectedImagePlacements,
     }),
     [
       state,
@@ -1271,6 +1444,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateImportedClips,
       addAsset,
       refreshAssetManifest,
+      subscribeImageProjection,
+      getImageProjectionSnapshot,
+      triggerImageProjectionReconcile,
+      setExpectedImagePlacements,
     ],
   );
 

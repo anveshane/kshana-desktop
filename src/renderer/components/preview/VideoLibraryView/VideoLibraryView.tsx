@@ -81,15 +81,6 @@ interface VideoLibraryViewProps {
   projectScenes?: SceneRef[];
 }
 
-function inferPlacementNumberFromPath(path: string | undefined): number | null {
-  if (!path) return null;
-  const filename = path.split('/').pop() ?? path;
-  const match = filename.match(/image(\d+)(?:[-_]|\.|$)/i);
-  if (!match) return null;
-  const placementNumber = Number(match[1]);
-  return Number.isNaN(placementNumber) ? null : placementNumber;
-}
-
 export default function VideoLibraryView({
   playbackTime,
   isPlaying,
@@ -321,119 +312,8 @@ export default function VideoLibraryView({
       return null;
     }
 
-    if (!assetManifest?.assets) {
-      console.warn('[VideoLibraryView] No asset manifest or assets available', {
-        hasManifest: !!assetManifest,
-        hasAssets: !!assetManifest?.assets,
-      });
-      return currentImage.imagePath || null;
-    }
-
-    const { placementNumber } = currentImage;
-    if (placementNumber === undefined) {
-      console.warn('[VideoLibraryView] Current image has no placement number');
-      return currentImage.imagePath || null;
-    }
-
-    const activeImageVersion = activeVersions[placementNumber]?.image;
-
-    // Find image asset matching placement number and version
-    if (activeImageVersion !== undefined) {
-      const imageAsset = assetManifest.assets.find(
-        (asset) => {
-          if (asset.type !== 'scene_image') return false;
-          const metadataPlacement = asset.metadata?.placementNumber;
-          const scenePlacement = asset.scene_number;
-          const pathPlacement = inferPlacementNumberFromPath(asset.path);
-          const placementMatch =
-            (metadataPlacement !== undefined &&
-              Number(metadataPlacement) === placementNumber) ||
-            (scenePlacement !== undefined &&
-              Number(scenePlacement) === placementNumber) ||
-            pathPlacement === placementNumber;
-          return placementMatch && asset.version === activeImageVersion;
-        },
-      );
-      if (imageAsset?.path) {
-        console.log(
-          `[VideoLibraryView] Found asset for placement ${placementNumber} (version ${activeImageVersion}):`,
-          {
-            path: imageAsset.path,
-            assetId: imageAsset.id,
-          },
-        );
-        return imageAsset.path;
-      }
-      console.warn(
-        `[VideoLibraryView] Specified version ${activeImageVersion} not found for placement ${placementNumber}, trying latest`,
-      );
-    }
-
-    // Fallback: find latest image asset for this placement
-    const imageAssets = assetManifest.assets.filter(
-      (asset) => {
-        if (asset.type !== 'scene_image') return false;
-        const metadataPlacement = asset.metadata?.placementNumber;
-        const scenePlacement = asset.scene_number;
-        const pathPlacement = inferPlacementNumberFromPath(asset.path);
-        return (
-          (metadataPlacement !== undefined &&
-            Number(metadataPlacement) === placementNumber) ||
-          (scenePlacement !== undefined &&
-            Number(scenePlacement) === placementNumber) ||
-          pathPlacement === placementNumber
-        );
-      },
-    );
-    if (imageAssets.length > 0) {
-      // Sort by version descending to get latest
-      const sorted = imageAssets.sort((a, b) => b.version - a.version);
-      const latest = sorted[0]!;
-      if (latest.path) {
-        console.log(
-          `[VideoLibraryView] Using latest asset for placement ${placementNumber}:`,
-          {
-            path: latest.path,
-            version: latest.version,
-            assetId: latest.id,
-          },
-        );
-        return latest.path;
-      }
-      console.error(
-        `[VideoLibraryView] Latest asset for placement ${placementNumber} has no path:`,
-        {
-          assetId: latest.id,
-          version: latest.version,
-        },
-      );
-    } else {
-      console.warn(
-        `[VideoLibraryView] No image assets found for placement ${placementNumber}`,
-        {
-          totalAssets: assetManifest.assets.length,
-          imageAssets: assetManifest.assets
-            .filter((a) => a.type === 'scene_image')
-            .map((a) => ({
-              id: a.id,
-              placementNumber: a.metadata?.placementNumber,
-              scene_number: a.scene_number,
-              path: a.path,
-            })),
-        },
-      );
-    }
-
-    // Use imagePath from timeline item if available
-    if (currentImage.imagePath) {
-      console.log(
-        `[VideoLibraryView] Using imagePath from timeline item for placement ${placementNumber}`,
-      );
-      return currentImage.imagePath;
-    }
-
-    return null;
-  }, [currentImage, activeVersions, assetManifest]);
+    return currentImage.imagePath || null;
+  }, [currentImage]);
 
   // Resolve and store the display-ready image path
   const [resolvedSceneImagePath, setResolvedSceneImagePath] = useState<
@@ -617,68 +497,14 @@ export default function VideoLibraryView({
       },
     });
 
-    const { placementNumber } = currentVideo;
-    if (placementNumber === undefined) {
-      const path = currentVideo.videoPath || null;
-      if (!path) {
-        console.warn(
-          `[VideoLibraryView] No videoPath for video: ${currentVideo.label}`,
-        );
-      } else {
-        console.log(
-          `[VideoLibraryView] Using videoPath directly (no placement number): ${path}`,
-        );
-      }
-      return path;
-    }
-
-    const activeVideoVersion = activeVersions[placementNumber]?.video;
-    console.log('[VideoLibraryView] Looking for video asset:', {
-      placementNumber,
-      activeVideoVersion,
-      hasAssetManifest: !!assetManifest,
-      totalAssets: assetManifest?.assets?.length || 0,
-    });
-
-    if (activeVideoVersion !== undefined && assetManifest?.assets) {
-      // Find video asset matching placement number and version
-      const videoAsset = assetManifest.assets.find(
-        (asset) =>
-          asset.type === 'scene_video' &&
-          (asset.metadata?.placementNumber === placementNumber ||
-            asset.scene_number === placementNumber) &&
-          asset.version === activeVideoVersion,
-      );
-      if (videoAsset) {
-        console.log(
-          `[VideoLibraryView] Found video asset for placement ${placementNumber}, version ${activeVideoVersion}:`,
-          {
-            path: videoAsset.path,
-            assetId: videoAsset.id,
-          },
-        );
-        return videoAsset.path;
-      }
+    const selectedPath = currentVideo.videoPath || null;
+    if (!selectedPath) {
       console.warn(
-        `[VideoLibraryView] Video asset not found for placement ${placementNumber}, version ${activeVideoVersion}`,
+        `[VideoLibraryView] No videoPath found for ${currentVideo.label}`,
       );
     }
-
-    // Fallback: use videoPath from timeline item
-    const fallbackPath = currentVideo.videoPath || null;
-    if (!fallbackPath) {
-      console.warn(
-        `[VideoLibraryView] No videoPath found for placement ${placementNumber} (${currentVideo.label})`,
-      );
-    } else {
-      console.log(
-        `[VideoLibraryView] Using fallback videoPath: ${fallbackPath}`,
-      );
-    }
-
-    console.log('[VideoLibraryView] versionPath result:', fallbackPath);
-    return fallbackPath;
-  }, [currentVideo, activeVersions, assetManifest]);
+    return selectedPath;
+  }, [currentVideo]);
 
   // If versionPath is null but videoPath exists, use videoPath directly as fallback
   const effectiveVersionPath = useMemo(() => {
