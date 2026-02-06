@@ -22,11 +22,21 @@ interface PlacementFilesState {
   error: string | null;
 }
 
+function serializePlacementList(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '__serialize_error__';
+  }
+}
+
 /**
  * Hook to read and watch placement markdown files
  * Automatically reloads when files change (debounced)
  */
-export function usePlacementFiles(): PlacementFilesState {
+export function usePlacementFiles(
+  refreshToken?: number,
+): PlacementFilesState {
   const { projectDirectory } = useWorkspace();
   const [state, setState] = useState<PlacementFilesState>({
     imagePlacements: [],
@@ -40,17 +50,27 @@ export function usePlacementFiles(): PlacementFilesState {
 
   const loadPlacementFiles = useCallback(async () => {
     if (!projectDirectory) {
-      setState({
-        imagePlacements: [],
-        videoPlacements: [],
-        infographicPlacements: [],
-        isLoading: false,
-        error: null,
+      setState((prev) => {
+        if (
+          prev.imagePlacements.length === 0 &&
+          prev.videoPlacements.length === 0 &&
+          prev.infographicPlacements.length === 0 &&
+          prev.isLoading === false &&
+          prev.error === null
+        ) {
+          return prev;
+        }
+
+        return {
+          imagePlacements: [],
+          videoPlacements: [],
+          infographicPlacements: [],
+          isLoading: false,
+          error: null,
+        };
       });
       return;
     }
-
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
       const imagePlacementsPath = `${projectDirectory}/.kshana/agent/content/image-placements.md`;
@@ -150,27 +170,57 @@ export function usePlacementFiles(): PlacementFilesState {
         }
       }
 
-      setState({
-        imagePlacements,
-        videoPlacements,
-        infographicPlacements,
-        isLoading: false,
-        error: parseError,
+      setState((prev) => {
+        const unchanged =
+          prev.isLoading === false &&
+          prev.error === parseError &&
+          serializePlacementList(prev.imagePlacements) ===
+            serializePlacementList(imagePlacements) &&
+          serializePlacementList(prev.videoPlacements) ===
+            serializePlacementList(videoPlacements) &&
+          serializePlacementList(prev.infographicPlacements) ===
+            serializePlacementList(infographicPlacements);
+
+        if (unchanged) {
+          return prev;
+        }
+
+        return {
+          imagePlacements,
+          videoPlacements,
+          infographicPlacements,
+          isLoading: false,
+          error: parseError,
+        };
       });
     } catch (error) {
       console.error(
         '[usePlacementFiles] Failed to load placement files:',
         error,
       );
-      setState({
-        imagePlacements: [],
-        videoPlacements: [],
-        infographicPlacements: [],
-        isLoading: false,
-        error:
+      setState((prev) => {
+        const nextError =
           error instanceof Error
             ? error.message
-            : 'Failed to load placement files',
+            : 'Failed to load placement files';
+
+        if (
+          prev.imagePlacements.length === 0 &&
+          prev.videoPlacements.length === 0 &&
+          prev.infographicPlacements.length === 0 &&
+          prev.isLoading === false &&
+          prev.error === nextError
+        ) {
+          return prev;
+        }
+
+        return {
+          imagePlacements: [],
+          videoPlacements: [],
+          infographicPlacements: [],
+          isLoading: false,
+          error: nextError,
+        };
       });
     }
   }, [projectDirectory]);
@@ -178,7 +228,7 @@ export function usePlacementFiles(): PlacementFilesState {
   // Initial load
   useEffect(() => {
     loadPlacementFiles();
-  }, [loadPlacementFiles]);
+  }, [loadPlacementFiles, refreshToken]);
 
   // Watch for file changes
   useEffect(() => {

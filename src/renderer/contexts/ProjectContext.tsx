@@ -169,6 +169,14 @@ const initialState: ProjectState = {
   contextIndex: null,
 };
 
+function normalizeProjectDirectoryPath(
+  input: string | null | undefined,
+): string | null {
+  if (!input) return null;
+  const normalized = input.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  return normalized || null;
+}
+
 /**
  * Project context
  */
@@ -199,6 +207,11 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const reconnectDelayRef = useRef(500);
+  const manifestRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const connectAssetWebSocketRef = useRef<(source: string) => void>(() => {});
   const connectingRef = useRef(false);
   const currentProjectDirRef = useRef<string | null>(null);
 
@@ -308,7 +321,13 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         filePath.includes('.kshana/agent/manifest.json') ||
         filePath.includes('.kshana/context/index.json')
       ) {
-        console.log('[ProjectContext] File change detected, will refresh:', filePath.includes('manifest.json') ? 'manifest.json (assets)' : filePath);
+        console.log('[ProjectContext][file_watch] File change detected', {
+          source: 'file_watch',
+          path: filePath,
+          target: filePath.includes('manifest.json')
+            ? 'manifest.json'
+            : 'project_state',
+        });
         // Clear existing timeout
         if (debounceTimeout) {
           clearTimeout(debounceTimeout);
@@ -495,10 +514,242 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     });
   }, []);
 
-  // Listen for WebSocket asset_added events
+  const scheduleManifestReconcile = useCallback(
+    (source: 'ws_asset' | 'file_watch' | 'poll', delayMs: number = 250) => {
+      if (manifestRefreshTimeoutRef.current) {
+        clearTimeout(manifestRefreshTimeoutRef.current);
+      }
+
+      console.log('[ProjectContext][reconcile_schedule]', {
+        source,
+        delayMs,
+      });
+
+      manifestRefreshTimeoutRef.current = setTimeout(() => {
+        manifestRefreshTimeoutRef.current = null;
+        refreshAssetManifest().catch((error) => {
+          console.warn('[ProjectContext][reconcile_schedule] Refresh failed', {
+            source,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }, delayMs);
+    },
+    [refreshAssetManifest],
+  );
+
+  const scheduleAssetSocketReconnect = useCallback(
+    (source: string) => {
+      if (!projectDirectory || !state.isLoaded) return;
+      if (reconnectTimeoutRef.current) return;
+
+      const delayMs = reconnectDelayRef.current;
+      console.log('[ProjectContext][ws_reconnect_schedule]', {
+        source,
+        delayMs,
+      });
+
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 5000);
+        connectAssetWebSocketRef.current('reconnect_timer');
+      }, delayMs);
+    },
+    [projectDirectory, state.isLoaded],
+  );
+
+  const connectAssetWebSocket = useCallback(
+    async (source: string): Promise<void> => {
+      const normalizedProjectDirectory =
+        normalizeProjectDirectoryPath(projectDirectory);
+
+      if (!normalizedProjectDirectory || !state.isLoaded) {
+        return;
+      }
+
+      if (
+        wsRef.current &&
+        wsRef.current.readyState === WebSocket.OPEN &&
+        currentProjectDirRef.current === normalizedProjectDirectory
+      ) {
+        return;
+      }
+
+      if (connectingRef.current) {
+        return;
+      }
+
+      if (
+        wsRef.current &&
+        currentProjectDirRef.current !== normalizedProjectDirectory
+      ) {
+        wsRef.current.close();
+        wsRef.current = null;
+        currentProjectDirRef.current = null;
+      }
+
+      try {
+        connectingRef.current = true;
+        const backendState = await window.electron.backend.getState();
+        const projectDirectoryForQuery = projectDirectory;
+
+        if (!projectDirectoryForQuery) {
+          connectingRef.current = false;
+          return;
+        }
+
+        if (backendState.status !== 'ready') {
+          connectingRef.current = false;
+          console.log('[ProjectContext][ws_connect] Backend not ready', {
+            source,
+            backendStatus: backendState.status,
+          });
+          scheduleAssetSocketReconnect('backend_not_ready');
+          return;
+        }
+
+        const wsUrl = `ws://localhost:${backendState.port || 8000}/api/v1/ws/chat?project_dir=${encodeURIComponent(projectDirectoryForQuery)}`;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        currentProjectDirRef.current = normalizedProjectDirectory;
+
+        ws.onopen = () => {
+          reconnectDelayRef.current = 500;
+          connectingRef.current = false;
+          console.log('[ProjectContext][ws_connect] Connected', {
+            source,
+            projectDirectory: normalizedProjectDirectory,
+          });
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+
+            if (message.type === 'asset_added' && message.data) {
+              const assetData = message.data as Record<string, unknown>;
+              const eventProjectDirectory = normalizeProjectDirectoryPath(
+                assetData['projectDirectory'] as string | undefined,
+              );
+              const currentDirectory = currentProjectDirRef.current;
+
+              if (
+                eventProjectDirectory &&
+                currentDirectory &&
+                eventProjectDirectory !== currentDirectory
+              ) {
+                return;
+              }
+
+              const optimisticAsset: AssetInfo = {
+                id: String(assetData['assetId'] ?? ''),
+                type: assetData['assetType'] as AssetInfo['type'],
+                path: String(assetData['path'] ?? ''),
+                scene_number:
+                  typeof assetData['sceneNumber'] === 'number'
+                    ? assetData['sceneNumber']
+                    : undefined,
+                version:
+                  typeof assetData['version'] === 'number'
+                    ? assetData['version']
+                    : 1,
+                created_at: Date.now(),
+                metadata:
+                  assetData['placementNumber'] !== undefined
+                    ? { placementNumber: Number(assetData['placementNumber']) }
+                    : undefined,
+              };
+
+              console.log('[ProjectContext][ws_asset]', {
+                source: 'ws_asset',
+                assetId: optimisticAsset.id,
+                assetType: optimisticAsset.type,
+                path: optimisticAsset.path,
+                placementNumber: optimisticAsset.metadata?.['placementNumber'],
+                sceneNumber: optimisticAsset.scene_number,
+              });
+
+              upsertAssetInManifest(optimisticAsset);
+              scheduleManifestReconcile('ws_asset');
+            } else if (message.type === 'status' && message.data) {
+              const statusData = message.data as Record<string, unknown>;
+              const status = statusData['status'];
+              const isActive = status === 'busy' || status === 'processing';
+              setIsImageGenerationActive(isActive);
+            } else if (message.type === 'tool_call' && message.data) {
+              const toolData = message.data as Record<string, unknown>;
+              const toolName = toolData['toolName'];
+              if (
+                toolName === 'generate_image' ||
+                toolName === 'generate_all_images'
+              ) {
+                setIsImageGenerationActive(true);
+              }
+            }
+          } catch {
+            // Ignore malformed messages
+          }
+        };
+
+        ws.onerror = (error) => {
+          connectingRef.current = false;
+          console.warn('[ProjectContext][ws_connect] Socket error', {
+            source,
+            error,
+          });
+        };
+
+        ws.onclose = () => {
+          wsRef.current = null;
+          connectingRef.current = false;
+          console.log('[ProjectContext][ws_connect] Socket closed', {
+            source,
+            projectDirectory: normalizedProjectDirectory,
+          });
+
+          if (
+            currentProjectDirRef.current === normalizedProjectDirectory &&
+            state.isLoaded &&
+            normalizeProjectDirectoryPath(projectDirectory) ===
+              normalizedProjectDirectory
+          ) {
+            scheduleAssetSocketReconnect('socket_closed');
+          } else {
+            currentProjectDirRef.current = null;
+          }
+        };
+      } catch (error) {
+        connectingRef.current = false;
+        console.warn('[ProjectContext][ws_connect] Connection attempt failed', {
+          source,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        scheduleAssetSocketReconnect('connect_error');
+      }
+    },
+    [
+      projectDirectory,
+      state.isLoaded,
+      scheduleAssetSocketReconnect,
+      scheduleManifestReconcile,
+      upsertAssetInManifest,
+    ],
+  );
+
+  useEffect(() => {
+    connectAssetWebSocketRef.current = (source: string) => {
+      connectAssetWebSocket(source).catch((error) => {
+        console.warn('[ProjectContext][ws_connect] Unhandled connect failure', {
+          source,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    };
+  }, [connectAssetWebSocket]);
+
+  // Maintain a dedicated asset WebSocket for the active project.
   useEffect(() => {
     if (!projectDirectory || !state.isLoaded) {
-      // Clean up if project directory is cleared
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -507,175 +758,45 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-      currentProjectDirRef.current = null;
-      return;
-    }
-
-    // Skip if already connected to the same project directory
-    if (
-      wsRef.current &&
-      wsRef.current.readyState === WebSocket.OPEN &&
-      currentProjectDirRef.current === projectDirectory
-    ) {
-      return;
-    }
-
-    // Close existing connection if project directory changed
-    if (wsRef.current && currentProjectDirRef.current !== projectDirectory) {
-      wsRef.current.close();
-      wsRef.current = null;
-      currentProjectDirRef.current = null;
-    }
-
-    // Prevent concurrent connection attempts
-    if (connectingRef.current) {
-      return;
-    }
-
-    const connectWebSocket = async () => {
-      try {
-        connectingRef.current = true;
-        const backendState = await window.electron.backend.getState();
-        if (backendState.status !== 'ready') {
-          console.log(
-            '[ProjectContext] Backend not ready, skipping WebSocket connection',
-          );
-          connectingRef.current = false;
-          return;
-        }
-
-        const wsUrl = `ws://localhost:${backendState.port || 8000}/api/v1/ws/chat?project_dir=${encodeURIComponent(projectDirectory)}`;
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-        currentProjectDirRef.current = projectDirectory;
-
-        ws.onopen = () => {
-          console.log('[ProjectContext] WebSocket connected for asset events');
-          connectingRef.current = false;
-        };
-
-        let refreshTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
-        ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            if (message.type === 'asset_added' && message.data) {
-              const assetData = message.data;
-              console.log(
-                '[ProjectContext] Received asset_added event:',
-                assetData,
-              );
-              if (
-                assetData.projectDirectory &&
-                assetData.projectDirectory !== projectDirectory
-              ) {
-                return;
-              }
-
-              const optimisticAsset: AssetInfo = {
-                id: assetData.assetId,
-                type: assetData.assetType,
-                path: assetData.path,
-                scene_number: assetData.sceneNumber,
-                version: assetData.version ?? 1,
-                created_at: Date.now(),
-                metadata: assetData.placementNumber
-                  ? { placementNumber: assetData.placementNumber }
-                  : undefined,
-              };
-              upsertAssetInManifest(optimisticAsset);
-
-              if (refreshTimeoutId) {
-                clearTimeout(refreshTimeoutId);
-              }
-              refreshTimeoutId = setTimeout(() => {
-                refreshTimeoutId = null;
-                refreshAssetManifest();
-              }, 250);
-            } else if (message.type === 'status' && message.data) {
-              // Track image generation activity based on status
-              const { status } = message.data;
-              const isActive = status === 'busy' || status === 'processing';
-              setIsImageGenerationActive(isActive);
-            } else if (message.type === 'tool_call' && message.data) {
-              // Also track tool calls for image generation
-              const { toolName } = message.data;
-              if (
-                toolName === 'generate_image' ||
-                toolName === 'generate_all_images'
-              ) {
-                setIsImageGenerationActive(true);
-              }
-            }
-          } catch (error) {
-            // Not a JSON message or not a relevant event, ignore
-          }
-        };
-
-        ws.onerror = (error) => {
-          console.warn(
-            '[ProjectContext] WebSocket error for asset events:',
-            error,
-          );
-          connectingRef.current = false;
-        };
-
-        ws.onclose = () => {
-          console.log('[ProjectContext] WebSocket closed for asset events');
-          wsRef.current = null;
-          connectingRef.current = false;
-          if (refreshTimeoutId) {
-            clearTimeout(refreshTimeoutId);
-            refreshTimeoutId = null;
-          }
-
-          // Only reconnect if project directory hasn't changed
-          if (
-            currentProjectDirRef.current === projectDirectory &&
-            projectDirectory
-          ) {
-            if (reconnectTimeoutRef.current) {
-              clearTimeout(reconnectTimeoutRef.current);
-            }
-            reconnectTimeoutRef.current = setTimeout(() => {
-              reconnectTimeoutRef.current = null;
-              if (currentProjectDirRef.current === projectDirectory) {
-                connectWebSocket();
-              }
-            }, 3000);
-          } else {
-            currentProjectDirRef.current = null;
-          }
-        };
-      } catch (error) {
-        console.warn(
-          '[ProjectContext] Failed to connect WebSocket for asset events:',
-          error,
-        );
-        connectingRef.current = false;
+      if (manifestRefreshTimeoutRef.current) {
+        clearTimeout(manifestRefreshTimeoutRef.current);
+        manifestRefreshTimeoutRef.current = null;
       }
-    };
+      reconnectDelayRef.current = 500;
+      currentProjectDirRef.current = null;
+      return;
+    }
 
-    connectWebSocket();
+    connectAssetWebSocketRef.current('project_loaded');
+  }, [projectDirectory, state.isLoaded]);
+
+  // If backend becomes ready after initial mount, retry socket connection.
+  useEffect(() => {
+    const unsubscribe = window.electron.backend.onStateChange((backendState) => {
+      if (!projectDirectory || !state.isLoaded) return;
+      if (backendState.status !== 'ready') return;
+      if (connectingRef.current) return;
+      if (wsRef.current?.readyState === WebSocket.OPEN) return;
+
+      console.log('[ProjectContext][ws_connect] Backend transitioned to ready', {
+        source: 'backend_state_change',
+      });
+      connectAssetWebSocketRef.current('backend_ready');
+    });
 
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-      // Don't close WebSocket here - let it persist across re-renders
-      // Only close if project directory actually changes (handled above)
+      unsubscribe();
     };
-  }, [projectDirectory, state.isLoaded, refreshAssetManifest]);
+  }, [projectDirectory, state.isLoaded]);
 
-  // Poll for manifest updates during image generation (fallback if file watcher fails)
-  // Uses dynamic polling: faster (500ms) during active generation, slower (1-2s) when idle
+  // Poll for manifest updates as a source-agnostic fallback.
+  // This keeps timeline hydration convergent even if websocket/file-watch signals are missed.
   useEffect(() => {
     if (!projectDirectory || !state.isLoaded) return;
 
-    let pollIntervalMs = isImageGenerationActive ? 500 : 1000; // 500ms during generation, 1s when idle
+    let pollIntervalMs = 1000;
     let consecutiveFailures = 0;
-    const MAX_POLL_INTERVAL = isImageGenerationActive ? 1000 : 2000; // Max 1s during generation, 2s when idle
+    const MAX_POLL_INTERVAL = 5000;
     const BACKOFF_MULTIPLIER = 1.5;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let isCancelled = false;
@@ -697,8 +818,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
             if (assetsChanged) {
               console.log(
-                '[ProjectContext] Assets changed (polling), updating manifest:',
+                '[ProjectContext][poll] Assets changed, updating manifest',
                 {
+                  source: 'poll',
                   oldCount: prev.assetManifest?.assets?.length || 0,
                   newCount: project.assetManifest?.assets?.length || 0,
                   addedAssets:
@@ -717,8 +839,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
                 },
               );
 
-              // Reset polling interval on successful update (use dynamic interval based on activity)
-              pollIntervalMs = isImageGenerationActive ? 500 : 1000;
+              pollIntervalMs = 1000;
               consecutiveFailures = 0;
               // Always create new object reference to force React re-renders
               return {
@@ -736,6 +857,12 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
             Math.floor(1000 * BACKOFF_MULTIPLIER ** consecutiveFailures),
             MAX_POLL_INTERVAL,
           );
+          console.warn('[ProjectContext][poll] Poll openProject failed', {
+            source: 'poll',
+            consecutiveFailures,
+            nextIntervalMs: pollIntervalMs,
+            error: result.error,
+          });
         }
       } catch (error) {
         consecutiveFailures++;
@@ -743,7 +870,12 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           Math.floor(1000 * BACKOFF_MULTIPLIER ** consecutiveFailures),
           MAX_POLL_INTERVAL,
         );
-        console.debug('[ProjectContext] Poll check failed:', error);
+        console.debug('[ProjectContext][poll] Poll check failed', {
+          source: 'poll',
+          consecutiveFailures,
+          nextIntervalMs: pollIntervalMs,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
 
       if (!isCancelled) {
@@ -762,7 +894,6 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   }, [
     projectDirectory,
     state.isLoaded,
-    isImageGenerationActive,
   ]);
 
   // Load project from directory

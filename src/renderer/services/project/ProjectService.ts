@@ -13,7 +13,6 @@ import type {
   WorkflowPhase,
   ItemApprovalStatus,
   AssetInfo,
-  AssetType,
 } from '../../types/kshana';
 import {
   PROJECT_PATHS,
@@ -22,7 +21,6 @@ import {
   createDefaultAgentProject,
   createDefaultAssetManifest,
   createDefaultContextIndex,
-  createAssetInfo,
 } from '../../types/kshana';
 
 /**
@@ -42,6 +40,20 @@ export interface ProjectValidation {
   hasAssetManifest: boolean;
   hasTimelineState: boolean;
   errors: string[];
+}
+
+type JSONReadStatus = 'ok' | 'missing' | 'invalid';
+
+interface JSONReadResult<T> {
+  status: JSONReadStatus;
+  data?: T;
+  error?: string;
+}
+
+interface AssetManifestReadResult {
+  status: JSONReadStatus;
+  manifest?: AssetManifest;
+  error?: string;
 }
 
 /**
@@ -137,21 +149,44 @@ export class ProjectService {
         await this.writeManifest(directory, manifest);
       }
 
-      // Read asset manifest (create default if missing)
-      let assetManifest = await this.readAssetManifest(directory);
-      if (!assetManifest) {
-        console.log(
-          '[ProjectService] Asset manifest not found, creating default',
-        );
-        assetManifest = createDefaultAssetManifest();
-        await this.writeAssetManifest(directory, assetManifest);
-      } else {
+      const sameLoadedProject = this.projectDirectory === directory;
+      const inMemoryAssetManifest = sameLoadedProject
+        ? this.currentProject?.assetManifest ?? null
+        : null;
+
+      // Read asset manifest with explicit status handling.
+      // Missing file -> create default.
+      // Invalid JSON -> keep existing in-memory manifest when available.
+      const assetManifestResult = await this.readAssetManifestWithStatus(
+        directory,
+      );
+      let assetManifest: AssetManifest;
+
+      if (assetManifestResult.status === 'ok' && assetManifestResult.manifest) {
+        assetManifest = assetManifestResult.manifest;
         console.log('[ProjectService] Asset manifest loaded:', {
+          source: 'disk',
           assetCount: assetManifest.assets.length,
           imageAssets: assetManifest.assets.filter(
             (a) => a.type === 'scene_image',
           ).length,
         });
+      } else if (assetManifestResult.status === 'missing') {
+        console.log('[ProjectService] Asset manifest missing, creating default', {
+          source: 'open_project',
+          path: `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`,
+        });
+        assetManifest = createDefaultAssetManifest();
+        await this.writeAssetManifest(directory, assetManifest);
+      } else {
+        console.warn('[ProjectService] Asset manifest invalid; preserving in-memory state when available', {
+          source: 'open_project',
+          path: `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`,
+          hasInMemoryManifest: !!inMemoryAssetManifest,
+          error: assetManifestResult.error,
+        });
+        assetManifest =
+          inMemoryAssetManifest ?? createDefaultAssetManifest();
       }
 
       // Read timeline state (use default if missing)
@@ -372,18 +407,47 @@ export class ProjectService {
     }
   }
 
-  private async readJSON<T>(path: string): Promise<T | null> {
+  private async readJSONWithStatus<T>(path: string): Promise<JSONReadResult<T>> {
     try {
       const content = await window.electron.project.readFile(path);
-      if (content === null) return null;
-      return JSON.parse(content) as T;
+      if (content === null) {
+        return { status: 'missing' };
+      }
+      try {
+        return { status: 'ok', data: JSON.parse(content) as T };
+      } catch (parseError) {
+        return {
+          status: 'invalid',
+          error:
+            parseError instanceof Error
+              ? parseError.message
+              : String(parseError),
+        };
+      }
     } catch (error) {
       console.error(
         `[ProjectService] Failed to read JSON from ${path}:`,
         error,
       );
-      return null;
+      return {
+        status: 'invalid',
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
+  }
+
+  private async readJSON<T>(path: string): Promise<T | null> {
+    const result = await this.readJSONWithStatus<T>(path);
+    if (result.status === 'ok') {
+      return result.data ?? null;
+    }
+    if (result.status === 'invalid') {
+      console.error(
+        `[ProjectService] Invalid JSON content in ${path}:`,
+        result.error ?? 'Unknown parse error',
+      );
+    }
+    return null;
   }
 
   private async writeJSON(path: string, data: unknown): Promise<void> {
@@ -431,13 +495,13 @@ export class ProjectService {
     await this.writeJSON(`${directory}/${PROJECT_PATHS.AGENT_PROJECT}`, state);
   }
 
-  private async readAssetManifest(
+  private async readAssetManifestWithStatus(
     directory: string,
-  ): Promise<AssetManifest | null> {
+  ): Promise<AssetManifestReadResult> {
     const manifestPath = `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`;
     console.log('[ProjectService] Reading asset manifest from:', manifestPath);
 
-    const manifest = await this.readJSON<{
+    const manifestResult = await this.readJSONWithStatus<{
       schema_version?: string;
       assets: Array<{
         id: string;
@@ -452,14 +516,20 @@ export class ProjectService {
       }>;
     }>(manifestPath);
 
-    if (!manifest) {
-      console.warn(
-        '[ProjectService] Asset manifest file not found or empty:',
-        manifestPath,
-      );
-      return null;
+    if (manifestResult.status === 'missing') {
+      console.warn('[ProjectService] Asset manifest file missing:', manifestPath);
+      return { status: 'missing' };
     }
 
+    if (manifestResult.status === 'invalid' || !manifestResult.data) {
+      console.error('[ProjectService] Asset manifest is invalid JSON:', {
+        path: manifestPath,
+        error: manifestResult.error ?? 'Unknown parse error',
+      });
+      return { status: 'invalid', error: manifestResult.error };
+    }
+
+    const manifest = manifestResult.data;
     console.log('[ProjectService] Asset manifest read successfully:', {
       schemaVersion: manifest.schema_version,
       assetCount: manifest.assets?.length || 0,
@@ -476,9 +546,14 @@ export class ProjectService {
       ({ createdAt, ...rest }) => rest,
     );
 
-    return {
+    const normalizedManifest: AssetManifest = {
       schema_version: (manifest.schema_version as '1') || '1',
       assets: cleanedAssets as AssetManifest['assets'],
+    };
+
+    return {
+      status: 'ok',
+      manifest: normalizedManifest,
     };
   }
 

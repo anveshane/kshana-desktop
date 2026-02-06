@@ -52,6 +52,15 @@ interface TimelineItemComponentProps {
   ) => void;
 }
 
+function inferPlacementNumberFromPath(path: string | undefined): number | null {
+  if (!path) return null;
+  const filename = path.split('/').pop() ?? path;
+  const match = filename.match(/image(\d+)(?:[-_]|\.|$)/i);
+  if (!match) return null;
+  const placementNumber = Number(match[1]);
+  return Number.isNaN(placementNumber) ? null : placementNumber;
+}
+
 function TimelineItemComponent({
   item,
   left,
@@ -121,6 +130,7 @@ function TimelineItemComponent({
         // Handle type coercion (placementNumber might be number or string)
         const assetPlacementNumber = a.metadata?.placementNumber;
         const assetSceneNumber = a.scene_number;
+        const pathPlacementNumber = inferPlacementNumberFromPath(a.path);
         const placementMatch =
           assetPlacementNumber !== undefined &&
           (Number(assetPlacementNumber) === item.placementNumber ||
@@ -130,7 +140,11 @@ function TimelineItemComponent({
           (Number(assetSceneNumber) === item.placementNumber ||
             String(assetSceneNumber) === String(item.placementNumber));
 
-        return placementMatch || sceneMatch;
+        const pathMatch =
+          pathPlacementNumber !== null &&
+          pathPlacementNumber === item.placementNumber;
+
+        return placementMatch || sceneMatch || pathMatch;
       });
 
       if (matchingAssets.length > 0) {

@@ -242,20 +242,33 @@ ipcMain.handle(
 ipcMain.handle(
   'project:refresh-assets',
   async (_event, projectDirectory: string) => {
-    // Trigger a file change event for manifest.json to force refresh
     const manifestPath = path.join(
       projectDirectory,
       '.kshana',
       'agent',
       'manifest.json',
     );
-    if (fs.existsSync(manifestPath)) {
-      // Emit a change event to trigger refresh
+
+    try {
+      await fs.access(manifestPath);
       fileSystemManager.emit('file-change', {
         type: 'change',
         path: manifestPath,
       });
-      console.log('[Main] Triggered asset refresh for manifest:', manifestPath);
+      console.log('[Main][refresh-assets] Triggered manifest refresh', {
+        source: 'ipc_refresh_assets',
+        manifestPath,
+      });
+      return { success: true };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Manifest not found';
+      console.warn('[Main][refresh-assets] Failed to trigger manifest refresh', {
+        source: 'ipc_refresh_assets',
+        manifestPath,
+        error: message,
+      });
+      return { success: false, error: message };
     }
   },
 );
@@ -277,10 +290,17 @@ ipcMain.on(
         'agent',
         'manifest.json',
       );
-      if (fs.existsSync(manifestPath)) {
+      try {
+        await fs.access(manifestPath);
         fileSystemManager.emit('file-change', {
           type: 'change',
           path: manifestPath,
+        });
+      } catch (error) {
+        console.warn('[Main][asset-updated] Manifest refresh skipped', {
+          source: 'ipc_asset_updated',
+          manifestPath,
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     }

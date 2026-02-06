@@ -131,7 +131,9 @@ const projectBridge = {
       infographicPlacementsDir,
     );
   },
-  refreshAssets(projectDirectory: string): Promise<void> {
+  refreshAssets(
+    projectDirectory: string,
+  ): Promise<{ success: boolean; error?: string }> {
     return ipcRenderer.invoke('project:refresh-assets', projectDirectory);
   },
   unwatchDirectory(dirPath: string): Promise<void> {

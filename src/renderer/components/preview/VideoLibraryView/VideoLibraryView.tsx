@@ -81,6 +81,15 @@ interface VideoLibraryViewProps {
   projectScenes?: SceneRef[];
 }
 
+function inferPlacementNumberFromPath(path: string | undefined): number | null {
+  if (!path) return null;
+  const filename = path.split('/').pop() ?? path;
+  const match = filename.match(/image(\d+)(?:[-_]|\.|$)/i);
+  if (!match) return null;
+  const placementNumber = Number(match[1]);
+  return Number.isNaN(placementNumber) ? null : placementNumber;
+}
+
 export default function VideoLibraryView({
   playbackTime,
   isPlaying,
@@ -331,11 +340,19 @@ export default function VideoLibraryView({
     // Find image asset matching placement number and version
     if (activeImageVersion !== undefined) {
       const imageAsset = assetManifest.assets.find(
-        (asset) =>
-          asset.type === 'scene_image' &&
-          (asset.metadata?.placementNumber === placementNumber ||
-            asset.scene_number === placementNumber) &&
-          asset.version === activeImageVersion,
+        (asset) => {
+          if (asset.type !== 'scene_image') return false;
+          const metadataPlacement = asset.metadata?.placementNumber;
+          const scenePlacement = asset.scene_number;
+          const pathPlacement = inferPlacementNumberFromPath(asset.path);
+          const placementMatch =
+            (metadataPlacement !== undefined &&
+              Number(metadataPlacement) === placementNumber) ||
+            (scenePlacement !== undefined &&
+              Number(scenePlacement) === placementNumber) ||
+            pathPlacement === placementNumber;
+          return placementMatch && asset.version === activeImageVersion;
+        },
       );
       if (imageAsset?.path) {
         console.log(
@@ -354,10 +371,19 @@ export default function VideoLibraryView({
 
     // Fallback: find latest image asset for this placement
     const imageAssets = assetManifest.assets.filter(
-      (asset) =>
-        asset.type === 'scene_image' &&
-        (asset.metadata?.placementNumber === placementNumber ||
-          asset.scene_number === placementNumber),
+      (asset) => {
+        if (asset.type !== 'scene_image') return false;
+        const metadataPlacement = asset.metadata?.placementNumber;
+        const scenePlacement = asset.scene_number;
+        const pathPlacement = inferPlacementNumberFromPath(asset.path);
+        return (
+          (metadataPlacement !== undefined &&
+            Number(metadataPlacement) === placementNumber) ||
+          (scenePlacement !== undefined &&
+            Number(scenePlacement) === placementNumber) ||
+          pathPlacement === placementNumber
+        );
+      },
     );
     if (imageAssets.length > 0) {
       // Sort by version descending to get latest
