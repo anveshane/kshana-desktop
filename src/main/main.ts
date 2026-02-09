@@ -29,6 +29,7 @@ import {
 } from './settingsManager';
 import fileSystemManager from './fileSystemManager';
 import { remotionManager } from './remotionManager';
+import { generateWordCaptions } from './services/wordCaptionService';
 import type { FileChangeEvent } from '../shared/fileSystemTypes';
 import type {
   RemotionTimelineItem,
@@ -204,6 +205,24 @@ ipcMain.handle(
       );
       return 0;
     }
+  },
+);
+
+ipcMain.handle(
+  'project:generate-word-captions',
+  async (
+    _event,
+    projectDirectory: string,
+    audioPath?: string,
+  ): Promise<{ success: boolean; outputPath?: string; words?: unknown[]; error?: string }> => {
+    const result = await generateWordCaptions(projectDirectory, audioPath);
+    if (result.success && result.outputPath) {
+      fileSystemManager.emit('file-change', {
+        type: 'change',
+        path: result.outputPath,
+      });
+    }
+    return result;
   },
 );
 
@@ -543,6 +562,113 @@ interface OverlayItem {
   endTime: number;
 }
 
+interface TextOverlayWord {
+  text: string;
+  startTime: number;
+  endTime: number;
+  charStart: number;
+  charEnd: number;
+}
+
+interface TextOverlayCue {
+  id: string;
+  startTime: number;
+  endTime: number;
+  text: string;
+  words: TextOverlayWord[];
+}
+
+function formatAssTimestamp(seconds: number): string {
+  const totalCentiseconds = Math.max(0, Math.round(seconds * 100));
+  const centiseconds = totalCentiseconds % 100;
+  const totalSeconds = Math.floor(totalCentiseconds / 100);
+  const secs = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const mins = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  return `${hours}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(centiseconds).padStart(2, '0')}`;
+}
+
+function escapeAssText(input: string): string {
+  return input
+    .replace(/\\/g, '\\\\')
+    .replace(/{/g, '(')
+    .replace(/}/g, ')')
+    .replace(/\r?\n/g, ' ')
+    .trim();
+}
+
+function buildAssDialogueText(cue: TextOverlayCue): string {
+  if (cue.words.length === 0) {
+    return escapeAssText(cue.text);
+  }
+
+  const segments: string[] = [];
+  cue.words.forEach((word, index) => {
+    const safeText = escapeAssText(word.text);
+    const durationCentiseconds = Math.max(
+      1,
+      Math.round((word.endTime - word.startTime) * 100),
+    );
+    const suffix = index < cue.words.length - 1 ? ' ' : '';
+    segments.push(`{\\k${durationCentiseconds}}${safeText}${suffix}`);
+  });
+  return segments.join('');
+}
+
+function buildAssFromTextOverlayCues(cues: TextOverlayCue[]): string {
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    'PlayResX: 1920',
+    'PlayResY: 1080',
+    'WrapStyle: 2',
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding',
+    'Style: WordSync,Arial,28,&H00FFFFFF,&H0000D7FF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,2,0,2,80,80,54,1',
+    '',
+    '[Events]',
+    'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text',
+  ];
+
+  const events = cues
+    .filter((cue) => Number.isFinite(cue.startTime) && Number.isFinite(cue.endTime))
+    .filter((cue) => cue.endTime > cue.startTime)
+    .sort((a, b) => a.startTime - b.startTime)
+    .map((cue) => {
+      const start = formatAssTimestamp(cue.startTime);
+      const end = formatAssTimestamp(cue.endTime);
+      const text = buildAssDialogueText(cue);
+      return `Dialogue: 0,${start},${end},WordSync,,0,0,0,,${text}`;
+    });
+
+  return [...header, ...events, ''].join('\n');
+}
+
+async function burnWordCaptionsIntoVideo(
+  inputVideoPath: string,
+  assPath: string,
+  outputVideoPath: string,
+): Promise<void> {
+  const normalizedAssPath = assPath
+    .replace(/\\/g, '/')
+    .replace(/:/g, '\\:')
+    .replace(/,/g, '\\,');
+
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg()
+      .input(inputVideoPath)
+      .videoFilters(`subtitles=${normalizedAssPath}`)
+      .outputOptions(['-c:v libx264', '-crf 18', '-preset medium', '-c:a copy'])
+      .output(outputVideoPath)
+      .on('end', () => resolve())
+      .on('error', (error) => reject(error))
+      .run();
+  });
+}
+
 ipcMain.handle(
   'project:compose-timeline-video',
   async (
@@ -551,6 +677,7 @@ ipcMain.handle(
     projectDirectory: string,
     audioPath?: string,
     overlayItems?: OverlayItem[],
+    textOverlayCues?: TextOverlayCue[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
     console.log('[VideoComposition] Starting video composition...');
     console.log('[VideoComposition] Timeline items:', timelineItems.length);
@@ -981,7 +1108,7 @@ ipcMain.handle(
       });
 
       // Step 2: Mix audio if provided
-      const outputPath = path.join(tempDir, 'composed-video.mp4');
+      const baseOutputPath = path.join(tempDir, 'composed-video.mp4');
       if (audioPath) {
         // Normalize audio path (strips file://, resolves relative paths)
         const normalizedAudioPath = await normalizePathForFFmpeg(
@@ -993,7 +1120,7 @@ ipcMain.handle(
           console.warn(
             '[VideoComposition] Audio path is empty after normalization',
           );
-          await fs.copyFile(concatenatedVideoPath, outputPath);
+          await fs.copyFile(concatenatedVideoPath, baseOutputPath);
           console.log(
             '[VideoComposition] No audio track provided, using video only',
           );
@@ -1016,7 +1143,7 @@ ipcMain.handle(
                   '-map 1:a:0', // Use audio from second input (audio file)
                   '-shortest', // End when shortest stream ends (prevents length mismatch)
                 ])
-                .output(outputPath)
+                .output(baseOutputPath)
                 .on('start', (commandLine) => {
                   console.log(
                     `[VideoComposition] FFmpeg audio mix command: ${commandLine}`,
@@ -1039,7 +1166,7 @@ ipcMain.handle(
                   console.warn(
                     '[VideoComposition] Falling back to video-only output',
                   );
-                  fs.copyFile(concatenatedVideoPath, outputPath)
+                  fs.copyFile(concatenatedVideoPath, baseOutputPath)
                     .then(() => resolve())
                     .catch((copyErr) => {
                       console.error(
@@ -1056,7 +1183,7 @@ ipcMain.handle(
             console.warn(
               `[VideoComposition] Audio file not found: ${normalizedAudioPath}, using video only`,
             );
-            await fs.copyFile(concatenatedVideoPath, outputPath);
+            await fs.copyFile(concatenatedVideoPath, baseOutputPath);
           }
         }
       } else {
@@ -1064,18 +1191,47 @@ ipcMain.handle(
         console.log(
           '[VideoComposition] No audio track provided, using video only',
         );
-        await fs.copyFile(concatenatedVideoPath, outputPath);
+        await fs.copyFile(concatenatedVideoPath, baseOutputPath);
+      }
+
+      let finalOutputPath = baseOutputPath;
+
+      if (textOverlayCues && textOverlayCues.length > 0) {
+        const assPath = path.join(tempDir, 'word-captions.ass');
+        const captionedOutputPath = path.join(
+          tempDir,
+          'composed-video-captions.mp4',
+        );
+        const assContent = buildAssFromTextOverlayCues(textOverlayCues);
+        await fs.writeFile(assPath, assContent, 'utf-8');
+        cleanupFiles.push(assPath);
+
+        try {
+          await burnWordCaptionsIntoVideo(
+            baseOutputPath,
+            assPath,
+            captionedOutputPath,
+          );
+          cleanupFiles.push(captionedOutputPath);
+          finalOutputPath = captionedOutputPath;
+        } catch (error) {
+          throw new Error(
+            `Failed to burn word captions: ${
+              error instanceof Error ? error.message : 'Unknown error'
+            }`,
+          );
+        }
       }
 
       // Verify output file exists
       try {
-        const stats = await fs.stat(outputPath);
+        const stats = await fs.stat(finalOutputPath);
         console.log(
-          `[VideoComposition] Output file created: ${outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`,
+          `[VideoComposition] Output file created: ${finalOutputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`,
         );
       } catch {
         console.error(
-          `[VideoComposition] Output file not found: ${outputPath}`,
+          `[VideoComposition] Output file not found: ${finalOutputPath}`,
         );
         throw new Error('Composed video file was not created');
       }
@@ -1083,7 +1239,7 @@ ipcMain.handle(
       console.log(
         '[VideoComposition] Video composition completed successfully!',
       );
-      return { success: true, outputPath };
+      return { success: true, outputPath: finalOutputPath };
     } catch (error) {
       console.error('[VideoComposition] Error during composition:', error);
       // Clean up temporary files on error

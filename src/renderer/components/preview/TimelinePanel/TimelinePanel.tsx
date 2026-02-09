@@ -366,6 +366,33 @@ function TimelineItemComponent({
     );
   }
 
+  if (item.type === 'text_overlay') {
+    return (
+      <div
+        className={`${styles.textOverlayBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.label}
+      >
+        <div className={styles.textOverlayLabel}>
+          {item.label}
+        </div>
+      </div>
+    );
+  }
+
   // Handle image type
   let thumbnailElement: React.ReactNode;
   if (imagePath) {
@@ -557,6 +584,7 @@ export default function TimelinePanel({
   const {
     timelineItems,
     overlayItems,
+    textOverlayItems,
     totalDuration: timelineTotalDuration,
     refreshAudioFiles,
   } = useTimelineDataContext();
@@ -584,6 +612,11 @@ export default function TimelinePanel({
     const lastItem = timelineItems[timelineItems.length - 1];
     return Math.max(lastItem.endTime, 10);
   }, [timelineTotalDuration, timelineItems]);
+
+  const audioTimelineItems = useMemo(
+    () => timelineItems.filter((item) => item.type === 'audio' && !!item.audioPath),
+    [timelineItems],
+  );
 
   // Clamp playback position to totalDuration to prevent playhead from going beyond content
   const rawCurrentPosition = externalPlaybackTime ?? internalPlaybackTime;
@@ -760,8 +793,21 @@ export default function TimelinePanel({
   const [isAudioModalOpen, setIsAudioModalOpen] = useState(false);
   const [contextMenuState, setContextMenuState] =
     useState<TimelineContextMenuState | null>(null);
+  const [isGeneratingWordCaptions, setIsGeneratingWordCaptions] =
+    useState(false);
+  const [captionGenerationMessage, setCaptionGenerationMessage] = useState<
+    string | null
+  >(null);
   const [canUndo, setCanUndo] = useState(false);
   const undoStackRef = useRef<TimelineEditSnapshot[]>([]);
+
+  useEffect(() => {
+    if (!captionGenerationMessage) return undefined;
+    const timeout = setTimeout(() => {
+      setCaptionGenerationMessage(null);
+    }, 4000);
+    return () => clearTimeout(timeout);
+  }, [captionGenerationMessage]);
 
   // Load active versions from timeline state or use external prop (with migration)
   const [internalActiveVersions, setInternalActiveVersions] = useState<
@@ -1203,7 +1249,8 @@ export default function TimelinePanel({
       if (
         target.closest(`.${styles.sceneBlock}`) ||
         target.closest(`.${styles.videoBlock}`) ||
-        target.closest(`.${styles.audioBlock}`)
+        target.closest(`.${styles.audioBlock}`) ||
+        target.closest(`.${styles.textOverlayBlock}`)
       ) {
         return;
       }
@@ -1231,6 +1278,65 @@ export default function TimelinePanel({
   const handleUndoFromContextMenu = useCallback(() => {
     undoLastTimelineEdit();
   }, [undoLastTimelineEdit]);
+
+  const handleGenerateWordCaptions = useCallback(async () => {
+    if (!projectDirectory || isGeneratingWordCaptions) return;
+
+    const contextualAudioPath =
+      contextMenuState?.item?.type === 'audio'
+        ? contextMenuState.item.audioPath
+        : undefined;
+    const fallbackAudioPath =
+      audioTimelineItems.length > 0
+        ? [...audioTimelineItems].sort((a, b) => b.duration - a.duration)[0]
+            ?.audioPath
+        : undefined;
+    const selectedAudioPath = contextualAudioPath || fallbackAudioPath;
+
+    if (!selectedAudioPath) {
+      setCaptionGenerationMessage('No audio track available for captions.');
+      return;
+    }
+
+    setIsGeneratingWordCaptions(true);
+    setCaptionGenerationMessage(
+      'Generating word captions... First run may take longer while Whisper installs.',
+    );
+
+    try {
+      const result = await window.electron.project.generateWordCaptions(
+        projectDirectory,
+        selectedAudioPath,
+      );
+
+      if (!result.success) {
+        setCaptionGenerationMessage(
+          result.error || 'Failed to generate word captions.',
+        );
+        return;
+      }
+
+      const wordCount = result.words?.length ?? 0;
+      setCaptionGenerationMessage(
+        `Generated word captions (${wordCount} words).`,
+      );
+    } catch (error) {
+      setCaptionGenerationMessage(
+        error instanceof Error
+          ? error.message
+          : 'Failed to generate word captions.',
+      );
+    } finally {
+      setIsGeneratingWordCaptions(false);
+    }
+  }, [
+    projectDirectory,
+    isGeneratingWordCaptions,
+    contextMenuState,
+    audioTimelineItems,
+  ]);
+
+  const canGenerateWordCaptions = audioTimelineItems.length > 0;
 
   // Handle playhead drag start
   const handlePlayheadMouseDown = useCallback(
@@ -1912,6 +2018,11 @@ export default function TimelinePanel({
               </span>
             </div>
             <div className={styles.toolbarRight}>
+              {captionGenerationMessage && (
+                <span className={styles.captionGenerationStatus}>
+                  {captionGenerationMessage}
+                </span>
+              )}
               <button
                 type="button"
                 className={styles.toolbarButton}
@@ -2096,6 +2207,37 @@ export default function TimelinePanel({
                   </div>
                 )}
 
+                {/* Text Overlay Track (Word Sync Captions) */}
+                {textOverlayItems.length > 0 && (
+                  <div className={`${styles.track} ${styles.textOverlayTrack}`}>
+                    <div className={styles.trackContent}>
+                      {textOverlayItems.map((item) => {
+                        const left = secondsToPixels(
+                          item.startTime,
+                          zoomLevel,
+                        );
+                        const width = secondsToPixels(
+                          item.duration,
+                          zoomLevel,
+                        );
+
+                        return (
+                          <TimelineItemComponent
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            isSelected={false}
+                            onItemClick={handleItemClick}
+                            onItemContextMenu={handleTimelineItemContextMenu}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Audio Track */}
                 {timelineItems.filter((item) => item.type === 'audio').length >
                   0 && (
@@ -2148,9 +2290,12 @@ export default function TimelinePanel({
               x={contextMenuState.x}
               y={contextMenuState.y}
               canUndo={canUndo}
+              canGenerateWordCaptions={canGenerateWordCaptions}
+              isGeneratingWordCaptions={isGeneratingWordCaptions}
               showVideoEditActions={isPlacementVideoContextTarget}
               onUndo={handleUndoFromContextMenu}
               onAddTimelineInstruction={handleAddTimelineInstructionFromContextMenu}
+              onGenerateWordCaptions={handleGenerateWordCaptions}
               onSplitClip={
                 isPlacementVideoContextTarget && canSplitContextTarget
                   ? handleContextSplitClip

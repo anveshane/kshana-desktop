@@ -15,6 +15,29 @@ import type {
   ParsedInfographicPlacement,
 } from '../shared/remotionTypes';
 
+interface WordTimestamp {
+  text: string;
+  startTime: number;
+  endTime: number;
+  confidence?: number;
+}
+
+interface TextOverlayWord {
+  text: string;
+  startTime: number;
+  endTime: number;
+  charStart: number;
+  charEnd: number;
+}
+
+interface TextOverlayCue {
+  id: string;
+  startTime: number;
+  endTime: number;
+  text: string;
+  words: TextOverlayWord[];
+}
+
 export type Channels = 'ipc-example';
 
 const backendBridge = {
@@ -71,6 +94,21 @@ const projectBridge = {
   },
   getAudioDuration(audioPath: string): Promise<number> {
     return ipcRenderer.invoke('project:get-audio-duration', audioPath);
+  },
+  generateWordCaptions(
+    projectDirectory: string,
+    audioPath?: string,
+  ): Promise<{
+    success: boolean;
+    outputPath?: string;
+    words?: WordTimestamp[];
+    error?: string;
+  }> {
+    return ipcRenderer.invoke(
+      'project:generate-word-captions',
+      projectDirectory,
+      audioPath,
+    );
   },
   // extractYoutubeAudio removed - can be re-added later if needed
   readTree(dirPath: string, depth?: number): Promise<FileNode> {
@@ -168,6 +206,7 @@ const projectBridge = {
       startTime: number;
       endTime: number;
     }>,
+    textOverlayCues?: TextOverlayCue[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
     return ipcRenderer.invoke(
       'project:compose-timeline-video',
@@ -175,6 +214,7 @@ const projectBridge = {
       projectDirectory,
       audioPath,
       overlayItems,
+      textOverlayCues,
     );
   },
   onFileChange(callback: (event: FileChangeEvent) => void) {

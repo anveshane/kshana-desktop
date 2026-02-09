@@ -9,9 +9,11 @@ import { useProject } from '../contexts/ProjectContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { usePlacementFiles } from './usePlacementFiles';
 import { useTranscript } from './useTranscript';
+import { useWordCaptions } from './useWordCaptions';
 import { timeStringToSeconds } from '../utils/placementParsers';
 import type { AssetInfo } from '../types/kshana/assetManifest';
 import type { SceneVersions } from '../types/kshana/timeline';
+import type { TextOverlayCue } from '../types/captions';
 import { PROJECT_PATHS } from '../types/kshana';
 import {
   createEmptyImageProjectionSnapshot,
@@ -28,7 +30,13 @@ import {
 
 export interface TimelineItem {
   id: string; // "PLM-1", "vd-placement-1", "info-placement-1", "placeholder-start", "audio-1"
-  type: 'image' | 'video' | 'infographic' | 'placeholder' | 'audio';
+  type:
+    | 'image'
+    | 'video'
+    | 'infographic'
+    | 'placeholder'
+    | 'audio'
+    | 'text_overlay';
   startTime: number; // seconds
   endTime: number; // seconds
   duration: number; // calculated: endTime - startTime
@@ -44,11 +52,14 @@ export interface TimelineItem {
   sourcePlacementNumber?: number; // original placement number for derived segments
   sourcePlacementDurationSeconds?: number; // original full source duration
   segmentIndex?: number; // derived segment index for split video
+  textOverlayCue?: TextOverlayCue;
 }
 
 export interface TimelineData {
   timelineItems: TimelineItem[];
   overlayItems: TimelineItem[];
+  textOverlayItems: TimelineItem[];
+  textOverlayCues: TextOverlayCue[];
   totalDuration: number;
 }
 
@@ -161,6 +172,7 @@ export function useTimelineData(
   const { imagePlacements, videoPlacements, infographicPlacements } =
     usePlacementFiles();
   const { totalDuration: transcriptDuration } = useTranscript();
+  const { cues: wordCaptionCues } = useWordCaptions();
   const [audioFiles, setAudioFiles] = useState<
     Array<{ path: string; duration: number }>
   >([]);
@@ -762,6 +774,27 @@ export function useTimelineData(
     timelineRefreshTrigger,
   ]);
 
+  const textOverlayItems: TimelineItem[] = useMemo(() => {
+    if (wordCaptionCues.length === 0) return [];
+    const cueStart = Math.min(...wordCaptionCues.map((cue) => cue.startTime));
+    const cueEnd = Math.max(...wordCaptionCues.map((cue) => cue.endTime));
+    const startTime = Number.isFinite(cueStart) ? Math.max(0, cueStart) : 0;
+    const endTime = Number.isFinite(cueEnd)
+      ? Math.max(startTime + 0.01, cueEnd)
+      : startTime + 0.01;
+
+    return [
+      {
+        id: 'text-overlay-track',
+        type: 'text_overlay',
+        startTime,
+        endTime,
+        duration: endTime - startTime,
+        label: 'Text Captions',
+      },
+    ];
+  }, [wordCaptionCues]);
+
   // Calculate total duration from all sources (audio, placements, transcript)
   // Use whichever is longest - audio may be longer than scenes, or scenes may be longer than audio
   const calculatedTotalDuration = useMemo(() => {
@@ -780,22 +813,29 @@ export function useTimelineData(
     // Get transcript duration
     const transcriptDur = transcriptDuration || 0;
 
+    const textOverlayDuration =
+      wordCaptionCues.length > 0
+        ? Math.max(...wordCaptionCues.map((cue) => cue.endTime))
+        : 0;
+
     // Use the maximum of all three - whichever is longest
     const maxDuration = Math.max(
       maxAudioDuration,
       lastPlacementEndTime,
       transcriptDur,
+      textOverlayDuration,
     );
 
     console.log('[useTimelineData] Calculated total duration:', {
       maxAudioDuration,
       lastPlacementEndTime,
       transcriptDur,
+      textOverlayDuration,
       maxDuration,
     });
 
     return maxDuration;
-  }, [audioFiles, basePlacementItems, transcriptDuration]);
+  }, [audioFiles, basePlacementItems, transcriptDuration, wordCaptionCues]);
 
   // Resolve asset paths for display
   const timelineItems: TimelineItem[] = useMemo(() => {
@@ -849,6 +889,8 @@ export function useTimelineData(
   return {
     timelineItems,
     overlayItems,
+    textOverlayItems,
+    textOverlayCues: wordCaptionCues,
     totalDuration,
     refreshTimeline,
     refreshAudioFiles,

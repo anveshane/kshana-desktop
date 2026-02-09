@@ -19,6 +19,8 @@ import { normalizePathForExport } from '../../../utils/pathNormalizer';
 import type { Artifact } from '../../../types/projectState';
 import type { SceneRef } from '../../../types/kshana/entities';
 import type { SceneVersions } from '../../../types/kshana/timeline';
+import type { TextOverlayCue } from '../../../types/captions';
+import { getActiveCue, getActiveWordIndex } from '../../../utils/captionGrouping';
 import styles from './VideoLibraryView.module.scss';
 
 // Video Card Component
@@ -104,7 +106,12 @@ export default function VideoLibraryView({
   }, [projectScenes]);
 
   // Use unified timeline data from context (single source of truth for TimelinePanel + VideoLibraryView)
-  const { timelineItems, overlayItems, totalDuration } = useTimelineDataContext();
+  const {
+    timelineItems,
+    overlayItems,
+    textOverlayCues,
+    totalDuration,
+  } = useTimelineDataContext();
 
   // Notify parent when totalDuration changes (for playback bounds checking)
   useEffect(() => {
@@ -187,6 +194,25 @@ export default function VideoLibraryView({
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
+  const renderCaptionCue = useCallback(
+    (cue: TextOverlayCue, highlightedWordIndex: number): React.ReactNode => {
+      return cue.words.map((word, index) => (
+        <span
+          key={`${cue.id}-${word.startTime}-${word.endTime}-${index}`}
+          className={
+            index === highlightedWordIndex
+              ? styles.wordCaptionWordActive
+              : styles.wordCaptionWord
+          }
+        >
+          {index > 0 ? ' ' : ''}
+          {word.text}
+        </span>
+      ));
+    },
+    [],
+  );
+
   // Wrapper to prevent backward jumps during normal playback
   // Backward jumps are only allowed during explicit seeks or when dragging
   const safeSetPlaybackTime = useCallback(
@@ -232,6 +258,15 @@ export default function VideoLibraryView({
 
   const activeOverlay =
     currentItem?.type === 'image' ? currentOverlay : null;
+
+  const activeTextCue = useMemo(
+    () => getActiveCue(textOverlayCues, playbackTime),
+    [textOverlayCues, playbackTime],
+  );
+  const activeWordIndex = useMemo(
+    () => getActiveWordIndex(activeTextCue, playbackTime),
+    [activeTextCue, playbackTime],
+  );
 
   // Log when currentVideo changes
   useEffect(() => {
@@ -1134,6 +1169,7 @@ export default function VideoLibraryView({
           startTime: number;
           endTime: number;
         }>,
+        textOverlayCues?: TextOverlayCue[],
       ) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
 
       const overlayItemsWithPaths = await Promise.all(
@@ -1191,6 +1227,7 @@ export default function VideoLibraryView({
         projectDirectory,
         resolvedAudioPath || undefined, // Pass audio path if available
         overlayItemsData,
+        textOverlayCues,
       );
 
       console.log('[VideoDownload] Composition result:', result);
@@ -1259,7 +1296,13 @@ export default function VideoLibraryView({
     } finally {
       setIsDownloading(false);
     }
-  }, [projectDirectory, timelineItems, overlayItems, isDownloading]);
+  }, [
+    projectDirectory,
+    timelineItems,
+    overlayItems,
+    textOverlayCues,
+    isDownloading,
+  ]);
 
   // Show empty state if no project
   if (!projectDirectory) {
@@ -1379,6 +1422,13 @@ export default function VideoLibraryView({
               <div className={styles.currentVideoLabel}>
                 {currentVideo.label}
               </div>
+              {activeTextCue && (
+                <div className={styles.wordCaptionOverlay}>
+                  <div className={styles.wordCaptionText}>
+                    {renderCaptionCue(activeTextCue, activeWordIndex)}
+                  </div>
+                </div>
+              )}
               <div className={styles.playerControls}>
                 <button
                   type="button"
@@ -1434,6 +1484,13 @@ export default function VideoLibraryView({
                   muted
                   aria-hidden
                 />
+              )}
+              {activeTextCue && (
+                <div className={styles.wordCaptionOverlay}>
+                  <div className={styles.wordCaptionText}>
+                    {renderCaptionCue(activeTextCue, activeWordIndex)}
+                  </div>
+                </div>
               )}
               <div className={styles.playerControls}>
                 <button

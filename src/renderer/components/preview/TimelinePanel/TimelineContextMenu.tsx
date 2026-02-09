@@ -5,9 +5,12 @@ interface TimelineContextMenuProps {
   x: number;
   y: number;
   canUndo?: boolean;
+  canGenerateWordCaptions?: boolean;
+  isGeneratingWordCaptions?: boolean;
   showVideoEditActions?: boolean;
   onUndo?: () => void;
   onAddTimelineInstruction: () => void;
+  onGenerateWordCaptions?: () => void;
   onSplitClip?: () => void;
   onTrimLeftToPlayhead?: () => void;
   onClose: () => void;
@@ -17,9 +20,12 @@ export default function TimelineContextMenu({
   x,
   y,
   canUndo = false,
+  canGenerateWordCaptions = false,
+  isGeneratingWordCaptions = false,
   showVideoEditActions = false,
   onUndo,
   onAddTimelineInstruction,
+  onGenerateWordCaptions,
   onSplitClip,
   onTrimLeftToPlayhead,
   onClose,
@@ -94,6 +100,21 @@ export default function TimelineContextMenu({
         onClick={() => handleAction(onAddTimelineInstruction)}
       >
         Add Timeline Instruction
+      </button>
+
+      <button
+        type="button"
+        className={`${styles.menuItem} ${!onGenerateWordCaptions || !canGenerateWordCaptions || isGeneratingWordCaptions ? styles.disabled : ''}`}
+        onClick={() => handleAction(onGenerateWordCaptions)}
+        disabled={
+          !onGenerateWordCaptions ||
+          !canGenerateWordCaptions ||
+          isGeneratingWordCaptions
+        }
+      >
+        {isGeneratingWordCaptions
+          ? 'Generating Word Captions...'
+          : 'Generate Word Captions'}
       </button>
 
       {showVideoEditActions && (

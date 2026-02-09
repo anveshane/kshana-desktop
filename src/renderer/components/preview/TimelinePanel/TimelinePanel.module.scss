@@ -99,6 +99,13 @@
   gap: $spacing-sm;
 }
 
+.captionGenerationStatus {
+  font-size: $font-size-xs;
+  color: $color-accent-cyan;
+  max-width: 260px;
+  @include truncate;
+}
+
 .playButton {
   @include flex-center;
   width: 28px;
@@ -325,6 +332,19 @@
   }
 }
 
+.textOverlayTrack {
+  margin-top: 0 !important;
+  padding-top: 0;
+  min-height: 64px;
+  background-color: rgba($color-accent-green, 0.03);
+
+  .trackContent {
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+    min-height: 64px;
+  }
+}
+
 .trackLabel {
   width: 80px;
   padding: $spacing-sm;
@@ -537,6 +557,38 @@
   font-weight: $font-weight-semibold;
   color: $color-accent-cyan;
   background-color: rgba($color-accent-cyan, 0.1);
+}
+
+.textOverlayBlock {
+  position: absolute;
+  top: $spacing-sm;
+  bottom: $spacing-sm;
+  border: 1px solid rgba(96, 165, 250, 0.55);
+  border-radius: $radius-sm;
+  background: linear-gradient(
+    180deg,
+    rgba(96, 165, 250, 0.18) 0%,
+    rgba(59, 130, 246, 0.1) 100%
+  );
+  overflow: hidden;
+  cursor: pointer;
+  transition: all $transition-fast;
+  display: flex;
+  align-items: center;
+  padding: 0 $spacing-sm;
+
+  &:hover {
+    border-color: rgba(125, 188, 255, 0.95);
+    box-shadow: 0 0 10px rgba(96, 165, 250, 0.26);
+  }
+}
+
+.textOverlayLabel {
+  color: #e8f2ff;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  width: 100%;
+  @include truncate;
 }
 
 .audioBlock {
