@@ -570,9 +570,11 @@ export class ProjectService {
   private async readTimelineState(
     directory: string,
   ): Promise<KshanaTimelineState | null> {
-    return this.readJSON<KshanaTimelineState>(
+    const state = await this.readJSON<KshanaTimelineState>(
       `${directory}/${PROJECT_PATHS.UI_TIMELINE}`,
     );
+    if (!state) return null;
+    return this.normalizeTimelineState(state);
   }
 
   private async writeTimelineState(
@@ -580,6 +582,20 @@ export class ProjectService {
     state: KshanaTimelineState,
   ): Promise<void> {
     await this.writeJSON(`${directory}/${PROJECT_PATHS.UI_TIMELINE}`, state);
+  }
+
+  private normalizeTimelineState(
+    state: KshanaTimelineState,
+  ): KshanaTimelineState {
+    return {
+      ...DEFAULT_TIMELINE_STATE,
+      ...state,
+      active_versions: state.active_versions ?? {},
+      markers: state.markers ?? [],
+      imported_clips: state.imported_clips ?? [],
+      image_timing_overrides: state.image_timing_overrides ?? {},
+      video_split_overrides: state.video_split_overrides ?? {},
+    };
   }
 
   private async readContextIndex(

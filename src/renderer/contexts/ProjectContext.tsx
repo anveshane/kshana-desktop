@@ -119,6 +119,16 @@ interface ProjectActions {
     importedClips: KshanaTimelineState['imported_clips'],
   ) => void;
 
+  /** Update per-image timeline timing overrides */
+  updateImageTimingOverrides: (
+    overrides: KshanaTimelineState['image_timing_overrides'],
+  ) => void;
+
+  /** Update per-video split overrides */
+  updateVideoSplitOverrides: (
+    overrides: KshanaTimelineState['video_split_overrides'],
+  ) => void;
+
   /** Add an asset to the asset manifest */
   addAsset: (assetInfo: AssetInfo) => Promise<boolean>;
 
@@ -1244,6 +1254,32 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     [],
   );
 
+  const updateImageTimingOverrides = useCallback(
+    (overrides: KshanaTimelineState['image_timing_overrides']) => {
+      setState((prev) => ({
+        ...prev,
+        timelineState: {
+          ...prev.timelineState,
+          image_timing_overrides: overrides,
+        },
+      }));
+    },
+    [],
+  );
+
+  const updateVideoSplitOverrides = useCallback(
+    (overrides: KshanaTimelineState['video_split_overrides']) => {
+      setState((prev) => ({
+        ...prev,
+        timelineState: {
+          ...prev.timelineState,
+          video_split_overrides: overrides,
+        },
+      }));
+    },
+    [],
+  );
+
   // Add asset to manifest
   const addAsset = useCallback(
     async (assetInfo: AssetInfo): Promise<boolean> => {
@@ -1339,6 +1375,8 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       active_versions: state.timelineState.active_versions,
       markers: state.timelineState.markers,
       imported_clips: state.timelineState.imported_clips,
+      image_timing_overrides: state.timelineState.image_timing_overrides,
+      video_split_overrides: state.timelineState.video_split_overrides,
     });
 
     // Only save if state actually changed
@@ -1373,6 +1411,8 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     JSON.stringify(state.timelineState.active_versions),
     JSON.stringify(state.timelineState.markers),
     JSON.stringify(state.timelineState.imported_clips),
+    JSON.stringify(state.timelineState.image_timing_overrides),
+    JSON.stringify(state.timelineState.video_split_overrides),
     saveTimelineState,
   ]);
 
@@ -1421,6 +1461,8 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       setActiveVersion,
       updateMarkers,
       updateImportedClips,
+      updateImageTimingOverrides,
+      updateVideoSplitOverrides,
       addAsset,
       refreshAssetManifest,
       subscribeImageProjection,
@@ -1442,6 +1484,8 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       setActiveVersion,
       updateMarkers,
       updateImportedClips,
+      updateImageTimingOverrides,
+      updateVideoSplitOverrides,
       addAsset,
       refreshAssetManifest,
       subscribeImageProjection,

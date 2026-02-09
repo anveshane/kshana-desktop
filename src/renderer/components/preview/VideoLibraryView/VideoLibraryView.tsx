@@ -367,8 +367,9 @@ export default function VideoLibraryView({
   const handleTimeUpdate = useCallback(
     (e: React.SyntheticEvent<HTMLVideoElement>) => {
       if (!currentVideo || isSeekingRef.current || isDragging) return;
+      const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
       const videoTime = e.currentTarget.currentTime;
-      const timelineTime = currentVideo.startTime + videoTime;
+      const timelineTime = currentVideo.startTime + (videoTime - sourceOffset);
       // Always update playbackTime from video - don't use safeSetPlaybackTime
       // Video element's currentTime is authoritative and should be trusted
       console.log('[VideoLibraryView] Video time update:', {
@@ -427,8 +428,12 @@ export default function VideoLibraryView({
         safeSetPlaybackTime(seekTime, true);
         // Still seek within current video if possible
         if (videoRef.current && currentVideo) {
-          const videoTime = seekTime - currentVideo.startTime;
-          if (videoTime >= 0 && videoTime <= currentVideo.duration) {
+          const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
+          const videoTime = sourceOffset + (seekTime - currentVideo.startTime);
+          if (
+            videoTime >= sourceOffset &&
+            videoTime <= sourceOffset + currentVideo.duration
+          ) {
             videoRef.current.currentTime = videoTime;
           }
         }
@@ -445,8 +450,12 @@ export default function VideoLibraryView({
 
       // If seeking within the same video item, update video element directly
       if (currentVideo && videoRef.current) {
-        const videoTime = seekTime - currentVideo.startTime;
-        if (videoTime >= 0 && videoTime <= currentVideo.duration) {
+        const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
+        const videoTime = sourceOffset + (seekTime - currentVideo.startTime);
+        if (
+          videoTime >= sourceOffset &&
+          videoTime <= sourceOffset + currentVideo.duration
+        ) {
           videoRef.current.currentTime = videoTime;
         }
       }
@@ -721,8 +730,12 @@ export default function VideoLibraryView({
       const handleCanPlay = () => {
         console.log(`[VideoLibraryView] Video can play: ${currentVideo.label}`);
         // Seek to the correct position based on playbackTime
-        const videoTime = playbackTime - currentVideo.startTime;
-        if (videoTime > 0 && videoTime < currentVideo.duration) {
+        const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
+        const videoTime = sourceOffset + (playbackTime - currentVideo.startTime);
+        if (
+          videoTime > sourceOffset &&
+          videoTime < sourceOffset + currentVideo.duration
+        ) {
           videoElement.currentTime = Math.max(0, videoTime);
         }
         // Resume playback if it was playing
@@ -740,8 +753,12 @@ export default function VideoLibraryView({
       const handleLoadedData = () => {
         console.log(`[VideoLibraryView] Video loaded: ${currentVideo.label}`);
         // Video is loaded, seek to correct position
-        const videoTime = playbackTime - currentVideo.startTime;
-        if (videoTime > 0 && videoTime < currentVideo.duration) {
+        const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
+        const videoTime = sourceOffset + (playbackTime - currentVideo.startTime);
+        if (
+          videoTime > sourceOffset &&
+          videoTime < sourceOffset + currentVideo.duration
+        ) {
           videoElement.currentTime = Math.max(0, videoTime);
         }
         // Resume playback if it was playing
@@ -881,13 +898,14 @@ export default function VideoLibraryView({
       return;
     }
 
-    const expectedVideoTime = playbackTime - currentVideo.startTime;
+    const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
+    const expectedVideoTime = sourceOffset + (playbackTime - currentVideo.startTime);
 
     // Only update if there's a significant difference to avoid jitter
     // Also ensure we're within valid bounds
     if (
-      expectedVideoTime >= 0 &&
-      expectedVideoTime <= currentVideo.duration &&
+      expectedVideoTime >= sourceOffset &&
+      expectedVideoTime <= sourceOffset + currentVideo.duration &&
       Math.abs(videoElement.currentTime - expectedVideoTime) > 0.2
     ) {
       videoElement.currentTime = Math.max(0, expectedVideoTime);
@@ -1035,6 +1053,8 @@ export default function VideoLibraryView({
               duration: item.duration,
               startTime: item.startTime,
               endTime: item.endTime,
+              sourceOffsetSeconds:
+                exportType === 'video' ? item.sourceOffsetSeconds ?? 0 : 0,
               originalIndex: index,
               label: item.label,
             };
@@ -1104,6 +1124,7 @@ export default function VideoLibraryView({
           duration: number;
           startTime: number;
           endTime: number;
+          sourceOffsetSeconds?: number;
         }>,
         projectDirectory: string,
         audioPath?: string,

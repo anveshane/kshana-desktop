@@ -533,6 +533,7 @@ interface TimelineItem {
   duration: number;
   startTime: number;
   endTime: number;
+  sourceOffsetSeconds?: number;
 }
 
 interface OverlayItem {
@@ -662,7 +663,15 @@ ipcMain.handle(
             `[VideoComposition] Converting video segment ${i + 1}...`,
           );
           await new Promise<void>((resolve, reject) => {
-            ffmpeg(absolutePath)
+            const command = ffmpeg(absolutePath);
+            if (
+              typeof item.sourceOffsetSeconds === 'number' &&
+              item.sourceOffsetSeconds > 0
+            ) {
+              command.inputOptions([`-ss ${item.sourceOffsetSeconds}`]);
+            }
+
+            command
               .outputOptions([
                 '-c:v libx264',
                 '-c:a aac',

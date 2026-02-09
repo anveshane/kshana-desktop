@@ -381,6 +381,37 @@
   }
 }
 
+.editableImageBlock {
+  cursor: pointer;
+}
+
+.editing {
+  cursor: grabbing;
+  box-shadow: 0 0 12px rgba($color-accent-green, 0.5);
+}
+
+.imageResizeHandle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  background: linear-gradient(
+    90deg,
+    rgba($color-accent-green, 0),
+    rgba($color-accent-green, 0.35)
+  );
+  opacity: 0.6;
+  transition: opacity $transition-fast;
+  z-index: 3;
+}
+
+.editableImageBlock:hover .imageResizeHandle,
+.editing .imageResizeHandle {
+  opacity: 1;
+}
+
 .dropIndicatorLine {
   position: absolute;
   top: $spacing-sm;

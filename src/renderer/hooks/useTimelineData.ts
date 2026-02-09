@@ -18,6 +18,13 @@ import {
   selectBestAssetForPlacement,
   type ImageProjectionSnapshot,
 } from '../services/assets';
+import {
+  applyImageTimingOverridesToItems,
+  applyVideoSplitOverridesToItems,
+  applyRippleTimingFromImageDurationEdits,
+  type ImageTimingOverride,
+  type VideoSplitOverride,
+} from '../utils/timelineImageEditing';
 
 export interface TimelineItem {
   id: string; // "PLM-1", "vd-placement-1", "info-placement-1", "placeholder-start", "audio-1"
@@ -31,6 +38,12 @@ export interface TimelineItem {
   imagePath?: string; // resolved if asset matched
   videoPath?: string; // resolved if asset matched (also used for infographic mp4)
   audioPath?: string; // path to audio file
+  sourceStartTime?: number; // original placement start (before UI override)
+  sourceEndTime?: number; // original placement end (before UI override)
+  sourceOffsetSeconds?: number; // source media offset for split/trimmed video segments
+  sourcePlacementNumber?: number; // original placement number for derived segments
+  sourcePlacementDurationSeconds?: number; // original full source duration
+  segmentIndex?: number; // derived segment index for split video
 }
 
 export interface TimelineData {
@@ -136,6 +149,7 @@ export function useTimelineData(
   const {
     isLoaded,
     assetManifest,
+    timelineState,
     refreshAssetManifest,
     isImageSyncV2Enabled,
     subscribeImageProjection,
@@ -621,6 +635,8 @@ export function useTimelineData(
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
         imagePath: selectedImagePath,
+        sourceStartTime: startSeconds,
+        sourceEndTime: endSeconds,
       });
     });
 
@@ -646,10 +662,25 @@ export function useTimelineData(
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
         videoPath: asset?.path,
+        sourceStartTime: startSeconds,
+        sourceEndTime: endSeconds,
+        sourceOffsetSeconds: 0,
+        sourcePlacementNumber: placement.placementNumber,
+        sourcePlacementDurationSeconds: endSeconds - startSeconds,
+        segmentIndex: 0,
       });
     });
 
-    return items;
+    const imageOverrides: Record<string, ImageTimingOverride> =
+      timelineState.image_timing_overrides ?? {};
+    const withImageDurationEdits = applyImageTimingOverridesToItems(items, imageOverrides);
+    const videoSplitOverrides: Record<string, VideoSplitOverride> =
+      timelineState.video_split_overrides ?? {};
+    const withVideoSplits = applyVideoSplitOverridesToItems(
+      withImageDurationEdits,
+      videoSplitOverrides,
+    );
+    return applyRippleTimingFromImageDurationEdits(withVideoSplits);
   }, [
     imagePlacements,
     videoPlacements,
@@ -659,6 +690,8 @@ export function useTimelineData(
     imageProjectionSnapshot,
     isImageSyncV2CompareEnabled,
     isImageSyncV2Enabled,
+    timelineState.image_timing_overrides,
+    timelineState.video_split_overrides,
   ]);
 
   // Convert infographic placements to overlay items (contained within images)

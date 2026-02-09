@@ -83,6 +83,14 @@ export interface SceneVersions {
 }
 
 /**
+ * Per-video split settings (placement-based)
+ */
+export interface VideoSplitOverride {
+  /** Split offsets in seconds from the source clip start */
+  split_offsets_seconds: number[];
+}
+
+/**
  * Timeline state persistence
  */
 export interface TimelineState {
@@ -103,6 +111,18 @@ export interface TimelineState {
 
   /** Imported video clips */
   imported_clips: ImportedClip[];
+
+  /** Per-image timing overrides keyed by placement number string */
+  image_timing_overrides: Record<
+    string,
+    {
+      start_time_seconds: number;
+      end_time_seconds: number;
+    }
+  >;
+
+  /** Per-video split overrides keyed by placement number string */
+  video_split_overrides: Record<string, VideoSplitOverride>;
 }
 
 /**
@@ -115,6 +135,8 @@ export const DEFAULT_TIMELINE_STATE: TimelineState = {
   active_versions: {},
   markers: [],
   imported_clips: [],
+  image_timing_overrides: {},
+  video_split_overrides: {},
 };
 
 /**
