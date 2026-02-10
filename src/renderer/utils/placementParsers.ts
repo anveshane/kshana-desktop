@@ -36,6 +36,8 @@ export interface ParsedInfographicPlacement {
     | 'statistic'
     | 'list';
   prompt: string;
+  /** Optional structured values for chart/list/stat layouts */
+  data?: Record<string, unknown>;
   /** Optional motion preset for animation style */
   motionPreset?: 'minimal' | 'energetic' | 'bouncy' | 'slide';
 }
@@ -559,6 +561,66 @@ function normalizeInfographicType(
   return 'statistic';
 }
 
+function parseInfographicPromptDataAndMotion(raw: string): {
+  prompt: string;
+  data?: Record<string, unknown>;
+  motionPreset?: 'minimal' | 'energetic' | 'bouncy' | 'slide';
+  dataParseError?: string;
+} {
+  let remaining = raw.trim();
+  let data: Record<string, unknown> | undefined;
+  let motionPreset: 'minimal' | 'energetic' | 'bouncy' | 'slide' | undefined;
+  let dataParseError: string | undefined;
+
+  while (true) {
+    const motionMatch = remaining.match(/^(.*)\s*\|\s*motion\s*[:=]\s*(\w+)\s*$/);
+    if (motionMatch && motionMatch[1] && motionMatch[2]) {
+      remaining = motionMatch[1].trim();
+      const normalized = motionMatch[2].trim().toLowerCase();
+      if (
+        normalized === 'minimal' ||
+        normalized === 'energetic' ||
+        normalized === 'bouncy' ||
+        normalized === 'slide'
+      ) {
+        motionPreset = normalized;
+      }
+      continue;
+    }
+
+    const dataMatch = remaining.match(/^(.*)\s*\|\s*data\s*=\s*([\s\S]*)$/);
+    if (dataMatch && dataMatch[1]) {
+      remaining = dataMatch[1].trim();
+      const rawData = dataMatch[2]?.trim();
+      if (!rawData) {
+        dataParseError = 'data= marker present but JSON payload is empty';
+      } else {
+        try {
+          const parsed = JSON.parse(rawData) as unknown;
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            dataParseError = 'data JSON must be an object';
+          } else {
+            data = parsed as Record<string, unknown>;
+          }
+        } catch (error) {
+          dataParseError =
+            error instanceof Error ? error.message : `Invalid data JSON: ${String(error)}`;
+        }
+      }
+      continue;
+    }
+
+    break;
+  }
+
+  return {
+    prompt: remaining.trim(),
+    data,
+    motionPreset,
+    dataParseError,
+  };
+}
+
 /**
  * Parse infographic placements from the infographic-placements.md file content.
  *
@@ -594,11 +656,11 @@ export function parseInfographicPlacementsWithErrors(
     }
 
     let match = trimmedLine.match(
-      /^[•\-]?\s*Placement\s+(\d+)\s*:\s*([^\|]+?)\s*\|\s*type\s*=\s*([^\|]+?)\s*\|\s*(.+?)(?:\s*\|\s*motion\s*[:=]\s*(\w+))?$/,
+      /^[•\-]?\s*Placement\s+(\d+)\s*:\s*([^\|]+?)\s*\|\s*type\s*=\s*([^\|]+?)\s*\|\s*(.+)$/,
     );
     if (!match || !match[1] || !match[2] || !match[3] || !match[4]) {
       const alt = trimmedLine.match(
-        /Placement\s+(\d+)\s*:\s*([^\|]+?)\s*\|\s*type\s*=\s*([^\|]+?)\s*\|\s*(.+?)(?:\s*\|\s*motion\s*[:=]\s*(\w+))?$/,
+        /Placement\s+(\d+)\s*:\s*([^\|]+?)\s*\|\s*type\s*=\s*([^\|]+?)\s*\|\s*(.+)$/,
       );
       if (!alt || !alt[1] || !alt[2] || !alt[3] || !alt[4]) {
         if (strict) {
@@ -660,9 +722,9 @@ export function parseInfographicPlacementsWithErrors(
     }
 
     const typeStr = match[3]!.trim();
-    const prompt = match[4]!.trim();
-    const motionPresetStr = match[5]?.trim();
-    
+    const parsedTail = parseInfographicPromptDataAndMotion(match[4]!);
+    const prompt = parsedTail.prompt;
+
     if (!prompt) {
       if (strict) {
         errors.push({
@@ -675,27 +737,31 @@ export function parseInfographicPlacementsWithErrors(
       continue;
     }
 
-    const infographicType = normalizeInfographicType(typeStr);
-    
-    // Normalize motion preset
-    let motionPreset: 'minimal' | 'energetic' | 'bouncy' | 'slide' | undefined;
-    if (motionPresetStr) {
-      const normalized = motionPresetStr.toLowerCase();
-      if (normalized === 'energetic' || normalized === 'bouncy' || normalized === 'slide') {
-        motionPreset = normalized;
-      } else if (normalized === 'minimal') {
-        motionPreset = 'minimal';
+    if (parsedTail.dataParseError) {
+      const reason = `Invalid data JSON: ${parsedTail.dataParseError}`;
+      if (strict) {
+        errors.push({
+          line: lineNum + 1,
+          content: trimmedLine,
+          reason,
+          suggestion:
+            'Use valid JSON object syntax for data payload, e.g. data={"labels":["Q1"],"values":[42]}',
+        });
+        continue;
       }
-      // If invalid, leave undefined (will default to minimal)
+      warnings.push(`Line ${lineNum + 1}: ${reason}`);
     }
-    
+
+    const infographicType = normalizeInfographicType(typeStr);
+
     placements.push({
       placementNumber,
       startTime,
       endTime,
       infographicType,
       prompt,
-      motionPreset,
+      data: parsedTail.data,
+      motionPreset: parsedTail.motionPreset,
     });
   }
 

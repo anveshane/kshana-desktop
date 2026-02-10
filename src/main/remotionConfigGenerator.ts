@@ -34,6 +34,7 @@ export function buildRemotionPlacements(
       const placement = placementMap.get(item.placementNumber!);
       const infographicType = placement?.infographicType ?? 'statistic';
       const prompt = item.prompt ?? placement?.prompt ?? '';
+      const data = placement?.data;
 
       return {
         placementNumber: item.placementNumber!,
@@ -41,6 +42,7 @@ export function buildRemotionPlacements(
         endTime: formatTime(item.endTime),
         infographicType,
         prompt,
+        data,
         componentName: `Infographic${item.placementNumber}`,
       };
     });

@@ -50,7 +50,9 @@ function getProductionRemotionDir(): string {
 }
 
 function getDevelopmentRemotionDir(): string {
+  const cwdRemotionPath = path.resolve(process.cwd(), '..', 'kshana-ink', 'remotion-infographics');
   const devPaths = [
+    cwdRemotionPath,
     path.join(__dirname, '../../node_modules/kshana-ink/remotion-infographics'),
     path.join(__dirname, '../../kshana-ink/remotion-infographics'),
     path.join(__dirname, '../../../remotion-infographics'),

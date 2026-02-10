@@ -927,59 +927,68 @@ ipcMain.handle(
                 overlay.startTime >= item.startTime &&
                 overlay.endTime <= item.endTime,
             );
+            const orderedOverlays = overlaysForItem.sort(
+              (a, b) => a.startTime - b.startTime,
+            );
 
-            if (overlaysForItem.length > 1) {
-              console.warn(
-                `[VideoComposition] Multiple overlays detected for image segment ${i + 1}; using the earliest overlay`,
-                overlaysForItem.map((overlay) => ({
+            if (orderedOverlays.length > 0) {
+              const overlaySegmentPath = path.join(
+                tempDir,
+                `segment-${i}-overlays.mp4`,
+              );
+              const filterParts: string[] = ['[0:v]setpts=PTS-STARTPTS[base0]'];
+              let currentBase = 'base0';
+
+              console.log(
+                `[VideoComposition] Applying ${orderedOverlays.length} overlay(s) to image segment ${i + 1}`,
+                orderedOverlays.map((overlay) => ({
                   startTime: overlay.startTime,
                   endTime: overlay.endTime,
                   path: overlay.absolutePath,
                 })),
               );
-            }
 
-            const overlay = overlaysForItem.sort(
-              (a, b) => a.startTime - b.startTime,
-            )[0];
+              orderedOverlays.forEach((overlay, overlayIndex) => {
+                const overlayOffset = Math.max(
+                  0,
+                  overlay.startTime - item.startTime,
+                );
+                const inputIndex = overlayIndex + 1;
+                const overlayLabel = `ov${overlayIndex}`;
+                const nextBase = `base${overlayIndex + 1}`;
 
-            if (overlay) {
-              const overlayOffset = Math.max(
-                0,
-                overlay.startTime - item.startTime,
-              );
-              const overlaySegmentPath = path.join(
-                tempDir,
-                `segment-${i}-overlay.mp4`,
-              );
-
-              console.log(
-                `[VideoComposition] Applying overlay to image segment ${i + 1}:`,
-                {
-                  overlayPath: overlay.absolutePath,
-                  overlayOffset,
-                  overlayDuration: overlay.duration,
-                },
-              );
+                filterParts.push(
+                  `[${inputIndex}:v]format=rgba,setpts=PTS-STARTPTS+${overlayOffset}/TB[${overlayLabel}]`,
+                );
+                filterParts.push(
+                  `[${currentBase}][${overlayLabel}]overlay=(W-w)/2:(H-h)/2:eof_action=pass[${nextBase}]`,
+                );
+                currentBase = nextBase;
+              });
 
               await new Promise<void>((resolve, reject) => {
-                ffmpeg(segmentPath)
-                  .input(overlay.absolutePath)
-                  .complexFilter(
-                    `[1:v]format=rgba,setpts=PTS-STARTPTS+${overlayOffset}/TB[ov];[0:v][ov]overlay=(W-w)/2:(H-h)/2:eof_action=pass`,
-                  )
+                const command = ffmpeg(segmentPath);
+                orderedOverlays.forEach((overlay) => {
+                  command.input(overlay.absolutePath);
+                });
+
+                command
+                  .complexFilter(filterParts.join(';'))
                   .outputOptions([
+                    '-map',
+                    `[${currentBase}]`,
                     '-c:v libx264',
                     '-preset medium',
                     '-crf 23',
                     '-pix_fmt yuv420p',
+                    '-an',
                     '-t',
                     item.duration.toString(),
                   ])
                   .output(overlaySegmentPath)
                   .on('end', () => {
                     console.log(
-                      `[VideoComposition] Overlay applied for segment ${i + 1}`,
+                      `[VideoComposition] Overlay chain applied for segment ${i + 1}`,
                     );
                     resolve();
                   })

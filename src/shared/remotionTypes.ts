@@ -13,6 +13,7 @@ export interface RemotionPlacement {
     | 'line_chart'
     | 'diagram';
   prompt: string;
+  data?: Record<string, unknown>;
   componentName: string;
 }
 
@@ -62,4 +63,5 @@ export interface ParsedInfographicPlacement {
     | 'statistic'
     | 'list';
   prompt: string;
+  data?: Record<string, unknown>;
 }

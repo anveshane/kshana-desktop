@@ -259,6 +259,7 @@ class RemotionManager extends EventEmitter {
       endTime: string;
       infographicType: string;
       prompt: string;
+      data?: Record<string, unknown>;
       componentName: string;
     }>,
     outDir: string,
@@ -295,6 +296,7 @@ class RemotionManager extends EventEmitter {
         const inputProps = {
           prompt: p.prompt,
           infographicType: p.infographicType,
+          data: p.data ?? {},
         };
 
         const composition = await selectComposition({
