@@ -161,6 +161,9 @@ function setupEnvironment(overrides: BackendEnvOverrides): void {
   } catch (err) {
     log.warn('remotion-infographics not found:', (err as Error).message);
   }
+
+  // Enable expanded prompt logging for debugging
+  process.env.KSHANA_LOG_EXPANDED_PROMPTS = '1';
 }
 
 class BackendManager extends EventEmitter {
