@@ -16,8 +16,8 @@ jobs:
         id: set_branches
         run: |
           # Hardcoded branch names for now
-          FRONTEND_BRANCH="fix-image-display"
-          BACKEND_BRANCH="fix-image-display"
+          FRONTEND_BRANCH="feat/enhance-infographics"
+          BACKEND_BRANCH="feat/enhance-infographics"
           echo "FRONTEND_BRANCH=$FRONTEND_BRANCH" >> $GITHUB_OUTPUT
           echo "BACKEND_BRANCH=$BACKEND_BRANCH" >> $GITHUB_OUTPUT
           echo "✓ Using branches: frontend=$FRONTEND_BRANCH, backend=$BACKEND_BRANCH"
@@ -182,6 +182,219 @@ jobs:
           fs.writeFileSync('release/app/package.json', JSON.stringify(appPkg, null, 2) + '\n');
           console.log('✓ Created release/app/package.json without kshana-ink');
           EOF
+
+      - name: Install dependencies
+        working-directory: kshana-desktop
+        run: |
+          # Skip postinstall scripts to avoid electron-builder install-app-deps running
+          # with kshana-ink in package.json. Our install-app-deps.ts will handle everything.
+          npm ci --ignore-scripts
+          echo "✓ Dependencies installed (postinstall scripts skipped)"
+          
+          # Manually run the postinstall steps we need (excluding electron-builder install-app-deps)
+          echo "Running postinstall steps manually..."
+          npx ts-node .erb/scripts/check-native-dep.js
+          npm run build:dll
+          echo "✓ Postinstall steps completed"
+          echo "Note: kshana-ink will be handled by install-app-deps.ts during package step"
+
+      - name: Build and Publish Electron app
+        working-directory: kshana-desktop
+        run: |
+          # This workflow is triggered by tags (v*), so we use 'npm run release'
+          # which publishes to GitHub Releases automatically via electron-builder
+          echo "Building and publishing release for tag: ${{ github.ref_name }}"
+          npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-windows:
+    runs-on: windows-latest
+    needs: release-mac  # Wait for Mac build to create the release first
+    permissions:
+      contents: write  # Required to create releases and upload artifacts
+    
+    steps:
+      - name: Set branch names
+        id: set_branches
+        run: |
+          # Hardcoded branch names for now
+          $FRONTEND_BRANCH="feat/enhance-infographics"
+          $BACKEND_BRANCH="feat/enhance-infographics"
+          echo "FRONTEND_BRANCH=$FRONTEND_BRANCH" >> $env:GITHUB_OUTPUT
+          echo "BACKEND_BRANCH=$BACKEND_BRANCH" >> $env:GITHUB_OUTPUT
+          echo "✓ Using branches: frontend=$FRONTEND_BRANCH, backend=$BACKEND_BRANCH"
+
+      - name: Checkout kshana-desktop (frontend)
+        uses: actions/checkout@v4
+        with:
+          path: kshana-desktop
+          ref: ${{ steps.set_branches.outputs.FRONTEND_BRANCH }}
+
+      - name: Verify backend repo access
+        run: |
+          echo "Attempting to access backend repo..."
+          echo "Branch: ${{ steps.set_branches.outputs.BACKEND_BRANCH }}"
+          if ("${{ secrets.BACKEND_REPO_TOKEN }}" -eq "") {
+            echo "⚠ BACKEND_REPO_TOKEN secret is not set, will try GITHUB_TOKEN"
+          } else {
+            echo "✓ BACKEND_REPO_TOKEN is set"
+          }
+          
+      - name: Checkout kshana-ink backend
+        id: checkout_backend
+        uses: actions/checkout@v4
+        with:
+          repository: anveshane/kshana-ink
+          path: kshana-ink
+          ref: ${{ steps.set_branches.outputs.BACKEND_BRANCH }}
+          token: ${{ secrets.BACKEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+        continue-on-error: true
+
+      - name: Handle backend checkout failure
+        if: steps.checkout_backend.outcome == 'failure'
+        run: |
+          echo "Backend checkout failed. Trying default branch..."
+          echo "Attempted branch: ${{ steps.set_branches.outputs.BACKEND_BRANCH }}"
+          echo ""
+          echo "Possible issues:"
+          echo "1. Branch '${{ steps.set_branches.outputs.BACKEND_BRANCH }}' doesn't exist"
+          echo "2. BACKEND_REPO_TOKEN doesn't have access"
+          echo "3. Token is invalid or expired"
+          echo ""
+          echo "Trying to checkout without specifying branch (uses default)..."
+          
+      - name: Checkout kshana-ink backend (fallback to default)
+        if: steps.checkout_backend.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          repository: anveshane/kshana-ink
+          path: kshana-ink
+          token: ${{ secrets.BACKEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+
+      - name: Verify backend checkout succeeded
+        run: |
+          echo "Checking if backend repo was checked out..."
+          if (-not (Test-Path "kshana-ink")) {
+            echo "Error: Backend repo directory not found!"
+            echo "Current directory: $(Get-Location)"
+            echo "Contents:"
+            Get-ChildItem
+            exit 1
+          }
+          echo "✓ Backend repo directory exists"
+          echo "Backend repo contents:"
+          Get-ChildItem kshana-ink | Select-Object -First 10
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: kshana-desktop/package-lock.json
+
+      - name: Verify directory structure
+        run: |
+          echo "Current directory: $(Get-Location)"
+          echo "Directory contents:"
+          Get-ChildItem
+          echo ""
+          echo "kshana-desktop location:"
+          Get-ChildItem kshana-desktop | Select-Object -First 5
+          echo ""
+          echo "kshana-ink location:"
+          Get-ChildItem kshana-ink | Select-Object -First 5
+          echo ""
+          echo "Verifying kshana-ink package.json exists:"
+          if (Test-Path "kshana-ink/package.json") {
+            echo "✓ kshana-ink/package.json found"
+          } else {
+            echo "✗ kshana-ink/package.json NOT found"
+          }
+          echo ""
+          echo "Verifying test_image and test_video folders exist:"
+          if (Test-Path "kshana-desktop/test_image") {
+            echo "✓ test_image folder found"
+            $imageCount = (Get-ChildItem kshana-desktop/test_image).Count
+            echo "  Images: $imageCount files"
+            Get-ChildItem kshana-desktop/test_image
+          } else {
+            echo "✗ test_image folder NOT found - images won't load in production!"
+          }
+          if (Test-Path "kshana-desktop/test_video") {
+            echo "✓ test_video folder found"
+            $videoCount = (Get-ChildItem kshana-desktop/test_video/*.mp4 -ErrorAction SilentlyContinue).Count
+            echo "  Videos: $videoCount files"
+            Get-ChildItem kshana-desktop/test_video/*.mp4 -ErrorAction SilentlyContinue
+          } else {
+            echo "✗ test_video folder NOT found - videos won't load in production!"
+          }
+
+      - name: Build kshana-ink
+        run: |
+          cd kshana-ink
+          echo "Building kshana-ink from: $(Get-Location)"
+          pnpm install --no-frozen-lockfile
+          pnpm build
+          echo "✓ kshana-ink built successfully"
+          echo "Verifying dist directory exists:"
+          if (Test-Path "dist") {
+            Get-ChildItem dist | Select-Object -First 10
+          } else {
+            echo "✗ dist directory not found"
+          }
+
+      - name: Prepare release/app before install
+        working-directory: kshana-desktop
+        run: |
+          # Create release/app directory structure and package.json without kshana-ink
+          # This prevents electron-builder install-app-deps from trying to resolve kshana-ink
+          # during postinstall. Our install-app-deps.ts will handle kshana-ink later.
+          New-Item -ItemType Directory -Force -Path release/app
+          
+          # Create a minimal package.json without kshana-ink
+          # electron-builder install-app-deps will merge dependencies from main package.json
+          # but won't try to resolve kshana-ink if it's not in release/app/package.json
+          node -e @"
+          const fs = require('fs');
+          const mainPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          
+          // Create release/app/package.json without kshana-ink
+          // Ensure version is set (required by electron-builder)
+          // For production builds, main should point to dist/main/main.js (not dev DLL)
+          const appPkg = {
+            name: mainPkg.name,
+            version: mainPkg.version || '1.0.0',
+            description: mainPkg.description,
+            main: './dist/main/main.js', // Production main entry point
+            dependencies: {}
+          };
+          
+          // Ensure version is present (electron-builder requirement)
+          if (!appPkg.version) {
+            appPkg.version = '1.0.0';
+            console.log('⚠ Version not found in package.json, using default: 1.0.0');
+          }
+          
+          // Copy dependencies except kshana-ink
+          if (mainPkg.dependencies) {
+            Object.keys(mainPkg.dependencies).forEach(dep => {
+              if (dep !== 'kshana-ink') {
+                appPkg.dependencies[dep] = mainPkg.dependencies[dep];
+              }
+            });
+          }
+          
+          fs.writeFileSync('release/app/package.json', JSON.stringify(appPkg, null, 2) + '\n');
+          console.log('✓ Created release/app/package.json without kshana-ink');
+          "@
 
       - name: Install dependencies
         working-directory: kshana-desktop
