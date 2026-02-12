@@ -355,8 +355,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/core/llm
           
           # Build using tsc with proper configuration
+          # Override noEmit from tsconfig.json to actually output files
           echo "Compiling TypeScript files..."
-          npx tsc --project tsconfig.json --outDir dist --declaration --declarationMap --sourceMap
+          npx tsc --project tsconfig.json --outDir dist --declaration --declarationMap --sourceMap --noEmit false
           
           # Copy prompts directory (required for runtime)
           if (Test-Path "prompts") {
