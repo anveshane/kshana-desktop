@@ -345,23 +345,18 @@ jobs:
           echo "Building kshana-ink from: $(Get-Location)"
           pnpm install --no-frozen-lockfile
           
-          # Try building with tsx instead of tsup (more stable on Windows)
-          echo "Attempting alternative build with tsx..."
+          # Use TypeScript compiler directly (more reliable on Windows than tsup/esbuild)
+          echo "Building with TypeScript compiler..."
           
-          # Create dist directory
+          # Create dist directory structure
           New-Item -ItemType Directory -Force -Path dist
           New-Item -ItemType Directory -Force -Path dist/server
           New-Item -ItemType Directory -Force -Path dist/core
+          New-Item -ItemType Directory -Force -Path dist/core/llm
           
-          # Build using tsx (TypeScript executor) - more stable than tsup on Windows
-          echo "Building with tsx..."
-          npx tsx --tsconfig tsconfig.json src/index.tsx > dist/index.js 2>&1 || echo "tsx build completed with warnings"
-          
-          # Copy source files as fallback if build fails
-          if (-not (Test-Path "dist/index.js")) {
-            echo "Building TypeScript files directly..."
-            npx tsc --outDir dist --module esnext --target es2020 --moduleResolution node
-          }
+          # Build using tsc with proper configuration
+          echo "Compiling TypeScript files..."
+          npx tsc --project tsconfig.json --outDir dist --declaration --declarationMap --sourceMap
           
           # Copy prompts directory (required for runtime)
           if (Test-Path "prompts") {
@@ -369,12 +364,30 @@ jobs:
             echo "✓ Copied prompts directory"
           }
           
-          # Verify dist exists
-          if (Test-Path "dist") {
-            echo "✓ kshana-ink dist directory created"
-            Get-ChildItem dist | Select-Object -First 10
+          # Verify all required files exist
+          $requiredFiles = @(
+            "dist/index.js",
+            "dist/server/index.js", 
+            "dist/core/index.js",
+            "dist/core/llm/index.js"
+          )
+          
+          $allExist = $true
+          foreach ($file in $requiredFiles) {
+            if (Test-Path $file) {
+              echo "✓ Found: $file"
+            } else {
+              echo "✗ Missing: $file"
+              $allExist = $false
+            }
+          }
+          
+          if ($allExist) {
+            echo "✓ kshana-ink built successfully - all required files present"
+            echo "Dist contents:"
+            Get-ChildItem dist -Recurse | Select-Object -First 20
           } else {
-            echo "✗ Failed to create dist directory"
+            echo "✗ Build incomplete - missing required files"
             exit 1
           }
 
