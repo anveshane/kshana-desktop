@@ -210,9 +210,11 @@ jobs:
 
   release-windows:
     runs-on: windows-latest
-    needs: release-mac  # Wait for Mac build to create the release first
+    # Remove dependency on Mac build - can run independently and add to existing release
     permissions:
       contents: write  # Required to create releases and upload artifacts
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
     
     steps:
       - name: Set branch names
@@ -342,13 +344,24 @@ jobs:
           cd kshana-ink
           echo "Building kshana-ink from: $(Get-Location)"
           pnpm install --no-frozen-lockfile
-          pnpm build
-          echo "✓ kshana-ink built successfully"
-          echo "Verifying dist directory exists:"
-          if (Test-Path "dist") {
-            Get-ChildItem dist | Select-Object -First 10
-          } else {
-            echo "✗ dist directory not found"
+          
+          # Increase Node.js memory limit for Windows build
+          $env:NODE_OPTIONS="--max-old-space-size=4096"
+          
+          # Try building with increased memory
+          try {
+            pnpm build
+            if (Test-Path "dist") {
+              echo "✓ kshana-ink built successfully"
+              echo "Verifying dist directory exists:"
+              Get-ChildItem dist | Select-Object -First 10
+            } else {
+              echo "✗ dist directory not found after build"
+              exit 1
+            }
+          } catch {
+            echo "Build failed with error: $_"
+            exit 1
           }
 
       - name: Prepare release/app before install
@@ -389,6 +402,9 @@ jobs:
       - name: Install dependencies
         working-directory: kshana-desktop
         run: |
+          # Increase Node.js memory limit for Windows
+          $env:NODE_OPTIONS="--max-old-space-size=4096"
+          
           # Skip postinstall scripts to avoid electron-builder install-app-deps running
           # with kshana-ink in package.json. Our install-app-deps.ts will handle everything.
           npm ci --ignore-scripts
