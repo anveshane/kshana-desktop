@@ -17,14 +17,13 @@ import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { normalizePathForFFmpeg } from './utils/pathNormalizer';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
-import backendManager, {
-  BackendEnvOverrides,
+import serverConnectionManager, {
   BackendState,
-} from './backendManager';
+  ServerConnectionConfig,
+} from './serverConnectionManager';
 import {
   AppSettings,
   getSettings,
-  toBackendEnv,
   updateSettings,
 } from './settingsManager';
 import fileSystemManager from './fileSystemManager';
@@ -41,19 +40,9 @@ if (app.isPackaged) {
   process.env.KSHANA_PACKAGED = '1';
 }
 
-const buildBackendEnv = (
-  overrides: BackendEnvOverrides = {},
-): BackendEnvOverrides => {
-  const base = toBackendEnv(getSettings());
-  return {
-    ...base,
-    ...overrides,
-  };
-};
-
 let mainWindow: BrowserWindow | null = null;
 
-backendManager.on('state', (state: BackendState) => {
+serverConnectionManager.on('state', (state: BackendState) => {
   if (mainWindow) {
     mainWindow.webContents.send('backend:state', state);
   }
@@ -66,20 +55,19 @@ ipcMain.on('ipc-example', async (event, arg) => {
 });
 
 ipcMain.handle('backend:get-state', async (): Promise<BackendState> => {
-  return backendManager.status;
+  return serverConnectionManager.status;
 });
 
 ipcMain.handle(
   'backend:start',
   async (
     _event,
-    overrides: BackendEnvOverrides = {},
+    config: ServerConnectionConfig = { serverUrl: getSettings().serverUrl },
   ): Promise<BackendState> => {
     try {
-      await backendManager.start(buildBackendEnv(overrides));
-      return backendManager.status;
+      return await serverConnectionManager.connect(config);
     } catch (error) {
-      log.error(`Failed to start backend: ${(error as Error).message}`);
+      log.error(`Failed to connect to server: ${(error as Error).message}`);
       return {
         status: 'error',
         message: (error as Error).message,
@@ -90,12 +78,11 @@ ipcMain.handle(
 
 ipcMain.handle(
   'backend:restart',
-  async (_event, overrides: BackendEnvOverrides = {}) => {
+  async (_event, _config?: ServerConnectionConfig) => {
     try {
-      await backendManager.restart(buildBackendEnv(overrides));
-      return backendManager.status;
+      return await serverConnectionManager.reconnect();
     } catch (error) {
-      log.error(`Failed to restart backend: ${(error as Error).message}`);
+      log.error(`Failed to reconnect to server: ${(error as Error).message}`);
       return {
         status: 'error',
         message: (error as Error).message,
@@ -105,8 +92,7 @@ ipcMain.handle(
 );
 
 ipcMain.handle('backend:stop', async () => {
-  await backendManager.stop();
-  return backendManager.status;
+  return serverConnectionManager.disconnect();
 });
 
 ipcMain.handle('settings:get', async (): Promise<AppSettings> => {
@@ -1575,16 +1561,19 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   desktopLogger.logSessionEnd();
-  backendManager.stop().catch((error) => {
-    log.error(`Failed to stop backend: ${(error as Error).message}`);
+  serverConnectionManager.disconnect().catch((error) => {
+    log.error(`Failed to disconnect from server: ${(error as Error).message}`);
   });
 });
 
 const bootstrapBackend = async () => {
   try {
-    await backendManager.start(buildBackendEnv());
+    const settings = getSettings();
+    await serverConnectionManager.connect({
+      serverUrl: settings.serverUrl || 'http://localhost:8001',
+    });
   } catch (error) {
-    log.error(`Failed to bootstrap backend: ${(error as Error).message}`);
+    log.error(`Failed to connect to server: ${(error as Error).message}`);
   }
 };
 

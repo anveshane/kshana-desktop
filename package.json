@@ -33,9 +33,8 @@
     "postinstall": "ts-node .erb/scripts/check-native-dep.js && node .erb/scripts/conditional-install-app-deps.js && npm run build:dll",
     "lint": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx",
     "lint:fix": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx --fix",
-    "prepackage": "ts-node ./.erb/scripts/verify-kshana-ink.ts",
-    "package": "ts-node ./.erb/scripts/clean.js dist && ts-node ./.erb/scripts/install-app-deps.ts && npm run build && electron-builder build --publish never && npm run build:dll",
-    "release": "ts-node ./.erb/scripts/clean.js dist && ts-node ./.erb/scripts/install-app-deps.ts && npm run build && electron-builder build --publish always",
+    "package": "ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --publish never && npm run build:dll",
+    "release": "ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --publish always",
     "rebuild": "electron-rebuild --parallel --types prod,dev,optional --module-dir release/app",
     "prestart": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.main.dev.ts",
     "start": "ts-node ./.erb/scripts/check-port-in-use.js && npm run prestart && npm run start:renderer",
@@ -111,7 +110,6 @@
     "@remotion/install-whisper-cpp": "4.0.409",
     "@remotion/renderer": "4.0.409",
     "@ts-ffmpeg/fluent-ffmpeg": "^2.2.6",
-    "kshana-ink": "file:../kshana-ink",
     "lucide-react": "^0.555.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -193,9 +191,7 @@
     "asar": true,
     "afterSign": ".erb/scripts/notarize.js",
     "asarUnpack": [
-      "**\\*.{node,dll}",
-      "**/node_modules/**/*",
-      "**/node_modules/kshana-ink/**/*"
+      "**\\*.{node,dll}"
     ],
     "files": [
       "dist",

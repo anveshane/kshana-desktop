@@ -1,7 +1,7 @@
 // Disable no-unused-vars, broken for spread args
 /* eslint no-unused-vars: off */
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
-import type { BackendEnvOverrides, BackendState } from '../shared/backendTypes';
+import type { BackendState, ServerConnectionConfig } from '../shared/backendTypes';
 import type { AppSettings } from '../shared/settingsTypes';
 import type {
   FileNode,
@@ -41,11 +41,11 @@ interface TextOverlayCue {
 export type Channels = 'ipc-example';
 
 const backendBridge = {
-  start(overrides: BackendEnvOverrides = {}): Promise<BackendState> {
-    return ipcRenderer.invoke('backend:start', overrides);
+  start(config: ServerConnectionConfig = { serverUrl: 'http://localhost:8001' }): Promise<BackendState> {
+    return ipcRenderer.invoke('backend:start', config);
   },
-  restart(overrides: BackendEnvOverrides = {}): Promise<BackendState> {
-    return ipcRenderer.invoke('backend:restart', overrides);
+  restart(): Promise<BackendState> {
+    return ipcRenderer.invoke('backend:restart');
   },
   stop(): Promise<BackendState> {
     return ipcRenderer.invoke('backend:stop');

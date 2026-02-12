@@ -1,6 +1,6 @@
 /**
  * Resolves the path to remotion-infographics directory.
- * Used by RemotionManager and backendManager for dev vs packaged environments.
+ * Used by RemotionManager for dev vs packaged environments.
  */
 import path from 'path';
 import fs from 'fs';

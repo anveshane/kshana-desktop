@@ -1,6 +1,8 @@
 export type LlmProvider = 'gemini' | 'lmstudio' | 'openai' | 'openrouter';
 
 export interface AppSettings {
+  /** URL of the kshana-ink server (default: http://localhost:8001) */
+  serverUrl: string;
   comfyuiUrl: string;
   /** Video generation timeout in seconds (default: 1800 = 30 min). LTX-2 is compute-intensive. */
   comfyuiTimeout?: number;
@@ -15,5 +17,4 @@ export interface AppSettings {
   openRouterApiKey: string;
   openRouterModel: string;
   projectDir?: string;
-  preferredPort?: number;
 }

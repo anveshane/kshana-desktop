@@ -11,6 +11,7 @@ type Props = {
 };
 
 const emptySettings: AppSettings = {
+  serverUrl: 'http://localhost:8001',
   comfyuiUrl: 'http://localhost:8000',
   lmStudioUrl: 'http://127.0.0.1:1234',
   lmStudioModel: 'qwen3',
@@ -82,8 +83,8 @@ export default function SettingsPanel({
       <div className={styles.panel}>
         <div className={styles.header}>
           <div>
-            <h2>Runtime settings</h2>
-            <p>Values apply to the kshana-ink backend at the next restart.</p>
+            <h2>Settings</h2>
+            <p>Configure the server connection and LLM provider. LLM settings are configured on the server via environment variables.</p>
           </div>
           <button
             type="button"
@@ -106,24 +107,6 @@ export default function SettingsPanel({
               }
               placeholder="http://localhost:8000"
               required
-            />
-          </label>
-
-          <label className={styles.label}>
-            Preferred backend port
-            <input
-              type="number"
-              className={styles.input}
-              min={1025}
-              max={65535}
-              value={form.preferredPort ?? ''}
-              onChange={(event) =>
-                handleInput(
-                  'preferredPort',
-                  event.target.value ? Number(event.target.value) : undefined,
-                )
-              }
-              placeholder="8001"
             />
           </label>
 
@@ -347,7 +330,7 @@ export default function SettingsPanel({
               className={styles.submitButton}
               disabled={isRestarting}
             >
-              {isRestarting ? 'Applying…' : 'Save & Restart'}
+              {isRestarting ? 'Reconnecting…' : 'Save & Reconnect'}
             </button>
           </div>
         </form>

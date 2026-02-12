@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Settings } from 'lucide-react';
 import type { AppSettings } from '../../../../shared/settingsTypes';
-import { toBackendEnv } from '../../../../shared/settingsUtils';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { TimelineDataProvider } from '../../../contexts/TimelineDataContext';
@@ -191,7 +190,7 @@ export default function PreviewPanel() {
     try {
       const updated = await window.electron.settings.update(next);
       setSettings(updated);
-      await window.electron.backend.restart(toBackendEnv(updated));
+      await window.electron.backend.restart();
       setSettingsOpen(false);
     } catch (error) {
       console.error('Failed to restart backend:', error);

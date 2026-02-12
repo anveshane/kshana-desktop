@@ -1,8 +1,8 @@
 import Store from 'electron-store';
 import type { AppSettings } from '../shared/settingsTypes';
-import { toBackendEnv } from '../shared/settingsUtils';
 
 const defaults: AppSettings = {
+  serverUrl: 'http://localhost:8001',
   comfyuiUrl: 'http://localhost:8000',
   lmStudioUrl: 'http://127.0.0.1:1234',
   lmStudioModel: 'qwen3',
@@ -32,4 +32,3 @@ export const updateSettings = (patch: Partial<AppSettings>): AppSettings => {
 };
 
 export type { AppSettings } from '../shared/settingsTypes';
-export { toBackendEnv };

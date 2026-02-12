@@ -1,8 +1,8 @@
 // Conditionally run electron-builder install-app-deps
-// Skip in CI environments since install-app-deps.ts handles it
+// Skip in CI environments since the CI workflow handles it
 if (process.env.CI) {
   console.log(
-    'Skipping electron-builder install-app-deps in CI (handled by install-app-deps.ts)',
+    'Skipping electron-builder install-app-deps in CI',
   );
   process.exit(0);
 }
@@ -30,13 +30,11 @@ if (fs.existsSync(mainPackagePath)) {
   process.exit(1);
 }
 
-// Create or update release/app/package.json without kshana-ink
-// This prevents electron-builder from trying to resolve the file: path
+// Create or update release/app/package.json
 let appPackageJson = {};
 if (fs.existsSync(appPackagePath)) {
   appPackageJson = JSON.parse(fs.readFileSync(appPackagePath, 'utf-8'));
 } else {
-  // Create minimal package.json if it doesn't exist
   appPackageJson = {
     name: mainPackageJson.name || 'kshana-desktop',
     version: mainPackageJson.version || '1.0.0',
@@ -56,35 +54,21 @@ if (!appPackageJson.main) {
   appPackageJson.main = './dist/main/main.js';
 }
 
-// Copy dependencies from main package.json, excluding kshana-ink
-// electron-builder install-app-deps will merge these, but we want to exclude kshana-ink
-// to prevent it from trying to resolve the file: path
+// Copy dependencies from main package.json
 appPackageJson.dependencies = appPackageJson.dependencies || {};
 if (mainPackageJson.dependencies) {
   Object.keys(mainPackageJson.dependencies).forEach((dep) => {
-    if (dep !== 'kshana-ink') {
-      appPackageJson.dependencies[dep] = mainPackageJson.dependencies[dep];
-    }
+    appPackageJson.dependencies[dep] = mainPackageJson.dependencies[dep];
   });
 }
 
-// Remove kshana-ink if it exists (from previous runs)
-if (appPackageJson.dependencies['kshana-ink']) {
-  delete appPackageJson.dependencies['kshana-ink'];
-  console.log(
-    '✓ Removed kshana-ink from release/app/package.json (will be handled separately)',
-  );
-}
-
-// Write updated package.json (without kshana-ink)
+// Write updated package.json
 fs.writeFileSync(
   appPackagePath,
   `${JSON.stringify(appPackageJson, null, 2)}\n`,
 );
 
-// Now run electron-builder install-app-deps
-// It will read from main package.json but since kshana-ink is not in release/app/package.json,
-// it won't try to resolve the file: path during installation
+// Run electron-builder install-app-deps
 try {
   execSync('electron-builder install-app-deps', { stdio: 'inherit' });
   console.log('✓ electron-builder install-app-deps completed successfully');
