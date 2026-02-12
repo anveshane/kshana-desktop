@@ -359,31 +359,21 @@ jobs:
           # during postinstall. Our install-app-deps.ts will handle kshana-ink later.
           New-Item -ItemType Directory -Force -Path release/app
           
-          # Create a minimal package.json without kshana-ink
-          # electron-builder install-app-deps will merge dependencies from main package.json
-          # but won't try to resolve kshana-ink if it's not in release/app/package.json
-          node -e @"
+          # Create a minimal package.json without kshana-ink using a PowerShell script
+          $script = @'
           const fs = require('fs');
           const mainPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          
-          // Create release/app/package.json without kshana-ink
-          // Ensure version is set (required by electron-builder)
-          // For production builds, main should point to dist/main/main.js (not dev DLL)
           const appPkg = {
             name: mainPkg.name,
             version: mainPkg.version || '1.0.0',
             description: mainPkg.description,
-            main: './dist/main/main.js', // Production main entry point
+            main: './dist/main/main.js',
             dependencies: {}
           };
-          
-          // Ensure version is present (electron-builder requirement)
           if (!appPkg.version) {
             appPkg.version = '1.0.0';
-            console.log('⚠ Version not found in package.json, using default: 1.0.0');
+            console.log('Version not found, using default: 1.0.0');
           }
-          
-          // Copy dependencies except kshana-ink
           if (mainPkg.dependencies) {
             Object.keys(mainPkg.dependencies).forEach(dep => {
               if (dep !== 'kshana-ink') {
@@ -391,10 +381,10 @@ jobs:
               }
             });
           }
-          
           fs.writeFileSync('release/app/package.json', JSON.stringify(appPkg, null, 2) + '\n');
-          console.log('✓ Created release/app/package.json without kshana-ink');
-          "@
+          console.log('Created release/app/package.json without kshana-ink');
+          '@
+          node -e $script
 
       - name: Install dependencies
         working-directory: kshana-desktop
