@@ -27,8 +27,10 @@ import {
 } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import {
+  clampImageMove,
   clampImageResizeRight,
   buildUpdatedImageOverride,
+  buildUpdatedInfographicOverride,
   buildUpdatedVideoSplitOverride,
   snapToSecond,
 } from '../../../utils/timelineImageEditing';
@@ -62,6 +64,10 @@ interface TimelineItemComponentProps {
     e: React.MouseEvent<HTMLDivElement>,
     item: TimelineItem,
   ) => void;
+  onInfographicDragMouseDown?: (
+    e: React.MouseEvent<HTMLDivElement>,
+    item: TimelineItem,
+  ) => void;
   onItemContextMenu?: (
     e: React.MouseEvent<HTMLDivElement>,
     item: TimelineItem,
@@ -77,6 +83,7 @@ function TimelineItemComponent({
   isSelected,
   onItemClick,
   onImageResizeMouseDown,
+  onInfographicDragMouseDown,
   onItemContextMenu,
   isEditing = false,
 }: TimelineItemComponentProps) {
@@ -323,10 +330,15 @@ function TimelineItemComponent({
   if (item.type === 'infographic' && videoPath) {
     return (
       <div
-        className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
+        className={`${styles.videoBlock} ${styles.editableInfographicBlock} ${isSelected ? styles.selected : ''} ${isEditing ? styles.editing : ''}`}
         style={{
           left: `${left}px`,
           width: `${width}px`,
+        }}
+        onMouseDown={(e) => {
+          if (onInfographicDragMouseDown) {
+            onInfographicDragMouseDown(e, item);
+          }
         }}
         onClick={(e) => {
           if (onItemClick) {
@@ -354,8 +366,11 @@ function TimelineItemComponent({
   if (item.type === 'infographic' && !videoPath) {
     return (
       <div
-        className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
+        className={`${styles.videoBlock} ${styles.editableInfographicBlock} ${isSelected ? styles.selected : ''} ${isEditing ? styles.editing : ''}`}
         style={{ left: `${left}px`, width: `${width}px` }}
+        onMouseDown={(e) =>
+          onInfographicDragMouseDown && onInfographicDragMouseDown(e, item)
+        }
         onClick={(e) => onItemClick && onItemClick(e, item)}
         onContextMenu={(e) => onItemContextMenu && onItemContextMenu(e, item)}
         title={item.prompt || item.label}
@@ -517,6 +532,7 @@ interface TimelineContextMenuState {
 interface TimelineEditSnapshot {
   markers: TimelineMarker[];
   image_timing_overrides: KshanaTimelineState['image_timing_overrides'];
+  infographic_timing_overrides: KshanaTimelineState['infographic_timing_overrides'];
   video_split_overrides: KshanaTimelineState['video_split_overrides'];
 }
 
@@ -530,6 +546,19 @@ function cloneImageTimingOverrides(
   overrides: KshanaTimelineState['image_timing_overrides'],
 ): KshanaTimelineState['image_timing_overrides'] {
   const next: KshanaTimelineState['image_timing_overrides'] = {};
+  Object.entries(overrides).forEach(([key, value]) => {
+    next[key] = {
+      start_time_seconds: value.start_time_seconds,
+      end_time_seconds: value.end_time_seconds,
+    };
+  });
+  return next;
+}
+
+function cloneInfographicTimingOverrides(
+  overrides: KshanaTimelineState['infographic_timing_overrides'],
+): KshanaTimelineState['infographic_timing_overrides'] {
+  const next: KshanaTimelineState['infographic_timing_overrides'] = {};
   Object.entries(overrides).forEach(([key, value]) => {
     next[key] = {
       start_time_seconds: value.start_time_seconds,
@@ -576,6 +605,7 @@ export default function TimelinePanel({
     updateMarkers,
     updateImportedClips,
     updateImageTimingOverrides,
+    updateInfographicTimingOverrides,
     updateVideoSplitOverrides,
     addAsset,
   } = useProject();
@@ -897,6 +927,9 @@ export default function TimelinePanel({
   const imageTimingOverridesRef = useRef(
     timelineState.image_timing_overrides || {},
   );
+  const infographicTimingOverridesRef = useRef(
+    timelineState.infographic_timing_overrides || {},
+  );
   const videoSplitOverridesRef = useRef(
     timelineState.video_split_overrides || {},
   );
@@ -910,6 +943,11 @@ export default function TimelinePanel({
   }, [timelineState.image_timing_overrides]);
 
   useEffect(() => {
+    infographicTimingOverridesRef.current =
+      timelineState.infographic_timing_overrides || {};
+  }, [timelineState.infographic_timing_overrides]);
+
+  useEffect(() => {
     videoSplitOverridesRef.current = timelineState.video_split_overrides || {};
   }, [timelineState.video_split_overrides]);
 
@@ -918,6 +956,9 @@ export default function TimelinePanel({
       markers: cloneMarkers(markersRef.current),
       image_timing_overrides: cloneImageTimingOverrides(
         imageTimingOverridesRef.current,
+      ),
+      infographic_timing_overrides: cloneInfographicTimingOverrides(
+        infographicTimingOverridesRef.current,
       ),
       video_split_overrides: cloneVideoSplitOverrides(
         videoSplitOverridesRef.current,
@@ -965,12 +1006,19 @@ export default function TimelinePanel({
     updateImageTimingOverrides(
       cloneImageTimingOverrides(previous.image_timing_overrides),
     );
+    updateInfographicTimingOverrides(
+      cloneInfographicTimingOverrides(previous.infographic_timing_overrides),
+    );
     updateVideoSplitOverrides(
       cloneVideoSplitOverrides(previous.video_split_overrides),
     );
     setContextMenuState(null);
     setCanUndo(stack.length > 0);
-  }, [updateImageTimingOverrides, updateVideoSplitOverrides]);
+  }, [
+    updateImageTimingOverrides,
+    updateInfographicTimingOverrides,
+    updateVideoSplitOverrides,
+  ]);
 
   useEffect(() => {
     if (!isLoaded || !projectDirectory) {
@@ -1007,6 +1055,31 @@ export default function TimelinePanel({
       }
     },
     [updateImageTimingOverrides],
+  );
+
+  const commitInfographicTimingOverride = useCallback(
+    (
+      placementNumber: number,
+      sourceStartTime: number,
+      sourceEndTime: number,
+      editedStartTime: number,
+      editedEndTime: number,
+    ) => {
+      const currentOverrides = infographicTimingOverridesRef.current;
+      const nextOverrides = buildUpdatedInfographicOverride(
+        currentOverrides,
+        placementNumber,
+        sourceStartTime,
+        sourceEndTime,
+        editedStartTime,
+        editedEndTime,
+      );
+
+      if (nextOverrides !== currentOverrides) {
+        updateInfographicTimingOverrides(nextOverrides);
+      }
+    },
+    [updateInfographicTimingOverrides],
   );
 
   const commitVideoSplitAtTime = useCallback(
@@ -1510,6 +1583,102 @@ export default function TimelinePanel({
       commitImageTimingOverride,
       captureSnapshot,
       pushUndoSnapshot,
+      setIsPlaying,
+    ],
+  );
+
+  const handleInfographicDragMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
+      if (item.type !== 'infographic' || item.placementNumber === undefined) {
+        return;
+      }
+      if (e.button !== 0) return;
+
+      e.stopPropagation();
+      e.preventDefault();
+      scrollPositionBeforeEditRef.current = tracksRef.current?.scrollLeft ?? null;
+
+      const sourceStartTime = item.sourceStartTime ?? item.startTime;
+      const sourceEndTime = item.sourceEndTime ?? item.endTime;
+      const initialStartTime = item.startTime;
+      const initialDuration = Math.max(1, item.duration);
+
+      let lastStartTime = initialStartTime;
+      let hasRecordedUndoSnapshot = false;
+      const interactionSnapshot = captureSnapshot();
+
+      setActiveEditingItemId(item.id);
+      setIsDragging(true);
+      if (onDragStateChange) {
+        onDragStateChange(true);
+      }
+      wasPlayingBeforeDragRef.current = isPlaying;
+      dragStartXRef.current = e.clientX;
+      dragStartPositionRef.current = currentPosition;
+
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const deltaX = moveEvent.clientX - dragStartXRef.current;
+        if (Math.abs(deltaX) <= 5) {
+          return;
+        }
+
+        const deltaSeconds = pixelsToSeconds(deltaX, zoomLevel);
+        const nextRange = clampImageMove({
+          desiredStart: initialStartTime + deltaSeconds,
+          duration: initialDuration,
+          minStart: 0,
+          maxEnd: totalDuration,
+        });
+
+        if (nextRange.startTime !== lastStartTime) {
+          if (!hasRecordedUndoSnapshot) {
+            pushUndoSnapshot(interactionSnapshot);
+            hasRecordedUndoSnapshot = true;
+          }
+
+          lastStartTime = nextRange.startTime;
+          commitInfographicTimingOverride(
+            item.placementNumber!,
+            sourceStartTime,
+            sourceEndTime,
+            nextRange.startTime,
+            nextRange.endTime,
+          );
+        }
+      };
+
+      const handleMouseUpGlobal = () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUpGlobal);
+        setIsDragging(false);
+        if (onDragStateChange) {
+          onDragStateChange(false);
+        }
+        setActiveEditingItemId(null);
+
+        if (wasPlayingBeforeDragRef.current) {
+          setIsPlaying(true);
+        }
+      };
+
+      document.addEventListener('mousemove', handleMouseMove, {
+        passive: true,
+      });
+      document.addEventListener('mouseup', handleMouseUpGlobal);
+    },
+    [
+      isPlaying,
+      currentPosition,
+      onDragStateChange,
+      zoomLevel,
+      totalDuration,
+      captureSnapshot,
+      pushUndoSnapshot,
+      commitInfographicTimingOverride,
       setIsPlaying,
     ],
   );
@@ -2167,6 +2336,9 @@ export default function TimelinePanel({
                               isSelected={activeEditingItemId === item.id}
                               onItemClick={handleItemClick}
                               onImageResizeMouseDown={handleImageResizeMouseDown}
+                              onInfographicDragMouseDown={
+                                handleInfographicDragMouseDown
+                              }
                               onItemContextMenu={handleTimelineItemContextMenu}
                               isEditing={activeEditingItemId === item.id}
                             />
@@ -2197,9 +2369,13 @@ export default function TimelinePanel({
                             left={left}
                             width={width}
                             projectDirectory={projectDirectory || null}
-                            isSelected={false}
+                            isSelected={activeEditingItemId === item.id}
                             onItemClick={handleItemClick}
+                            onInfographicDragMouseDown={
+                              handleInfographicDragMouseDown
+                            }
                             onItemContextMenu={handleTimelineItemContextMenu}
+                            isEditing={activeEditingItemId === item.id}
                           />
                         );
                       })}

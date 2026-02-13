@@ -1,10 +1,13 @@
 import { describe, expect, test } from '@jest/globals';
 import {
   applyImageTimingOverridesToItems,
+  applyInfographicTimingOverridesToItems,
   applyVideoSplitOverridesToItems,
   applyRippleTimingFromImageDurationEdits,
+  buildUpdatedInfographicOverride,
   buildUpdatedImageOverride,
   buildUpdatedVideoSplitOverride,
+  clampImageMove,
   clampImageResizeRight,
 } from './timelineImageEditing';
 
@@ -50,6 +53,35 @@ describe('timelineImageEditing', () => {
     expect(resized.endTime).toBe(11);
   });
 
+  test('moves block timing with 1-second snap and timeline bounds', () => {
+    const moved = clampImageMove({
+      desiredStart: 5.6,
+      duration: 3,
+      minStart: 0,
+      maxEnd: 12,
+    });
+    expect(moved.startTime).toBe(6);
+    expect(moved.endTime).toBe(9);
+
+    const clampedStart = clampImageMove({
+      desiredStart: -2.4,
+      duration: 3,
+      minStart: 0,
+      maxEnd: 12,
+    });
+    expect(clampedStart.startTime).toBe(0);
+    expect(clampedStart.endTime).toBe(3);
+
+    const clampedEnd = clampImageMove({
+      desiredStart: 11.2,
+      duration: 3,
+      minStart: 0,
+      maxEnd: 12,
+    });
+    expect(clampedEnd.startTime).toBe(9);
+    expect(clampedEnd.endTime).toBe(12);
+  });
+
   test('removes override when edited range matches source range', () => {
     const current = {
       '12': { start_time_seconds: 5, end_time_seconds: 9 },
@@ -67,6 +99,43 @@ describe('timelineImageEditing', () => {
 
     expect(next['12']).toBeUndefined();
     expect(next['13']).toEqual({ start_time_seconds: 9, end_time_seconds: 12 });
+  });
+
+  test('adds infographic override when timing is moved', () => {
+    const current = {
+      '4': { start_time_seconds: 10, end_time_seconds: 13 },
+    };
+
+    const next = buildUpdatedInfographicOverride(
+      current,
+      2,
+      6,
+      8,
+      9,
+      11,
+    );
+
+    expect(next['2']).toEqual({ start_time_seconds: 9, end_time_seconds: 11 });
+    expect(next['4']).toEqual({ start_time_seconds: 10, end_time_seconds: 13 });
+  });
+
+  test('removes infographic override when edited range matches source range', () => {
+    const current = {
+      '2': { start_time_seconds: 9, end_time_seconds: 11 },
+      '4': { start_time_seconds: 10, end_time_seconds: 13 },
+    };
+
+    const next = buildUpdatedInfographicOverride(
+      current,
+      2,
+      6,
+      8,
+      6,
+      8,
+    );
+
+    expect(next['2']).toBeUndefined();
+    expect(next['4']).toEqual({ start_time_seconds: 10, end_time_seconds: 13 });
   });
 
   test('applies image overrides and keeps non-image items unchanged', () => {
@@ -124,6 +193,40 @@ describe('timelineImageEditing', () => {
       endTime: 14,
       duration: 4,
     });
+  });
+
+  test('applies infographic overrides and keeps non-infographic items unchanged', () => {
+    const items = [
+      {
+        id: 'info-placement-1',
+        type: 'infographic',
+        placementNumber: 1,
+        startTime: 3,
+        endTime: 7,
+        duration: 4,
+      },
+      {
+        id: 'PLM-2',
+        type: 'image',
+        placementNumber: 2,
+        startTime: 7,
+        endTime: 10,
+        duration: 3,
+      },
+    ];
+
+    const updated = applyInfographicTimingOverridesToItems(items, {
+      '1': { start_time_seconds: 5, end_time_seconds: 9 },
+    });
+
+    expect(updated[0]).toMatchObject({
+      startTime: 5,
+      endTime: 9,
+      duration: 4,
+      sourceStartTime: 3,
+      sourceEndTime: 7,
+    });
+    expect(updated[1]).toEqual(items[1]);
   });
 
   test('ripple shifts following video left when image is shortened by 1 second', () => {

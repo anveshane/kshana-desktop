@@ -594,6 +594,7 @@ export class ProjectService {
       markers: state.markers ?? [],
       imported_clips: state.imported_clips ?? [],
       image_timing_overrides: state.image_timing_overrides ?? {},
+      infographic_timing_overrides: state.infographic_timing_overrides ?? {},
       video_split_overrides: state.video_split_overrides ?? {},
     };
   }

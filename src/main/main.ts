@@ -613,7 +613,7 @@ function buildAssFromTextOverlayCues(cues: TextOverlayCue[]): string {
     '',
     '[V4+ Styles]',
     'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding',
-    'Style: WordSync,Arial,28,&H00FFFFFF,&H0000D7FF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,2,0,2,80,80,54,1',
+    'Style: WordSync,Arial,42,&H00FFFFFF,&H00FFD700,&H00000000,&HA0000000,1,0,0,0,100,100,0,0,3,2,0,2,80,80,60,1',
     '',
     '[Events]',
     'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text',
@@ -947,7 +947,7 @@ ipcMain.handle(
                   `[${inputIndex}:v]format=rgba,setpts=PTS-STARTPTS+${overlayOffset}/TB[${overlayLabel}]`,
                 );
                 filterParts.push(
-                  `[${currentBase}][${overlayLabel}]overlay=(W-w)/2:(H-h)/2:eof_action=pass[${nextBase}]`,
+                  `[${currentBase}][${overlayLabel}]overlay=(W-w)/2:(H-h)/2:format=auto:eof_action=pass[${nextBase}]`,
                 );
                 currentBase = nextBase;
               });
@@ -955,7 +955,9 @@ ipcMain.handle(
               await new Promise<void>((resolve, reject) => {
                 const command = ffmpeg(segmentPath);
                 orderedOverlays.forEach((overlay) => {
-                  command.input(overlay.absolutePath);
+                  command
+                    .input(overlay.absolutePath)
+                    .inputOptions(['-c:v', 'libvpx-vp9']);
                 });
 
                 command
@@ -972,6 +974,11 @@ ipcMain.handle(
                     item.duration.toString(),
                   ])
                   .output(overlaySegmentPath)
+                  .on('start', (cmd) => {
+                    console.log(
+                      `[VideoComposition] Overlay FFmpeg command for segment ${i + 1}: ${cmd}`,
+                    );
+                  })
                   .on('end', () => {
                     console.log(
                       `[VideoComposition] Overlay chain applied for segment ${i + 1}`,

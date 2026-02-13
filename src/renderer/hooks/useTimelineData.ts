@@ -22,6 +22,7 @@ import {
 } from '../services/assets';
 import {
   applyImageTimingOverridesToItems,
+  applyInfographicTimingOverridesToItems,
   applyVideoSplitOverridesToItems,
   applyRippleTimingFromImageDurationEdits,
   type ImageTimingOverride,
@@ -760,17 +761,26 @@ export function useTimelineData(
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
         videoPath: asset?.path || fallbackInfoPath, // infographics are overlay clips (webm/mp4)
+        sourceStartTime: startSeconds,
+        sourceEndTime: endSeconds,
       });
     });
 
-    items.sort((a, b) => a.startTime - b.startTime);
+    const infographicOverrides: Record<string, ImageTimingOverride> =
+      timelineState.infographic_timing_overrides ?? {};
+    const withInfographicTimingEdits = applyInfographicTimingOverridesToItems(
+      items,
+      infographicOverrides,
+    );
+    withInfographicTimingEdits.sort((a, b) => a.startTime - b.startTime);
 
-    return items;
+    return withInfographicTimingEdits;
   }, [
     infographicPlacements,
     imagePlacements,
     assetManifest,
     activeVersions,
+    timelineState.infographic_timing_overrides,
     timelineRefreshTrigger,
   ]);
 

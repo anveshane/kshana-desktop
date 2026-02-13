@@ -405,6 +405,10 @@
   cursor: pointer;
 }
 
+.editableInfographicBlock {
+  cursor: grab;
+}
+
 .editing {
   cursor: grabbing;
   box-shadow: 0 0 12px rgba($color-accent-green, 0.5);
