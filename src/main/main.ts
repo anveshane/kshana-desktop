@@ -35,6 +35,12 @@ import type {
   ParsedInfographicPlacement,
 } from '../shared/remotionTypes';
 import * as desktopLogger from './services/DesktopLogger';
+import {
+  generateCapcutProject,
+  type ExportTimelineItem,
+  type ExportOverlayItem,
+  type ExportTextOverlayCue,
+} from './exporters/capcutGenerator';
 
 if (app.isPackaged) {
   process.env.KSHANA_PACKAGED = '1';
@@ -528,6 +534,40 @@ ipcMain.handle('project:save-video-file', async () => {
   }
   return result.filePath;
 });
+
+// ── Export to CapCut ────────────────────────────────────────────────────────
+ipcMain.handle(
+  'project:export-capcut',
+  async (
+    _event,
+    timelineItems: ExportTimelineItem[],
+    projectDirectory: string,
+    audioPath?: string,
+    overlayItems?: ExportOverlayItem[],
+    textOverlayCues?: ExportTextOverlayCue[],
+  ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
+    console.log('[Export:CapCut] Starting CapCut export...');
+    try {
+      const projectName = projectDirectory.split(/[/\\]/).filter(Boolean).pop() || 'Project';
+      const result = await generateCapcutProject(
+        projectName,
+        timelineItems,
+        projectDirectory,
+        audioPath,
+        overlayItems,
+        textOverlayCues,
+      );
+
+      console.log('[Export:CapCut] Exported successfully to:', result.outputDir);
+      return { success: true, outputPath: result.outputDir };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Export:CapCut] Failed:', message);
+      return { success: false, error: message };
+    }
+  },
+);
 
 // Configure ffmpeg to use bundled binary
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);

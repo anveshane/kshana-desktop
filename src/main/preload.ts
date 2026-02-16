@@ -217,6 +217,36 @@ const projectBridge = {
       textOverlayCues,
     );
   },
+  exportCapcut(
+    timelineItems: Array<{
+      type: 'image' | 'video' | 'placeholder';
+      path: string;
+      duration: number;
+      startTime: number;
+      endTime: number;
+      sourceOffsetSeconds?: number;
+      label?: string;
+    }>,
+    projectDirectory: string,
+    audioPath?: string,
+    overlayItems?: Array<{
+      path: string;
+      duration: number;
+      startTime: number;
+      endTime: number;
+      label?: string;
+    }>,
+    textOverlayCues?: TextOverlayCue[],
+  ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+    return ipcRenderer.invoke(
+      'project:export-capcut',
+      timelineItems,
+      projectDirectory,
+      audioPath,
+      overlayItems,
+      textOverlayCues,
+    );
+  },
   onFileChange(callback: (event: FileChangeEvent) => void) {
     const subscription = (
       _event: IpcRendererEvent,

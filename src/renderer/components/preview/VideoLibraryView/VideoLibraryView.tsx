@@ -5,7 +5,7 @@ import React, {
   useRef,
   useMemo,
 } from 'react';
-import { Film, Play, Calendar, Pause, Download } from 'lucide-react';
+import { Film, Play, Calendar, Pause, Download, ChevronDown } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
@@ -159,6 +159,9 @@ export default function VideoLibraryView({
   const isSeekingRef = useRef(false);
   const isVideoLoadingRef = useRef(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
   const lastPlaybackTimeRef = useRef(0);
 
   // Use production-grade playback controller instead of manual state management
@@ -1304,6 +1307,189 @@ export default function VideoLibraryView({
     isDownloading,
   ]);
 
+  // Close export menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        exportMenuRef.current &&
+        !exportMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowExportMenu(false);
+      }
+    }
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showExportMenu]);
+
+  // Helper: resolve timeline items + overlays for export (shared by all export handlers)
+  const resolveExportData = useCallback(async () => {
+    if (!projectDirectory || timelineItems.length === 0) return null;
+
+    // Extract audio path
+    const audioItems = timelineItems.filter((item) => item.type === 'audio');
+    let resolvedAudioPath: string | null = null;
+    if (audioItems.length > 0 && audioItems[0]?.audioPath) {
+      try {
+        const displayPath = await resolveAssetPathForDisplay(
+          audioItems[0].audioPath,
+          projectDirectory,
+        );
+        resolvedAudioPath = normalizePathForExport(displayPath);
+      } catch (error) {
+        console.warn('[Export] Failed to resolve audio path:', error);
+      }
+    }
+
+    // Resolve main timeline items
+    const itemsDataWithPaths = await Promise.all(
+      timelineItems
+        .filter((item) => item.type !== 'audio')
+        .map(async (item) => {
+          let resolvedPath = '';
+          if (
+            (item.type === 'video' || item.type === 'infographic') &&
+            item.videoPath
+          ) {
+            resolvedPath = await resolveAssetPathForDisplay(
+              item.videoPath,
+              projectDirectory,
+            );
+          } else if (item.type === 'image' && item.imagePath) {
+            resolvedPath = await resolveAssetPathForDisplay(
+              item.imagePath,
+              projectDirectory,
+            );
+          }
+          const finalPath =
+            resolvedPath || item.videoPath || item.imagePath || '';
+          const exportType =
+            item.type === 'infographic' ? 'video' : item.type;
+          return {
+            type: exportType as 'video' | 'image' | 'placeholder',
+            path: finalPath,
+            duration: item.duration,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            sourceOffsetSeconds:
+              exportType === 'video' ? item.sourceOffsetSeconds ?? 0 : 0,
+            label: item.label,
+          };
+        }),
+    );
+    const itemsData = itemsDataWithPaths.filter(
+      (item) => item.path && item.path.trim() !== '',
+    );
+
+    // Resolve overlays
+    const overlayItemsWithPaths = await Promise.all(
+      overlayItems.map(async (item) => {
+        let resolvedPath = '';
+        if (item.videoPath) {
+          resolvedPath = await resolveAssetPathForDisplay(
+            item.videoPath,
+            projectDirectory,
+          );
+        }
+        return {
+          path: resolvedPath || item.videoPath || '',
+          duration: item.duration,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          label: item.label,
+        };
+      }),
+    );
+    const overlayItemsData = overlayItemsWithPaths.filter(
+      (item) => item.path && item.path.trim() !== '',
+    );
+
+    console.log(
+      `[Export] Resolved ${overlayItemsData.length}/${overlayItems.length} overlay items`,
+      overlayItemsData.map((o, i) => ({
+        index: i,
+        label: o.label,
+        path: o.path ? `${o.path.substring(0, 60)}...` : '(empty)',
+        start: o.startTime,
+        duration: o.duration,
+      })),
+    );
+
+    return {
+      itemsData,
+      resolvedAudioPath,
+      overlayItemsData,
+      textOverlayCues,
+    };
+  }, [projectDirectory, timelineItems, overlayItems, textOverlayCues]);
+
+  // Handle CapCut export
+  const handleExportCapcut = useCallback(async () => {
+    if (!projectDirectory || timelineItems.length === 0 || isExporting) return;
+    setIsExporting(true);
+    setShowExportMenu(false);
+    try {
+      console.log('[Export:CapCut] Starting CapCut export...');
+      const data = await resolveExportData();
+      if (!data || data.itemsData.length === 0) {
+        alert('No valid timeline items found for export.');
+        return;
+      }
+      console.log(
+        `[Export:CapCut] Data: ${data.itemsData.length} timeline items, ${data.overlayItemsData.length} overlays, ${data.textOverlayCues?.length ?? 0} captions`,
+      );
+
+      const exportFn = window.electron.project.exportCapcut as (
+        timelineItems: Array<{
+          type: 'image' | 'video' | 'placeholder';
+          path: string;
+          duration: number;
+          startTime: number;
+          endTime: number;
+          sourceOffsetSeconds?: number;
+          label?: string;
+        }>,
+        projectDirectory: string,
+        audioPath?: string,
+        overlayItems?: Array<{
+          path: string;
+          duration: number;
+          startTime: number;
+          endTime: number;
+          label?: string;
+        }>,
+        textOverlayCues?: TextOverlayCue[],
+      ) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
+
+      const result = await exportFn(
+        data.itemsData,
+        projectDirectory,
+        data.resolvedAudioPath || undefined,
+        data.overlayItemsData,
+        data.textOverlayCues || undefined,
+      );
+
+      if (result.error === 'cancelled') return;
+      if (!result.success) {
+        alert(`Failed to export CapCut project: ${result.error || 'Unknown error'}`);
+        return;
+      }
+      alert('CapCut project exported successfully! You can now open it in CapCut.');
+    } catch (error) {
+      console.error('[Export:CapCut] Error:', error);
+      alert(
+        `Failed to export CapCut project: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  }, [projectDirectory, timelineItems, isExporting, resolveExportData]);
+
   // Show empty state if no project
   if (!projectDirectory) {
     return (
@@ -1334,16 +1520,49 @@ export default function VideoLibraryView({
           <span className={styles.count}>{videoArtifacts.length}</span>
         </div>
         <div className={styles.headerRight}>
-          <button
-            type="button"
-            className={styles.downloadButton}
-            onClick={handleDownloadVideo}
-            disabled={isDownloading || timelineItems.length === 0}
-            title="Download complete timeline video"
-          >
-            <Download size={16} />
-            {isDownloading ? 'Composing...' : 'Download'}
-          </button>
+          <div className={styles.exportDropdownWrapper} ref={exportMenuRef}>
+            <button
+              type="button"
+              className={styles.downloadButton}
+              onClick={handleDownloadVideo}
+              disabled={isDownloading || isExporting || timelineItems.length === 0}
+              title="Download complete timeline video as MP4"
+            >
+              <Download size={16} />
+              {isDownloading ? 'Composing...' : isExporting ? 'Exporting...' : 'Download'}
+            </button>
+            <button
+              type="button"
+              className={styles.exportDropdownToggle}
+              onClick={() => setShowExportMenu((prev) => !prev)}
+              disabled={isDownloading || isExporting || timelineItems.length === 0}
+              title="Export options"
+            >
+              <ChevronDown size={14} />
+            </button>
+            {showExportMenu && (
+              <div className={styles.exportDropdownMenu}>
+                <button
+                  type="button"
+                  className={styles.exportDropdownItem}
+                  onClick={handleDownloadVideo}
+                  disabled={isDownloading || isExporting}
+                >
+                  <Download size={14} />
+                  Export as MP4
+                </button>
+                <button
+                  type="button"
+                  className={styles.exportDropdownItem}
+                  onClick={handleExportCapcut}
+                  disabled={isDownloading || isExporting}
+                >
+                  <Download size={14} />
+                  Export as CapCut Project
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

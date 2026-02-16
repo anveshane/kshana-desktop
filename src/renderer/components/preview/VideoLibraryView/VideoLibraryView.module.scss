@@ -44,6 +44,12 @@
   gap: $spacing-sm;
 }
 
+.exportDropdownWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .downloadButton {
   display: flex;
   align-items: center;
@@ -51,7 +57,7 @@
   padding: $spacing-xs $spacing-sm;
   background-color: rgba($color-accent-green, 0.1);
   border: 1px solid rgba($color-accent-green, 0.3);
-  border-radius: $radius-sm;
+  border-radius: $radius-sm 0 0 $radius-sm;
   color: $color-accent-green;
   font-size: $font-size-xs;
   font-weight: $font-weight-medium;
@@ -61,7 +67,6 @@
   &:hover:not(:disabled) {
     background-color: rgba($color-accent-green, 0.2);
     border-color: rgba($color-accent-green, 0.5);
-    transform: translateY(-1px);
   }
 
   &:disabled {
@@ -71,6 +76,73 @@
 
   &:active:not(:disabled) {
     transform: translateY(0);
+  }
+}
+
+.exportDropdownToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xs 6px;
+  background-color: rgba($color-accent-green, 0.1);
+  border: 1px solid rgba($color-accent-green, 0.3);
+  border-left: none;
+  border-radius: 0 $radius-sm $radius-sm 0;
+  color: $color-accent-green;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background-color: rgba($color-accent-green, 0.2);
+    border-color: rgba($color-accent-green, 0.5);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.exportDropdownMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 240px;
+  background-color: $color-panel-background;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.exportDropdownItem {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  width: 100%;
+  padding: $spacing-sm $spacing-md;
+  background: none;
+  border: none;
+  color: $color-text-primary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: background-color $transition-fast;
+  text-align: left;
+
+  &:hover:not(:disabled) {
+    background-color: rgba($color-accent-green, 0.1);
+    color: $color-accent-green;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  & + & {
+    border-top: 1px solid rgba($color-panel-border, 0.5);
   }
 }
 
