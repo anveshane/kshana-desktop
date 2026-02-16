@@ -12,6 +12,7 @@ import styles from './ChatPanel.module.scss';
 
 // Message types that shouldn't create new messages if same type already exists
 const DEDUPE_TYPES = ['progress', 'comfyui_progress', 'error'];
+const backgroundGenerationEventDedupe = new Set<string>();
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 
@@ -61,7 +62,6 @@ export default function ChatPanel() {
   const lastQuestionMessageIdRef = useRef<string | null>(null);
   // Track if error was already shown for the current connection attempt
   const connectionErrorShownRef = useRef(false);
-
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
       const id = message.id ?? makeId();
@@ -124,6 +124,7 @@ export default function ChatPanel() {
     toolCallSequenceRef.current.clear();
     lastTodoMessageIdRef.current = null;
     lastQuestionMessageIdRef.current = null;
+    backgroundGenerationEventDedupe.clear();
     setAgentStatus('idle');
     setStatusMessage('Ready');
     setHasUserSentMessage(false);
@@ -930,6 +931,46 @@ export default function ChatPanel() {
               });
               lastTodoMessageIdRef.current = messageId;
             }
+          }
+          break;
+        }
+        case 'background_generation': {
+          const batchId = String(data.batchId ?? '');
+          const kind = ((data.kind as 'image' | 'video' | undefined) ?? 'image');
+          const batchStatus = (data.status as
+            | 'queued'
+            | 'running'
+            | 'completed'
+            | 'failed'
+            | undefined) ?? 'running';
+          const totalItems = Number(data.totalItems ?? 0);
+          const completedItems = Number(data.completedItems ?? 0);
+          const failedItems = Number(data.failedItems ?? 0);
+          const kindLabel = kind === 'video' ? 'video' : 'image';
+
+          if (batchStatus === 'queued' || batchStatus === 'running') {
+            const progress =
+              totalItems > 0 ? ` (${Math.min(completedItems, totalItems)}/${totalItems})` : '';
+            setStatusMessage(`Background ${kindLabel} generation ${batchStatus}${progress}.`);
+            break;
+          }
+
+          const dedupeKey = `${batchId}:${batchStatus}`;
+          if (backgroundGenerationEventDedupe.has(dedupeKey)) {
+            break;
+          }
+          backgroundGenerationEventDedupe.add(dedupeKey);
+
+          if (batchStatus === 'completed') {
+            appendSystemMessage(
+              `Background ${kindLabel} generation finished (${completedItems}/${totalItems}).`,
+              'status',
+            );
+          } else if (batchStatus === 'failed') {
+            appendSystemMessage(
+              `Background ${kindLabel} generation finished with failures (${completedItems}/${totalItems}, failed: ${failedItems}).`,
+              'status',
+            );
           }
           break;
         }

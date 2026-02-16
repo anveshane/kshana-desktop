@@ -704,60 +704,6 @@ function buildMediaSegmentObject(
   };
 }
 
-function buildOverlaySegmentObject(
-  seg: TrackSegment,
-  renderIndex: number,
-  speedMat: SpeedMaterial,
-): Record<string, unknown> {
-  // Overlay segments are scaled down so the background image remains visible.
-  // The clip is centered and muted (infographic audio is not useful).
-  return {
-    caption_info: null,
-    cartoon: false,
-    clip: {
-      alpha: 1.0,
-      flip: { horizontal: false, vertical: false },
-      rotation: 0.0,
-      scale: { x: 0.6, y: 0.6 },
-      transform: { x: 0.0, y: 0.0 },
-    },
-    common_keyframes: [],
-    enable_adjust: true,
-    enable_color_correct_adjust: false,
-    enable_color_curves: true,
-    enable_color_match_adjust: false,
-    enable_color_wheels: true,
-    enable_lut: true,
-    enable_smart_color_adjust: false,
-    extra_material_refs: [speedMat.id],
-    group_id: '',
-    hdr_settings: { intensity: 1.0, mode: 1, nits: 1000 },
-    id: seg.id,
-    intensifies_audio: false,
-    is_placeholder: false,
-    is_tone_modify: false,
-    keyframe_refs: [],
-    last_nonzero_volume: 1.0,
-    material_id: seg.material_id,
-    render_index: renderIndex,
-    responsive_layout: {
-      enable: false, horizontal_pos_layout: 0, size_layout: 0,
-      target_follow: '', vertical_pos_layout: 0,
-    },
-    reverse: false,
-    source_timerange: seg.source_timerange,
-    speed: speedMat.speed,
-    target_timerange: seg.target_timerange,
-    template_id: '',
-    template_scene: 'default',
-    track_attribute: 0,
-    track_render_index: 0,
-    uniform_scale: { on: true, value: 1.0 },
-    visible: true,
-    volume: 0.0,
-  };
-}
-
 function buildTextSegmentObject(
   seg: TextSegment,
   renderIndex: number,
@@ -1052,7 +998,6 @@ export async function generateCapcutProject(
   });
 
   // Overlay track (render_index = 1, above main track)
-  // Overlays use a scaled-down PIP style so the background image remains visible.
   if (overlaySegments.length > 0) {
     tracks.push({
       attribute: 0,
@@ -1063,7 +1008,7 @@ export async function generateCapcutProject(
       segments: overlaySegments.map((seg) => {
         const spd = createSpeedMaterial();
         speedMaterials.push(spd);
-        return buildOverlaySegmentObject(seg, 1, spd);
+        return buildMediaSegmentObject(seg, 1, false, spd);
       }),
       type: 'video',
     });
