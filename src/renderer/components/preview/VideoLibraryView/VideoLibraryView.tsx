@@ -23,6 +23,28 @@ import type { TextOverlayCue } from '../../../types/captions';
 import { getActiveCue, getActiveWordIndex } from '../../../utils/captionGrouping';
 import styles from './VideoLibraryView.module.scss';
 
+function normalizeVideoSourcePath(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return '';
+
+  if (trimmed.startsWith('file://')) {
+    return decodeURIComponent(trimmed.replace(/^file:\/\//, ''));
+  }
+
+  return trimmed;
+}
+
+function doesVideoSourceMatch(currentSrc: string, expectedSrc: string): boolean {
+  if (!currentSrc || !expectedSrc) return false;
+  if (currentSrc === expectedSrc) return true;
+
+  const normalizedCurrent = normalizeVideoSourcePath(currentSrc);
+  const normalizedExpected = normalizeVideoSourcePath(expectedSrc);
+  if (!normalizedCurrent || !normalizedExpected) return false;
+
+  return normalizedCurrent === normalizedExpected;
+}
+
 // Video Card Component
 interface VideoCardProps {
   artifact: Artifact;
@@ -156,6 +178,9 @@ export default function VideoLibraryView({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayVideoRef = useRef<HTMLVideoElement | null>(null);
   const currentVideoPathRef = useRef<string | null>(null);
+  const appliedClipIdentityRef = useRef<string | null>(null);
+  const videoPathRequestIdRef = useRef(0);
+  const sceneImageRequestIdRef = useRef(0);
   const isSeekingRef = useRef(false);
   const isVideoLoadingRef = useRef(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -245,9 +270,27 @@ export default function VideoLibraryView({
 
   // Get current video and image from playback controller
   // currentItem is already provided by usePlaybackController
-  const currentVideo =
-    currentItem?.type === 'video' ? currentItem : null;
+  const currentVideo = currentItem?.type === 'video' ? currentItem : null;
   const currentImage = currentItem?.type === 'image' ? currentItem : null;
+  const sceneClipIdentity = useMemo(() => {
+    if (!currentItem) return null;
+    if (
+      currentItem.type === 'video' ||
+      currentItem.type === 'audio' ||
+      currentItem.type === 'text_overlay'
+    ) {
+      return null;
+    }
+
+    const idPart = currentItem.id || currentItem.label;
+    return `${idPart}:${currentItem.startTime}:${currentItem.endTime}:${currentItem.imagePath ?? ''}`;
+  }, [currentItem]);
+  const clipIdentity = useMemo(() => {
+    if (!currentVideo) return null;
+
+    const idPart = currentVideo.id || currentVideo.label;
+    return `${idPart}:${currentVideo.startTime}:${currentVideo.endTime}:${currentVideo.sourceOffsetSeconds ?? 0}`;
+  }, [currentVideo]);
 
   const currentOverlay = useMemo(() => {
     if (overlayItems.length === 0) return null;
@@ -363,19 +406,35 @@ export default function VideoLibraryView({
   );
 
   useEffect(() => {
+    sceneImageRequestIdRef.current += 1;
+    const requestId = sceneImageRequestIdRef.current;
+    // Clear stale image immediately so previous clip art does not linger.
+    setResolvedSceneImagePath(null);
+
     if (!sceneImagePath || !projectDirectory) {
       setResolvedSceneImagePath(null);
       return;
     }
 
-    resolveAssetPathForDisplay(sceneImagePath, projectDirectory)
+    resolveAssetPathWithRetry(sceneImagePath, projectDirectory, {
+      maxRetries: 3,
+      retryDelayBase: 350,
+      timeout: 5000,
+      verifyExists: true,
+    })
       .then((resolved) => {
+        if (requestId !== sceneImageRequestIdRef.current) {
+          return;
+        }
         setResolvedSceneImagePath(resolved);
       })
       .catch(() => {
+        if (requestId !== sceneImageRequestIdRef.current) {
+          return;
+        }
         setResolvedSceneImagePath(null);
       });
-  }, [sceneImagePath, projectDirectory]);
+  }, [sceneImagePath, sceneClipIdentity, projectDirectory]);
 
   useEffect(() => {
     if (!activeOverlay?.videoPath || !projectDirectory) {
@@ -526,6 +585,8 @@ export default function VideoLibraryView({
 
   // Resolved video path state
   const [currentVideoPath, setCurrentVideoPath] = useState<string>('');
+  const shouldShowVideo = Boolean(currentVideo && currentVideoPath);
+  const shouldShowLoadingVideo = Boolean(currentVideo && !currentVideoPath);
 
   // Construct version-specific path if active version is set (placement-based)
   const versionPath = useMemo(() => {
@@ -570,24 +631,39 @@ export default function VideoLibraryView({
     return versionPath;
   }, [versionPath, currentVideo]);
 
+  useEffect(() => {
+    setCurrentVideoPath('');
+    currentVideoPathRef.current = null;
+    appliedClipIdentityRef.current = null;
+    isVideoLoadingRef.current = false;
+  }, [clipIdentity]);
+
   // Resolve video path when current video or version changes
   useEffect(() => {
+    videoPathRequestIdRef.current += 1;
+    const requestId = videoPathRequestIdRef.current;
     console.log('[VideoLibraryView] Resolving video path:', {
       effectiveVersionPath,
       versionPath,
       hasProjectDirectory: !!projectDirectory,
+      requestId,
     });
 
     if (!effectiveVersionPath) {
       console.log(
         '[VideoLibraryView] No effectiveVersionPath, clearing currentVideoPath',
       );
-      setCurrentVideoPath('');
-      return;
+      if (requestId === videoPathRequestIdRef.current) {
+        setCurrentVideoPath('');
+      }
+      return undefined;
     }
 
     resolveAssetPathForDisplay(effectiveVersionPath, projectDirectory || null)
       .then((resolved) => {
+        if (requestId !== videoPathRequestIdRef.current) {
+          return undefined;
+        }
         console.log('[VideoLibraryView] Video path resolved:', {
           effectiveVersionPath,
           resolved,
@@ -602,6 +678,9 @@ export default function VideoLibraryView({
         }
       })
       .catch((error) => {
+        if (requestId !== videoPathRequestIdRef.current) {
+          return undefined;
+        }
         console.error(
           `[VideoLibraryView] Failed to resolve video path: ${effectiveVersionPath}`,
           error,
@@ -621,239 +700,215 @@ export default function VideoLibraryView({
       hasVideoRef: !!videoRef.current,
     });
 
-    if (!currentVideo || !videoRef.current || isDragging) {
+    if (!videoRef.current || isDragging) {
       console.log('[VideoLibraryView] Skipping video source update:', {
         hasCurrentVideo: !!currentVideo,
         hasVideoRef: !!videoRef.current,
         isDragging,
       });
-      return;
+      return undefined;
     }
 
     const videoElement = videoRef.current;
+    const clearVideoSource = () => {
+      videoElement.pause();
+      videoElement.removeAttribute('src');
+      videoElement.load();
+      currentVideoPathRef.current = null;
+      appliedClipIdentityRef.current = null;
+      isVideoLoadingRef.current = false;
+    };
+
+    if (!currentVideo) {
+      if (videoElement.src) {
+        clearVideoSource();
+      } else {
+        currentVideoPathRef.current = null;
+        appliedClipIdentityRef.current = null;
+        isVideoLoadingRef.current = false;
+      }
+      return undefined;
+    }
 
     // If path is empty, check if we need to clear existing video
     if (!currentVideoPath || !currentVideoPath.trim()) {
-      // If currentVideo exists and is a video type, we're waiting for path resolution
-      // But we should clear any existing video source to prevent showing stale content
-      if (currentVideo && currentVideo.type === 'video') {
-        if (
-          videoElement.src &&
-          videoElement.src !== currentVideoPathRef.current
-        ) {
-          // We have an old video loaded, clear it while waiting for new path
-          console.log(
-            '[VideoLibraryView] Waiting for video path resolution, clearing old video:',
-            {
-              currentVideoLabel: currentVideo.label,
-              currentVideoPath,
-              oldSrc: videoElement.src,
-              prevPathRef: currentVideoPathRef.current,
-            },
-          );
-          videoElement.pause();
-          videoElement.src = '';
-          videoElement.load();
-          currentVideoPathRef.current = null;
-        }
-        console.log('[VideoLibraryView] Waiting for video path resolution:', {
-          currentVideoLabel: currentVideo.label,
-          currentVideoPath,
-          hasExistingSrc: !!videoElement.src,
-        });
-        return; // Wait for path resolution
-      }
-
-      // Only clear if we're sure there's no video
-      console.warn(
-        '[VideoLibraryView] Empty currentVideoPath, clearing video source:',
-        {
-          currentVideoLabel: currentVideo?.label,
-          currentVideoPath,
-        },
-      );
       if (videoElement.src) {
-        videoElement.pause();
-        videoElement.src = '';
-        videoElement.load();
+        clearVideoSource();
+      } else {
         currentVideoPathRef.current = null;
+        appliedClipIdentityRef.current = null;
+        isVideoLoadingRef.current = false;
       }
-      return;
+      console.log('[VideoLibraryView] Waiting for video path resolution:', {
+        currentVideoLabel: currentVideo.label,
+        currentVideoPath,
+        hasExistingSrc: !!videoElement.src,
+      });
+      return undefined;
     }
 
-    // Only update if source actually changed to prevent flickering
-    if (currentVideoPathRef.current !== currentVideoPath) {
-      console.log('[VideoLibraryView] Video source changing:', {
-        from: currentVideoPathRef.current,
-        to: currentVideoPath,
-        currentVideoLabel: currentVideo.label,
-      });
+    const clipChanged = appliedClipIdentityRef.current !== clipIdentity;
+    const pathChanged = currentVideoPathRef.current !== currentVideoPath;
+    const srcMismatch = !doesVideoSourceMatch(videoElement.src, currentVideoPath);
+    const shouldApplySource = clipChanged || pathChanged || srcMismatch;
+    if (!shouldApplySource) {
+      return undefined;
+    }
 
-      // If we're switching to a new video and the old video is different,
-      // clear the video element immediately to prevent showing stale content
-      if (
-        currentVideoPathRef.current &&
-        currentVideoPathRef.current !== currentVideoPath
-      ) {
-        console.log(
-          '[VideoLibraryView] Clearing old video source before loading new one',
-        );
-        videoElement.pause();
-        videoElement.src = '';
-        videoElement.load();
-      }
+    console.log('[VideoLibraryView] Video source changing:', {
+      from: currentVideoPathRef.current,
+      to: currentVideoPath,
+      currentVideoLabel: currentVideo.label,
+      clipChanged,
+      pathChanged,
+      srcMismatch,
+    });
 
-      const wasPlaying = !videoElement.paused;
-      currentVideoPathRef.current = currentVideoPath;
+    const wasPlaying = !videoElement.paused;
 
-      // Pause current video before changing source
-      videoElement.pause();
+    // Pause current video before changing source
+    videoElement.pause();
 
-      // Clear previous error handlers
-      const handleError = (e: Event) => {
-        const { error } = videoElement;
-        if (error) {
-          console.error(
-            `[VideoLibraryView] Video error for ${currentVideo.label}:`,
-            {
-              code: error.code,
-              message: error.message,
-              path: currentVideoPath,
-              effectiveVersionPath,
-              videoPath: currentVideo.videoPath,
-            },
+    const handleError = () => {
+      isVideoLoadingRef.current = false;
+      const { error } = videoElement;
+      if (error) {
+        console.error(`[VideoLibraryView] Video error for ${currentVideo.label}:`, {
+          code: error.code,
+          message: error.message,
+          path: currentVideoPath,
+          effectiveVersionPath,
+          videoPath: currentVideo.videoPath,
+        });
+
+        // Try fallback: use videoPath directly if versionPath failed
+        if (currentVideo.videoPath && currentVideoPath !== currentVideo.videoPath) {
+          console.log(
+            '[VideoLibraryView] Video load error, trying fallback path:',
+            currentVideo.videoPath,
           );
-
-          // Try fallback: use videoPath directly if versionPath failed
-          if (
-            currentVideo?.videoPath &&
-            currentVideoPath !== currentVideo.videoPath
-          ) {
-            console.log(
-              '[VideoLibraryView] Video load error, trying fallback path:',
-              currentVideo.videoPath,
-            );
-            // Trigger re-resolution with fallback path
-            resolveAssetPathForDisplay(
-              currentVideo.videoPath,
-              projectDirectory || null,
-            )
-              .then((resolved) => {
-                if (
-                  resolved &&
-                  resolved.trim() &&
-                  resolved !== currentVideoPath
-                ) {
-                  console.log(
-                    '[VideoLibraryView] Fallback path resolved successfully:',
-                    resolved,
-                  );
-                  // Update the video element src directly
-                  if (videoRef.current) {
-                    videoRef.current.src = resolved;
-                    videoRef.current.load();
-                  }
-                }
-              })
-              .catch((fallbackError) => {
-                console.error(
-                  '[VideoLibraryView] Fallback path resolution also failed:',
-                  fallbackError,
+          resolveAssetPathForDisplay(currentVideo.videoPath, projectDirectory || null)
+            .then((resolved) => {
+              if (
+                resolved &&
+                resolved.trim() &&
+                resolved !== currentVideoPath &&
+                videoRef.current
+              ) {
+                console.log(
+                  '[VideoLibraryView] Fallback path resolved successfully:',
+                  resolved,
                 );
-              });
-          }
+                currentVideoPathRef.current = resolved;
+                appliedClipIdentityRef.current = clipIdentity;
+                isVideoLoadingRef.current = true;
+                videoRef.current.src = resolved;
+                videoRef.current.load();
+              }
+            })
+            .catch((fallbackError) => {
+              console.error(
+                '[VideoLibraryView] Fallback path resolution also failed:',
+                fallbackError,
+              );
+            });
         }
-      };
+      }
+    };
 
-      const handleCanPlay = () => {
-        console.log(`[VideoLibraryView] Video can play: ${currentVideo.label}`);
-        // Seek to the correct position based on playbackTime
-        const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
-        const videoTime = sourceOffset + (playbackTime - currentVideo.startTime);
-        if (
-          videoTime > sourceOffset &&
-          videoTime < sourceOffset + currentVideo.duration
-        ) {
-          videoElement.currentTime = Math.max(0, videoTime);
-        }
-        // Resume playback if it was playing
-        if (wasPlaying || isPlaying) {
-          videoElement.play().catch((playError) => {
-            console.warn(
-              `[VideoLibraryView] Play error for ${currentVideo.label}:`,
-              playError,
-            );
-          });
-        }
-        videoElement.removeEventListener('canplay', handleCanPlay);
-      };
+    const handleCanPlay = () => {
+      isVideoLoadingRef.current = false;
+      console.log(`[VideoLibraryView] Video can play: ${currentVideo.label}`);
+      // Seek to the correct position based on playbackTime
+      const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
+      const timelinePlaybackTime = lastPlaybackTimeRef.current;
+      const videoTime =
+        sourceOffset + (timelinePlaybackTime - currentVideo.startTime);
+      if (
+        videoTime > sourceOffset &&
+        videoTime < sourceOffset + currentVideo.duration
+      ) {
+        videoElement.currentTime = Math.max(0, videoTime);
+      }
+      // Resume playback if it was playing
+      if (wasPlaying || isPlaying) {
+        videoElement.play().catch((playError) => {
+          console.warn(
+            `[VideoLibraryView] Play error for ${currentVideo.label}:`,
+            playError,
+          );
+        });
+      }
+      videoElement.removeEventListener('canplay', handleCanPlay);
+    };
 
-      const handleLoadedData = () => {
-        console.log(`[VideoLibraryView] Video loaded: ${currentVideo.label}`);
-        // Video is loaded, seek to correct position
-        const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
-        const videoTime = sourceOffset + (playbackTime - currentVideo.startTime);
-        if (
-          videoTime > sourceOffset &&
-          videoTime < sourceOffset + currentVideo.duration
-        ) {
-          videoElement.currentTime = Math.max(0, videoTime);
-        }
-        // Resume playback if it was playing
-        if (wasPlaying || isPlaying) {
-          videoElement.play().catch((playError) => {
-            console.warn(
-              `[VideoLibraryView] Play error for ${currentVideo.label}:`,
-              playError,
-            );
-          });
-        }
-        videoElement.removeEventListener('loadeddata', handleLoadedData);
-      };
+    const handleLoadedData = () => {
+      isVideoLoadingRef.current = false;
+      console.log(`[VideoLibraryView] Video loaded: ${currentVideo.label}`);
+      // Video is loaded, seek to correct position
+      const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
+      const timelinePlaybackTime = lastPlaybackTimeRef.current;
+      const videoTime =
+        sourceOffset + (timelinePlaybackTime - currentVideo.startTime);
+      if (
+        videoTime > sourceOffset &&
+        videoTime < sourceOffset + currentVideo.duration
+      ) {
+        videoElement.currentTime = Math.max(0, videoTime);
+      }
+      // Resume playback if it was playing
+      if (wasPlaying || isPlaying) {
+        videoElement.play().catch((playError) => {
+          console.warn(
+            `[VideoLibraryView] Play error for ${currentVideo.label}:`,
+            playError,
+          );
+        });
+      }
+      videoElement.removeEventListener('loadeddata', handleLoadedData);
+    };
 
-      const handleLoadStart = () => {
-        console.log(
-          `[VideoLibraryView] Loading video: ${currentVideo.label} from ${currentVideoPath}`,
-        );
-        isVideoLoadingRef.current = true;
-      };
-
-      // Add error handler
-      videoElement.addEventListener('error', handleError);
-      videoElement.addEventListener('canplay', handleCanPlay);
-      videoElement.addEventListener('loadeddata', handleLoadedData);
-      videoElement.addEventListener('loadstart', handleLoadStart);
-
-      // Set new source
-      console.log('[VideoLibraryView] Setting video element src:', {
-        newSrc: currentVideoPath,
-        oldSrc: videoElement.src,
-        currentVideoLabel: currentVideo.label,
-        wasPlaying,
-      });
-      videoElement.src = currentVideoPath;
-      videoElement.muted = true; // Mute video audio so only imported audio track plays
-      // Don't reset currentTime to 0 - let it be set by the loaded event handlers based on playbackTime
-      videoElement.load();
+    const handleLoadStart = () => {
       console.log(
-        '[VideoLibraryView] Video element src set and load() called:',
-        {
-          src: videoElement.src,
-          readyState: videoElement.readyState,
-          networkState: videoElement.networkState,
-        },
+        `[VideoLibraryView] Loading video: ${currentVideo.label} from ${currentVideoPath}`,
       );
+      isVideoLoadingRef.current = true;
+    };
 
-      return () => {
-        videoElement.removeEventListener('error', handleError);
-        videoElement.removeEventListener('canplay', handleCanPlay);
-        videoElement.removeEventListener('loadeddata', handleLoadedData);
-        videoElement.removeEventListener('loadstart', handleLoadStart);
-      };
-    }
+    videoElement.addEventListener('error', handleError);
+    videoElement.addEventListener('canplay', handleCanPlay);
+    videoElement.addEventListener('loadeddata', handleLoadedData);
+    videoElement.addEventListener('loadstart', handleLoadStart);
+
+    console.log('[VideoLibraryView] Setting video element src:', {
+      newSrc: currentVideoPath,
+      oldSrc: videoElement.src,
+      currentVideoLabel: currentVideo.label,
+      wasPlaying,
+    });
+    currentVideoPathRef.current = currentVideoPath;
+    appliedClipIdentityRef.current = clipIdentity;
+    isVideoLoadingRef.current = true;
+    videoElement.src = currentVideoPath;
+    videoElement.muted = true; // Mute video audio so only imported audio track plays
+    // Don't reset currentTime to 0 - let it be set by the loaded event handlers based on playbackTime
+    videoElement.load();
+    console.log('[VideoLibraryView] Video element src set and load() called:', {
+      src: videoElement.src,
+      readyState: videoElement.readyState,
+      networkState: videoElement.networkState,
+    });
+
+    return () => {
+      videoElement.removeEventListener('error', handleError);
+      videoElement.removeEventListener('canplay', handleCanPlay);
+      videoElement.removeEventListener('loadeddata', handleLoadedData);
+      videoElement.removeEventListener('loadstart', handleLoadStart);
+    };
   }, [
     currentVideo,
     currentVideoPath,
+    clipIdentity,
     isPlaying,
     isDragging,
     effectiveVersionPath,
@@ -894,7 +949,7 @@ export default function VideoLibraryView({
       videoElement.removeEventListener('play', handlePlay);
       videoElement.removeEventListener('pause', handlePause);
     };
-  }, [onPlaybackStateChange]);
+  }, [onPlaybackStateChange, currentItemIndex]);
 
   // Sync video playback with shared state
   useEffect(() => {
@@ -1593,108 +1648,79 @@ export default function VideoLibraryView({
 
         {/* Right Side - Timeline Preview */}
         <div className={styles.playerSection}>
-          {/* Video player - only show if currentVideo exists */}
-          {currentVideo ? (
+          {timelineItems.length > 0 ? (
             <div className={styles.videoPlayer}>
-              {currentVideoPath ? (
-                <video
-                  ref={videoRef}
-                  key={`video-${currentItemIndex}-${currentVideo?.id || currentVideo?.label || 'none'}-${currentVideoPath || 'no-path'}`}
-                  className={styles.playerVideo}
-                  onTimeUpdate={handleTimeUpdate}
-                  onEnded={handleVideoEnd}
-                  onError={(e) => {
-                    const video = e.currentTarget;
-                    const { error } = video;
-                    if (error) {
-                      console.error(`[VideoLibraryView] Video element error:`, {
-                        code: error.code,
-                        message: error.message,
-                        path: currentVideoPath,
-                        label: currentVideo.label,
-                      });
-                      // Try fallback: use videoPath directly if versionPath failed
-                      if (
-                        currentVideo?.videoPath &&
-                        currentVideoPath !== currentVideo.videoPath
-                      ) {
-                        console.log(
-                          '[VideoLibraryView] Video load error, will try fallback path:',
-                          currentVideo.videoPath,
-                        );
-                      }
+              <video
+                ref={videoRef}
+                className={`${styles.playerVideo} ${
+                  shouldShowVideo ? '' : styles.videoHidden
+                }`}
+                onTimeUpdate={handleTimeUpdate}
+                onEnded={handleVideoEnd}
+                onError={(e) => {
+                  if (!currentVideo) return;
+                  const video = e.currentTarget;
+                  const { error } = video;
+                  if (error) {
+                    console.error(`[VideoLibraryView] Video element error:`, {
+                      code: error.code,
+                      message: error.message,
+                      path: currentVideoPath,
+                      label: currentVideo.label,
+                    });
+                    // Try fallback: use videoPath directly if versionPath failed
+                    if (
+                      currentVideo.videoPath &&
+                      currentVideoPath !== currentVideo.videoPath
+                    ) {
+                      console.log(
+                        '[VideoLibraryView] Video load error, will try fallback path:',
+                        currentVideo.videoPath,
+                      );
                     }
-                  }}
-                  preload="auto"
-                  playsInline
-                  muted
-                />
-              ) : (
+                  }
+                }}
+                preload="auto"
+                playsInline
+                muted
+              />
+
+              {!shouldShowVideo && shouldShowLoadingVideo && (
                 <div className={styles.videoPlaceholder}>
                   <Film size={48} className={styles.videoPlaceholderIcon} />
                   <p>Loading video...</p>
                   <p className={styles.videoPlaceholderSubtext}>
-                    {currentVideo.label}
+                    {currentVideo?.label}
                   </p>
                 </div>
               )}
-              <div className={styles.currentVideoLabel}>
-                {currentVideo.label}
-              </div>
-              {activeTextCue && (
-                <div className={styles.wordCaptionOverlay}>
-                  <div className={styles.wordCaptionText}>
-                    {renderCaptionCue(activeTextCue, activeWordIndex)}
-                  </div>
+
+              {!shouldShowVideo && !shouldShowLoadingVideo && (
+                <div
+                  className={`${styles.scenePlaceholder} ${
+                    resolvedSceneImagePath ? styles.hasBackgroundImage : ''
+                  }`}
+                  style={
+                    resolvedSceneImagePath
+                      ? {
+                          backgroundImage: `url(${resolvedSceneImagePath})`,
+                        }
+                      : undefined
+                  }
+                >
+                  {currentItem &&
+                    (currentItem.type === 'image' ||
+                      currentItem.type === 'placeholder') &&
+                    !resolvedSceneImagePath && (
+                      <div className={styles.scenePlaceholderContent}>
+                        <Film size={64} className={styles.scenePlaceholderIcon} />
+                        <h3>{currentItem.label}</h3>
+                      </div>
+                    )}
                 </div>
               )}
-              <div className={styles.playerControls}>
-                <button
-                  type="button"
-                  className={styles.playPauseButton}
-                  onClick={handlePlayPause}
-                >
-                  {isPlaying ? <Pause size={20} /> : <Play size={20} />}
-                </button>
-                <div className={styles.timeDisplay}>
-                  {formatTime(playbackTime)} / {formatTime(totalDuration)}
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max={totalDuration || 0}
-                  value={playbackTime}
-                  onChange={handleSeekBarChange}
-                  className={styles.seekBar}
-                />
-              </div>
-            </div>
-          ) : timelineItems.length > 0 ? (
-            /* Show controls even when no video - for image/placeholder playback */
-            <div className={styles.videoPlayer}>
-              <div
-                className={`${styles.scenePlaceholder} ${
-                  resolvedSceneImagePath ? styles.hasBackgroundImage : ''
-                }`}
-                style={
-                  resolvedSceneImagePath
-                    ? {
-                        backgroundImage: `url(${resolvedSceneImagePath})`,
-                      }
-                    : undefined
-                }
-              >
-                {currentItem &&
-                  (currentItem.type === 'image' ||
-                    currentItem.type === 'placeholder') &&
-                  !resolvedSceneImagePath && (
-                    <div className={styles.scenePlaceholderContent}>
-                      <Film size={64} className={styles.scenePlaceholderIcon} />
-                      <h3>{currentItem.label}</h3>
-                    </div>
-                  )}
-              </div>
-              {activeOverlay && resolvedOverlayPath && (
+
+              {!shouldShowVideo && activeOverlay && resolvedOverlayPath && (
                 <video
                   ref={overlayVideoRef}
                   className={styles.overlayVideo}
@@ -1703,6 +1729,10 @@ export default function VideoLibraryView({
                   muted
                   aria-hidden
                 />
+              )}
+
+              {currentVideo && (
+                <div className={styles.currentVideoLabel}>{currentVideo.label}</div>
               )}
               {activeTextCue && (
                 <div className={styles.wordCaptionOverlay}>

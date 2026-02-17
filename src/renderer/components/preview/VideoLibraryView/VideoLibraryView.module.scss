@@ -294,10 +294,19 @@
 }
 
 .playerVideo {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background-color: #000;
+  z-index: 0;
+}
+
+.videoHidden {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .overlayVideo {
@@ -341,6 +350,8 @@
 }
 
 .videoPlaceholder {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   @include flex-center;
@@ -348,6 +359,7 @@
   gap: $spacing-md;
   background-color: $color-background-dark;
   color: $color-text-muted;
+  z-index: 0;
 }
 
 .videoPlaceholderIcon {
@@ -485,6 +497,8 @@
 }
 
 .scenePlaceholder {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: flex;
@@ -496,11 +510,13 @@
   background-position: center;
   background-repeat: no-repeat;
   border: 2px dashed $color-panel-border;
-  position: relative;
+  z-index: 0;
 
   &.hasBackgroundImage {
     justify-content: flex-end;
     padding-bottom: $spacing-lg;
+    background-size: cover;
+    border: none;
   }
 }
 

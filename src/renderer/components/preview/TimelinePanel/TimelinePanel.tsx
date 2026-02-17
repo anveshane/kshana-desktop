@@ -659,7 +659,10 @@ export default function TimelinePanel({
   // If position was clamped, update internal state
   useEffect(() => {
     // Only clamp if using internal state and position exceeds duration
-    if (!externalPlaybackTime && internalPlaybackTime > totalDuration) {
+    if (
+      externalPlaybackTime === undefined &&
+      internalPlaybackTime > totalDuration
+    ) {
       setInternalPlaybackTime(totalDuration);
     }
   }, [
@@ -671,7 +674,7 @@ export default function TimelinePanel({
 
   // Sync playhead position to timeline state (debounced)
   useEffect(() => {
-    if (!externalPlaybackTime) {
+    if (externalPlaybackTime === undefined) {
       // Only sync if using internal state
       const timeoutId = setTimeout(() => {
         updatePlayhead(currentPosition);
