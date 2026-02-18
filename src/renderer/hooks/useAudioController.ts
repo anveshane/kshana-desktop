@@ -40,7 +40,7 @@ function normalizePathForComparison(path: string | null): string | null {
   }
 
   // If it's a relative path, extract the filename
-  return path.split('/').pop() || null;
+  return path.replace(/\\/g, '/').split('/').pop() || null;
 }
 
 /**

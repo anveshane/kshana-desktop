@@ -8,6 +8,7 @@ type Props = {
   onClose: () => void;
   onSave: (settings: AppSettings) => Promise<void> | void;
   isRestarting: boolean;
+  error?: string | null;
 };
 
 const emptySettings: AppSettings = {
@@ -31,6 +32,7 @@ export default function SettingsPanel({
   onClose,
   onSave,
   isRestarting,
+  error,
 }: Props) {
   const [form, setForm] = useState<AppSettings>(settings ?? emptySettings);
 
@@ -332,6 +334,10 @@ export default function SettingsPanel({
             </>
           )}
           */}
+
+          {error && (
+            <div className={styles.error}>{error}</div>
+          )}
 
           <div className={styles.actions}>
             <button

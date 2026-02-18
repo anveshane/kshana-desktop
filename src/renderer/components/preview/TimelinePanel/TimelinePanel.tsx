@@ -1840,7 +1840,7 @@ export default function TimelinePanel({
 
       // Copy video to videos/imported folder
       const videoFileName =
-        videoPath.split('/').pop() || `video-${Date.now()}.mp4`;
+        videoPath.replace(/\\/g, '/').split('/').pop() || `video-${Date.now()}.mp4`;
       const destPath = await window.electron.project.copy(
         videoPath,
         videosFolder,
@@ -1850,7 +1850,7 @@ export default function TimelinePanel({
       // Get video duration
       const video = document.createElement('video');
       video.preload = 'metadata';
-      video.src = `file://${destPath}`;
+      video.src = `file://${destPath.replace(/\\/g, '/')}`;
 
       // eslint-disable-next-line compat/compat
       await new Promise<void>((resolve, reject) => {
@@ -1929,7 +1929,7 @@ export default function TimelinePanel({
 
       // Copy audio to .kshana/agent/audio folder
       const audioFileName =
-        audioPath.split('/').pop() || `audio-${Date.now()}.mp3`;
+        audioPath.replace(/\\/g, '/').split('/').pop() || `audio-${Date.now()}.mp3`;
       await window.electron.project.copy(audioPath, audioFolder);
 
       // Add small delay before refresh to ensure file copy completes

@@ -27,8 +27,7 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 function shortenPath(filePath: string): string {
-  // In renderer process, use a simple approach
-  const parts = filePath.split('/');
+  const parts = filePath.replace(/\\/g, '/').split('/');
   if (parts.length > 3) {
     return `~/${parts.slice(-3).join('/')}`;
   }

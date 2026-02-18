@@ -1507,9 +1507,6 @@ const createWindow = async () => {
     },
   });
 
-  // Open DevTools to debug black screen
-  mainWindow.webContents.openDevTools();
-
   const htmlPath = resolveHtmlPath('index.html');
   log.info(`Loading HTML from: ${htmlPath}`);
   log.info(`App is packaged: ${app.isPackaged}`);

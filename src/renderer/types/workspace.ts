@@ -7,8 +7,7 @@ import type {
 export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting';
 
 export interface ConnectionState {
-  lmStudio: ConnectionStatus;
-  comfyUI: ConnectionStatus;
+  server: ConnectionStatus;
 }
 
 export interface SelectedFile {

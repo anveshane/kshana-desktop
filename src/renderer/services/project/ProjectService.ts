@@ -88,22 +88,22 @@ export class ProjectService {
     const errors: string[] = [];
 
     // Check for agent state (required - this is the primary project file)
-    const agentStatePath = `${directory}/${PROJECT_PATHS.AGENT_PROJECT}`;
+    const agentStatePath = ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_PROJECT);
     const hasAgentState = await this.fileExists(agentStatePath);
     if (!hasAgentState) {
       errors.push('Missing .kshana/agent/project.json file');
     }
 
     // Check for root manifest (optional - CLI doesn't create this)
-    const manifestPath = `${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`;
+    const manifestPath = ProjectService.buildPath(directory, PROJECT_PATHS.ROOT_MANIFEST);
     const hasManifest = await this.fileExists(manifestPath);
 
     // Check for asset manifest
-    const assetManifestPath = `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`;
+    const assetManifestPath = ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST);
     const hasAssetManifest = await this.fileExists(assetManifestPath);
 
     // Check for timeline state
-    const timelinePath = `${directory}/${PROJECT_PATHS.UI_TIMELINE}`;
+    const timelinePath = ProjectService.buildPath(directory, PROJECT_PATHS.UI_TIMELINE);
     const hasTimelineState = await this.fileExists(timelinePath);
 
     // Project is valid if it has agent state (CLI structure)
@@ -174,14 +174,14 @@ export class ProjectService {
       } else if (assetManifestResult.status === 'missing') {
         console.log('[ProjectService] Asset manifest missing, creating default', {
           source: 'open_project',
-          path: `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`,
+          path: ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
         });
         assetManifest = createDefaultAssetManifest();
         await this.writeAssetManifest(directory, assetManifest);
       } else {
         console.warn('[ProjectService] Asset manifest invalid; preserving in-memory state when available', {
           source: 'open_project',
-          path: `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`,
+          path: ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
           hasInMemoryManifest: !!inMemoryAssetManifest,
           error: assetManifestResult.error,
         });
@@ -398,10 +398,15 @@ export class ProjectService {
 
   // === Private helper methods ===
 
+  private static buildPath(directory: string, ...segments: string[]): string {
+    const normalized = directory.replace(/\\/g, '/').replace(/\/+$/, '');
+    return [normalized, ...segments].join('/');
+  }
+
   private async fileExists(path: string): Promise<boolean> {
     try {
-      await window.electron.project.readFile(path);
-      return true;
+      const content = await window.electron.project.readFile(path);
+      return content !== null;
     } catch {
       return false;
     }
@@ -464,7 +469,7 @@ export class ProjectService {
     directory: string,
   ): Promise<KshanaManifest | null> {
     return this.readJSON<KshanaManifest>(
-      `${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`,
+      ProjectService.buildPath(directory, PROJECT_PATHS.ROOT_MANIFEST),
     );
   }
 
@@ -474,7 +479,7 @@ export class ProjectService {
   ): Promise<void> {
     manifest.updated_at = new Date().toISOString();
     await this.writeJSON(
-      `${directory}/${PROJECT_PATHS.ROOT_MANIFEST}`,
+      ProjectService.buildPath(directory, PROJECT_PATHS.ROOT_MANIFEST),
       manifest,
     );
   }
@@ -483,7 +488,7 @@ export class ProjectService {
     directory: string,
   ): Promise<AgentProjectFile | null> {
     return this.readJSON<AgentProjectFile>(
-      `${directory}/${PROJECT_PATHS.AGENT_PROJECT}`,
+      ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_PROJECT),
     );
   }
 
@@ -492,13 +497,16 @@ export class ProjectService {
     state: AgentProjectFile,
   ): Promise<void> {
     state.updated_at = Date.now();
-    await this.writeJSON(`${directory}/${PROJECT_PATHS.AGENT_PROJECT}`, state);
+    await this.writeJSON(
+      ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_PROJECT),
+      state,
+    );
   }
 
   private async readAssetManifestWithStatus(
     directory: string,
   ): Promise<AssetManifestReadResult> {
-    const manifestPath = `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`;
+    const manifestPath = ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST);
     console.log('[ProjectService] Reading asset manifest from:', manifestPath);
 
     const manifestResult = await this.readJSONWithStatus<{
@@ -562,7 +570,7 @@ export class ProjectService {
     manifest: AssetManifest,
   ): Promise<void> {
     await this.writeJSON(
-      `${directory}/${PROJECT_PATHS.AGENT_MANIFEST}`,
+      ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
       manifest,
     );
   }
@@ -571,7 +579,7 @@ export class ProjectService {
     directory: string,
   ): Promise<KshanaTimelineState | null> {
     const state = await this.readJSON<KshanaTimelineState>(
-      `${directory}/${PROJECT_PATHS.UI_TIMELINE}`,
+      ProjectService.buildPath(directory, PROJECT_PATHS.UI_TIMELINE),
     );
     if (!state) return null;
     return this.normalizeTimelineState(state);
@@ -581,7 +589,10 @@ export class ProjectService {
     directory: string,
     state: KshanaTimelineState,
   ): Promise<void> {
-    await this.writeJSON(`${directory}/${PROJECT_PATHS.UI_TIMELINE}`, state);
+    await this.writeJSON(
+      ProjectService.buildPath(directory, PROJECT_PATHS.UI_TIMELINE),
+      state,
+    );
   }
 
   private normalizeTimelineState(
@@ -603,7 +614,7 @@ export class ProjectService {
     directory: string,
   ): Promise<ContextIndex | null> {
     return this.readJSON<ContextIndex>(
-      `${directory}/${PROJECT_PATHS.CONTEXT_INDEX}`,
+      ProjectService.buildPath(directory, PROJECT_PATHS.CONTEXT_INDEX),
     );
   }
 
@@ -624,26 +635,20 @@ export class ProjectService {
       PROJECT_PATHS.CONTEXT_CHUNKS,
     ];
 
+    const normalizedDirectory = directory.replace(/\\/g, '/').replace(/\/+$/, '');
     for (const dir of dirs) {
-      // createFolder expects basePath and relativePath
-      // Create nested folders step by step to ensure proper path resolution
       const parts = dir.split('/');
-      let basePath = directory;
+      let basePath = normalizedDirectory;
       for (const part of parts) {
         if (part) {
           const newPath = await window.electron.project.createFolder(
             basePath,
             part,
           );
-          // Use the returned normalized path for the next iteration
-          // This ensures we don't accumulate path errors or duplicates
           if (newPath) {
-            basePath = newPath;
+            basePath = newPath.replace(/\\/g, '/');
           } else {
-            // Fallback for safety (though main process should throw or return path)
-            basePath = basePath.endsWith('/')
-              ? `${basePath}${part}`
-              : `${basePath}/${part}`;
+            basePath = `${basePath}/${part}`;
           }
         }
       }

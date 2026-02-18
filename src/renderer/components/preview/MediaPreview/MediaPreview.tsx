@@ -13,7 +13,7 @@ export default function MediaPreview({ file }: MediaPreviewProps) {
   const [error, setError] = useState<string | null>(null);
 
   const fileUrl = useMemo(() => {
-    return `file://${file.path}`;
+    return `file://${file.path.replace(/\\/g, '/')}`;
   }, [file.path]);
 
   const fileExtension = useMemo(() => {

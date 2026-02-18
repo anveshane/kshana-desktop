@@ -353,14 +353,16 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
     // Auto-load project when opening a project directory
     const loadProject = async () => {
-      console.log('[ProjectContext] Loading project from:', projectDirectory);
+      const normalizedDir =
+        normalizeProjectDirectoryPath(projectDirectory) ?? projectDirectory;
+      console.log('[ProjectContext] Loading project from:', normalizedDir);
       setState((prev) => ({
         ...prev,
         isLoading: true,
         error: null,
       }));
 
-      const result = await projectService.openProject(projectDirectory);
+      const result = await projectService.openProject(normalizedDir);
 
       if (result.success) {
         const project = result.data;
@@ -389,9 +391,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
         // Set up explicit watches for manifest and placements
         try {
-          const manifestPath = `${projectDirectory}/.kshana/agent/manifest.json`;
-          const imagePlacementsDir = `${projectDirectory}/.kshana/agent/image-placements`;
-          const infographicPlacementsDir = `${projectDirectory}/.kshana/agent/infographic-placements`;
+          const manifestPath = `${normalizedDir}/.kshana/agent/manifest.json`;
+          const imagePlacementsDir = `${normalizedDir}/.kshana/agent/image-placements`;
+          const infographicPlacementsDir = `${normalizedDir}/.kshana/agent/infographic-placements`;
 
           await window.electron.project.watchManifest(manifestPath);
           await window.electron.project.watchImagePlacements(
@@ -755,7 +757,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           return;
         }
 
-        const wsUrl = `ws://localhost:${backendState.port || 8000}/api/v1/ws/chat?project_dir=${encodeURIComponent(projectDirectoryForQuery)}`;
+        const baseUrl = backendState.serverUrl || `http://localhost:${backendState.port || 8001}`;
+        const wsBase = baseUrl.replace(/^http/, 'ws');
+        const wsUrl = `${wsBase}/api/v1/ws/chat?project_dir=${encodeURIComponent(projectDirectoryForQuery)}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
         currentProjectDirRef.current = normalizedProjectDirectory;

@@ -23,6 +23,7 @@ export default function PreviewPanel() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [isRestartingBackend, setIsRestartingBackend] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [timelineHeight, setTimelineHeight] = useState(300);
 
@@ -187,14 +188,21 @@ export default function PreviewPanel() {
 
   const handleSaveSettings = useCallback(async (next: AppSettings) => {
     setIsRestartingBackend(true);
+    setSettingsError(null);
     try {
       const updated = await window.electron.settings.update(next);
       setSettings(updated);
-      await window.electron.backend.restart();
-      setSettingsOpen(false);
+      const result = await window.electron.backend.restart();
+      if (result.status === 'error') {
+        setSettingsError(result.message || 'Failed to connect to backend server');
+      } else {
+        setSettingsOpen(false);
+      }
     } catch (error) {
       console.error('Failed to restart backend:', error);
-      // Keep modal open on error so user can try again
+      setSettingsError(
+        error instanceof Error ? error.message : 'Failed to save settings',
+      );
     } finally {
       setIsRestartingBackend(false);
     }
@@ -240,40 +248,16 @@ export default function PreviewPanel() {
             <div className={styles.statusItem}>
               <span
                 className={`${styles.statusDot} ${
-                  connectionState.lmStudio === 'connected'
+                  connectionState.server === 'connected'
                     ? styles.connected
                     : ''
                 }`}
               />
               <span className={styles.statusLabel}>
-                {settings?.llmProvider === 'gemini'
-                  ? 'Gemini'
-                  : settings?.llmProvider === 'openai'
-                    ? 'OpenAI'
-                    : settings?.llmProvider === 'openrouter'
-                      ? 'OpenRouter'
-                      : 'LM Studio'}
-                :{' '}
-                {connectionState.lmStudio === 'connected'
+                Server:{' '}
+                {connectionState.server === 'connected'
                   ? 'Connected'
-                  : connectionState.lmStudio === 'connecting'
-                    ? 'Connecting'
-                    : 'Disconnected'}
-              </span>
-            </div>
-            <div className={styles.statusItem}>
-              <span
-                className={`${styles.statusDot} ${
-                  connectionState.comfyUI === 'connected'
-                    ? styles.connected
-                    : ''
-                }`}
-              />
-              <span className={styles.statusLabel}>
-                ComfyUI:{' '}
-                {connectionState.comfyUI === 'connected'
-                  ? 'Connected'
-                  : connectionState.comfyUI === 'connecting'
+                  : connectionState.server === 'connecting'
                     ? 'Connecting'
                     : 'Disconnected'}
               </span>
@@ -345,9 +329,13 @@ export default function PreviewPanel() {
       <SettingsPanel
         isOpen={settingsOpen}
         settings={settings}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          setSettingsError(null);
+        }}
         onSave={handleSaveSettings}
         isRestarting={isRestartingBackend}
+        error={settingsError}
       />
     </div>
   );

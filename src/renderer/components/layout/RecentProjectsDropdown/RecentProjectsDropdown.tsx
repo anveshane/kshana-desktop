@@ -23,7 +23,7 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 function shortenPath(filePath: string): string {
-  const parts = filePath.split('/');
+  const parts = filePath.replace(/\\/g, '/').split('/');
   if (parts.length > 3) {
     return `~/${parts.slice(-3).join('/')}`;
   }

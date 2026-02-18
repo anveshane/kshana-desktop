@@ -1057,14 +1057,14 @@ export default function ChatPanel() {
         throw new Error(errorMsg);
       }
 
-      const port = currentState.port ?? 8001;
-      const url = new URL(DEFAULT_WS_PATH, `http://127.0.0.1:${port}`);
-      url.protocol = 'ws:';
+      const baseUrl = currentState.serverUrl || `http://localhost:${currentState.port ?? 8001}`;
+      const wsBase = baseUrl.replace(/^http/, 'ws');
+      const url = new URL(DEFAULT_WS_PATH, wsBase);
 
       console.log('[ChatPanel] Connecting to WebSocket:', {
         projectDirectory,
         hasProjectDir: !!projectDirectory,
-        port,
+        serverUrl: baseUrl,
       });
 
       if (projectDirectory) {

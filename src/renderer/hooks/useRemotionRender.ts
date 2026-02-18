@@ -83,7 +83,7 @@ export function useRemotionRender() {
         ) {
           for (let i = 0; i < completedJob.outputFiles.length; i++) {
             const manifestPath = completedJob.outputFiles[i]!;
-            const basename = manifestPath.split('/').pop() ?? '';
+            const basename = manifestPath.replace(/\\/g, '/').split('/').pop() ?? '';
             const placementMatch = basename.match(/^info(\d+)_/);
             const placementNumber = placementMatch?.[1]
               ? parseInt(placementMatch[1], 10)

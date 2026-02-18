@@ -17,7 +17,7 @@ export function inferImagePlacementNumberFromPath(
   path: string | undefined | null,
 ): number | null {
   if (!path) return null;
-  const filename = path.split('/').pop() ?? path;
+  const filename = path.replace(/\\/g, '/').split('/').pop() ?? path;
   const match = filename.match(/image(\d+)(?:[-_]|\.|$)/i);
   if (!match) return null;
   return parsePlacementNumber(match[1]);

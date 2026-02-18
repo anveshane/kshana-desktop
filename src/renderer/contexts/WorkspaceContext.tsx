@@ -44,8 +44,7 @@ const initialState: WorkspaceState = {
   activeContextFiles: [],
   recentProjects: [],
   connectionState: {
-    lmStudio: 'disconnected',
-    comfyUI: 'disconnected',
+    server: 'disconnected',
   },
   isLoading: false,
   pendingFileNavigation: null,
@@ -99,7 +98,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     try {
       // Read only first level to prevent freeze
       const tree = await window.electron.project.readTree(path, 1);
-      const projectName = path.split('/').pop() || path;
+      const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '');
+      const projectName = normalizedPath.split('/').pop() || path;
 
       // Start watching the directory
       await window.electron.project.watchDirectory(path);
@@ -110,7 +110,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
       setState((prev) => ({
         ...prev,
-        projectDirectory: path,
+        projectDirectory: normalizedPath,
         projectName,
         fileTree: tree,
         recentProjects: recent,
@@ -120,7 +120,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       }));
 
       console.log('[WorkspaceContext] Project opened:', {
-        projectDirectory: path,
+        projectDirectory: normalizedPath,
         projectName,
       });
     } catch {

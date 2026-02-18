@@ -90,7 +90,7 @@ export async function copyVideoToScene(
     // Fallback to direct copy if base64 conversion fails
     await window.electron.project.copy(videoPath, videoDir);
     // Rename if needed
-    const copiedFileName = videoPath.split('/').pop();
+    const copiedFileName = videoPath.replace(/\\/g, '/').split('/').pop();
     if (copiedFileName && copiedFileName !== targetFileName) {
       const copiedFilePath = `${videoDir}/${copiedFileName}`;
       await window.electron.project.rename(copiedFilePath, targetFileName);

@@ -28,10 +28,10 @@ function normalizeVideoSourcePath(path: string): string {
   if (!trimmed) return '';
 
   if (trimmed.startsWith('file://')) {
-    return decodeURIComponent(trimmed.replace(/^file:\/\//, ''));
+    return decodeURIComponent(trimmed.replace(/^file:\/\//, '')).replace(/\\/g, '/');
   }
 
-  return trimmed;
+  return trimmed.replace(/\\/g, '/');
 }
 
 function doesVideoSourceMatch(currentSrc: string, expectedSrc: string): boolean {
@@ -166,7 +166,7 @@ export default function VideoLibraryView({
           created_at: createdAt,
           scene_number: asset.scene_number,
           metadata: {
-            title: asset.path.split('/').pop(),
+            title: asset.path.replace(/\\/g, '/').split('/').pop(),
             duration: asset.metadata?.duration,
             imported: asset.metadata?.imported,
           },

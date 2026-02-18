@@ -17,6 +17,6 @@ export function resolveHtmlPath(htmlFileName: string) {
   // Electron handles ASAR paths automatically with file:// protocol
   const htmlPath = path.join(__dirname, '../renderer/', htmlFileName);
   // Normalize the path and ensure it works with ASAR
-  const normalizedPath = path.normalize(htmlPath);
+  const normalizedPath = path.normalize(htmlPath).replace(/\\/g, '/');
   return `file://${normalizedPath}`;
 }
