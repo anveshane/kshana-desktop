@@ -987,14 +987,76 @@ export default function ChatPanel() {
           window.electron.logger.logStatusChange('error', agentName, errorMsg);
           break;
         }
-        // ... (Keep other legacy cases if needed or just minimal support)
+        case 'file_sync_request': {
+          const syncProjectDir = data.projectDir as string;
+          if (syncProjectDir) {
+            console.log('[ChatPanel] Received file_sync_request, reading project files...', syncProjectDir);
+            window.electron.project.readAllFiles(syncProjectDir).then((files) => {
+              console.log(`[ChatPanel] Sending file_sync_init with ${files.length} files`);
+              const ws = wsRef.current;
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                  type: 'file_sync_init',
+                  data: { files },
+                }));
+              }
+            }).catch((err) => {
+              console.error('[ChatPanel] Failed to read project files for sync:', err);
+              const ws = wsRef.current;
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                  type: 'file_sync_init',
+                  data: { files: [] },
+                }));
+              }
+            });
+          }
+          break;
+        }
+        case 'file_write': {
+          const filePath = data.path as string;
+          const fileContent = data.content as string;
+          if (filePath && fileContent !== undefined) {
+            window.electron.project.writeFile(filePath, fileContent).catch((err) => {
+              console.error('[ChatPanel] file_write failed:', filePath, err);
+            });
+          }
+          break;
+        }
+        case 'file_write_binary': {
+          const binPath = data.path as string;
+          const binContent = data.content as string;
+          if (binPath && binContent) {
+            window.electron.project.writeFileBinary(binPath, binContent).catch((err) => {
+              console.error('[ChatPanel] file_write_binary failed:', binPath, err);
+            });
+          }
+          break;
+        }
+        case 'file_mkdir': {
+          const mkdirPath = data.path as string;
+          if (mkdirPath) {
+            window.electron.project.mkdir(mkdirPath).catch((err) => {
+              console.error('[ChatPanel] file_mkdir failed:', mkdirPath, err);
+            });
+          }
+          break;
+        }
+        case 'file_rm': {
+          const rmPath = data.path as string;
+          if (rmPath) {
+            window.electron.project.delete(rmPath).catch((err) => {
+              console.error('[ChatPanel] file_rm failed:', rmPath, err);
+            });
+          }
+          break;
+        }
         default:
           console.warn(
             '[ChatPanel] Unhandled message type:',
             messageType,
             payload,
           );
-          // Don't ignore unknown types - log them for debugging
           break;
       }
     },
@@ -1060,6 +1122,7 @@ export default function ChatPanel() {
       const baseUrl = currentState.serverUrl || `http://localhost:${currentState.port ?? 8001}`;
       const wsBase = baseUrl.replace(/^http/, 'ws');
       const url = new URL(DEFAULT_WS_PATH, wsBase);
+      url.searchParams.set('channel', 'chat');
 
       console.log('[ChatPanel] Connecting to WebSocket:', {
         projectDirectory,

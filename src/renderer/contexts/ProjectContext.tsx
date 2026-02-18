@@ -759,7 +759,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
         const baseUrl = backendState.serverUrl || `http://localhost:${backendState.port || 8001}`;
         const wsBase = baseUrl.replace(/^http/, 'ws');
-        const wsUrl = `${wsBase}/api/v1/ws/chat?project_dir=${encodeURIComponent(projectDirectoryForQuery)}`;
+        const wsUrl = `${wsBase}/api/v1/ws/chat?project_dir=${encodeURIComponent(projectDirectoryForQuery)}&channel=assets`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
         currentProjectDirRef.current = normalizedProjectDirectory;

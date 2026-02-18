@@ -401,6 +401,93 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'project:read-all-files',
+  async (
+    _event,
+    projectDir: string,
+  ): Promise<Array<{ path: string; content: string; isBinary: boolean }>> => {
+    const kshanaDir = path.join(projectDir, '.kshana');
+    const results: Array<{ path: string; content: string; isBinary: boolean }> = [];
+    const TEXT_EXTS = new Set([
+      '.json',
+      '.md',
+      '.txt',
+      '.yaml',
+      '.yml',
+      '.ts',
+      '.tsx',
+      '.js',
+      '.jsx',
+      '.css',
+      '.html',
+      '.xml',
+    ]);
+    const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', '__pycache__']);
+    const MAX_TEXT_BYTES = 5 * 1024 * 1024;
+    let skippedNonText = 0;
+    let skippedOversized = 0;
+
+    async function walk(dir: string): Promise<void> {
+      let entries;
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!SKIP_DIRS.has(entry.name)) {
+            await walk(fullPath);
+          }
+        } else {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (!TEXT_EXTS.has(ext)) {
+            skippedNonText += 1;
+            continue;
+          }
+
+          try {
+            const stat = await fs.stat(fullPath);
+            if (stat.size > MAX_TEXT_BYTES) {
+              skippedOversized += 1;
+              continue;
+            }
+
+            const content = await fs.readFile(fullPath, 'utf-8');
+            results.push({ path: fullPath, content, isBinary: false });
+          } catch {
+            // Skip files that can't be read
+          }
+        }
+      }
+    }
+
+    try {
+      await walk(kshanaDir);
+    } catch {
+      // .kshana directory might not exist yet
+    }
+
+    log.info(
+      `[project:read-all-files] Read ${results.length} text files from ${kshanaDir} ` +
+      `(skipped non-text: ${skippedNonText}, skipped oversized: ${skippedOversized})`,
+    );
+    return results;
+  },
+);
+
+ipcMain.handle(
+  'project:mkdir',
+  async (_event, dirPath: string): Promise<void> => {
+    const normalizedPath = path.isAbsolute(dirPath)
+      ? path.normalize(dirPath)
+      : path.resolve(dirPath);
+    await fs.mkdir(normalizedPath, { recursive: true });
+  },
+);
+
+ipcMain.handle(
   'project:write-file',
   async (_event, filePath: string, content: string): Promise<void> => {
     // Normalize the file path to ensure it's resolved correctly

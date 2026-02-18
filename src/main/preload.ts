@@ -117,6 +117,12 @@ const projectBridge = {
   readFile(filePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:read-file', filePath);
   },
+  readAllFiles(projectDir: string): Promise<Array<{ path: string; content: string; isBinary: boolean }>> {
+    return ipcRenderer.invoke('project:read-all-files', projectDir);
+  },
+  mkdir(dirPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:mkdir', dirPath);
+  },
   readFileBase64(filePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:read-file-base64', filePath);
   },
