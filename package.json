@@ -33,7 +33,9 @@
     "postinstall": "ts-node .erb/scripts/check-native-dep.js && node .erb/scripts/conditional-install-app-deps.js && npm run build:dll",
     "lint": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx",
     "lint:fix": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx --fix",
-    "package": "ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --publish never && npm run build:dll",
+    "package": "ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --mac --win --publish never && npm run build:dll",
+    "package:win": "ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --win --publish never && npm run build:dll",
+    "package:all": "ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --mac --win --publish never && npm run build:dll",
     "release": "ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --publish always",
     "rebuild": "electron-rebuild --parallel --types prod,dev,optional --module-dir release/app",
     "prestart": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.main.dev.ts",
@@ -244,9 +246,7 @@
       "output": "release/build"
     },
     "extraResources": [
-      "./assets/**",
-      "./test_image/**",
-      "./test_video/**"
+      "./assets/**"
     ],
     "publish": {
       "provider": "github",

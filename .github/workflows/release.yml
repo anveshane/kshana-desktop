@@ -3,13 +3,13 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'  # Matches all tags starting with 'v'
+      - 'v*'
 
 jobs:
   release-mac:
     runs-on: macos-14
     permissions:
-      contents: write  # Required to create releases and upload artifacts
+      contents: write
     
     steps:
       - name: Checkout kshana-desktop
@@ -20,24 +20,6 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-
-      - name: Verify directory structure
-        run: |
-          echo "Current directory: $(pwd)"
-          echo ""
-          echo "Verifying test_image and test_video folders exist:"
-          if [ -d "test_image" ]; then
-            echo "✓ test_image folder found"
-            echo "  Images: $(ls test_image/ | wc -l) files"
-          else
-            echo "✗ test_image folder NOT found - images won't load in production!"
-          fi
-          if [ -d "test_video" ]; then
-            echo "✓ test_video folder found"
-            echo "  Videos: $(ls test_video/*.mp4 2>/dev/null | wc -l) files"
-          else
-            echo "✗ test_video folder NOT found - videos won't load in production!"
-          fi
 
       - name: Prepare release/app
         run: |
@@ -58,28 +40,24 @@ jobs:
             });
           }
           fs.writeFileSync('release/app/package.json', JSON.stringify(appPkg, null, 2) + '\n');
-          console.log('✓ Created release/app/package.json');
+          console.log('Created release/app/package.json');
           EOF
 
       - name: Install dependencies
         run: |
           npm ci --ignore-scripts
-          echo "✓ Dependencies installed (postinstall scripts skipped)"
           npx ts-node .erb/scripts/check-native-dep.js
           npm run build:dll
-          echo "✓ Postinstall steps completed"
 
       - name: Build and Publish Electron app
-        run: |
-          echo "Building and publishing release for tag: ${{ github.ref_name }}"
-          npm run release
+        run: npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release-windows:
     runs-on: windows-latest
     permissions:
-      contents: write  # Required to create releases and upload artifacts
+      contents: write
     env:
       NODE_OPTIONS: --max-old-space-size=4096
     
@@ -92,26 +70,6 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-
-      - name: Verify directory structure
-        run: |
-          echo "Current directory: $(Get-Location)"
-          echo ""
-          echo "Verifying test_image and test_video folders exist:"
-          if (Test-Path "test_image") {
-            echo "✓ test_image folder found"
-            $imageCount = (Get-ChildItem test_image).Count
-            echo "  Images: $imageCount files"
-          } else {
-            echo "✗ test_image folder NOT found - images won't load in production!"
-          }
-          if (Test-Path "test_video") {
-            echo "✓ test_video folder found"
-            $videoCount = (Get-ChildItem test_video/*.mp4 -ErrorAction SilentlyContinue).Count
-            echo "  Videos: $videoCount files"
-          } else {
-            echo "✗ test_video folder NOT found - videos won't load in production!"
-          }
 
       - name: Prepare release/app
         run: |
@@ -140,14 +98,10 @@ jobs:
         run: |
           $env:NODE_OPTIONS="--max-old-space-size=4096"
           npm ci --ignore-scripts
-          echo "✓ Dependencies installed (postinstall scripts skipped)"
           npx ts-node .erb/scripts/check-native-dep.js
           npm run build:dll
-          echo "✓ Postinstall steps completed"
 
       - name: Build and Publish Electron app
-        run: |
-          echo "Building and publishing release for tag: ${{ github.ref_name }}"
-          npm run release
+        run: npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
