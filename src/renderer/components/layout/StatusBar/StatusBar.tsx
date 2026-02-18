@@ -1,7 +1,7 @@
 import { Settings, HelpCircle } from 'lucide-react';
 import styles from './StatusBar.module.scss';
 
-const APP_VERSION = 'v1.0.4';
+const APP_VERSION = 'v1.0.5';
 
 export default function StatusBar() {
   return (
