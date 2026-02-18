@@ -84,7 +84,7 @@ export default function SettingsPanel({
         <div className={styles.header}>
           <div>
             <h2>Settings</h2>
-            <p>Configure the server connection and LLM provider. LLM settings are configured on the server via environment variables.</p>
+            <p>Configure the backend server connection.</p>
           </div>
           <button
             type="button"
@@ -96,6 +96,21 @@ export default function SettingsPanel({
           </button>
         </div>
         <form className={styles.form} onSubmit={handleSubmit}>
+          <label className={styles.label}>
+            Backend URL
+            <input
+              type="url"
+              className={styles.input}
+              value={form.serverUrl}
+              onChange={(event) =>
+                handleInput('serverUrl', event.target.value)
+              }
+              placeholder="http://localhost:8001"
+              required
+            />
+          </label>
+
+          {/* TODO: Re-enable when needed
           <label className={styles.label}>
             ComfyUI URL
             <input
@@ -316,6 +331,7 @@ export default function SettingsPanel({
               </label>
             </>
           )}
+          */}
 
           <div className={styles.actions}>
             <button

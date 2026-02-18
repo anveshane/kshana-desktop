@@ -86,7 +86,11 @@ ipcMain.handle(
   'backend:restart',
   async (_event, _config?: ServerConnectionConfig) => {
     try {
-      return await serverConnectionManager.reconnect();
+      const settings = getSettings();
+      await serverConnectionManager.disconnect();
+      return await serverConnectionManager.connect({
+        serverUrl: settings.serverUrl || 'http://localhost:8001',
+      });
     } catch (error) {
       log.error(`Failed to reconnect to server: ${(error as Error).message}`);
       return {
