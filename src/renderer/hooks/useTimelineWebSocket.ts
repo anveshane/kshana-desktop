@@ -56,7 +56,8 @@ export function useTimelineWebSocket(
           }
 
           connectingRef.current = true;
-          const wsUrl = `ws://localhost:${backendState.port || 8000}/api/v1/ws/chat`;
+          const baseUrl = backendState.serverUrl || `http://localhost:${backendState.port || 8001}`;
+          const wsUrl = `${baseUrl.replace(/^http/, 'ws')}/api/v1/ws/chat`;
           const socket = new WebSocket(wsUrl);
 
           await new Promise<void>((resolve, reject) => {

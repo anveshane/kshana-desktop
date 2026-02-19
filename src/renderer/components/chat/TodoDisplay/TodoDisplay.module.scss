@@ -18,6 +18,14 @@
   color: $color-accent-cyan;
 }
 
+.cliHeader {
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-accent-cyan;
+  margin-bottom: $spacing-sm;
+}
+
 .headerIcon {
   font-size: $font-size-lg;
 }

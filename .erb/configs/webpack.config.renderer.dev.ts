@@ -243,34 +243,17 @@ const configuration: webpack.Configuration = {
           !dep.includes('lucide') &&
           !dep.includes('remark'),
       );
-      return [
-        ...deps,
-        // Keep runtime dependencies external
-        'fastify',
-        '@fastify/websocket',
-        '@fastify/cors',
-        'dotenv',
-      ];
+      return deps;
     } catch (error) {
-      // Fallback: only externalize kshana-ink and its deps if package.json can't be read
       console.warn(
-        'Could not read package.json for externals, using minimal externals list',
+        'Could not read package.json for externals, using empty externals list',
       );
-      return [
-        'kshana-ink',
-        /^kshana-ink\/.*/,
-        'fastify',
-        '@fastify/websocket',
-        '@fastify/cors',
-        'dotenv',
-      ];
+      return [];
     }
   })(),
 
   resolve: {
     alias: {
-      // Stub kshana-ink in renderer
-      'kshana-ink': false,
       // Force React resolution to project root
       react: path.dirname(require.resolve('react/package.json')),
       'react-dom': path.dirname(require.resolve('react-dom/package.json')),

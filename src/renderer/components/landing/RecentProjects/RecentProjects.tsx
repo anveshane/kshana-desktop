@@ -26,11 +26,13 @@ function formatRelativeTime(timestamp: number): string {
   return `${weeks} weeks ago`;
 }
 
+const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+
 function shortenPath(filePath: string): string {
-  // In renderer process, use a simple approach
-  const parts = filePath.split('/');
+  const parts = filePath.replace(/\\/g, '/').split('/');
   if (parts.length > 3) {
-    return `~/${parts.slice(-3).join('/')}`;
+    const prefix = isMac ? '~' : '...';
+    return `${prefix}/${parts.slice(-3).join('/')}`;
   }
   return filePath;
 }

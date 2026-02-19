@@ -72,8 +72,18 @@ export interface ContentRegistry {
 
 /**
  * All workflow phases configuration
+ * Includes both YouTube workflow phases and legacy story workflow phases
  */
 export interface WorkflowPhases {
+  // YouTube workflow phases
+  transcript_input: PhaseInfo;
+  planning: PhaseInfo;
+  image_placement: PhaseInfo;
+  image_generation: PhaseInfo;
+  video_placement: PhaseInfo;
+  video_generation: PhaseInfo;
+  video_replacement: PhaseInfo;
+  // Legacy story workflow phases
   plot: PhaseInfo;
   story: PhaseInfo;
   characters_settings: PhaseInfo;
@@ -153,9 +163,19 @@ export function createDefaultContentEntry(file: string): ContentEntry {
 
 /**
  * Creates default workflow phases
+ * Includes both YouTube workflow phases and legacy story workflow phases
  */
 export function createDefaultWorkflowPhases(): WorkflowPhases {
   return {
+    // YouTube workflow phases
+    transcript_input: createDefaultPhaseInfo(),
+    planning: createDefaultPhaseInfo(),
+    image_placement: createDefaultPhaseInfo(),
+    image_generation: createDefaultPhaseInfo(),
+    video_placement: createDefaultPhaseInfo(),
+    video_generation: createDefaultPhaseInfo(),
+    video_replacement: createDefaultPhaseInfo(),
+    // Legacy story workflow phases
     plot: createDefaultPhaseInfo(),
     story: createDefaultPhaseInfo(),
     characters_settings: createDefaultPhaseInfo(),

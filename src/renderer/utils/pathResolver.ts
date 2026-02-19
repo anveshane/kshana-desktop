@@ -3,10 +3,32 @@
  * Handles path resolution for assets, especially test assets in mock mode
  */
 
+import { stripFileProtocol } from './pathNormalizer';
+
+/**
+ * Build a file:// URL from an absolute path.
+ * On Windows (C:/...) produces file:///C:/... ; on Unix (/...) produces file:///...
+ */
+export function toFileUrl(absolutePath: string): string {
+  const normalized = absolutePath.replace(/\\/g, '/');
+  return normalized.startsWith('/')
+    ? `file://${normalized}`
+    : `file:///${normalized}`;
+}
+
 /**
  * Test asset folder names
  */
 const TEST_ASSET_FOLDERS = ['test_image', 'test_video'] as const;
+
+/**
+ * Path cache to avoid redundant file system calls
+ */
+const pathCache = new Map<string, { resolved: string; timestamp: number }>();
+const CACHE_TTL = 30000; // 30 seconds cache TTL
+const MAX_RETRIES = 3;
+const RETRY_DELAY_BASE = 500; // Base delay in ms
+const MAX_TIMEOUT = 5000; // 5 seconds max timeout
 
 /**
  * Gets the resources path where test_image and test_video are located
@@ -104,7 +126,7 @@ export async function resolveTestAssetPathToAbsolute(
 
   // Handle file:// URLs
   if (testAssetPath.startsWith('file://')) {
-    return testAssetPath.slice(7);
+    return stripFileProtocol(testAssetPath);
   }
 
   // If already absolute, normalize and return
@@ -148,7 +170,6 @@ export async function resolveTestAssetPathToAbsolute(
 export async function resolveAssetPathForDisplay(
   assetPath: string,
   projectDirectory: string | null,
-  useMockData: boolean = false,
 ): Promise<string> {
   // If no path, return empty
   if (!assetPath || !assetPath.trim()) {
@@ -163,11 +184,11 @@ export async function resolveAssetPathForDisplay(
   }
 
   // ALWAYS resolve test asset paths to resources path in production or if detected
-  // This ensures bundled assets load correctly even if useMockData is false
+  // This ensures bundled assets load correctly
   if (isTestAssetPath(trimmedPath)) {
     const absolutePath = await resolveTestAssetPathToAbsolute(trimmedPath);
     if (absolutePath) {
-      const result = `file://${absolutePath}`;
+      const result = toFileUrl(absolutePath);
       if (assetPath.endsWith('.mp4')) {
         console.log(
           `[PathResolver] Resolved test video: ${assetPath} -> ${result}`,
@@ -180,7 +201,7 @@ export async function resolveAssetPathForDisplay(
 
   // If assetPath is already absolute, use it directly
   if (trimmedPath.startsWith('/') || /^[A-Za-z]:/.test(trimmedPath)) {
-    return `file://${trimmedPath.replace(/\\/g, '/')}`;
+    return toFileUrl(trimmedPath);
   }
 
   // Otherwise, construct path relative to project directory
@@ -189,16 +210,21 @@ export async function resolveAssetPathForDisplay(
 
     // Handle paths that already start with .kshana
     if (trimmedPath.startsWith('.kshana/')) {
-      return `file://${normalizedProjectDir}/${trimmedPath}`;
+      return toFileUrl(`${normalizedProjectDir}/${trimmedPath}`);
     }
 
     // Handle paths relative to .kshana/agent/ (e.g., characters/alice-chen/image.png)
     if (trimmedPath.match(/^(characters|settings|props|plans|scenes)\//)) {
-      return `file://${normalizedProjectDir}/.kshana/agent/${trimmedPath}`;
+      return toFileUrl(`${normalizedProjectDir}/.kshana/agent/${trimmedPath}`);
+    }
+
+    // Handle paths starting with "agent/" (e.g., agent/image-placements/...)
+    if (trimmedPath.startsWith('agent/')) {
+      return toFileUrl(`${normalizedProjectDir}/.kshana/${trimmedPath}`);
     }
 
     // Handle other relative paths
-    const result = `file://${normalizedProjectDir}/${trimmedPath}`;
+    const result = toFileUrl(`${normalizedProjectDir}/${trimmedPath}`);
     if (assetPath.endsWith('.mp4')) {
       console.log(
         `[PathResolver] Resolved project video: ${assetPath} -> ${result}`,
@@ -211,5 +237,150 @@ export async function resolveAssetPathForDisplay(
   console.warn(
     `[PathResolver] No project directory provided for relative path: ${trimmedPath}`,
   );
-  return `file://${trimmedPath.replace(/\\/g, '/')}`;
+  return toFileUrl(trimmedPath);
+}
+
+/**
+ * Check if a file exists (using IPC to main process)
+ */
+async function checkFileExists(filePath: string): Promise<boolean> {
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      window.electron?.project?.checkFileExists
+    ) {
+      return await window.electron.project.checkFileExists(filePath);
+    }
+    return true;
+  } catch (error) {
+    console.debug(
+      `[PathResolver] File existence check failed for ${filePath}:`,
+      error,
+    );
+    return false;
+  }
+}
+
+/**
+ * Resolve asset path with retry logic and file existence verification
+ * Uses exponential backoff for retries
+ */
+export async function resolveAssetPathWithRetry(
+  assetPath: string,
+  projectDirectory: string | null,
+  options: {
+    maxRetries?: number;
+    retryDelayBase?: number;
+    timeout?: number;
+    verifyExists?: boolean;
+  } = {},
+): Promise<string> {
+  const {
+    maxRetries = MAX_RETRIES,
+    retryDelayBase = RETRY_DELAY_BASE,
+    timeout = MAX_TIMEOUT,
+    verifyExists = true,
+  } = options;
+
+  // Check cache first
+  const cacheKey = `${assetPath}:${projectDirectory || ''}`;
+  const cached = pathCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.resolved;
+  }
+
+  let lastError: Error | null = null;
+  let resolvedPath = '';
+
+  // Create timeout promise
+  const timeoutPromise = new Promise<string>((_, reject) => {
+    setTimeout(() => reject(new Error('Path resolution timeout')), timeout);
+  });
+
+  // Retry logic with exponential backoff
+  const resolveWithRetry = async (attempt: number): Promise<string> => {
+    try {
+      // Resolve path
+      resolvedPath = await Promise.race([
+        resolveAssetPathForDisplay(assetPath, projectDirectory),
+        timeoutPromise,
+      ]);
+
+      // Verify file exists if requested
+      if (verifyExists && resolvedPath) {
+        // Remove file:// prefix for existence check
+        const filePath = resolvedPath.startsWith('file://')
+          ? stripFileProtocol(resolvedPath)
+          : resolvedPath;
+
+        const exists = await checkFileExists(filePath);
+        if (!exists && attempt < maxRetries) {
+          // File doesn't exist yet, retry
+          const delay = retryDelayBase * 2 ** attempt;
+          console.log(
+            `[PathResolver] File not found, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries}):`,
+            filePath,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          return resolveWithRetry(attempt + 1);
+        }
+        if (!exists) {
+          console.warn(
+            `[PathResolver] File not found after ${maxRetries} attempts:`,
+            filePath,
+          );
+          // Return path anyway - might be created soon
+        }
+      }
+
+      // Cache successful resolution
+      pathCache.set(cacheKey, {
+        resolved: resolvedPath,
+        timestamp: Date.now(),
+      });
+
+      return resolvedPath;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (attempt < maxRetries) {
+        const delay = retryDelayBase * 2 ** attempt;
+        console.log(
+          `[PathResolver] Resolution failed, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries}):`,
+          lastError.message,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return resolveWithRetry(attempt + 1);
+      }
+
+      // Max retries reached, return empty or last resolved path
+      console.error(
+        `[PathResolver] Failed to resolve path after ${maxRetries} attempts:`,
+        {
+          assetPath,
+          error: lastError.message,
+        },
+      );
+      return resolvedPath || '';
+    }
+  };
+
+  return resolveWithRetry(0);
+}
+
+/**
+ * Invalidate path cache for a specific path or all paths
+ */
+export function invalidatePathCache(assetPath?: string): void {
+  if (assetPath) {
+    // Remove specific path from cache
+    for (const [key] of pathCache) {
+      if (key.startsWith(assetPath)) {
+        pathCache.delete(key);
+      }
+    }
+  } else {
+    // Clear all cache
+    pathCache.clear();
+  }
 }

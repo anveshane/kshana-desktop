@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import type { SelectedFile } from '../../../types/workspace';
+import { toFileUrl } from '../../../utils/pathResolver';
 import CodePreview from '../CodePreview/CodePreview';
 import styles from './MediaPreview.module.scss';
 
@@ -13,7 +14,7 @@ export default function MediaPreview({ file }: MediaPreviewProps) {
   const [error, setError] = useState<string | null>(null);
 
   const fileUrl = useMemo(() => {
-    return `file://${file.path}`;
+    return toFileUrl(file.path);
   }, [file.path]);
 
   const fileExtension = useMemo(() => {

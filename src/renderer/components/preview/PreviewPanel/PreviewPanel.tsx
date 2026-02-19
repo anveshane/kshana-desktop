@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Settings } from 'lucide-react';
 import type { AppSettings } from '../../../../shared/settingsTypes';
-import type { BackendEnvOverrides } from '../../../../shared/backendTypes';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
+import { TimelineDataProvider } from '../../../contexts/TimelineDataContext';
 import { useBackendHealth } from '../../../hooks/useBackendHealth';
 import type { SceneVersions } from '../../../types/kshana/timeline';
 import PreviewPlaceholder from '../PreviewPlaceholder/PreviewPlaceholder';
@@ -18,21 +18,12 @@ import styles from './PreviewPanel.module.scss';
 
 type Tab = 'storyboard' | 'assets' | 'video-library' | 'preview';
 
-const mapSettingsToEnv = (settings: AppSettings): BackendEnvOverrides => ({
-  port: settings.preferredPort,
-  comfyuiUrl: settings.comfyuiUrl,
-  lmStudioUrl: settings.lmStudioUrl,
-  lmStudioModel: settings.lmStudioModel,
-  llmProvider: settings.llmProvider,
-  googleApiKey: settings.googleApiKey,
-  projectDir: settings.projectDir,
-});
-
 export default function PreviewPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('video-library');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [isRestartingBackend, setIsRestartingBackend] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [timelineHeight, setTimelineHeight] = useState(300);
 
@@ -40,11 +31,19 @@ export default function PreviewPanel() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [totalDuration, setTotalDuration] = useState(0);
   const playbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
 
-  const { selectedFile, connectionState, projectDirectory } = useWorkspace();
+  const { selectedFile, connectionState, projectDirectory, pendingFileNavigation, clearFileNavigation } = useWorkspace();
+  
+  // Handle file navigation from chat panel
+  useEffect(() => {
+    if (pendingFileNavigation) {
+      setActiveTab('preview');
+    }
+  }, [pendingFileNavigation]);
   const { timelineState, scenes: projectScenes } = useProject();
 
   // Initialize activeVersions from timelineState with migration support
@@ -76,34 +75,56 @@ export default function PreviewPanel() {
   });
 
   // Update activeVersions when timelineState changes (with migration)
-  useEffect(() => {
-    if (timelineState?.active_versions) {
-      const versions: Record<number, SceneVersions> = {};
-      Object.entries(timelineState.active_versions).forEach(
-        ([folder, versionData]) => {
-          const match = folder.match(/scene-(\d+)/);
-          if (match) {
-            const sceneNumber = parseInt(match[1], 10);
+  // Use ref to track previous serialized state to avoid infinite loops
+  const prevActiveVersionsRef = useRef<string>('');
 
-            // Handle migration from old format (number) to new format (SceneVersions)
-            if (typeof versionData === 'number') {
-              versions[sceneNumber] = { video: versionData };
-            } else if (versionData && typeof versionData === 'object') {
-              versions[sceneNumber] = versionData;
-            }
+  useEffect(() => {
+    if (!timelineState?.active_versions) {
+      prevActiveVersionsRef.current = '';
+      return;
+    }
+
+    const versions: Record<number, SceneVersions> = {};
+    Object.entries(timelineState.active_versions).forEach(
+      ([folder, versionData]) => {
+        const match = folder.match(/scene-(\d+)/);
+        if (match) {
+          const sceneNumber = parseInt(match[1], 10);
+
+          // Handle migration from old format (number) to new format (SceneVersions)
+          if (typeof versionData === 'number') {
+            versions[sceneNumber] = { video: versionData };
+          } else if (versionData && typeof versionData === 'object') {
+            versions[sceneNumber] = versionData;
           }
-        },
-      );
+        }
+      },
+    );
+
+    // Serialize to compare if content actually changed
+    const serializedVersions = JSON.stringify(versions);
+
+    // Only update if content actually changed
+    if (serializedVersions !== prevActiveVersionsRef.current) {
+      prevActiveVersionsRef.current = serializedVersions;
       setActiveVersions(versions);
     }
   }, [timelineState?.active_versions]);
 
   // Playback loop - advance playbackTime when playing
-  // VideoLibraryView and TimelinePanel will handle stopping at the end
+  // Includes bounds checking to stop at totalDuration
   useEffect(() => {
     if (isPlaying && !isDragging) {
       playbackIntervalRef.current = setInterval(() => {
-        setPlaybackTime((prev) => prev + 0.1); // Update every 100ms (0.1 seconds)
+        setPlaybackTime((prev) => {
+          const next = prev + 0.1; // Update every 100ms (0.1 seconds)
+          // Stop playback when reaching the end of timeline
+          if (totalDuration > 0 && next >= totalDuration) {
+            setIsPlaying(false);
+            return totalDuration;
+          }
+          return next;
+        });
       }, 100);
     } else if (playbackIntervalRef.current) {
       clearInterval(playbackIntervalRef.current);
@@ -116,7 +137,7 @@ export default function PreviewPanel() {
         playbackIntervalRef.current = null;
       }
     };
-  }, [isPlaying, isDragging]);
+  }, [isPlaying, isDragging, totalDuration]);
 
   // Handle timeline resize
   const handleTimelineResize = useCallback(
@@ -167,14 +188,21 @@ export default function PreviewPanel() {
 
   const handleSaveSettings = useCallback(async (next: AppSettings) => {
     setIsRestartingBackend(true);
+    setSettingsError(null);
     try {
       const updated = await window.electron.settings.update(next);
       setSettings(updated);
-      await window.electron.backend.restart(mapSettingsToEnv(updated));
-      setSettingsOpen(false);
+      const result = await window.electron.backend.restart();
+      if (result.status === 'error') {
+        setSettingsError(result.message || 'Failed to connect to backend server');
+      } else {
+        setSettingsOpen(false);
+      }
     } catch (error) {
       console.error('Failed to restart backend:', error);
-      // Keep modal open on error so user can try again
+      setSettingsError(
+        error instanceof Error ? error.message : 'Failed to save settings',
+      );
     } finally {
       setIsRestartingBackend(false);
     }
@@ -191,13 +219,14 @@ export default function PreviewPanel() {
           >
             Video Library
           </button>
-          <button
+          {/* Storyboard tab hidden for now */}
+          {/* <button
             type="button"
             className={`${styles.tab} ${activeTab === 'storyboard' ? styles.active : ''}`}
             onClick={() => setActiveTab('storyboard')}
           >
             Storyboard
-          </button>
+          </button> */}
           <button
             type="button"
             className={`${styles.tab} ${activeTab === 'assets' ? styles.active : ''}`}
@@ -219,33 +248,16 @@ export default function PreviewPanel() {
             <div className={styles.statusItem}>
               <span
                 className={`${styles.statusDot} ${
-                  connectionState.lmStudio === 'connected'
+                  connectionState.server === 'connected'
                     ? styles.connected
                     : ''
                 }`}
               />
               <span className={styles.statusLabel}>
-                {settings?.llmProvider === 'gemini' ? 'Gemini' : 'LM Studio'}:{' '}
-                {connectionState.lmStudio === 'connected'
+                Server:{' '}
+                {connectionState.server === 'connected'
                   ? 'Connected'
-                  : connectionState.lmStudio === 'connecting'
-                    ? 'Connecting'
-                    : 'Disconnected'}
-              </span>
-            </div>
-            <div className={styles.statusItem}>
-              <span
-                className={`${styles.statusDot} ${
-                  connectionState.comfyUI === 'connected'
-                    ? styles.connected
-                    : ''
-                }`}
-              />
-              <span className={styles.statusLabel}>
-                ComfyUI:{' '}
-                {connectionState.comfyUI === 'connected'
-                  ? 'Connected'
-                  : connectionState.comfyUI === 'connecting'
+                  : connectionState.server === 'connecting'
                     ? 'Connecting'
                     : 'Disconnected'}
               </span>
@@ -263,54 +275,67 @@ export default function PreviewPanel() {
       </div>
 
       <div className={styles.contentWrapper}>
-        <div className={styles.content}>
-          {activeTab === 'storyboard' && <StoryboardView />}
-          {activeTab === 'assets' && <AssetsView />}
-          {activeTab === 'video-library' && (
-            <VideoLibraryView
-              playbackTime={playbackTime}
-              isPlaying={isPlaying}
-              isDragging={isDragging}
-              onPlaybackTimeChange={setPlaybackTime}
-              onPlaybackStateChange={setIsPlaying}
-              activeVersions={activeVersions}
-              projectScenes={projectScenes}
-            />
-          )}
-          {activeTab === 'preview' && <PlansView />}
-        </div>
-
-        {projectDirectory && (
-          <div
-            className={styles.timelineContainer}
-            style={
-              timelineOpen
-                ? { height: `${timelineHeight}px` }
-                : { height: '28px' }
-            }
-          >
-            <TimelinePanel
-              isOpen={timelineOpen}
-              onToggle={() => setTimelineOpen(!timelineOpen)}
-              onResize={handleTimelineResize}
-              playbackTime={playbackTime}
-              isPlaying={isPlaying}
-              onSeek={setPlaybackTime}
-              onPlayPause={setIsPlaying}
-              onDragStateChange={setIsDragging}
-              activeVersions={activeVersions}
-              onActiveVersionsChange={setActiveVersions}
-            />
+        <TimelineDataProvider activeVersions={activeVersions}>
+          <div className={styles.content}>
+            {/* Storyboard view hidden for now */}
+            {/* {activeTab === 'storyboard' && <StoryboardView />} */}
+            {activeTab === 'assets' && <AssetsView />}
+            {activeTab === 'video-library' && (
+              <VideoLibraryView
+                playbackTime={playbackTime}
+                isPlaying={isPlaying}
+                isDragging={isDragging}
+                onPlaybackTimeChange={setPlaybackTime}
+                onPlaybackStateChange={setIsPlaying}
+                onTotalDurationChange={setTotalDuration}
+                activeVersions={activeVersions}
+                projectScenes={projectScenes}
+              />
+            )}
+            {activeTab === 'preview' && (
+              <PlansView 
+                fileToOpen={pendingFileNavigation} 
+                onFileOpened={clearFileNavigation}
+              />
+            )}
           </div>
-        )}
+
+          {projectDirectory && (
+            <div
+              className={styles.timelineContainer}
+              style={
+                timelineOpen
+                  ? { height: `${timelineHeight}px` }
+                  : { height: '28px' }
+              }
+            >
+              <TimelinePanel
+                isOpen={timelineOpen}
+                onToggle={() => setTimelineOpen(!timelineOpen)}
+                onResize={handleTimelineResize}
+                playbackTime={playbackTime}
+                isPlaying={isPlaying}
+                onSeek={setPlaybackTime}
+                onPlayPause={setIsPlaying}
+                onDragStateChange={setIsDragging}
+                activeVersions={activeVersions}
+                onActiveVersionsChange={setActiveVersions}
+              />
+            </div>
+          )}
+        </TimelineDataProvider>
       </div>
 
       <SettingsPanel
         isOpen={settingsOpen}
         settings={settings}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          setSettingsError(null);
+        }}
         onSave={handleSaveSettings}
         isRestarting={isRestartingBackend}
+        error={settingsError}
       />
     </div>
   );

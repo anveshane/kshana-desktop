@@ -5,8 +5,18 @@
 
 /**
  * Workflow phases representing the video generation pipeline
+ * Includes both YouTube workflow phases and legacy story workflow phases
  */
 export type WorkflowPhase =
+  // YouTube workflow phases
+  | 'transcript_input'
+  | 'planning'
+  | 'image_placement'
+  | 'image_generation'
+  | 'video_placement'
+  | 'video_generation'
+  | 'video_replacement'
+  // Legacy story workflow phases
   | 'plot'
   | 'story'
   | 'characters_settings'
@@ -22,7 +32,7 @@ export type WorkflowPhase =
 /**
  * Status of a workflow phase
  */
-export type PhaseStatus = 'pending' | 'in_progress' | 'completed';
+export type PhaseStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
 
 /**
  * Stage within the planning process

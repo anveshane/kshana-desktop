@@ -38,6 +38,114 @@
   border-radius: $radius-full;
 }
 
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.exportDropdownWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.downloadButton {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background-color: rgba($color-accent-green, 0.1);
+  border: 1px solid rgba($color-accent-green, 0.3);
+  border-radius: $radius-sm 0 0 $radius-sm;
+  color: $color-accent-green;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background-color: rgba($color-accent-green, 0.2);
+    border-color: rgba($color-accent-green, 0.5);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+}
+
+.exportDropdownToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xs 6px;
+  background-color: rgba($color-accent-green, 0.1);
+  border: 1px solid rgba($color-accent-green, 0.3);
+  border-left: none;
+  border-radius: 0 $radius-sm $radius-sm 0;
+  color: $color-accent-green;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background-color: rgba($color-accent-green, 0.2);
+    border-color: rgba($color-accent-green, 0.5);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.exportDropdownMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 240px;
+  background-color: $color-panel-background;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.exportDropdownItem {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  width: 100%;
+  padding: $spacing-sm $spacing-md;
+  background: none;
+  border: none;
+  color: $color-text-primary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: background-color $transition-fast;
+  text-align: left;
+
+  &:hover:not(:disabled) {
+    background-color: rgba($color-accent-green, 0.1);
+    color: $color-accent-green;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  & + & {
+    border-top: 1px solid rgba($color-panel-border, 0.5);
+  }
+}
+
 .content {
   flex: 1;
   display: flex;
@@ -186,10 +294,87 @@
 }
 
 .playerVideo {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background-color: #000;
+  z-index: 0;
+}
+
+.videoHidden {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.overlayVideo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.wordCaptionOverlay {
+  position: absolute;
+  left: 50%;
+  bottom: 56px;
+  transform: translateX(-50%);
+  z-index: 3;
+  max-width: min(88%, 1100px);
+  pointer-events: none;
+}
+
+.wordCaptionText {
+  background-color: rgba(0, 0, 0, 0.66);
+  border-radius: $radius-md;
+  padding: $spacing-xs $spacing-sm;
+  text-align: center;
+  line-height: 1.3;
+  font-size: clamp(16px, 2vw, 20px);
+  font-weight: $font-weight-semibold;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.wordCaptionWord {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.wordCaptionWordActive {
+  color: #00d7ff;
+}
+
+.videoPlaceholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  @include flex-center;
+  @include flex-column;
+  gap: $spacing-md;
+  background-color: $color-background-dark;
+  color: $color-text-muted;
+  z-index: 0;
+}
+
+.videoPlaceholderIcon {
+  opacity: 0.3;
+}
+
+.videoPlaceholder p {
+  margin: 0;
+  font-size: $font-size-sm;
+}
+
+.videoPlaceholderSubtext {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  opacity: 0.7;
 }
 
 .playerControls {
@@ -202,6 +387,7 @@
   display: flex;
   align-items: center;
   gap: $spacing-md;
+  z-index: 2;
 }
 
 .playPauseButton {
@@ -302,6 +488,7 @@
   border-radius: $radius-sm;
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 2;
 }
 
 .importedBadge {
@@ -310,6 +497,8 @@
 }
 
 .scenePlaceholder {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: flex;
@@ -321,11 +510,13 @@
   background-position: center;
   background-repeat: no-repeat;
   border: 2px dashed $color-panel-border;
-  position: relative;
+  z-index: 0;
 
   &.hasBackgroundImage {
     justify-content: flex-end;
     padding-bottom: $spacing-lg;
+    background-size: cover;
+    border: none;
   }
 }
 
@@ -369,6 +560,16 @@
   overflow-y: auto;
   flex-shrink: 0;
   max-height: 50%;
+}
+
+.sceneInfoPanelCompact {
+  width: 100%;
+  padding: $spacing-xs $spacing-md;
+  background-color: $color-panel-background;
+  border-top: 1px solid $color-panel-border;
+  flex-shrink: 0;
+  min-height: auto;
+  max-height: none;
 }
 
 .sceneHeader {
@@ -415,3 +616,29 @@
   }
 }
 
+.sceneMetadataCompact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+  width: 100%;
+}
+
+.sceneTitleCompact {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-secondary;
+  flex-shrink: 0;
+  
+  .sceneName {
+    font-weight: $font-weight-normal;
+    color: $color-text-muted;
+  }
+}
+
+.sceneMetaCompact {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  font-family: $font-family-mono;
+  flex-shrink: 0;
+}

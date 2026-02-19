@@ -135,6 +135,7 @@ export const PROJECT_PATHS = {
   AGENT_SETTINGS: '.kshana/agent/settings',
   AGENT_SCENES: '.kshana/agent/scenes',
   AGENT_MUSIC: '.kshana/agent/music',
+  AGENT_AUDIO: '.kshana/agent/audio',
   AGENT_FINAL: '.kshana/agent/final',
   UI_DIR: '.kshana/ui',
   UI_TIMELINE: '.kshana/ui/timeline.json',

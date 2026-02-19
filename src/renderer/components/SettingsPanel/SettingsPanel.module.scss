@@ -191,6 +191,16 @@
   }
 }
 
+.error {
+  padding: $spacing-md $spacing-lg;
+  margin-top: $spacing-lg;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: $radius-sm;
+  color: #f87171;
+  font-size: $font-size-sm;
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;

@@ -19,6 +19,16 @@
   margin-right: 8px;
 }
 
+.phaseName {
+  font-weight: 500;
+  color: var(--color-text-primary, #c9d1d9);
+  margin-right: 8px;
+  padding: 2px 8px;
+  background-color: var(--color-bg-tertiary, #21262d);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
 .statusIndicator {
   display: inline-block;
   width: 8px;

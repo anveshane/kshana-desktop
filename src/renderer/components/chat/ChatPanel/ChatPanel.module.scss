@@ -51,6 +51,27 @@
   }
 }
 
+.stopButton {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  cursor: pointer;
+  transition: all $transition-fast;
+}
+
+.stopButton {
+  background: rgba($color-error, 0.12);
+  border: 1px solid rgba($color-error, 0.5);
+  color: $color-error;
+
+  &:hover {
+    background: rgba($color-error, 0.2);
+  }
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;

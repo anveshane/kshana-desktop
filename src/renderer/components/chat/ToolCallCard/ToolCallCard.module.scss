@@ -8,6 +8,8 @@
   margin-bottom: $spacing-md;
   background: rgba($color-panel-background, 0.5);
   transition: all $transition-normal;
+  max-width: 100%;
+  overflow: hidden;
 
   &.borderExecuting {
     border-color: $color-warning;
@@ -40,6 +42,24 @@
   gap: $spacing-sm;
   font-size: $font-size-sm;
   color: $color-text-primary;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: $spacing-xs 0;
+  cursor: pointer;
+  text-align: left;
+  user-select: none;
+  
+  &:hover {
+    background: rgba($color-text-primary, 0.03);
+  }
+  
+  &:focus-visible {
+    outline: 1px solid $color-accent-cyan;
+    outline-offset: 2px;
+  }
 }
 
 .expandButton {
@@ -60,6 +80,18 @@
 .chevron {
   width: 14px;
   height: 14px;
+  flex-shrink: 0;
+  color: $color-text-secondary;
+  transition: transform 0.2s ease;
+}
+
+.chevronExpanded {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: $color-text-secondary;
+  transition: transform 0.2s ease;
+  transform: rotate(90deg);
 }
 
 .statusIconExecuting {
@@ -87,6 +119,10 @@
 .toolName {
   font-weight: $font-weight-semibold;
   flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .duration {
@@ -100,6 +136,8 @@
   padding-left: $spacing-lg;
   border-top: 1px solid rgba($color-panel-border, 0.5);
   padding-top: $spacing-sm;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .toolCall {
@@ -115,7 +153,9 @@
   border-radius: $radius-sm;
   display: block;
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
 }
 
 .errorResult {
@@ -278,6 +318,8 @@
   color: $color-text-secondary;
   font-size: $font-size-sm;
   white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .dispatchPlan {
@@ -383,5 +425,124 @@
       font-size: 0.9em;
     }
   }
+}
+
+// CLI-style display
+.cliStyle {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  margin-bottom: $spacing-xs;
+}
+
+.cliPrefix {
+  color: $color-accent-cyan;
+  font-weight: $font-weight-semibold;
+}
+
+.cliToolName {
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+}
+
+.cliError {
+  color: $color-error;
+}
+
+.cliDuration {
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+}
+
+.cliResult {
+  margin-top: $spacing-xs;
+  padding-left: $spacing-md;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.cliFilePath {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: $color-accent-green;
+  margin-bottom: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background: rgba($color-accent-green, 0.1);
+  border-radius: $radius-sm;
+  border-left: 2px solid $color-accent-green;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  cursor: pointer;
+  text-align: left;
+  display: block;
+  width: 100%;
+  transition: background-color $transition-fast;
+  
+  &:hover {
+    background: rgba($color-accent-green, 0.2);
+    color: $color-accent-green;
+  }
+  
+  &:focus-visible {
+    outline: 1px solid $color-accent-green;
+    outline-offset: 2px;
+  }
+}
+
+.cliFileSize {
+  color: $color-text-secondary;
+  font-size: 0.9em;
+  margin-left: $spacing-xs;
+}
+
+.cliPreview {
+  margin-top: $spacing-xs;
+  margin-bottom: $spacing-xs;
+  
+  summary {
+    cursor: pointer;
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+    padding: $spacing-xs 0;
+    user-select: none;
+    
+    &:hover {
+      color: $color-text-primary;
+    }
+  }
+}
+
+.cliResultContent {
+  margin-top: $spacing-xs;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.cliResultPre {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  background: rgba(0, 0, 0, 0.2);
+  padding: $spacing-xs $spacing-sm;
+  border-radius: $radius-sm;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  margin: 0;
+  line-height: 1.5;
+}
+
+
+.cliResultContent {
+  margin-top: $spacing-xs;
+  max-width: 100%;
+  overflow: hidden;
 }
 

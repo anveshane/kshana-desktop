@@ -32,6 +32,9 @@ const formatter = new Intl.DateTimeFormat('en-IN', {
   timeZone: 'Asia/Kolkata',
 });
 
+// Character limit for truncating user messages
+const USER_MESSAGE_TRUNCATE_LIMIT = 150;
+
 const MarkdownComponents = {
   code({ inline, className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '');
@@ -98,14 +101,12 @@ export default function MessageBubble({
   const isQuestion = message.type === 'agent_question';
   const isGreeting = message.type === 'greeting';
 
+  // Get navigateToFile from context
+  const { navigateToFile } = useWorkspace();
+
   // Render tool call card
   if (isToolCall && message.meta) {
     const toolName = (message.meta.toolName as string) || 'tool';
-    // Hide certain tools that are rendered elsewhere (like todo_write)
-    const HIDDEN_TOOLS = new Set(['todo_write']);
-    if (HIDDEN_TOOLS.has(toolName)) {
-      return null; // Don't render hidden tools
-    }
     const status = (message.meta.status as string) || 'executing';
     const args = (message.meta.args as Record<string, unknown>) || {};
     const { result } = message.meta;
@@ -127,6 +128,7 @@ export default function MessageBubble({
           duration={duration}
           toolCallId={message.meta.toolCallId as string | undefined}
           streamingContent={streamingContent}
+          onFileClick={navigateToFile}
         />
       </div>
     );
@@ -190,6 +192,18 @@ export default function MessageBubble({
     }
   }, [isReasoningOnly, isStreaming]);
 
+  // Check if user message should be truncated
+  const isUserMessage = message.role === 'user';
+  const shouldTruncate =
+    isUserMessage && message.content.length > USER_MESSAGE_TRUNCATE_LIMIT;
+  const [isUserMessageExpanded, setIsUserMessageExpanded] = useState(false);
+
+  // Get truncated content for user messages
+  const getTruncatedContent = (content: string) => {
+    if (!shouldTruncate) return content;
+    return `${content.substring(0, USER_MESSAGE_TRUNCATE_LIMIT)}...`;
+  };
+
   return (
     <div
       className={`${styles.container} ${styles[message.role]} ${
@@ -204,13 +218,20 @@ export default function MessageBubble({
             <span className={styles.role}>
               <span className={styles.agentName}>[{agentName}]</span>
             </span>
+          ) : message.role === 'assistant' ? (
+            <span className={styles.role}>
+              <span className={styles.agentName}>[Orchestrator]</span>
+            </span>
           ) : (
             <span className={styles.role}>{roleLabels[message.role]}</span>
           )}
 
-          {message.type && message.type !== 'message' && (
-            <span className={styles.type}>{message.type}</span>
-          )}
+          {message.type &&
+            message.type !== 'message' &&
+            message.type !== 'agent_text' &&
+            message.type !== 'stream_chunk' && (
+              <span className={styles.type}>{message.type}</span>
+            )}
           <span className={styles.time}>
             {formatter.format(new Date(message.timestamp))}
           </span>
@@ -273,6 +294,45 @@ export default function MessageBubble({
                   {message.content}
                 </ReactMarkdown>
               </div>
+            )}
+          </div>
+        ) : shouldTruncate ? (
+          // Truncated user message with expand/collapse
+          <div className={styles.reasoningContainer}>
+            {!isUserMessageExpanded ? (
+              <>
+                <ReactMarkdown
+                  remarkPlugins={remarkGfm ? [remarkGfm] : []}
+                  components={MarkdownComponents}
+                >
+                  {getTruncatedContent(message.content)}
+                </ReactMarkdown>
+                <button
+                  type="button"
+                  className={styles.reasoningToggle}
+                  onClick={() => setIsUserMessageExpanded(true)}
+                >
+                  <ChevronDown size={16} />
+                  <span className={styles.reasoningLabel}>Show more</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <ReactMarkdown
+                  remarkPlugins={remarkGfm ? [remarkGfm] : []}
+                  components={MarkdownComponents}
+                >
+                  {message.content}
+                </ReactMarkdown>
+                <button
+                  type="button"
+                  className={styles.reasoningToggle}
+                  onClick={() => setIsUserMessageExpanded(false)}
+                >
+                  <ChevronUp size={16} />
+                  <span className={styles.reasoningLabel}>Show less</span>
+                </button>
+              </>
             )}
           </div>
         ) : (

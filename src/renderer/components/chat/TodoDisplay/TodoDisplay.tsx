@@ -19,7 +19,7 @@ export interface TodoDisplayProps {
 
 const STATUS_ICONS: Record<TodoStatus, { icon: string; className: string }> = {
   pending: { icon: '○', className: styles.statusPending },
-  in_progress: { icon: '●', className: styles.statusInProgress },
+  in_progress: { icon: '→', className: styles.statusInProgress },
   completed: { icon: '✓', className: styles.statusCompleted },
   cancelled: { icon: '✗', className: styles.statusCancelled },
 };
@@ -102,38 +102,33 @@ export default function TodoDisplay({
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <span className={styles.headerIcon}>📋</span>
-        <span className={styles.headerText}>
-          Todos ({completedCount}/{visibleTodos.length})
-        </span>
-        {inProgressCount > 0 && (
-          <span className={styles.headerInProgress}>
-            {' '}
-            • {inProgressCount} in progress
-          </span>
-        )}
-        {pendingCount > 0 && (
-          <span className={styles.headerPending}>
-            {' '}
-            • {pendingCount} pending
-          </span>
-        )}
-      </div>
-      {!compact && currentTask && (
-        <div className={styles.currentTask}>
-          Working on: {currentTask.task || currentTask.content}
-        </div>
-      )}
+      <div className={styles.cliHeader}>[TODOS]</div>
       <div className={styles.todoList}>
-        {visibleTodos.map((todo, i) => (
-          <TodoItem
-            key={todo.id || i}
-            todo={todo}
-            index={i}
-            compact={compact}
-          />
-        ))}
+        {visibleTodos.map((todo, i) => {
+          const status = (todo.status || 'pending') as TodoStatus;
+          const statusConfig = STATUS_ICONS[status];
+          const indent = todo.depth || 0;
+          const content = todo.task || todo.content || 'Task';
+
+          return (
+            <div key={todo.id || i} className={styles.todoItem}>
+              <span className={styles.todoIndent}>{'  '.repeat(indent)}</span>
+              <span className={statusConfig.className}>
+                {statusConfig.icon}
+              </span>
+              <span
+                className={
+                  status === 'pending' || status === 'cancelled'
+                    ? styles.todoContentDimmed
+                    : styles.todoContent
+                }
+              >
+                {' '}
+                {content}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

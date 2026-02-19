@@ -153,3 +153,145 @@
   text-align: center;
 }
 
+// Media card styles
+.mediaCard {
+  @include panel-base;
+  display: flex;
+  flex-direction: column;
+  background-color: $color-panel-background;
+  border-radius: $radius-lg;
+  border: 1px solid $color-panel-border;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    border-color: rgba($color-accent-green, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+}
+
+.mediaThumbnail {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: $color-background-dark;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.thumbnailImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumbnailVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.playOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  @include flex-center;
+  background-color: rgba(0, 0, 0, 0.3);
+  color: white;
+  opacity: 0;
+  transition: opacity $transition-fast;
+
+  .mediaCard:hover & {
+    opacity: 1;
+  }
+}
+
+.mediaPlaceholder {
+  @include flex-center;
+  color: $color-text-muted;
+  opacity: 0.5;
+}
+
+.mediaName {
+  padding: $spacing-sm;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  text-align: center;
+  @include truncate;
+}
+
+// Modal styles
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 10000;
+  @include flex-center;
+  padding: $spacing-2xl;
+}
+
+.modalContent {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  @include flex-column;
+  align-items: center;
+  gap: $spacing-md;
+  background-color: rgba($color-background-dark, 0.85);
+  border-radius: $radius-lg;
+  padding: $spacing-lg;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.modalClose {
+  position: absolute;
+  top: -$spacing-xl;
+  right: 0;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: $radius-full;
+  width: 40px;
+  height: 40px;
+  @include flex-center;
+  cursor: pointer;
+  color: white;
+  transition: all $transition-fast;
+
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+  }
+}
+
+.modalImage {
+  max-width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: $radius-md;
+}
+
+.modalVideo {
+  max-width: 100%;
+  max-height: 80vh;
+  border-radius: $radius-md;
+}
+
+.modalTitle {
+  color: white;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  text-align: center;
+  padding: $spacing-sm;
+}
+

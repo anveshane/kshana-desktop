@@ -1,11 +1,5 @@
-import { useState, useEffect } from 'react';
-import {
-  CheckCircle2,
-  XCircle,
-  AlertCircle,
-  ChevronDown,
-  ChevronRight,
-} from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle2, XCircle, AlertCircle, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import styles from './ToolCallCard.module.scss';
 
@@ -24,6 +18,7 @@ export interface ToolCallCardProps {
   toolCallId?: string;
   agentName?: string;
   streamingContent?: string;
+  onFileClick?: (filePath: string) => void;
 }
 
 // Tools with special rendering
@@ -322,6 +317,9 @@ function renderProjectStateTool(
   );
 }
 
+// Tools that should be expanded by default (not collapsed)
+const EXPANDED_BY_DEFAULT_TOOLS = new Set(['Task', 'dispatch_agent']);
+
 export default function ToolCallCard({
   toolName,
   args,
@@ -330,154 +328,170 @@ export default function ToolCallCard({
   duration,
   agentName,
   streamingContent,
+  onFileClick,
 }: ToolCallCardProps) {
-  // Always expand if executing, error, needs_confirmation, or has result/streaming content
-  const [isExpanded, setIsExpanded] = useState(
-    status === 'executing' ||
-      status === 'error' ||
-      status === 'needs_confirmation' ||
-      result !== undefined ||
-      streamingContent !== undefined,
-  );
-
-  useEffect(() => {
-    if (
-      status === 'executing' ||
-      status === 'needs_confirmation' ||
-      result !== undefined ||
-      streamingContent !== undefined
-    ) {
-      setIsExpanded(true);
-    }
-  }, [status, result, streamingContent]);
-
-  // Special rendering for think tool
-  if (toolName === 'think') {
-    return <>{renderThinkTool(args, status)}</>;
-  }
-
-  // Special rendering for dispatch_agent (planning) tool
-  if (toolName === 'dispatch_agent') {
-    return <>{renderDispatchAgentTool(args, status, result)}</>;
-  }
-
-  // Special rendering for project state tools
-  if (toolName === 'write_project_state' || toolName === 'read_project_state') {
-    return <>{renderProjectStateTool(toolName, args, status)}</>;
-  }
-
-  // Standard tool display
   const isExecuting = status === 'executing';
-  const displayName = getDisplayName(toolName, isExecuting);
-  const toolCallStr = formatToolCall(toolName, args);
+  
+  // Task tool and executing tools stay expanded by default, all others are collapsed
+  const [isExpanded, setIsExpanded] = useState(() => 
+    EXPANDED_BY_DEFAULT_TOOLS.has(toolName) || isExecuting
+  );
+  
+  // Keep expanded while executing (can't collapse running tools)
+  const effectiveExpanded = isExecuting ? true : isExpanded;
+  
+  const isError = status === 'error';
+  const isCompleted = status === 'completed';
 
-  const getStatusIcon = () => {
-    switch (status) {
-      case 'executing':
-        return null; // No loader/icon for executing status
-      case 'completed':
-        return (
-          <CheckCircle2 size={14} className={styles.statusIconCompleted} />
-        );
-      case 'error':
-        return <XCircle size={14} className={styles.statusIconError} />;
-      case 'needs_confirmation':
-        return (
-          <AlertCircle
-            size={14}
-            className={styles.statusIconNeedsConfirmation}
-          />
-        );
-      default:
-        return <div className={styles.statusIconDefault}>○</div>;
-    }
-  };
+  // CLI-style format: [TOOL] toolName
+  const prefix = agentName ? `[${agentName}]` : '[TOOL]';
 
-  const getBorderColor = () => {
-    switch (status) {
-      case 'executing':
-        return styles.borderExecuting;
-      case 'completed':
-        return styles.borderCompleted;
-      case 'error':
-        return styles.borderError;
-      case 'needs_confirmation':
-        return styles.borderNeedsConfirmation;
-      default:
-        return styles.borderDefault;
+  // Format result for display - extract key information like file paths
+  let resultDisplay = '';
+  let filePath: string | undefined;
+  let fileSize: string | undefined;
+  let preview: string | undefined;
+
+  if (result !== undefined) {
+    if (typeof result === 'object' && result !== null) {
+      const resultObj = result as Record<string, unknown>;
+
+      // Extract file information (common in Task tool results)
+      if ('file_path' in resultObj || 'filePath' in resultObj) {
+        filePath = (resultObj.file_path || resultObj.filePath) as string;
+      }
+      if ('file_saved' in resultObj && filePath) {
+        // File was saved
+      }
+      if ('size' in resultObj) {
+        const size = resultObj.size as number;
+        fileSize =
+          size < 1024 ? `${size} bytes` : `${(size / 1024).toFixed(1)} KB`;
+      }
+      if ('preview' in resultObj) {
+        preview = String(resultObj.preview);
+      }
+
+      // Check if result has content field (like dispatch_content_agent results)
+      if ('content' in resultObj && typeof resultObj.content === 'string') {
+        resultDisplay = String(resultObj.content);
+      } else if (
+        'output' in resultObj &&
+        typeof resultObj.output === 'string'
+      ) {
+        resultDisplay = String(resultObj.output);
+      } else if (filePath && !resultDisplay) {
+        // If we have a file path but no content, show the file path
+        resultDisplay = `File: ${filePath}`;
+      } else {
+        // For other objects, show a summary
+        const keys = Object.keys(resultObj);
+        if (keys.length <= 3) {
+          resultDisplay = JSON.stringify(result, null, 2);
+        } else {
+          resultDisplay = `{${keys.slice(0, 3).join(', ')}...}`;
+        }
+      }
+    } else {
+      resultDisplay = String(result);
     }
-  };
+  }
+
+  // Truncate long results for cleaner display
+  const MAX_RESULT_LENGTH = 500;
+  if (resultDisplay.length > MAX_RESULT_LENGTH) {
+    resultDisplay = `${resultDisplay.substring(0, MAX_RESULT_LENGTH)}...`;
+  }
+
+  const borderClass = isExecuting
+    ? styles.borderExecuting
+    : isError
+      ? styles.borderError
+      : isCompleted
+        ? styles.borderCompleted
+        : styles.borderDefault;
+
+  const toolCallText = formatToolCall(toolName, args);
 
   return (
-    <div className={`${styles.container} ${getBorderColor()}`}>
-      <div className={styles.header}>
-        <button
-          type="button"
-          className={styles.expandButton}
-          onClick={() => setIsExpanded(!isExpanded)}
-          aria-expanded={isExpanded}
-        >
-          {isExpanded ? (
-            <ChevronDown size={14} className={styles.chevron} />
-          ) : (
-            <ChevronRight size={14} className={styles.chevron} />
-          )}
-        </button>
-        {getStatusIcon()}
-        <span className={styles.toolName}>
-          {agentName && (
-            <span className={styles.agentName}>[{agentName}] </span>
-          )}
-          {displayName}
-        </span>
-        {duration !== undefined && status !== 'executing' && (
-          <span className={styles.duration}>({formatDuration(duration)})</span>
+    <div className={`${styles.container} ${borderClass}`}>
+      <button
+        type="button"
+        className={`${styles.header} ${isExecuting ? styles.headerNoCollapse : ''}`}
+        onClick={() => !isExecuting && setIsExpanded(!isExpanded)}
+        style={isExecuting ? { cursor: 'default' } : undefined}
+      >
+        <ChevronRight
+          size={14}
+          className={effectiveExpanded ? styles.chevronExpanded : styles.chevron}
+        />
+        {isExecuting ? (
+          <AlertCircle size={14} className={styles.statusIconExecuting} />
+        ) : isError ? (
+          <XCircle size={14} className={styles.statusIconError} />
+        ) : (
+          <CheckCircle2 size={14} className={styles.statusIconCompleted} />
         )}
-      </div>
-      <div className={styles.toolCallSummary}>
-        <code className={styles.toolCallCode}>{toolCallStr}</code>
-      </div>
-      {(isExpanded || streamingContent) && (
+        <span className={styles.toolName}>{toolName}</span>
+        <span className={styles.cliPrefix}>{prefix}</span>
+        <span className={styles.cliToolName}>
+          {isExecuting ? 'Running' : isError ? 'Failed' : 'Success'}
+        </span>
+        {!isExecuting && duration !== undefined && duration > 0 && (
+          <span className={styles.duration}>{formatDuration(duration)}</span>
+        )}
+      </button>
+
+      {effectiveExpanded && (
         <div className={styles.content}>
-          {streamingContent && (
-            <div className={styles.streamingContent}>
-              <div className={styles.streamingLabel}>Thinking:</div>
-              <div className={styles.streamingPre}>
-                <ReactMarkdown>{streamingContent}</ReactMarkdown>
-              </div>
-            </div>
-          )}
-          {status === 'error' && result !== undefined && (
-            <div className={styles.errorResult}>
-              <span className={styles.errorLabel}>Error:</span>
-              <span className={styles.errorMessage}>
-                {typeof result === 'object'
-                  ? JSON.stringify(result, null, 2)
-                  : String(result)}
-              </span>
-            </div>
-          )}
-          {status === 'completed' && result !== undefined && (
-            <div className={styles.result}>
-              <span className={styles.resultLabel}>Result:</span>
-              {typeof result === 'object' && result !== null ? (
-                // Check if result has content field (like dispatch_content_agent results)
-                'content' in result &&
-                typeof (result as Record<string, unknown>).content ===
-                  'string' ? (
-                  <div className={styles.resultContentMarkdown}>
-                    <ReactMarkdown>
-                      {String((result as Record<string, unknown>).content)}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  <pre className={styles.resultContent}>
-                    {JSON.stringify(result, null, 2)}
-                  </pre>
-                )
-              ) : (
-                <pre className={styles.resultContent}>{String(result)}</pre>
+          <div className={styles.toolCall}>
+            <span className={styles.toolCallCode}>{toolCallText}</span>
+          </div>
+
+          {!isExecuting && (filePath || fileSize || resultDisplay) && (
+            <div className={styles.cliResult}>
+              {filePath && (
+                <button
+                  type="button"
+                  className={styles.cliFilePath}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onFileClick?.(filePath);
+                  }}
+                  title="Click to open in Preview"
+                >
+                  📄 {filePath}
+                  {fileSize && (
+                    <span className={styles.cliFileSize}> ({fileSize})</span>
+                  )}
+                </button>
               )}
+              {preview && (
+                <div className={styles.cliPreview}>
+                  <details>
+                    <summary>Preview</summary>
+                    <pre className={styles.cliResultPre}>{preview}</pre>
+                  </details>
+                </div>
+              )}
+              {resultDisplay && (
+                <div className={styles.cliResultContent}>
+                  {typeof result === 'object' &&
+                  result !== null &&
+                  'content' in result ? (
+                    <ReactMarkdown>{resultDisplay}</ReactMarkdown>
+                  ) : (
+                    <pre className={styles.cliResultPre}>{resultDisplay}</pre>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {isError && !resultDisplay && (
+            <div className={styles.errorResult}>
+              <div className={styles.errorLabel}>Error</div>
+              <pre className={styles.errorMessage}>Tool failed.</pre>
             </div>
           )}
         </div>

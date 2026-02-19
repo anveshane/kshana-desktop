@@ -170,7 +170,7 @@ export default function ContextMenu({
     },
     {
       id: 'reveal',
-      label: 'Reveal in Finder',
+      label: navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Reveal in Finder' : 'Show in Explorer',
       icon: <FolderOpen size={14} />,
       onClick: onRevealInFinder,
     },

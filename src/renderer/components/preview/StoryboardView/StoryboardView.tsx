@@ -11,12 +11,7 @@ type ViewType = 'grid' | 'list';
 
 export default function StoryboardView() {
   const { projectDirectory } = useWorkspace();
-  const {
-    isLoaded,
-    isLoading,
-    scenes: projectScenes,
-    useMockData,
-  } = useProject();
+  const { isLoaded, isLoading, scenes: projectScenes } = useProject();
   const [filter, setFilter] = useState<FilterType>('all');
   const [viewType, setViewType] = useState<ViewType>('grid');
 
@@ -100,8 +95,8 @@ export default function StoryboardView() {
     [],
   );
 
-  // Show empty state if no project and not using mock data
-  if (!projectDirectory && !useMockData) {
+  // Show empty state if no project
+  if (!projectDirectory) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>

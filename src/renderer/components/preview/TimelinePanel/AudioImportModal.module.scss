@@ -1,0 +1,204 @@
+@use 'sass:color';
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal {
+  background: $color-panel-background;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-lg;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: slideUp 0.2s ease-out;
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  overflow: hidden;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-lg;
+  border-bottom: 1px solid $color-panel-border;
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin: 0;
+}
+
+.closeButton {
+  @include flex-center;
+  background: none;
+  border: none;
+  padding: $spacing-xs;
+  color: $color-text-muted;
+  cursor: pointer;
+  border-radius: $radius-sm;
+  transition: all $transition-fast;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+
+  &:hover {
+    color: $color-text-primary;
+    background-color: rgba($color-text-primary, 0.1);
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
+}
+
+.content {
+  padding: $spacing-lg;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-lg;
+  overflow-y: auto;
+  @include custom-scrollbar;
+}
+
+.tabs {
+  display: flex;
+  gap: $spacing-xs;
+  border-bottom: 1px solid $color-panel-border;
+  padding-bottom: $spacing-sm;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-sm $spacing-md;
+  background: none;
+  border: none;
+  border-radius: $radius-sm;
+  color: $color-text-secondary;
+  cursor: pointer;
+  transition: all $transition-fast;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+
+  &:hover {
+    color: $color-text-primary;
+    background-color: rgba($color-text-primary, 0.05);
+  }
+
+  &.active {
+    color: $color-accent-green;
+    background-color: rgba($color-accent-green, 0.1);
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
+}
+
+.tabContent {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.description {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  margin: 0;
+}
+
+.urlInput {
+  width: 100%;
+  padding: $spacing-sm $spacing-md;
+  background: $color-background-dark;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-md;
+  color: $color-text-primary;
+  font-size: $font-size-base;
+  font-family: $font-family-base;
+  transition: all $transition-fast;
+
+  &:focus {
+    outline: none;
+    border-color: $color-accent-green;
+    box-shadow: 0 0 0 1px rgba($color-accent-green, 0.2);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &::placeholder {
+    color: $color-text-muted;
+  }
+}
+
+.actionButton {
+  padding: $spacing-sm $spacing-lg;
+  background: $color-accent-green;
+  border: none;
+  border-radius: $radius-md;
+  color: $color-background-dark;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-fast;
+  @include flex-center;
+  gap: $spacing-xs;
+
+  &:hover:not(:disabled) {
+    background: color.adjust($color-accent-green, $lightness: 5%);
+    @include glow-effect($color-accent-green, 8px);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
+}

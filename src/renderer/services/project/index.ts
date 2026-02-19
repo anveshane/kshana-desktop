@@ -10,6 +10,3 @@ export {
   type ProjectResult,
   type ProjectValidation,
 } from './ProjectService';
-
-// Mock data generators
-export * from './mockData';

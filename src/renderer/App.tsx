@@ -1,6 +1,7 @@
 import { WorkspaceProvider, useWorkspace } from './contexts/WorkspaceContext';
 import { TimelineProvider } from './contexts/TimelineContext';
 import { ProjectProvider, useProject } from './contexts/ProjectContext';
+import { AgentProvider } from './contexts/AgentContext';
 import LandingScreen from './components/landing/LandingScreen/LandingScreen';
 import WorkspaceLayout from './components/layout/WorkspaceLayout/WorkspaceLayout';
 import './styles/global.scss';
@@ -22,7 +23,9 @@ export default function App() {
     <WorkspaceProvider>
       <ProjectProvider>
         <TimelineProvider>
-          <AppContent />
+          <AgentProvider>
+            <AppContent />
+          </AgentProvider>
         </TimelineProvider>
       </ProjectProvider>
     </WorkspaceProvider>

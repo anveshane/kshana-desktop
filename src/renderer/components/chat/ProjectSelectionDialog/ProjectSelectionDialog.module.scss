@@ -1,0 +1,151 @@
+@import '../../../styles/tokens';
+
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+
+.dialog {
+  background: $color-panel-background;
+  border: 1px solid $color-panel-border;
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.header {
+  margin-bottom: 20px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 600;
+  color: $color-text-primary;
+  margin: 0;
+}
+
+.loading {
+  text-align: center;
+  color: $color-text-secondary;
+  padding: 20px;
+}
+
+.projectInfo {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid $color-panel-border;
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.projectTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: $color-text-primary;
+  margin-bottom: 12px;
+}
+
+.projectDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail {
+  display: flex;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.label {
+  color: $color-text-secondary;
+  min-width: 80px;
+}
+
+.value {
+  color: $color-text-primary;
+  font-weight: 500;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.prompt {
+  font-size: 14px;
+  font-weight: 500;
+  color: $color-text-primary;
+  margin: 0;
+}
+
+.buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.continueButton,
+.startNewButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid $color-panel-border;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.continueButton {
+  background: $color-accent-green;
+  color: $color-background-dark;
+  border-color: $color-accent-green;
+
+  &:hover:not(:disabled) {
+    background: #00f584;
+    border-color: #00f584;
+  }
+}
+
+.startNewButton {
+  background: $color-error;
+  color: white;
+  border-color: $color-error;
+
+  &:hover:not(:disabled) {
+    background: #e03e36;
+    border-color: #e03e36;
+  }
+}
+
+.warning {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: normal;
+  margin-left: auto;
+}

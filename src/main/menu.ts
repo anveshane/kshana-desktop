@@ -54,17 +54,17 @@ export default class MenuBuilder {
 
   buildDarwinTemplate(): MenuItemConstructorOptions[] {
     const subMenuAbout: DarwinMenuItemConstructorOptions = {
-      label: 'Electron',
+      label: 'Kshana',
       submenu: [
         {
-          label: 'About ElectronReact',
+          label: 'About Kshana',
           selector: 'orderFrontStandardAboutPanel:',
         },
         { type: 'separator' },
         { label: 'Services', submenu: [] },
         { type: 'separator' },
         {
-          label: 'Hide ElectronReact',
+          label: 'Hide Kshana',
           accelerator: 'Command+H',
           selector: 'hide:',
         },
@@ -198,15 +198,27 @@ export default class MenuBuilder {
         label: '&File',
         submenu: [
           {
-            label: '&Open',
-            accelerator: 'Ctrl+O',
-          },
-          {
             label: '&Close',
             accelerator: 'Ctrl+W',
             click: () => {
               this.mainWindow.close();
             },
+          },
+        ],
+      },
+      {
+        label: '&Edit',
+        submenu: [
+          { label: 'Undo', accelerator: 'Ctrl+Z', role: 'undo' as const },
+          { label: 'Redo', accelerator: 'Ctrl+Y', role: 'redo' as const },
+          { type: 'separator' as const },
+          { label: 'Cut', accelerator: 'Ctrl+X', role: 'cut' as const },
+          { label: 'Copy', accelerator: 'Ctrl+C', role: 'copy' as const },
+          { label: 'Paste', accelerator: 'Ctrl+V', role: 'paste' as const },
+          {
+            label: 'Select All',
+            accelerator: 'Ctrl+A',
+            role: 'selectAll' as const,
           },
         ],
       },

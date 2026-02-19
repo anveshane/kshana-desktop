@@ -44,10 +44,10 @@ const initialState: WorkspaceState = {
   activeContextFiles: [],
   recentProjects: [],
   connectionState: {
-    lmStudio: 'disconnected',
-    comfyUI: 'disconnected',
+    server: 'disconnected',
   },
   isLoading: false,
+  pendingFileNavigation: null,
 };
 
 const WorkspaceContext = createContext<WorkspaceContextType | null>(null);
@@ -98,7 +98,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     try {
       // Read only first level to prevent freeze
       const tree = await window.electron.project.readTree(path, 1);
-      const projectName = path.split('/').pop() || path;
+      const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '');
+      const projectName = normalizedPath.split('/').pop() || path;
 
       // Start watching the directory
       await window.electron.project.watchDirectory(path);
@@ -109,7 +110,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
       setState((prev) => ({
         ...prev,
-        projectDirectory: path,
+        projectDirectory: normalizedPath,
         projectName,
         fileTree: tree,
         recentProjects: recent,
@@ -117,6 +118,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
         selectedFile: null,
         activeContextFiles: [],
       }));
+
+      console.log('[WorkspaceContext] Project opened:', {
+        projectDirectory: normalizedPath,
+        projectName,
+      });
     } catch {
       setState((prev) => ({ ...prev, isLoading: false }));
     }
@@ -219,6 +225,14 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     }
   }, []);
 
+  const navigateToFile = useCallback((filePath: string) => {
+    setState((prev) => ({ ...prev, pendingFileNavigation: filePath }));
+  }, []);
+
+  const clearFileNavigation = useCallback(() => {
+    setState((prev) => ({ ...prev, pendingFileNavigation: null }));
+  }, []);
+
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -246,6 +260,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       refreshFileTree,
       setConnectionStatus,
       loadDirectory,
+      navigateToFile,
+      clearFileNavigation,
     }),
     [
       state,
@@ -257,6 +273,8 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       refreshFileTree,
       setConnectionStatus,
       loadDirectory,
+      navigateToFile,
+      clearFileNavigation,
     ],
   );
 

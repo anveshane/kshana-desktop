@@ -1,208 +1,548 @@
-import { useMemo } from 'react';
-import { User, MapPin, Package, Layers } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Image as ImageIcon, Video, X, Play, ImagePlus } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
-import { useProject } from '../../../contexts/ProjectContext';
-import { MOCK_PROPS as mockPropsData } from '../../../services/project/mockData/mockProps';
-import AssetCard from '../AssetCard';
+import { FileNode, getFileType } from '../../../../shared/fileSystemTypes';
+import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
+import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import styles from './AssetsView.module.scss';
 
-interface CharacterAsset {
+interface MediaAsset {
   name: string;
-  slug: string;
-  description?: string;
-  appearance?: string;
-  imagePath?: string;
-}
-
-interface LocationAsset {
-  name: string;
-  slug: string;
-  description?: string;
-  atmosphere?: string;
-  imagePath?: string;
+  path: string;
+  type: 'image' | 'video';
 }
 
 export default function AssetsView() {
   const { projectDirectory } = useWorkspace();
-  const {
-    isLoaded,
-    isLoading,
-    characters: projectCharacters,
-    settings: projectSettings,
-    useMockData,
-  } = useProject();
 
-  // Convert CharacterData from ProjectContext to CharacterAsset format
-  const characters: CharacterAsset[] = useMemo(() => {
-    if (!isLoaded || projectCharacters.length === 0) {
-      return [];
+  const [generatedImages, setGeneratedImages] = useState<MediaAsset[]>([]);
+  const [generatedVideos, setGeneratedVideos] = useState<MediaAsset[]>([]);
+  const [generatedInfographics, setGeneratedInfographics] = useState<
+    MediaAsset[]
+  >([]);
+  const [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<MediaAsset | null>(null);
+  const [selectedVideo, setSelectedVideo] = useState<MediaAsset | null>(null);
+  const [selectedInfographic, setSelectedInfographic] =
+    useState<MediaAsset | null>(null);
+  const [imagePaths, setImagePaths] = useState<Record<string, string>>({});
+  const [videoPaths, setVideoPaths] = useState<Record<string, string>>({});
+  const [infographicPaths, setInfographicPaths] = useState<
+    Record<string, string>
+  >({});
+
+  // Load generated images and videos from placement directories
+  useEffect(() => {
+    if (!projectDirectory) {
+      setGeneratedImages([]);
+      setGeneratedVideos([]);
+      setGeneratedInfographics([]);
+      return;
     }
 
-    return projectCharacters.map((char) => ({
-      name: char.name,
-      slug: char.slug,
-      description: char.visual_description,
-      appearance: char.visual_description,
-      // CharacterData uses reference_image_approval_status and reference_image_path
-      imagePath:
-        char.reference_image_approval_status === 'approved'
-          ? char.reference_image_path
-          : undefined,
-    }));
-  }, [isLoaded, projectCharacters]);
+    const loadMediaFiles = async () => {
+      setIsLoadingMedia(true);
+      try {
+        const imagePlacementsDir = `${projectDirectory}/.kshana/agent/image-placements`;
+        const videoPlacementsDir = `${projectDirectory}/.kshana/agent/video-placements`;
+        const infographicPlacementsDir = `${projectDirectory}/.kshana/agent/infographic-placements`;
 
-  // Convert SettingData from ProjectContext to LocationAsset format
-  const locations: LocationAsset[] = useMemo(() => {
-    if (!isLoaded || projectSettings.length === 0) {
-      return [];
+        // Load images
+        try {
+          const imageTree = await window.electron.project.readTree(
+            imagePlacementsDir,
+            1,
+          );
+          const imageFiles: MediaAsset[] = [];
+
+          const collectImageFiles = (node: FileNode) => {
+            if (node.type === 'file' && node.extension) {
+              const fileType = getFileType(node.extension);
+              if (fileType === 'image') {
+                imageFiles.push({
+                  name: node.name,
+                  path: node.path,
+                  type: 'image',
+                });
+              }
+            }
+            if (node.children) {
+              node.children.forEach(collectImageFiles);
+            }
+          };
+
+          collectImageFiles(imageTree);
+          setGeneratedImages(imageFiles);
+        } catch (err) {
+          // Directory might not exist yet
+          setGeneratedImages([]);
+        }
+
+        // Load videos
+        try {
+          const videoTree = await window.electron.project.readTree(
+            videoPlacementsDir,
+            1,
+          );
+          const videoFiles: MediaAsset[] = [];
+
+          const collectVideoFiles = (node: FileNode) => {
+            if (node.type === 'file' && node.extension) {
+              const fileType = getFileType(node.extension);
+              if (fileType === 'video') {
+                videoFiles.push({
+                  name: node.name,
+                  path: node.path,
+                  type: 'video',
+                });
+              }
+            }
+            if (node.children) {
+              node.children.forEach(collectVideoFiles);
+            }
+          };
+
+          collectVideoFiles(videoTree);
+          setGeneratedVideos(videoFiles);
+        } catch (err) {
+          setGeneratedVideos([]);
+        }
+
+        // Load infographics (MP4s and WebMs from Remotion)
+        try {
+          const infographicTree = await window.electron.project.readTree(
+            infographicPlacementsDir,
+            2, // Increased depth to handle subdirectories
+          );
+          const infographicFiles: MediaAsset[] = [];
+
+          const collectInfographicFiles = (node: FileNode) => {
+            if (node.type === 'file' && node.extension) {
+              // Display both MP4 and WebM files (WebM for transparency support)
+              const ext = node.extension.toLowerCase();
+              if (ext === '.mp4' || ext === '.webm') {
+                console.log('[AssetsView] Found infographic file:', node.name, node.path);
+                infographicFiles.push({
+                  name: node.name,
+                  path: node.path,
+                  type: 'video',
+                });
+              }
+            }
+            if (node.children) {
+              node.children.forEach(collectInfographicFiles);
+            }
+          };
+
+          collectInfographicFiles(infographicTree);
+          console.log('[AssetsView] Total infographic files found:', infographicFiles.length);
+          setGeneratedInfographics(infographicFiles);
+        } catch (err) {
+          console.error('[AssetsView] Error loading infographics:', err);
+          setGeneratedInfographics([]);
+        }
+      } catch (err) {
+        console.error('Failed to load media files:', err);
+      } finally {
+        setIsLoadingMedia(false);
+      }
+    };
+
+    loadMediaFiles();
+
+    // Listen for file changes to refresh media files
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      // Refresh if files changed in placement directories
+      if (
+        event.path.includes('image-placements') ||
+        event.path.includes('video-placements') ||
+        event.path.includes('infographic-placements')
+      ) {
+        loadMediaFiles();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [projectDirectory]);
+
+  // Resolve image paths
+  useEffect(() => {
+    if (!projectDirectory || generatedImages.length === 0) {
+      setImagePaths({});
+      return;
     }
 
-    return projectSettings.map((setting) => ({
-      name: setting.name,
-      slug: setting.slug,
-      description: setting.visual_description,
-      atmosphere: setting.visual_description, // Settings use visual_description for atmosphere
-      // SettingData uses reference_image_approval_status and reference_image_path
-      imagePath:
-        setting.reference_image_approval_status === 'approved'
-          ? setting.reference_image_path
-          : undefined,
-    }));
-  }, [isLoaded, projectSettings]);
+    const resolvePaths = async () => {
+      const paths: Record<string, string> = {};
+      for (const image of generatedImages) {
+        try {
+          const resolved = await resolveAssetPathForDisplay(
+            image.path,
+            projectDirectory,
+          );
+          if (shouldUseBase64(resolved)) {
+            const base64 = await imageToBase64(resolved);
+            if (base64) {
+              paths[image.path] = base64;
+              continue;
+            }
+          }
+          paths[image.path] = resolved;
+        } catch (err) {
+          console.error(`Failed to resolve image path for ${image.name}:`, err);
+        }
+      }
+      setImagePaths(paths);
+    };
 
-  // Get props from mock data
-  const props = useMemo(() => {
-    return mockPropsData.map((prop) => ({
-      id: prop.id,
-      name: prop.name,
-      slug: prop.slug,
-      description: prop.description,
-      category: prop.category,
-      imagePath: prop.image_path,
-    }));
-  }, []);
+    resolvePaths();
+  }, [projectDirectory, generatedImages]);
 
-  // Show empty state if no project and not using mock data
-  if (!projectDirectory && !useMockData) {
+  // Resolve video paths
+  useEffect(() => {
+    if (!projectDirectory || generatedVideos.length === 0) {
+      setVideoPaths({});
+      return;
+    }
+
+    const resolvePaths = async () => {
+      const paths: Record<string, string> = {};
+      for (const video of generatedVideos) {
+        try {
+          const resolved = await resolveAssetPathForDisplay(
+            video.path,
+            projectDirectory,
+          );
+          paths[video.path] = resolved;
+        } catch (err) {
+          console.error(`Failed to resolve video path for ${video.name}:`, err);
+        }
+      }
+      setVideoPaths(paths);
+    };
+
+    resolvePaths();
+  }, [projectDirectory, generatedVideos]);
+
+  // Resolve infographic paths
+  useEffect(() => {
+    if (!projectDirectory || generatedInfographics.length === 0) {
+      setInfographicPaths({});
+      return;
+    }
+
+    const resolvePaths = async () => {
+      const paths: Record<string, string> = {};
+      for (const infographic of generatedInfographics) {
+        try {
+          console.log('[AssetsView] Resolving infographic path:', infographic.path);
+          const resolved = await resolveAssetPathForDisplay(
+            infographic.path,
+            projectDirectory,
+          );
+          console.log('[AssetsView] Resolved to:', resolved);
+          paths[infographic.path] = resolved;
+        } catch (err) {
+          console.error(
+            `[AssetsView] Failed to resolve infographic path for ${infographic.name}:`,
+            err,
+          );
+        }
+      }
+      setInfographicPaths(paths);
+      console.log('[AssetsView] All infographic paths resolved:', Object.keys(paths).length);
+    };
+
+    resolvePaths();
+  }, [projectDirectory, generatedInfographics]);
+
+  // Show empty state if no project
+  if (!projectDirectory) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>
-          <Layers size={48} className={styles.emptyIcon} />
+          <ImageIcon size={48} className={styles.emptyIcon} />
           <h3>No Project Open</h3>
-          <p>Open a project to view assets</p>
+          <p>Open a project to view generated assets</p>
         </div>
-      </div>
-    );
-  }
-
-  // Show loading state
-  if (isLoading) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.loading}>Loading assets...</div>
       </div>
     );
   }
 
   // Show empty state if no assets
-  if (!isLoaded || (characters.length === 0 && locations.length === 0)) {
+  const hasAnyAssets =
+    generatedImages.length > 0 ||
+    generatedVideos.length > 0 ||
+    generatedInfographics.length > 0;
+
+  if (!isLoadingMedia && !hasAnyAssets) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>
-          <Layers size={48} className={styles.emptyIcon} />
-          <h3>No Assets Yet</h3>
-          <p>Start a conversation to generate characters and locations</p>
+          <ImageIcon size={48} className={styles.emptyIcon} />
+          <h3>No Generated Assets Yet</h3>
+          <p>Generated images, videos, and infographics will appear here</p>
         </div>
       </div>
     );
   }
 
-  const effectiveProjectDir = projectDirectory || '/mock';
-
   return (
-    <div className={styles.container}>
-      <div className={styles.content}>
-        {/* Characters Section */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <User size={16} />
-            <h3>Characters</h3>
-            <span className={styles.count}>{characters.length}</span>
-          </div>
-          <div className={styles.grid}>
-            {characters.length > 0 ? (
-              characters.map((char) => (
-                <AssetCard
-                  key={char.name}
-                  type="character"
-                  name={char.name}
-                  slug={char.slug}
-                  description={char.appearance || char.description}
-                  imagePath={char.imagePath}
-                  projectDirectory={effectiveProjectDir}
-                />
-              ))
-            ) : (
-              <div className={styles.emptySection}>
-                <p>No characters yet</p>
+    <>
+      <div className={styles.container}>
+        <div className={styles.content}>
+          {/* Generated Images Section */}
+          {(generatedImages.length > 0 || isLoadingMedia) && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <ImageIcon size={16} />
+                <h3>Generated Images</h3>
+                <span className={styles.count}>{generatedImages.length}</span>
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Locations Section */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <MapPin size={16} />
-            <h3>Locations</h3>
-            <span className={styles.count}>{locations.length}</span>
-          </div>
-          <div className={styles.grid}>
-            {locations.length > 0 ? (
-              locations.map((loc) => (
-                <AssetCard
-                  key={loc.name}
-                  type="location"
-                  name={loc.name}
-                  slug={loc.slug}
-                  description={loc.description}
-                  imagePath={loc.imagePath}
-                  projectDirectory={effectiveProjectDir}
-                />
-              ))
-            ) : (
-              <div className={styles.emptySection}>
-                <p>No locations yet</p>
+              <div className={styles.grid}>
+                {isLoadingMedia ? (
+                  <div className={styles.emptySection}>
+                    <p>Loading images...</p>
+                  </div>
+                ) : generatedImages.length > 0 ? (
+                  generatedImages.map((image) => {
+                    const imageSrc = imagePaths[image.path];
+                    return (
+                      <div
+                        key={image.path}
+                        className={styles.mediaCard}
+                        onClick={() => setSelectedImage(image)}
+                      >
+                        <div className={styles.mediaThumbnail}>
+                          {imageSrc ? (
+                            <img
+                              src={imageSrc}
+                              alt={image.name}
+                              className={styles.thumbnailImage}
+                            />
+                          ) : (
+                            <div className={styles.mediaPlaceholder}>
+                              <ImageIcon size={32} />
+                            </div>
+                          )}
+                        </div>
+                        <div className={styles.mediaName}>{image.name}</div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className={styles.emptySection}>
+                    <p>No generated images yet</p>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          )}
 
-        {/* Props Section */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <Package size={16} />
-            <h3>Props</h3>
-            <span className={styles.count}>{props.length}</span>
-          </div>
-          <div className={styles.grid}>
-            {props.map((prop) => (
-              <AssetCard
-                key={prop.id || prop.name}
-                type="prop"
-                name={prop.name}
-                slug={prop.slug}
-                description={prop.description}
-                imagePath={prop.imagePath}
-                projectDirectory={effectiveProjectDir}
-                metadata={{
-                  Category: prop.category,
-                }}
-              />
-            ))}
-          </div>
+          {/* Generated Videos Section */}
+          {(generatedVideos.length > 0 || isLoadingMedia) && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <Video size={16} />
+                <h3>Generated Videos</h3>
+                <span className={styles.count}>{generatedVideos.length}</span>
+              </div>
+              <div className={styles.grid}>
+                {isLoadingMedia ? (
+                  <div className={styles.emptySection}>
+                    <p>Loading videos...</p>
+                  </div>
+                ) : generatedVideos.length > 0 ? (
+                  generatedVideos.map((video) => {
+                    const videoSrc = videoPaths[video.path];
+                    return (
+                      <div
+                        key={video.path}
+                        className={styles.mediaCard}
+                        onClick={() => setSelectedVideo(video)}
+                      >
+                        <div className={styles.mediaThumbnail}>
+                          {videoSrc ? (
+                            <>
+                              <video
+                                src={videoSrc}
+                                className={styles.thumbnailVideo}
+                                preload="metadata"
+                                muted
+                              />
+                              <div className={styles.playOverlay}>
+                                <Play size={32} />
+                              </div>
+                            </>
+                          ) : (
+                            <div className={styles.mediaPlaceholder}>
+                              <Video size={32} />
+                            </div>
+                          )}
+                        </div>
+                        <div className={styles.mediaName}>{video.name}</div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className={styles.emptySection}>
+                    <p>No generated videos yet</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Generated Infographics Section */}
+          {(generatedInfographics.length > 0 || isLoadingMedia) && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <ImagePlus size={16} />
+                <h3>Generated Infographics</h3>
+                <span className={styles.count}>
+                  {generatedInfographics.length}
+                </span>
+              </div>
+              <div className={styles.grid}>
+                {isLoadingMedia ? (
+                  <div className={styles.emptySection}>
+                    <p>Loading infographics...</p>
+                  </div>
+                ) : generatedInfographics.length > 0 ? (
+                  generatedInfographics.map((infographic) => {
+                    const videoSrc = infographicPaths[infographic.path];
+                    if (!videoSrc) {
+                      console.warn('[AssetsView] No video src for infographic:', infographic.name, infographic.path);
+                    }
+                    return (
+                      <div
+                        key={infographic.path}
+                        className={styles.mediaCard}
+                        onClick={() => setSelectedInfographic(infographic)}
+                      >
+                        <div className={styles.mediaThumbnail}>
+                          {videoSrc ? (
+                            <>
+                              <video
+                                src={videoSrc}
+                                className={styles.thumbnailVideo}
+                                preload="metadata"
+                                muted
+                              />
+                              <div className={styles.playOverlay}>
+                                <Play size={32} />
+                              </div>
+                            </>
+                          ) : (
+                            <div className={styles.mediaPlaceholder}>
+                              <ImagePlus size={32} />
+                            </div>
+                          )}
+                        </div>
+                        <div className={styles.mediaName}>
+                          {infographic.name}
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className={styles.emptySection}>
+                    <p>No generated infographics yet</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
-    </div>
+
+      {/* Image Modal */}
+      {selectedImage && imagePaths[selectedImage.path] && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => setSelectedImage(null)}
+        >
+          <div
+            className={styles.modalContent}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className={styles.modalClose}
+              onClick={() => setSelectedImage(null)}
+              aria-label="Close"
+            >
+              <X size={24} />
+            </button>
+            <img
+              src={imagePaths[selectedImage.path]}
+              alt={selectedImage.name}
+              className={styles.modalImage}
+            />
+            <div className={styles.modalTitle}>{selectedImage.name}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Video Modal */}
+      {selectedVideo && videoPaths[selectedVideo.path] && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => setSelectedVideo(null)}
+        >
+          <div
+            className={styles.modalContent}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className={styles.modalClose}
+              onClick={() => setSelectedVideo(null)}
+              aria-label="Close"
+            >
+              <X size={24} />
+            </button>
+            <video
+              src={videoPaths[selectedVideo.path]}
+              controls
+              autoPlay
+              className={styles.modalVideo}
+            />
+            <div className={styles.modalTitle}>{selectedVideo.name}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Infographic Modal */}
+      {selectedInfographic &&
+        infographicPaths[selectedInfographic.path] && (
+          <div
+            className={styles.modalOverlay}
+            onClick={() => setSelectedInfographic(null)}
+          >
+            <div
+              className={styles.modalContent}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className={styles.modalClose}
+                onClick={() => setSelectedInfographic(null)}
+                aria-label="Close"
+              >
+                <X size={24} />
+              </button>
+              <video
+                src={infographicPaths[selectedInfographic.path]}
+                controls
+                autoPlay
+                className={styles.modalVideo}
+              />
+              <div className={styles.modalTitle}>
+                {selectedInfographic.name}
+              </div>
+            </div>
+          </div>
+        )}
+    </>
   );
 }

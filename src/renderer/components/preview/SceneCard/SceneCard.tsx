@@ -42,7 +42,6 @@ export default function SceneCard({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [markdownContent, setMarkdownContent] = useState<string>('');
   const [isLoadingMarkdown, setIsLoadingMarkdown] = useState(false);
-  const { useMockData } = useProject();
   const { projectDirectory: workspaceProjectDir } = useWorkspace();
 
   const effectiveProjectDir = projectDirectory || workspaceProjectDir || '';
@@ -65,10 +64,9 @@ export default function SceneCard({
     resolveAssetPathForDisplay(
       artifact.file_path,
       projectDirectory || null,
-      useMockData,
     ).then(async (resolved) => {
-      // For test images in mock mode, try to convert to base64
-      if (shouldUseBase64(resolved, useMockData)) {
+      // For test images, try to convert to base64
+      if (shouldUseBase64(resolved)) {
         const base64 = await imageToBase64(resolved);
         if (base64) {
           setImagePath(base64);
@@ -78,7 +76,7 @@ export default function SceneCard({
       // Fallback to file:// path
       setImagePath(resolved);
     });
-  }, [artifact?.file_path, projectDirectory, useMockData]);
+  }, [artifact?.file_path, projectDirectory]);
 
   // Default metadata tags
   const duration = scene.duration || 5;

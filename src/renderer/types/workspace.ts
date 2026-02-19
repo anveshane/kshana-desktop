@@ -7,8 +7,7 @@ import type {
 export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting';
 
 export interface ConnectionState {
-  lmStudio: ConnectionStatus;
-  comfyUI: ConnectionStatus;
+  server: ConnectionStatus;
 }
 
 export interface SelectedFile {
@@ -26,6 +25,7 @@ export interface WorkspaceState {
   recentProjects: RecentProject[];
   connectionState: ConnectionState;
   isLoading: boolean;
+  pendingFileNavigation: string | null;
 }
 
 export interface WorkspaceActions {
@@ -40,6 +40,8 @@ export interface WorkspaceActions {
     status: ConnectionStatus,
   ) => void;
   loadDirectory: (path: string) => Promise<void>;
+  navigateToFile: (filePath: string) => void;
+  clearFileNavigation: () => void;
 }
 
 export type WorkspaceContextType = WorkspaceState & WorkspaceActions;

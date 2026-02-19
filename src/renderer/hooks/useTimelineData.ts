@@ -1,245 +1,980 @@
 /**
  * useTimelineData Hook
  * Provides unified timeline data source for VideoLibraryView and TimelinePanel
- * Ensures consistent scene-to-video mapping and timeline item calculation
+ * Placement-based timeline architecture: timeline items driven by placement timestamps
  */
 
-import { useMemo } from 'react';
+import { useMemo, useEffect, useState, useCallback, useRef } from 'react';
 import { useProject } from '../contexts/ProjectContext';
-import type { Artifact, StoryboardScene } from '../types/projectState';
-import type { SceneRef } from '../types/kshana/entities';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import { usePlacementFiles } from './usePlacementFiles';
+import { useTranscript } from './useTranscript';
+import { useWordCaptions } from './useWordCaptions';
+import { timeStringToSeconds } from '../utils/placementParsers';
+import type { AssetInfo } from '../types/kshana/assetManifest';
+import type { SceneVersions } from '../types/kshana/timeline';
+import type { TextOverlayCue } from '../types/captions';
+import { PROJECT_PATHS } from '../types/kshana';
+import {
+  createEmptyImageProjectionSnapshot,
+  selectBestAssetForPlacement,
+  type ImageProjectionSnapshot,
+} from '../services/assets';
+import {
+  applyImageTimingOverridesToItems,
+  applyInfographicTimingOverridesToItems,
+  applyVideoSplitOverridesToItems,
+  applyRippleTimingFromImageDurationEdits,
+  type ImageTimingOverride,
+  type VideoSplitOverride,
+} from '../utils/timelineImageEditing';
 
 export interface TimelineItem {
-  id: string;
-  type: 'video' | 'scene';
-  startTime: number;
-  duration: number;
-  artifact?: Artifact;
-  scene?: StoryboardScene;
-  path?: string;
+  id: string; // "PLM-1", "vd-placement-1", "info-placement-1", "placeholder-start", "audio-1"
+  type:
+    | 'image'
+    | 'video'
+    | 'infographic'
+    | 'placeholder'
+    | 'audio'
+    | 'text_overlay';
+  startTime: number; // seconds
+  endTime: number; // seconds
+  duration: number; // calculated: endTime - startTime
   label: string;
-  sceneNumber?: number;
+  prompt?: string;
+  placementNumber?: number;
+  imagePath?: string; // resolved if asset matched
+  videoPath?: string; // resolved if asset matched (also used for infographic mp4)
+  audioPath?: string; // path to audio file
+  sourceStartTime?: number; // original placement start (before UI override)
+  sourceEndTime?: number; // original placement end (before UI override)
+  sourceOffsetSeconds?: number; // source media offset for split/trimmed video segments
+  sourcePlacementNumber?: number; // original placement number for derived segments
+  sourcePlacementDurationSeconds?: number; // original full source duration
+  segmentIndex?: number; // derived segment index for split video
+  textOverlayCue?: TextOverlayCue;
 }
 
 export interface TimelineData {
-  scenes: StoryboardScene[];
   timelineItems: TimelineItem[];
-  artifactsByScene: Record<number, Artifact>;
-  videoArtifacts: Artifact[];
-  importedVideoArtifacts: Artifact[];
+  overlayItems: TimelineItem[];
+  textOverlayItems: TimelineItem[];
+  textOverlayCues: TextOverlayCue[];
   totalDuration: number;
+}
+
+export interface TimelineDataWithRefresh extends TimelineData {
+  refreshTimeline: () => Promise<void>;
+  refreshAudioFiles: () => void;
+}
+
+function arePlacementMapsEqual(
+  left: Record<number, string>,
+  right: Record<number, string>,
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[Number(key)] === right[Number(key)]);
+}
+
+function findAssetByPlacementNumber(
+  placementNumber: number,
+  assets: AssetInfo[],
+  assetType: 'scene_image' | 'scene_video' | 'scene_infographic',
+  activeVersions?: Record<number, SceneVersions>,
+): AssetInfo | undefined {
+  const activeVersion = activeVersions?.[placementNumber];
+  const targetVersion =
+    assetType === 'scene_image'
+      ? activeVersion?.image
+      : assetType === 'scene_video'
+        ? activeVersion?.video
+        : undefined; // infographic: no versioning yet
+
+  return selectBestAssetForPlacement(
+    assets,
+    placementNumber,
+    assetType,
+    targetVersion,
+  );
+}
+
+/**
+ * Create a placeholder timeline item for "Original Footage"
+ */
+function createPlaceholderItem(
+  startTime: number,
+  endTime: number,
+  id?: string,
+): TimelineItem {
+  return {
+    id: id || `placeholder-${startTime}-${endTime}`,
+    type: 'placeholder',
+    startTime,
+    endTime,
+    duration: endTime - startTime,
+    label: 'Original Footage',
+  };
+}
+
+/**
+ * Fill gaps between placements with placeholder items
+ */
+function fillGapsWithPlaceholders(
+  placementItems: TimelineItem[],
+  totalDuration: number,
+): TimelineItem[] {
+  const allItems: TimelineItem[] = [];
+  let currentTime = 0;
+
+  // Sort placements by startTime
+  const sorted = [...placementItems].sort((a, b) => a.startTime - b.startTime);
+
+  for (const placement of sorted) {
+    // Add placeholder before placement if gap exists
+    if (placement.startTime > currentTime) {
+      allItems.push(createPlaceholderItem(currentTime, placement.startTime));
+    }
+    // Add placement
+    allItems.push(placement);
+    currentTime = Math.max(currentTime, placement.endTime);
+  }
+
+  // Add placeholder after last placement
+  if (currentTime < totalDuration) {
+    allItems.push(createPlaceholderItem(currentTime, totalDuration));
+  }
+
+  return allItems;
 }
 
 /**
  * Custom hook that provides unified timeline data
  * Single source of truth for timeline calculations
+ * Placement-based architecture: timeline driven by placement timestamps
  */
-export function useTimelineData(): TimelineData {
-  const { isLoaded, scenes: projectScenes, assetManifest } = useProject();
+export function useTimelineData(
+  activeVersions?: Record<number, SceneVersions>,
+): TimelineDataWithRefresh {
+  const {
+    isLoaded,
+    assetManifest,
+    timelineState,
+    refreshAssetManifest,
+    isImageSyncV2Enabled,
+    subscribeImageProjection,
+    getImageProjectionSnapshot,
+    triggerImageProjectionReconcile,
+    setExpectedImagePlacements,
+  } = useProject();
+  const { projectDirectory } = useWorkspace();
+  const { imagePlacements, videoPlacements, infographicPlacements } =
+    usePlacementFiles();
+  const { totalDuration: transcriptDuration } = useTranscript();
+  const { cues: wordCaptionCues } = useWordCaptions();
+  const [audioFiles, setAudioFiles] = useState<
+    Array<{ path: string; duration: number }>
+  >([]);
+  const [audioRefreshTrigger, setAudioRefreshTrigger] = useState(0);
+  const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
+  const [imagePlacementFiles, setImagePlacementFiles] = useState<
+    Record<number, string>
+  >({});
+  const [videoPlacementFiles, setVideoPlacementFiles] = useState<
+    Record<number, string>
+  >({});
+  const [imagePlacementRefreshTrigger, setImagePlacementRefreshTrigger] =
+    useState(0);
+  const [imageProjectionSnapshot, setImageProjectionSnapshot] =
+    useState<ImageProjectionSnapshot>(() => getImageProjectionSnapshot());
+  const isImageSyncV2CompareEnabled = useMemo(() => {
+    try {
+      return window.localStorage.getItem('renderer.image_sync_v2_compare') === 'true';
+    } catch {
+      return false;
+    }
+  }, []);
+  // Keep infographic fallback mapping in a ref so we don't introduce new hook state
+  // (avoids React Fast Refresh hook order issues in dev).
+  const infographicPlacementFilesRef = useRef<Record<number, string>>({});
 
-  // Convert SceneRef from ProjectContext to StoryboardScene format
-  const scenes: StoryboardScene[] = useMemo(() => {
-    if (!isLoaded || projectScenes.length === 0) {
+  useEffect(() => {
+    if (!isImageSyncV2Enabled) {
+      setImageProjectionSnapshot(createEmptyImageProjectionSnapshot(null));
+      return;
+    }
+
+    return subscribeImageProjection((snapshot) => {
+      setImageProjectionSnapshot(snapshot);
+    });
+  }, [isImageSyncV2Enabled, subscribeImageProjection]);
+
+  useEffect(() => {
+    if (!isImageSyncV2Enabled) return;
+    const placementNumbers = imagePlacements.map(
+      (placement) => placement.placementNumber,
+    );
+    setExpectedImagePlacements(placementNumbers);
+    triggerImageProjectionReconcile('manual');
+  }, [
+    isImageSyncV2Enabled,
+    imagePlacements,
+    setExpectedImagePlacements,
+    triggerImageProjectionReconcile,
+  ]);
+
+  // Refresh timeline function - triggers asset manifest refresh
+  const refreshTimeline = useCallback(async (source: string = 'manual') => {
+    console.log('[useTimelineData] Refreshing timeline', {
+      source,
+    });
+    if (isImageSyncV2Enabled) {
+      triggerImageProjectionReconcile('manual');
+    }
+    if (refreshAssetManifest) {
+      await refreshAssetManifest();
+    }
+    setTimelineRefreshTrigger((prev) => prev + 1);
+  }, [
+    refreshAssetManifest,
+    isImageSyncV2Enabled,
+    triggerImageProjectionReconcile,
+  ]);
+
+  // Refresh audio files - invoked by import handler or file watcher
+  const refreshAudioFiles = useCallback(() => {
+    setAudioRefreshTrigger((prev) => prev + 1);
+  }, []);
+
+  // Subscribe to file changes under .kshana/agent/audio so UI updates when audio is added by agent or elsewhere
+  useEffect(() => {
+    if (!projectDirectory) return;
+
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const filePath = event.path.replace(/\\/g, '/');
+      if (!filePath.includes('.kshana/agent/audio')) return;
+
+      console.log('[useTimelineData][file_watch]', {
+        source: 'file_watch',
+        scope: 'audio',
+        path: filePath,
+      });
+
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        setAudioRefreshTrigger((prev) => prev + 1);
+        debounceTimeout = null;
+      }, 250);
+    });
+
+    return () => {
+      unsubscribe();
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+    };
+  }, [projectDirectory]);
+
+  // Subscribe to file changes under .kshana/agent/image-placements for fallback image loading
+  useEffect(() => {
+    if (!projectDirectory || isImageSyncV2Enabled) return;
+
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const filePath = event.path.replace(/\\/g, '/');
+      if (!filePath.includes('.kshana/agent/image-placements')) return;
+
+      console.log('[useTimelineData][file_watch]', {
+        source: 'file_watch',
+        scope: 'image-placements',
+        path: filePath,
+      });
+
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        setImagePlacementRefreshTrigger((prev) => prev + 1);
+        debounceTimeout = null;
+      }, 250);
+    });
+
+    return () => {
+      unsubscribe();
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+    };
+  }, [projectDirectory, isImageSyncV2Enabled]);
+
+  // Subscribe to file changes under .kshana/agent/infographic-placements for fallback infographic loading
+  useEffect(() => {
+    if (!projectDirectory) return;
+
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const filePath = event.path.replace(/\\/g, '/');
+      if (!filePath.includes('.kshana/agent/infographic-placements')) return;
+
+      console.log('[useTimelineData][file_watch]', {
+        source: 'file_watch',
+        scope: 'infographic-placements',
+        path: filePath,
+      });
+
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        setTimelineRefreshTrigger((prev) => prev + 1);
+        debounceTimeout = null;
+      }, 250);
+    });
+
+    return () => {
+      unsubscribe();
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+    };
+  }, [projectDirectory]);
+
+  // Subscribe to file changes under .kshana/agent/video-placements for fallback video loading
+  useEffect(() => {
+    if (!projectDirectory) return;
+
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const filePath = event.path.replace(/\\/g, '/');
+      if (!filePath.includes('.kshana/agent/video-placements')) return;
+
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        setTimelineRefreshTrigger((prev) => prev + 1);
+        debounceTimeout = null;
+      }, 250);
+    });
+
+    return () => {
+      unsubscribe();
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+    };
+  }, [projectDirectory]);
+
+  // Load audio files from .kshana/agent/audio directory
+  useEffect(() => {
+    if (!projectDirectory || !isLoaded) return;
+
+    const loadAudioFiles = async () => {
+      try {
+        const audioDir = `${projectDirectory}/${PROJECT_PATHS.AGENT_AUDIO}`;
+        const files = await window.electron.project.readTree(audioDir, 1);
+
+        const audioFilesList: Array<{ path: string; duration: number }> = [];
+
+        if (files && files.children) {
+          for (const file of files.children) {
+            if (
+              file.type === 'file' &&
+              file.name.match(/\.(mp3|wav|m4a|aac|ogg|flac)$/i)
+            ) {
+              const audioPath = `${PROJECT_PATHS.AGENT_AUDIO}/${file.name}`;
+              // Get actual duration from audio file
+              const fullAudioPath = `${projectDirectory}/${audioPath}`;
+              let duration = 0;
+              try {
+                duration =
+                  await window.electron.project.getAudioDuration(fullAudioPath);
+                console.log(
+                  `[useTimelineData] Got audio duration for ${file.name}: ${duration}s`,
+                );
+              } catch (error) {
+                console.warn(
+                  `[useTimelineData] Failed to get duration for ${file.name}:`,
+                  error,
+                );
+                // Fallback to transcript duration if available
+                duration = transcriptDuration || 0;
+              }
+              audioFilesList.push({
+                path: audioPath,
+                duration,
+              });
+            }
+          }
+        }
+
+        setAudioFiles(audioFilesList);
+      } catch (error) {
+        // Directory might not exist yet, that's okay
+        console.debug(
+          '[useTimelineData] Audio directory not found or error loading:',
+          error,
+        );
+        setAudioFiles([]);
+      }
+    };
+
+    loadAudioFiles();
+  }, [projectDirectory, isLoaded, transcriptDuration, audioRefreshTrigger]);
+
+  const loadImagePlacementFiles = useCallback(
+    async (source: 'file_watch' | 'reconcile_tick' | 'initial_load') => {
+      if (isImageSyncV2Enabled) {
+        setImagePlacementFiles((prev) =>
+          Object.keys(prev).length === 0 ? prev : {},
+        );
+        return;
+      }
+      if (!projectDirectory || !isLoaded) {
+        setImagePlacementFiles((prev) =>
+          Object.keys(prev).length === 0 ? prev : {},
+        );
+        return;
+      }
+
+      try {
+        const imageDir = `${projectDirectory}/.kshana/agent/image-placements`;
+        const files = await window.electron.project.readTree(imageDir, 1);
+
+        const placementMap: Record<number, string> = {};
+        if (files && files.children) {
+          const candidateFiles = files.children
+            .filter((file) => file.type === 'file')
+            .map((file) => file.name)
+            .sort((a, b) => b.localeCompare(a)); // deterministic selection across refreshes
+
+          for (const name of candidateFiles) {
+            const match = name.match(/^image(\d+)[-_].+\.(png|jpe?g|webp)$/i);
+            if (!match) continue;
+            const placementNumber = parseInt(match[1], 10);
+            if (!Number.isNaN(placementNumber) && !placementMap[placementNumber]) {
+              placementMap[placementNumber] = `agent/image-placements/${name}`;
+            }
+          }
+        }
+
+        console.log('[useTimelineData][reconcile_scan]', {
+          source,
+          placementCount: Object.keys(placementMap).length,
+        });
+        setImagePlacementFiles((prev) =>
+          arePlacementMapsEqual(prev, placementMap) ? prev : placementMap,
+        );
+      } catch (error) {
+        console.debug(
+          '[useTimelineData] Image placements directory not found or error loading:',
+          error,
+        );
+        setImagePlacementFiles((prev) =>
+          Object.keys(prev).length === 0 ? prev : {},
+        );
+      }
+    },
+    [projectDirectory, isLoaded, isImageSyncV2Enabled],
+  );
+
+  // Load image placement files for fallback resolution.
+  useEffect(() => {
+    if (isImageSyncV2Enabled) return;
+    const source = imagePlacementRefreshTrigger > 0 ? 'file_watch' : 'initial_load';
+    loadImagePlacementFiles(source).catch((error) => {
+      console.warn('[useTimelineData] Failed to load image placement files', {
+        source,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, [loadImagePlacementFiles, imagePlacementRefreshTrigger, isImageSyncV2Enabled]);
+
+  // Load infographic placement files for fallback resolution
+  useEffect(() => {
+    if (!projectDirectory || !isLoaded) return;
+
+    const loadInfographicPlacementFiles = async () => {
+      try {
+        const infoDir = `${projectDirectory}/.kshana/agent/infographic-placements`;
+        const files = await window.electron.project.readTree(infoDir, 1);
+
+        const placementMap: Record<number, string> = {};
+        if (files && files.children) {
+          for (const file of files.children) {
+            if (file.type !== 'file') continue;
+            const match = file.name.match(/^info(\d+)[-_].+\.(mp4|mov|webm)$/i);
+            if (!match) continue;
+            const placementNumber = parseInt(match[1], 10);
+            if (!Number.isNaN(placementNumber)) {
+              if (!placementMap[placementNumber]) {
+                placementMap[
+                  placementNumber
+                ] = `agent/infographic-placements/${file.name}`;
+              }
+            }
+          }
+        }
+
+        infographicPlacementFilesRef.current = placementMap;
+      } catch (error) {
+        console.debug(
+          '[useTimelineData] Infographic placements directory not found or error loading:',
+          error,
+        );
+        infographicPlacementFilesRef.current = {};
+      }
+    };
+
+    loadInfographicPlacementFiles();
+  }, [projectDirectory, isLoaded, timelineRefreshTrigger]);
+
+  // Load video placement files for fallback resolution
+  useEffect(() => {
+    if (!projectDirectory || !isLoaded) return;
+
+    const loadVideoPlacementFiles = async () => {
+      try {
+        const videoDir = `${projectDirectory}/.kshana/agent/video-placements`;
+        const files = await window.electron.project.readTree(videoDir, 1);
+
+        const placementMap: Record<number, string> = {};
+        if (files && files.children) {
+          const candidateFiles = files.children
+            .filter((file) => file.type === 'file')
+            .map((file) => file.name)
+            .sort((a, b) => b.localeCompare(a));
+
+          for (const name of candidateFiles) {
+            const match = name.match(/^video(\d+)[-_].+\.(mp4|mov|webm)$/i);
+            if (!match) continue;
+            const placementNumber = parseInt(match[1], 10);
+            if (!Number.isNaN(placementNumber) && !placementMap[placementNumber]) {
+              placementMap[placementNumber] = `agent/video-placements/${name}`;
+            }
+          }
+        }
+
+        setVideoPlacementFiles((prev) =>
+          arePlacementMapsEqual(prev, placementMap) ? prev : placementMap,
+        );
+      } catch (error) {
+        console.debug(
+          '[useTimelineData] Video placements directory not found or error loading:',
+          error,
+        );
+        setVideoPlacementFiles((prev) =>
+          Object.keys(prev).length === 0 ? prev : {},
+        );
+      }
+    };
+
+    loadVideoPlacementFiles();
+  }, [projectDirectory, isLoaded, timelineRefreshTrigger]);
+
+  // Debug: Log assetManifest state
+  useEffect(() => {
+    console.log('[useTimelineData] AssetManifest state:', {
+      isLoaded,
+      hasManifest: !!assetManifest,
+      totalAssets: assetManifest?.assets?.length || 0,
+      imageAssets:
+        assetManifest?.assets
+          ?.filter((a) => a.type === 'scene_image')
+          .map((a) => ({
+            id: a.id,
+            placementNumber: a.metadata?.placementNumber,
+            scene_number: a.scene_number,
+            path: a.path,
+            metadata: a.metadata,
+          })) || [],
+      videoAssets:
+        assetManifest?.assets
+          ?.filter((a) => a.type === 'scene_video')
+          .map((a) => ({
+            id: a.id,
+            placementNumber: a.metadata?.placementNumber,
+            scene_number: a.scene_number,
+            path: a.path,
+          })) || [],
+      infographicAssets:
+        assetManifest?.assets
+          ?.filter((a) => a.type === 'scene_infographic')
+          .map((a) => ({
+            id: a.id,
+            placementNumber: a.metadata?.placementNumber,
+            path: a.path,
+          })) || [],
+    });
+  }, [isLoaded, assetManifest, timelineRefreshTrigger]);
+
+  // Listen for asset manifest changes and trigger refresh if needed
+  useEffect(() => {
+    if (assetManifest && isLoaded) {
+      // Asset manifest changed - timeline will automatically update via useMemo dependencies
+      console.log(
+        '[useTimelineData] Asset manifest updated, timeline will refresh',
+      );
+    }
+  }, [assetManifest, isLoaded]);
+
+  // Convert base placements (images + videos) to timeline items
+  const basePlacementItems: TimelineItem[] = useMemo(() => {
+    const items: TimelineItem[] = [];
+    const assets = assetManifest?.assets ?? [];
+
+    // Convert image placements to timeline items
+    imagePlacements.forEach((placement) => {
+      const startSeconds = timeStringToSeconds(placement.startTime);
+      const endSeconds = timeStringToSeconds(placement.endTime);
+
+      // Find matching asset
+      const asset = findAssetByPlacementNumber(
+        placement.placementNumber,
+        assets,
+        'scene_image',
+        activeVersions,
+      );
+
+      // Enhanced logging and validation
+      if (asset) {
+        if (!asset.path) {
+          console.error(
+            `[useTimelineData] Asset found for placement ${placement.placementNumber} but has no path:`,
+            {
+              placementNumber: placement.placementNumber,
+              assetId: asset.id,
+              assetPath: asset.path,
+              metadata: asset.metadata,
+            },
+          );
+        } else {
+          console.log(
+            `[useTimelineData] Found asset for placement ${placement.placementNumber}:`,
+            {
+              placementNumber: placement.placementNumber,
+              assetPath: asset.path,
+              assetId: asset.id,
+              version: asset.version,
+              metadata: asset.metadata,
+            },
+          );
+        }
+      } else {
+        const imageAssets =
+          assetManifest?.assets?.filter((a) => a.type === 'scene_image') || [];
+        console.warn(
+          `[useTimelineData] No asset found for placement ${placement.placementNumber}`,
+          {
+            placementNumber: placement.placementNumber,
+            totalAssets: assetManifest?.assets?.length || 0,
+            imageAssetsCount: imageAssets.length,
+            imageAssetsPlacementNumbers: imageAssets.map((a) => ({
+              id: a.id,
+              placementNumber: a.metadata?.placementNumber,
+              scene_number: a.scene_number,
+              path: a.path,
+              version: a.version,
+            })),
+            assetManifestExists: !!assetManifest,
+            assetsArrayExists: !!assetManifest?.assets,
+          },
+        );
+      }
+
+      const projectedImagePath = isImageSyncV2Enabled
+        ? imageProjectionSnapshot.placements[placement.placementNumber]?.path
+        : null;
+      const legacyFallbackPath = imagePlacementFiles[placement.placementNumber];
+      const legacyResolvedPath = asset?.path || legacyFallbackPath || undefined;
+
+      if (
+        isImageSyncV2Enabled &&
+        isImageSyncV2CompareEnabled &&
+        projectedImagePath !== legacyResolvedPath
+      ) {
+        console.warn('[useTimelineData][image_sync.mismatch]', {
+          placementNumber: placement.placementNumber,
+          v2Path: projectedImagePath ?? null,
+          legacyPath: legacyResolvedPath ?? null,
+          assetPath: asset?.path ?? null,
+          fallbackPath: legacyFallbackPath ?? null,
+        });
+      }
+
+      const selectedImagePath = isImageSyncV2Enabled
+        ? projectedImagePath || legacyResolvedPath
+        : legacyResolvedPath;
+
+      if (!asset && selectedImagePath) {
+        console.warn(
+          `[useTimelineData] Using fallback image for placement ${placement.placementNumber}:`,
+          selectedImagePath,
+        );
+      }
+
+      items.push({
+        id: `PLM-${placement.placementNumber}`,
+        type: 'image',
+        startTime: startSeconds,
+        endTime: endSeconds,
+        duration: endSeconds - startSeconds,
+        label: `PLM-${placement.placementNumber}`,
+        prompt: placement.prompt,
+        placementNumber: placement.placementNumber,
+        imagePath: selectedImagePath,
+        sourceStartTime: startSeconds,
+        sourceEndTime: endSeconds,
+      });
+    });
+
+    // Convert video placements to timeline items
+    videoPlacements.forEach((placement) => {
+      const startSeconds = timeStringToSeconds(placement.startTime);
+      const endSeconds = timeStringToSeconds(placement.endTime);
+
+      const asset = findAssetByPlacementNumber(
+        placement.placementNumber,
+        assets,
+        'scene_video',
+        activeVersions,
+      );
+
+      const videoFallbackPath = videoPlacementFiles[placement.placementNumber];
+      const resolvedVideoPath = asset?.path || videoFallbackPath || undefined;
+
+      items.push({
+        id: `vd-placement-${placement.placementNumber}`,
+        type: 'video',
+        startTime: startSeconds,
+        endTime: endSeconds,
+        duration: endSeconds - startSeconds,
+        label: `vd-placement-${placement.placementNumber}`,
+        prompt: placement.prompt,
+        placementNumber: placement.placementNumber,
+        videoPath: resolvedVideoPath,
+        sourceStartTime: startSeconds,
+        sourceEndTime: endSeconds,
+        sourceOffsetSeconds: 0,
+        sourcePlacementNumber: placement.placementNumber,
+        sourcePlacementDurationSeconds: endSeconds - startSeconds,
+        segmentIndex: 0,
+      });
+    });
+
+    const imageOverrides: Record<string, ImageTimingOverride> =
+      timelineState.image_timing_overrides ?? {};
+    const withImageDurationEdits = applyImageTimingOverridesToItems(items, imageOverrides);
+    const videoSplitOverrides: Record<string, VideoSplitOverride> =
+      timelineState.video_split_overrides ?? {};
+    const withVideoSplits = applyVideoSplitOverridesToItems(
+      withImageDurationEdits,
+      videoSplitOverrides,
+    );
+    return applyRippleTimingFromImageDurationEdits(withVideoSplits);
+  }, [
+    imagePlacements,
+    videoPlacements,
+    assetManifest,
+    activeVersions,
+    imagePlacementFiles,
+    videoPlacementFiles,
+    imageProjectionSnapshot,
+    isImageSyncV2CompareEnabled,
+    isImageSyncV2Enabled,
+    timelineState.image_timing_overrides,
+    timelineState.video_split_overrides,
+  ]);
+
+  // Convert infographic placements to overlay items (contained within images)
+  const overlayItems: TimelineItem[] = useMemo(() => {
+    const items: TimelineItem[] = [];
+    const assets = assetManifest?.assets ?? [];
+
+    if (infographicPlacements.length === 0) {
+      return items;
+    }
+
+    const imageRanges = imagePlacements.map((placement) => ({
+      placementNumber: placement.placementNumber,
+      start: timeStringToSeconds(placement.startTime),
+      end: timeStringToSeconds(placement.endTime),
+    }));
+
+    infographicPlacements.forEach((placement) => {
+      const startSeconds = timeStringToSeconds(placement.startTime);
+      const endSeconds = timeStringToSeconds(placement.endTime);
+
+      const contained = imageRanges.some(
+        (range) => startSeconds >= range.start && endSeconds <= range.end,
+      );
+
+      if (!contained) {
+        console.warn(
+          `[useTimelineData] Dropping infographic placement ${placement.placementNumber}: not contained within any image placement`,
+          {
+            placementNumber: placement.placementNumber,
+            startSeconds,
+            endSeconds,
+          },
+        );
+        return;
+      }
+
+      const asset = findAssetByPlacementNumber(
+        placement.placementNumber,
+        assets,
+        'scene_infographic',
+        activeVersions,
+      );
+      const fallbackInfoPath =
+        infographicPlacementFilesRef.current[placement.placementNumber];
+
+      items.push({
+        id: `info-placement-${placement.placementNumber}`,
+        type: 'infographic',
+        startTime: startSeconds,
+        endTime: endSeconds,
+        duration: endSeconds - startSeconds,
+        label: `info-placement-${placement.placementNumber}`,
+        prompt: placement.prompt,
+        placementNumber: placement.placementNumber,
+        videoPath: asset?.path || fallbackInfoPath, // infographics are overlay clips (webm/mp4)
+        sourceStartTime: startSeconds,
+        sourceEndTime: endSeconds,
+      });
+    });
+
+    const infographicOverrides: Record<string, ImageTimingOverride> =
+      timelineState.infographic_timing_overrides ?? {};
+    const withInfographicTimingEdits = applyInfographicTimingOverridesToItems(
+      items,
+      infographicOverrides,
+    );
+    withInfographicTimingEdits.sort((a, b) => a.startTime - b.startTime);
+
+    return withInfographicTimingEdits;
+  }, [
+    infographicPlacements,
+    imagePlacements,
+    assetManifest,
+    activeVersions,
+    timelineState.infographic_timing_overrides,
+    timelineRefreshTrigger,
+  ]);
+
+  const textOverlayItems: TimelineItem[] = useMemo(() => {
+    if (wordCaptionCues.length === 0) return [];
+    const cueStart = Math.min(...wordCaptionCues.map((cue) => cue.startTime));
+    const cueEnd = Math.max(...wordCaptionCues.map((cue) => cue.endTime));
+    const startTime = Number.isFinite(cueStart) ? Math.max(0, cueStart) : 0;
+    const endTime = Number.isFinite(cueEnd)
+      ? Math.max(startTime + 0.01, cueEnd)
+      : startTime + 0.01;
+
+    return [
+      {
+        id: 'text-overlay-track',
+        type: 'text_overlay',
+        startTime,
+        endTime,
+        duration: endTime - startTime,
+        label: 'Text Captions',
+      },
+    ];
+  }, [wordCaptionCues]);
+
+  // Calculate total duration from all sources (audio, placements, transcript)
+  // Use whichever is longest - audio may be longer than scenes, or scenes may be longer than audio
+  const calculatedTotalDuration = useMemo(() => {
+    // Get max audio duration (if any audio files exist)
+    const maxAudioDuration =
+      audioFiles.length > 0
+        ? Math.max(...audioFiles.map((af) => af.duration || 0))
+        : 0;
+
+    // Get last placement endTime (if any placements exist)
+    const lastPlacementEndTime =
+      basePlacementItems.length > 0
+        ? Math.max(...basePlacementItems.map((item) => item.endTime))
+        : 0;
+
+    // Get transcript duration
+    const transcriptDur = transcriptDuration || 0;
+
+    const textOverlayDuration =
+      wordCaptionCues.length > 0
+        ? Math.max(...wordCaptionCues.map((cue) => cue.endTime))
+        : 0;
+
+    // Use the maximum of all three - whichever is longest
+    const maxDuration = Math.max(
+      maxAudioDuration,
+      lastPlacementEndTime,
+      transcriptDur,
+      textOverlayDuration,
+    );
+
+    console.log('[useTimelineData] Calculated total duration:', {
+      maxAudioDuration,
+      lastPlacementEndTime,
+      transcriptDur,
+      textOverlayDuration,
+      maxDuration,
+    });
+
+    return maxDuration;
+  }, [audioFiles, basePlacementItems, transcriptDuration, wordCaptionCues]);
+
+  // Resolve asset paths for display
+  const timelineItems: TimelineItem[] = useMemo(() => {
+    // Start with placement items
+    const items = [...basePlacementItems];
+
+    // Add audio items - they span the full duration
+    audioFiles.forEach((audioFile, index) => {
+      items.push({
+        id: `audio-${index}`,
+        type: 'audio',
+        startTime: 0,
+        endTime: audioFile.duration || transcriptDuration || 0,
+        duration: audioFile.duration || transcriptDuration || 0,
+        label: 'Audio Track',
+        audioPath: audioFile.path,
+      });
+    });
+
+    // Fill gaps with placeholders (but don't fill gaps for audio items)
+    const nonAudioItems = items.filter((item) => item.type !== 'audio');
+    // Use calculated total duration instead of just transcriptDuration
+    const filledItems = fillGapsWithPlaceholders(
+      nonAudioItems,
+      calculatedTotalDuration,
+    );
+
+    // Add audio items back
+    const audioItems = items.filter((item) => item.type === 'audio');
+    filledItems.push(...audioItems);
+
+    // If no placements and no transcript, return empty
+    if (filledItems.length === 0 && calculatedTotalDuration === 0) {
       return [];
     }
 
-    return projectScenes.map((scene) => ({
-      scene_number: scene.scene_number,
-      name: scene.title,
-      description: scene.description || '',
-      duration: 5, // Default duration
-      shot_type: 'Mid Shot',
-      lighting: 'Natural',
-    }));
-  }, [isLoaded, projectScenes]);
+    // If no placements but content exists, return single placeholder
+    if (filledItems.length === 0 && calculatedTotalDuration > 0) {
+      return [createPlaceholderItem(0, calculatedTotalDuration)];
+    }
 
-  // Build artifacts map from scenes - prioritize video, fallback to image
-  const artifactsByScene: Record<number, Artifact> = useMemo(() => {
-    const map: Record<number, Artifact> = {};
+    // Sort all items by startTime
+    filledItems.sort((a, b) => a.startTime - b.startTime);
 
-    if (!isLoaded || projectScenes.length === 0) return map;
+    return filledItems;
+  }, [basePlacementItems, transcriptDuration, audioFiles, calculatedTotalDuration]);
 
-    projectScenes.forEach((scene: SceneRef) => {
-      // Check if scene has approved video (highest priority)
-      if (scene.video_approval_status === 'approved' && scene.video_path) {
-        map[scene.scene_number] = {
-          artifact_id:
-            scene.video_artifact_id || `scene-${scene.scene_number}-video`,
-          artifact_type: 'video',
-          scene_number: scene.scene_number,
-          file_path: scene.video_path,
-          created_at: scene.video_approved_at
-            ? new Date(scene.video_approved_at).toISOString()
-            : new Date().toISOString(),
-        };
-      } else if (
-        scene.image_approval_status === 'approved' &&
-        scene.image_path
-      ) {
-        // Fallback to image if no video
-        map[scene.scene_number] = {
-          artifact_id:
-            scene.image_artifact_id || `scene-${scene.scene_number}-image`,
-          artifact_type: 'image',
-          scene_number: scene.scene_number,
-          file_path: scene.image_path,
-          created_at: scene.image_approved_at
-            ? new Date(scene.image_approved_at).toISOString()
-            : new Date().toISOString(),
-        };
-      }
-    });
-
-    return map;
-  }, [isLoaded, projectScenes]);
-
-  // Build video artifacts from asset manifest
-  const videoArtifacts: Artifact[] = useMemo(() => {
-    if (!assetManifest?.assets) return [];
-
-    // Filter for video-related asset types
-    return assetManifest.assets
-      .filter(
-        (asset) => asset.type === 'scene_video' || asset.type === 'final_video',
-      )
-      .map((asset) => ({
-        artifact_id: asset.id,
-        artifact_type: 'video',
-        file_path: asset.path,
-        created_at: new Date(asset.created_at).toISOString(),
-        scene_number: asset.scene_number,
-        metadata: {
-          title: asset.path.split('/').pop(),
-          duration: asset.metadata?.duration,
-          imported: asset.metadata?.imported,
-        },
-      }));
-  }, [assetManifest]);
-
-  // Separate imported videos from scene videos
-  const importedVideoArtifacts: Artifact[] = useMemo(() => {
-    return videoArtifacts.filter(
-      (artifact) => artifact.metadata?.imported === true,
-    );
-  }, [videoArtifacts]);
-
-  // Calculate scene blocks with timing
-  const sceneBlocks = useMemo(() => {
-    let currentTime = 0;
-    return scenes.map((scene) => {
-      const startTime = currentTime;
-      const duration = scene.duration || 5;
-      currentTime += duration;
-      return {
-        scene,
-        startTime,
-        duration,
-        artifact: artifactsByScene[scene.scene_number],
-      };
-    });
-  }, [scenes, artifactsByScene]);
-
-  // Create unified timeline items - combine all videos and scenes
-  const timelineItems: TimelineItem[] = useMemo(() => {
-    const items: TimelineItem[] = [];
-
-    // Add ALL scene blocks from storyboard - every scene appears on timeline
-    sceneBlocks.forEach((block) => {
-      const sceneLabel =
-        block.scene.name || `Scene ${block.scene.scene_number}`;
-
-      if (block.artifact && block.artifact.artifact_type === 'video') {
-        // Scene has video - add as video item
-        items.push({
-          id: `scene-video-${block.scene.scene_number}`,
-          type: 'video',
-          startTime: block.startTime,
-          duration: block.duration,
-          artifact: block.artifact,
-          scene: block.scene,
-          path: block.artifact.file_path,
-          label: sceneLabel,
-          sceneNumber: block.scene.scene_number,
-        });
-      } else {
-        // Scene without video - add as scene item (will show placeholder or image)
-        items.push({
-          id: `scene-${block.scene.scene_number}`,
-          type: 'scene',
-          startTime: block.startTime,
-          duration: block.duration,
-          scene: block.scene,
-          artifact: block.artifact,
-          label: sceneLabel,
-          sceneNumber: block.scene.scene_number,
-        });
-      }
-    });
-
-    // Calculate scene end time for positioning imported videos
-    const sceneEndTime =
-      sceneBlocks.length > 0
-        ? sceneBlocks[sceneBlocks.length - 1].startTime +
-          sceneBlocks[sceneBlocks.length - 1].duration
-        : 0;
-
-    // Add imported videos (they go after all scenes)
-    let importedVideoTime = sceneEndTime;
-    importedVideoArtifacts.forEach((artifact, index) => {
-      const duration = (artifact.metadata?.duration as number) || 5;
-      items.push({
-        id: `imported-${index}`,
-        type: 'video',
-        startTime: importedVideoTime,
-        duration,
-        artifact,
-        path: artifact.file_path,
-        label: 'Imported',
-      });
-      importedVideoTime += duration;
-    });
-
-    // Add other video artifacts that don't have scene numbers and aren't imported
-    let orphanVideoTime = importedVideoTime;
-    videoArtifacts.forEach((artifact) => {
-      if (
-        !artifact.scene_number &&
-        !artifact.metadata?.imported &&
-        !importedVideoArtifacts.includes(artifact)
-      ) {
-        const duration = (artifact.metadata?.duration as number) || 5;
-        items.push({
-          id: artifact.artifact_id,
-          type: 'video',
-          startTime: orphanVideoTime,
-          duration,
-          artifact,
-          path: artifact.file_path,
-          label: `VID_${artifact.artifact_id.slice(-6)}`,
-        });
-        orphanVideoTime += duration;
-      }
-    });
-
-    // Sort timeline items by startTime to ensure correct order
-    items.sort((a, b) => a.startTime - b.startTime);
-
-    return items;
-  }, [sceneBlocks, importedVideoArtifacts, videoArtifacts]);
-
-  // Calculate total duration from all timeline items
-  const totalDuration = useMemo(() => {
-    if (timelineItems.length === 0) return 0;
-    const lastItem = timelineItems[timelineItems.length - 1];
-    return lastItem.startTime + lastItem.duration;
-  }, [timelineItems]);
+  // Return the calculated total duration (already considers all sources)
+  const totalDuration = calculatedTotalDuration;
 
   return {
-    scenes,
     timelineItems,
-    artifactsByScene,
-    videoArtifacts,
-    importedVideoArtifacts,
+    overlayItems,
+    textOverlayItems,
+    textOverlayCues: wordCaptionCues,
     totalDuration,
+    refreshTimeline,
+    refreshAudioFiles,
   };
 }

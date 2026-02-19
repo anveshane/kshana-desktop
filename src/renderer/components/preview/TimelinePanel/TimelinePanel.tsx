@@ -14,30 +14,44 @@ import {
   ChevronUp,
   Upload,
   Scissors,
-  Edit2,
-  FileText,
+  Music,
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
-import { useTimeline } from '../../../contexts/TimelineContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
+import { type TimelineItem } from '../../../hooks/useTimelineData';
+import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
 import {
-  useTimelineData,
-  type TimelineItem,
-} from '../../../hooks/useTimelineData';
-import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
+  resolveAssetPathForDisplay,
+  resolveAssetPathWithRetry,
+  toFileUrl,
+} from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
-import { setActiveVideoVersion } from '../../../utils/videoWorkspace';
-import type { Artifact, TimelineMarker } from '../../../types/projectState';
-import type { KshanaTimelineMarker, ImportedClip } from '../../../types/kshana';
+import {
+  clampImageMove,
+  clampImageResizeRight,
+  buildUpdatedImageOverride,
+  buildUpdatedInfographicOverride,
+  buildUpdatedVideoSplitOverride,
+  snapToSecond,
+} from '../../../utils/timelineImageEditing';
+import type { TimelineMarker } from '../../../types/projectState';
+import type {
+  KshanaTimelineMarker,
+  KshanaTimelineState,
+  ImportedClip,
+} from '../../../types/kshana';
 import type { SceneVersions } from '../../../types/kshana/timeline';
 import { PROJECT_PATHS, createAssetInfo } from '../../../types/kshana';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
-import SceneActionPopover from './SceneActionPopover';
 import VersionSelector from '../VersionSelector';
-import MarkdownPreview from '../MarkdownPreview';
+import AudioImportModal from './AudioImportModal';
+import TimelineContextMenu from './TimelineContextMenu';
 import styles from './TimelinePanel.module.scss';
+
+const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+const modKey = isMac ? 'Cmd' : 'Ctrl';
 
 // Timeline Item Component for proper hook usage
 interface TimelineItemComponentProps {
@@ -45,30 +59,24 @@ interface TimelineItemComponentProps {
   left: number;
   width: number;
   projectDirectory: string | null;
-  useMockData: boolean;
   isSelected: boolean;
-  isSceneDragging: boolean;
-  editingSceneNumber: number | null;
-  editedSceneName: string;
-  sceneFolder?: string;
-  activeVersions?: Record<number, SceneVersions>; // sceneNumber -> { image?: number, video?: number }
-  onSceneDragStart: (
-    e: React.DragEvent<HTMLDivElement>,
-    sceneNumber: number,
-  ) => void;
-  onSceneDragEnd: () => void;
-  onSceneBlockClick: (
-    e: React.MouseEvent<HTMLDivElement>,
-    sceneNumber: number,
-  ) => void;
-  onVideoBlockClick: (
+  onItemClick?: (
     e: React.MouseEvent<HTMLDivElement>,
     item: TimelineItem,
   ) => void;
-  onNameChange: (sceneNumber: number, name: string) => void;
-  onEditedNameChange: (name: string) => void;
-  onEditingCancel: () => void;
-  onViewDetails?: (sceneNumber: number, sceneFolder: string) => void;
+  onImageResizeMouseDown?: (
+    e: React.MouseEvent<HTMLDivElement>,
+    item: TimelineItem,
+  ) => void;
+  onInfographicDragMouseDown?: (
+    e: React.MouseEvent<HTMLDivElement>,
+    item: TimelineItem,
+  ) => void;
+  onItemContextMenu?: (
+    e: React.MouseEvent<HTMLDivElement>,
+    item: TimelineItem,
+  ) => void;
+  isEditing?: boolean;
 }
 
 function TimelineItemComponent({
@@ -76,113 +84,223 @@ function TimelineItemComponent({
   left,
   width,
   projectDirectory,
-  useMockData,
   isSelected,
-  isSceneDragging,
-  editingSceneNumber,
-  editedSceneName,
-  sceneFolder,
-  activeVersions = {},
-  onSceneDragStart,
-  onSceneDragEnd,
-  onSceneBlockClick,
-  onVideoBlockClick,
-  onNameChange,
-  onEditedNameChange,
-  onEditingCancel,
-  onViewDetails,
+  onItemClick,
+  onImageResizeMouseDown,
+  onInfographicDragMouseDown,
+  onItemContextMenu,
+  isEditing = false,
 }: TimelineItemComponentProps) {
-  const { assetManifest } = useProject();
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [imagePath, setImagePath] = useState<string | null>(null);
+  const [imageLoading, setImageLoading] = useState<boolean>(false);
+  const [imageLoadError, setImageLoadError] = useState<boolean>(false);
+  const imageRetryCountRef = React.useRef<number>(0);
+  const imageResolveAbortRef = React.useRef<AbortController | null>(null);
 
-  // Construct version-specific video path if active version is set
-  const videoVersionPath = useMemo(() => {
-    if (
-      item.sceneNumber &&
-      activeVersions[item.sceneNumber]?.video &&
-      sceneFolder
-    ) {
-      const version = activeVersions[item.sceneNumber].video!;
-      return `.kshana/agent/scenes/${sceneFolder}/video/v${version}.mp4`;
-    }
-    return item.path;
-  }, [item.sceneNumber, item.path, activeVersions, sceneFolder]);
-
-  // Construct version-specific image path from asset manifest (source of truth)
-  const imageVersionPath = useMemo(() => {
-    if (
-      item.sceneNumber &&
-      activeVersions[item.sceneNumber]?.image &&
-      assetManifest?.assets
-    ) {
-      const version = activeVersions[item.sceneNumber].image!;
-      // Find the image asset with matching scene number and version
-      const imageAsset = assetManifest.assets.find(
-        (asset) =>
-          asset.type === 'scene_image' &&
-          asset.scene_number === item.sceneNumber &&
-          asset.version === version,
-      );
-      if (imageAsset) {
-        return imageAsset.path;
-      }
-    }
-    return item.artifact?.file_path;
-  }, [
-    item.sceneNumber,
-    item.artifact?.file_path,
-    activeVersions,
-    assetManifest,
-  ]);
-
+  // Resolve video path from item (video and infographic both use videoPath for mp4)
   useEffect(() => {
-    if (videoVersionPath) {
-      resolveAssetPathForDisplay(
-        videoVersionPath,
-        projectDirectory,
-        useMockData,
-      ).then((resolved) => {
-        setVideoPath(resolved);
-      });
+    if (
+      (item.type === 'video' || item.type === 'infographic') &&
+      item.videoPath
+    ) {
+      resolveAssetPathForDisplay(item.videoPath, projectDirectory).then(
+        (resolved) => {
+          setVideoPath(resolved);
+        },
+      );
     } else {
       setVideoPath(null);
     }
-  }, [videoVersionPath, projectDirectory, useMockData]);
+  }, [item.type, item.videoPath, projectDirectory]);
 
+  // Resolve image path from timeline item only (projection-backed in v2).
   useEffect(() => {
-    if (item.artifact && item.artifact.artifact_type === 'image') {
-      const pathToResolve = imageVersionPath || item.artifact.file_path;
-      resolveAssetPathForDisplay(
-        pathToResolve,
-        projectDirectory,
-        useMockData,
-      ).then(async (resolved) => {
-        // For test images in mock mode, try to convert to base64
-        if (shouldUseBase64(resolved, useMockData)) {
-          const base64 = await imageToBase64(resolved);
-          if (base64) {
-            setImagePath(base64);
-            return;
+    if (item.type !== 'image') {
+      setImagePath(null);
+      setImageLoading(false);
+      setImageLoadError(false);
+      imageRetryCountRef.current = 0;
+      return;
+    }
+
+    // Abort previous resolution if still pending
+    if (imageResolveAbortRef.current) {
+      imageResolveAbortRef.current.abort();
+    }
+    imageResolveAbortRef.current = new AbortController();
+    const abortController = imageResolveAbortRef.current;
+
+    setImageLoading(true);
+    setImageLoadError(false);
+
+    const pathToResolve = item.imagePath;
+
+    if (pathToResolve) {
+      console.log(
+        `[TimelineItemComponent] Resolving image path for ${item.label}:`,
+        {
+          itemImagePath: item.imagePath,
+          resolvedPath: pathToResolve,
+          projectDirectory,
+          placementNumber: item.placementNumber,
+        },
+      );
+
+      // Use retry logic for path resolution
+      resolveAssetPathWithRetry(pathToResolve, projectDirectory, {
+        maxRetries: 3,
+        retryDelayBase: 500,
+        timeout: 5000,
+        verifyExists: true,
+      })
+        .then(async (resolved) => {
+          if (abortController.signal.aborted) return;
+
+          console.log(
+            `[TimelineItemComponent] Resolved path for ${item.label}:`,
+            resolved,
+          );
+          setImageLoading(false);
+          imageRetryCountRef.current = 0;
+
+          // For test images, try to convert to base64
+          if (shouldUseBase64(resolved)) {
+            try {
+              const base64 = await imageToBase64(resolved);
+              if (base64 && !abortController.signal.aborted) {
+                console.log(
+                  `[TimelineItemComponent] Using base64 for ${item.label}`,
+                );
+                setImagePath(base64);
+                return;
+              }
+            } catch (error) {
+              console.warn(
+                `[TimelineItemComponent] Failed to convert to base64:`,
+                error,
+              );
+            }
           }
-        }
-        // Fallback to file:// path
-        setImagePath(resolved);
-      });
+          // Fallback to file:// path
+          if (!abortController.signal.aborted) {
+            setImagePath(resolved);
+          }
+        })
+        .catch((error) => {
+          if (abortController.signal.aborted) return;
+
+          console.error(
+            `[TimelineItemComponent] Failed to resolve image path for ${item.label}:`,
+            error,
+          );
+          setImageLoading(false);
+
+          // Retry mechanism for image load failures
+          if (imageRetryCountRef.current < 3) {
+            imageRetryCountRef.current += 1;
+            const retryDelay = 1000 * imageRetryCountRef.current;
+            console.log(
+              `[TimelineItemComponent] Retrying image load in ${retryDelay}ms (attempt ${imageRetryCountRef.current}/3)`,
+            );
+            setTimeout(() => {
+              if (!abortController.signal.aborted) {
+                // Trigger re-resolution by updating a dependency
+                setImageLoadError(true);
+              }
+            }, retryDelay);
+          } else {
+            setImageLoadError(true);
+            setImagePath(null);
+          }
+        });
     } else {
+      if (item.type === 'image') {
+        console.warn(
+          `[TimelineItemComponent] No imagePath for ${item.label}:`,
+          {
+            itemImagePath: item.imagePath,
+            placementNumber: item.placementNumber,
+          },
+        );
+      }
+      setImageLoading(false);
       setImagePath(null);
     }
+
+    // Cleanup function
+    return () => {
+      if (imageResolveAbortRef.current) {
+        imageResolveAbortRef.current.abort();
+        imageResolveAbortRef.current = null;
+      }
+    };
   }, [
-    imageVersionPath,
-    item.artifact?.file_path,
-    item.artifact?.artifact_type,
+    item.type,
+    item.imagePath,
+    item.label,
+    item.placementNumber,
     projectDirectory,
-    useMockData,
+    imageLoadError,
   ]);
 
+  // Handle placeholder type
+  if (item.type === 'placeholder') {
+    return (
+      <div
+        className={`${styles.sceneBlock} ${styles.placeholderBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.label}
+      >
+        <div className={styles.scenePlaceholder} />
+        <div className={styles.sceneId}>{item.label}</div>
+      </div>
+    );
+  }
+
+  // Handle audio type
+  if (item.type === 'audio' && item.audioPath) {
+    return (
+      <div
+        className={`${styles.audioBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.label}
+      >
+        <div className={styles.audioWaveform} />
+        <div className={styles.audioLabel}>{item.label}</div>
+      </div>
+    );
+  }
+
+  // Handle video type
   if (item.type === 'video' && videoPath) {
     return (
-      // eslint-disable-next-line jsx-a11y/click-events-have-key-events
       <div
         className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
         style={{
@@ -190,8 +308,16 @@ function TimelineItemComponent({
           width: `${width}px`,
         }}
         onClick={(e) => {
-          onVideoBlockClick(e, item);
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
         }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.prompt || item.label}
       >
         <video
           src={videoPath}
@@ -204,125 +330,154 @@ function TimelineItemComponent({
     );
   }
 
-  // Scene block (with or without image)
+  // Handle infographic type (mp4 from Remotion, same as video block)
+  if (item.type === 'infographic' && videoPath) {
+    return (
+      <div
+        className={`${styles.videoBlock} ${styles.editableInfographicBlock} ${isSelected ? styles.selected : ''} ${isEditing ? styles.editing : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onMouseDown={(e) => {
+          if (onInfographicDragMouseDown) {
+            onInfographicDragMouseDown(e, item);
+          }
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.prompt || item.label}
+      >
+        <video
+          src={videoPath}
+          className={styles.videoThumbnail}
+          preload="metadata"
+          muted
+        />
+        <div className={styles.videoLabel}>{item.label}</div>
+      </div>
+    );
+  }
+
+  if (item.type === 'infographic' && !videoPath) {
+    return (
+      <div
+        className={`${styles.videoBlock} ${styles.editableInfographicBlock} ${isSelected ? styles.selected : ''} ${isEditing ? styles.editing : ''}`}
+        style={{ left: `${left}px`, width: `${width}px` }}
+        onMouseDown={(e) =>
+          onInfographicDragMouseDown && onInfographicDragMouseDown(e, item)
+        }
+        onClick={(e) => onItemClick && onItemClick(e, item)}
+        onContextMenu={(e) => onItemContextMenu && onItemContextMenu(e, item)}
+        title={item.prompt || item.label}
+      >
+        <div className={styles.scenePlaceholder}>Info</div>
+        <div className={styles.videoLabel}>{item.label}</div>
+      </div>
+    );
+  }
+
+  if (item.type === 'text_overlay') {
+    return (
+      <div
+        className={`${styles.textOverlayBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.label}
+      >
+        <div className={styles.textOverlayLabel}>
+          {item.label}
+        </div>
+      </div>
+    );
+  }
+
+  // Handle image type
   let thumbnailElement: React.ReactNode;
   if (imagePath) {
     thumbnailElement = (
-      <img src={imagePath} alt={item.label} className={styles.sceneThumbnail} />
-    );
-  } else if (videoPath) {
-    thumbnailElement = (
-      <video
-        src={videoPath}
+      <img
+        src={imagePath}
+        alt={item.label}
         className={styles.sceneThumbnail}
-        preload="metadata"
-        muted
+        onError={() => {
+          console.error(
+            `[TimelineItemComponent] Image load error for ${item.label}`,
+          );
+          setImagePath(null);
+          setImageLoadError(true);
+        }}
       />
+    );
+  } else if (imageLoading) {
+    thumbnailElement = (
+      <div className={styles.scenePlaceholder}>
+        <div style={{ fontSize: '10px', opacity: 0.5 }}>Loading...</div>
+      </div>
     );
   } else {
     thumbnailElement = <div className={styles.scenePlaceholder} />;
   }
 
   return (
-    // eslint-disable-next-line jsx-a11y/click-events-have-key-events
     <div
-      className={`${styles.sceneBlock} ${isSelected ? styles.selected : ''} ${isSceneDragging ? styles.dragging : ''}`}
+      className={`${styles.sceneBlock} ${styles.editableImageBlock} ${isSelected ? styles.selected : ''} ${isEditing ? styles.editing : ''}`}
       style={{
         left: `${left}px`,
         width: `${width}px`,
       }}
-      draggable={!!item.scene}
-      onDragStart={(e) => {
-        if (item.scene) {
-          onSceneDragStart(e, item.scene.scene_number);
-        }
-      }}
-      onDragEnd={onSceneDragEnd}
       onClick={(e) => {
-        if (item.scene) {
-          onSceneBlockClick(e, item.scene.scene_number);
+        if (onItemClick) {
+          onItemClick(e, item);
         }
       }}
+      onContextMenu={(e) => {
+        if (onItemContextMenu) {
+          onItemContextMenu(e, item);
+        }
+      }}
+      title={item.prompt || item.label}
     >
       {thumbnailElement}
-      {item.scene && editingSceneNumber === item.scene.scene_number ? (
-        <div className={styles.sceneNameEdit}>
-          <input
-            type="text"
-            value={editedSceneName}
-            onChange={(e) => onEditedNameChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                onNameChange(item.scene!.scene_number, editedSceneName);
-                onEditingCancel();
-              } else if (e.key === 'Escape') {
-                onEditingCancel();
-              }
-            }}
-            onBlur={() => {
-              onNameChange(item.scene!.scene_number, editedSceneName);
-              onEditingCancel();
-            }}
-            onFocus={(e) => {
-              // Prevent browser from scrolling to input
-              e.target.scrollIntoView({
-                behavior: 'instant',
-                block: 'nearest',
-                inline: 'nearest',
-              });
-            }}
-            className={styles.sceneNameInput}
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
-            onClick={(e) => e.stopPropagation()}
-            placeholder={`Scene ${item.scene.scene_number}`}
-          />
-        </div>
-      ) : (
-        <div
-          className={styles.sceneId}
-          onDoubleClick={(e) => {
-            if (item.scene) {
-              e.stopPropagation();
-              // This will be handled by parent component
-            }
-          }}
-          title="Double-click to edit name"
-        >
-          {item.label}
-          {item.scene && (
-            <button
-              type="button"
-              className={styles.sceneNameEditButton}
-              onClick={(e) => {
-                e.stopPropagation();
-                // This will be handled by parent component
-              }}
-              title="Edit scene name"
-            >
-              <Edit2 size={10} />
-            </button>
-          )}
+      <div className={styles.sceneId}>{item.label}</div>
+      {item.prompt && (
+        <div className={styles.sceneDescription} title={item.prompt}>
+          {item.prompt.length > 50
+            ? `${item.prompt.substring(0, 50)}...`
+            : item.prompt}
         </div>
       )}
-      {item.scene && (
-        <div className={styles.sceneDescription}>{item.scene.description}</div>
-      )}
-      {item.scene && sceneFolder && onViewDetails && (
-        <div className={styles.sceneFooter}>
-          <button
-            type="button"
-            className={styles.viewDetailsButton}
-            onClick={(e) => {
-              e.stopPropagation();
-              onViewDetails(item.scene!.scene_number, sceneFolder);
-            }}
-            title="View details"
-          >
-            <FileText size={10} />
-          </button>
-        </div>
-      )}
+      <div
+        className={styles.imageResizeHandle}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (onImageResizeMouseDown) {
+            onImageResizeMouseDown(e, item);
+          }
+        }}
+        role="presentation"
+      />
     </div>
   );
 }
@@ -348,6 +503,9 @@ const pixelsToSeconds = (pixels: number, zoomLevel: number): number => {
   return pixels / pixelsPerSecond;
 };
 
+/** Seconds of empty space after last scene so the timeline can be scrolled past content. Playhead stays within content only. */
+const TAIL_PADDING_SECONDS = 5;
+
 interface TimelinePanelProps {
   isOpen: boolean;
   onToggle: () => void;
@@ -368,6 +526,64 @@ interface TimelinePanelProps {
   onActiveVersionsChange?: (versions: Record<number, SceneVersions>) => void;
 }
 
+interface TimelineContextMenuState {
+  x: number;
+  y: number;
+  positionSeconds: number;
+  item: TimelineItem | null;
+}
+
+interface TimelineEditSnapshot {
+  markers: TimelineMarker[];
+  image_timing_overrides: KshanaTimelineState['image_timing_overrides'];
+  infographic_timing_overrides: KshanaTimelineState['infographic_timing_overrides'];
+  video_split_overrides: KshanaTimelineState['video_split_overrides'];
+}
+
+const MAX_TIMELINE_UNDO_STEPS = 100;
+
+function cloneMarkers(markers: TimelineMarker[]): TimelineMarker[] {
+  return markers.map((marker) => ({ ...marker }));
+}
+
+function cloneImageTimingOverrides(
+  overrides: KshanaTimelineState['image_timing_overrides'],
+): KshanaTimelineState['image_timing_overrides'] {
+  const next: KshanaTimelineState['image_timing_overrides'] = {};
+  Object.entries(overrides).forEach(([key, value]) => {
+    next[key] = {
+      start_time_seconds: value.start_time_seconds,
+      end_time_seconds: value.end_time_seconds,
+    };
+  });
+  return next;
+}
+
+function cloneInfographicTimingOverrides(
+  overrides: KshanaTimelineState['infographic_timing_overrides'],
+): KshanaTimelineState['infographic_timing_overrides'] {
+  const next: KshanaTimelineState['infographic_timing_overrides'] = {};
+  Object.entries(overrides).forEach(([key, value]) => {
+    next[key] = {
+      start_time_seconds: value.start_time_seconds,
+      end_time_seconds: value.end_time_seconds,
+    };
+  });
+  return next;
+}
+
+function cloneVideoSplitOverrides(
+  overrides: KshanaTimelineState['video_split_overrides'],
+): KshanaTimelineState['video_split_overrides'] {
+  const next: KshanaTimelineState['video_split_overrides'] = {};
+  Object.entries(overrides).forEach(([key, value]) => {
+    next[key] = {
+      split_offsets_seconds: [...value.split_offsets_seconds],
+    };
+  });
+  return next;
+}
+
 export default function TimelinePanel({
   isOpen,
   onToggle,
@@ -382,8 +598,8 @@ export default function TimelinePanel({
 }: TimelinePanelProps) {
   const { projectDirectory } = useWorkspace();
   const {
+    isLoaded,
     isLoading,
-    useMockData,
     scenes: projectScenes,
     timelineState,
     saveTimelineState,
@@ -392,12 +608,20 @@ export default function TimelinePanel({
     setActiveVersion,
     updateMarkers,
     updateImportedClips,
+    updateImageTimingOverrides,
+    updateInfographicTimingOverrides,
+    updateVideoSplitOverrides,
     addAsset,
   } = useProject();
 
-  // Use unified timeline data hook
-  const { scenes, timelineItems, artifactsByScene, importedVideoArtifacts } =
-    useTimelineData();
+  // Use unified timeline data from context (single source of truth for TimelinePanel + VideoLibraryView)
+  const {
+    timelineItems,
+    overlayItems,
+    textOverlayItems,
+    totalDuration: timelineTotalDuration,
+    refreshAudioFiles,
+  } = useTimelineDataContext();
 
   // Initialize zoom level from timeline state
   const [zoomLevel, setZoomLevel] = useState(timelineState.zoom_level);
@@ -415,12 +639,46 @@ export default function TimelinePanel({
   );
   const [internalIsPlaying, setInternalIsPlaying] = useState(false);
 
-  const currentPosition = externalPlaybackTime ?? internalPlaybackTime;
+  // Calculate total duration from timeline (placement-based)
+  const totalDuration = useMemo(() => {
+    if (timelineTotalDuration > 0) return timelineTotalDuration;
+    if (timelineItems.length === 0) return 10;
+    const lastItem = timelineItems[timelineItems.length - 1];
+    return Math.max(lastItem.endTime, 10);
+  }, [timelineTotalDuration, timelineItems]);
+
+  const audioTimelineItems = useMemo(
+    () => timelineItems.filter((item) => item.type === 'audio' && !!item.audioPath),
+    [timelineItems],
+  );
+
+  // Clamp playback position to totalDuration to prevent playhead from going beyond content
+  const rawCurrentPosition = externalPlaybackTime ?? internalPlaybackTime;
+  const currentPosition = Math.max(
+    0,
+    Math.min(rawCurrentPosition, totalDuration),
+  );
   const isPlaying = externalIsPlaying ?? internalIsPlaying;
+
+  // If position was clamped, update internal state
+  useEffect(() => {
+    // Only clamp if using internal state and position exceeds duration
+    if (
+      externalPlaybackTime === undefined &&
+      internalPlaybackTime > totalDuration
+    ) {
+      setInternalPlaybackTime(totalDuration);
+    }
+  }, [
+    internalPlaybackTime,
+    totalDuration,
+    externalPlaybackTime,
+    setInternalPlaybackTime,
+  ]);
 
   // Sync playhead position to timeline state (debounced)
   useEffect(() => {
-    if (!externalPlaybackTime) {
+    if (externalPlaybackTime === undefined) {
       // Only sync if using internal state
       const timeoutId = setTimeout(() => {
         updatePlayhead(currentPosition);
@@ -432,15 +690,16 @@ export default function TimelinePanel({
 
   const setCurrentPosition = useCallback(
     (value: number | ((prev: number) => number)) => {
+      const newValue =
+        typeof value === 'function' ? value(currentPosition) : value;
+      const clamped = Math.max(0, Math.min(totalDuration, newValue));
       if (onSeek) {
-        const newValue =
-          typeof value === 'function' ? value(currentPosition) : value;
-        onSeek(newValue);
+        onSeek(clamped);
       } else {
-        setInternalPlaybackTime(value);
+        setInternalPlaybackTime(clamped);
       }
     },
-    [onSeek, currentPosition],
+    [onSeek, currentPosition, totalDuration],
   );
 
   const setIsPlaying = useCallback(
@@ -568,32 +827,24 @@ export default function TimelinePanel({
   const [markerPromptPosition, setMarkerPromptPosition] = useState<
     number | null
   >(null);
-  const [popoverSceneNumber, setPopoverSceneNumber] = useState<number | null>(
-    null,
-  );
-  const [popoverPosition, setPopoverPosition] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const [previewSceneNumber, setPreviewSceneNumber] = useState<number | null>(
-    null,
-  );
-  const [markdownContent, setMarkdownContent] = useState<string>('');
-  const [isLoadingMarkdown, setIsLoadingMarkdown] = useState(false);
-  const [editingSceneNumber, setEditingSceneNumber] = useState<number | null>(
-    null,
-  );
-  const [editedSceneName, setEditedSceneName] = useState<string>('');
-  // Create scene folder map for markdown preview and version management
-  const sceneFoldersByNumber = useMemo(() => {
-    const map: Record<number, string> = {};
-    if (!projectScenes || projectScenes.length === 0) return map;
+  const [isAudioModalOpen, setIsAudioModalOpen] = useState(false);
+  const [contextMenuState, setContextMenuState] =
+    useState<TimelineContextMenuState | null>(null);
+  const [isGeneratingWordCaptions, setIsGeneratingWordCaptions] =
+    useState(false);
+  const [captionGenerationMessage, setCaptionGenerationMessage] = useState<
+    string | null
+  >(null);
+  const [canUndo, setCanUndo] = useState(false);
+  const undoStackRef = useRef<TimelineEditSnapshot[]>([]);
 
-    projectScenes.forEach((scene) => {
-      map[scene.scene_number] = scene.folder;
-    });
-    return map;
-  }, [projectScenes]);
+  useEffect(() => {
+    if (!captionGenerationMessage) return undefined;
+    const timeout = setTimeout(() => {
+      setCaptionGenerationMessage(null);
+    }, 4000);
+    return () => clearTimeout(timeout);
+  }, [captionGenerationMessage]);
 
   // Load active versions from timeline state or use external prop (with migration)
   const [internalActiveVersions, setInternalActiveVersions] = useState<
@@ -624,52 +875,44 @@ export default function TimelinePanel({
   const setActiveVersions = onActiveVersionsChange ?? setInternalActiveVersions;
 
   // Sync active versions to timeline state when they change
-  useEffect(() => {
-    if (!projectDirectory || useMockData) return;
+  // For placement-based timeline, we use placementNumber as key
+  // Note: Timeline state still uses sceneFolder format, so we map placementNumber to a folder-like key
+  const prevActiveVersionsRef = useRef<string>('');
 
+  useEffect(() => {
+    if (!projectDirectory) return;
+
+    // Serialize current activeVersions for comparison
+    const serializedActiveVersions = JSON.stringify(activeVersions);
+
+    // Only update if activeVersions actually changed
+    if (serializedActiveVersions === prevActiveVersionsRef.current) {
+      return;
+    }
+
+    prevActiveVersionsRef.current = serializedActiveVersions;
+
+    // Update timeline state active_versions
+    // Map placementNumber to a folder-like key for timeline state compatibility
     Object.entries(activeVersions).forEach(
-      async ([sceneNumber, sceneVersions]) => {
-        const sceneFolder = sceneFoldersByNumber[parseInt(sceneNumber, 10)];
-        if (sceneFolder && sceneVersions) {
-          // Update timeline state active_versions for both image and video
+      ([placementNumberStr, sceneVersions]) => {
+        const placementNumber = parseInt(placementNumberStr, 10);
+        // Use placement-{number} as the key to distinguish from scene folders
+        const folderKey = `placement-${String(placementNumber).padStart(3, '0')}`;
+
+        if (sceneVersions) {
           if (sceneVersions.image !== undefined) {
-            setActiveVersion(sceneFolder, 'image', sceneVersions.image);
+            setActiveVersion(folderKey, 'image', sceneVersions.image);
           }
           if (sceneVersions.video !== undefined) {
-            setActiveVersion(sceneFolder, 'video', sceneVersions.video);
-
-            // Update current.txt file for video version
-            try {
-              await setActiveVideoVersion(
-                projectDirectory,
-                sceneFolder,
-                sceneVersions.video,
-              );
-            } catch (error) {
-              console.error('Failed to update current.txt:', error);
-            }
+            setActiveVersion(folderKey, 'video', sceneVersions.video);
           }
         }
       },
     );
-  }, [
-    activeVersions,
-    projectDirectory,
-    useMockData,
-    sceneFoldersByNumber,
-    setActiveVersion,
-  ]);
-  const {
-    selectedScenes,
-    selectScene,
-    clearSelection,
-    draggedSceneNumber,
-    dropInsertIndex,
-    startDrag,
-    endDrag,
-    setDropIndex,
-    reorderScenes,
-  } = useTimeline();
+  }, [activeVersions, projectDirectory, setActiveVersion]);
+  // Scene selection and drag/drop removed for placement-based timeline
+  // Placements are timestamp-based and cannot be reordered
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const tracksRef = useRef<HTMLDivElement>(null);
@@ -684,6 +927,202 @@ export default function TimelinePanel({
   const dragStartPositionRef = useRef(0);
   const isClickRef = useRef(true);
   const scrollPositionBeforeEditRef = useRef<number | null>(null);
+  const [activeEditingItemId, setActiveEditingItemId] = useState<string | null>(
+    null,
+  );
+  const markersRef = useRef(markers);
+  const imageTimingOverridesRef = useRef(
+    timelineState.image_timing_overrides || {},
+  );
+  const infographicTimingOverridesRef = useRef(
+    timelineState.infographic_timing_overrides || {},
+  );
+  const videoSplitOverridesRef = useRef(
+    timelineState.video_split_overrides || {},
+  );
+
+  useEffect(() => {
+    markersRef.current = markers;
+  }, [markers]);
+
+  useEffect(() => {
+    imageTimingOverridesRef.current = timelineState.image_timing_overrides || {};
+  }, [timelineState.image_timing_overrides]);
+
+  useEffect(() => {
+    infographicTimingOverridesRef.current =
+      timelineState.infographic_timing_overrides || {};
+  }, [timelineState.infographic_timing_overrides]);
+
+  useEffect(() => {
+    videoSplitOverridesRef.current = timelineState.video_split_overrides || {};
+  }, [timelineState.video_split_overrides]);
+
+  const captureSnapshot = useCallback((): TimelineEditSnapshot => {
+    return {
+      markers: cloneMarkers(markersRef.current),
+      image_timing_overrides: cloneImageTimingOverrides(
+        imageTimingOverridesRef.current,
+      ),
+      infographic_timing_overrides: cloneInfographicTimingOverrides(
+        infographicTimingOverridesRef.current,
+      ),
+      video_split_overrides: cloneVideoSplitOverrides(
+        videoSplitOverridesRef.current,
+      ),
+    };
+  }, []);
+
+  const pushUndoSnapshot = useCallback(
+    (snapshot?: TimelineEditSnapshot): boolean => {
+      const nextSnapshot = snapshot ?? captureSnapshot();
+      const stack = undoStackRef.current;
+      const previous = stack[stack.length - 1];
+
+      if (
+        previous &&
+        JSON.stringify(previous) === JSON.stringify(nextSnapshot)
+      ) {
+        return false;
+      }
+
+      stack.push(nextSnapshot);
+      if (stack.length > MAX_TIMELINE_UNDO_STEPS) {
+        stack.shift();
+      }
+      setCanUndo(stack.length > 0);
+      return true;
+    },
+    [captureSnapshot],
+  );
+
+  const clearUndoHistory = useCallback(() => {
+    undoStackRef.current = [];
+    setCanUndo(false);
+  }, []);
+
+  const undoLastTimelineEdit = useCallback(() => {
+    const stack = undoStackRef.current;
+    const previous = stack.pop();
+    if (!previous) {
+      setCanUndo(false);
+      return;
+    }
+
+    setMarkers(cloneMarkers(previous.markers));
+    updateImageTimingOverrides(
+      cloneImageTimingOverrides(previous.image_timing_overrides),
+    );
+    updateInfographicTimingOverrides(
+      cloneInfographicTimingOverrides(previous.infographic_timing_overrides),
+    );
+    updateVideoSplitOverrides(
+      cloneVideoSplitOverrides(previous.video_split_overrides),
+    );
+    setContextMenuState(null);
+    setCanUndo(stack.length > 0);
+  }, [
+    updateImageTimingOverrides,
+    updateInfographicTimingOverrides,
+    updateVideoSplitOverrides,
+  ]);
+
+  useEffect(() => {
+    if (!isLoaded || !projectDirectory) {
+      clearUndoHistory();
+    }
+  }, [isLoaded, projectDirectory, clearUndoHistory]);
+
+  useEffect(() => {
+    return () => {
+      clearUndoHistory();
+    };
+  }, [clearUndoHistory]);
+
+  const commitImageTimingOverride = useCallback(
+    (
+      placementNumber: number,
+      sourceStartTime: number,
+      sourceEndTime: number,
+      editedStartTime: number,
+      editedEndTime: number,
+    ) => {
+      const currentOverrides = imageTimingOverridesRef.current;
+      const nextOverrides = buildUpdatedImageOverride(
+        currentOverrides,
+        placementNumber,
+        sourceStartTime,
+        sourceEndTime,
+        editedStartTime,
+        editedEndTime,
+      );
+
+      if (nextOverrides !== currentOverrides) {
+        updateImageTimingOverrides(nextOverrides);
+      }
+    },
+    [updateImageTimingOverrides],
+  );
+
+  const commitInfographicTimingOverride = useCallback(
+    (
+      placementNumber: number,
+      sourceStartTime: number,
+      sourceEndTime: number,
+      editedStartTime: number,
+      editedEndTime: number,
+    ) => {
+      const currentOverrides = infographicTimingOverridesRef.current;
+      const nextOverrides = buildUpdatedInfographicOverride(
+        currentOverrides,
+        placementNumber,
+        sourceStartTime,
+        sourceEndTime,
+        editedStartTime,
+        editedEndTime,
+      );
+
+      if (nextOverrides !== currentOverrides) {
+        updateInfographicTimingOverrides(nextOverrides);
+      }
+    },
+    [updateInfographicTimingOverrides],
+  );
+
+  const commitVideoSplitAtTime = useCallback(
+    (item: TimelineItem, splitTimelineSeconds: number): boolean => {
+      if (item.type !== 'video' || item.placementNumber === undefined) {
+        return false;
+      }
+
+      const sourceOffset = item.sourceOffsetSeconds ?? 0;
+      const sourceDuration =
+        item.sourcePlacementDurationSeconds ??
+        Math.max(
+          1,
+          (item.sourceEndTime ?? item.endTime) -
+            (item.sourceStartTime ?? item.startTime),
+        );
+      const splitOffset = snapToSecond(
+        sourceOffset + (splitTimelineSeconds - item.startTime),
+      );
+
+      const nextOverrides = buildUpdatedVideoSplitOverride(
+        videoSplitOverridesRef.current,
+        item.placementNumber,
+        sourceDuration,
+        splitOffset,
+      );
+
+      if (nextOverrides === videoSplitOverridesRef.current) {
+        return false;
+      }
+
+      updateVideoSplitOverrides(nextOverrides);
+      return true;
+    },
+    [updateVideoSplitOverrides],
+  );
 
   // WebSocket integration for timeline markers
   const handleMarkerUpdate = useCallback(
@@ -705,121 +1144,14 @@ export default function TimelinePanel({
 
   const { sendTimelineMarker } = useTimelineWebSocket(handleMarkerUpdate);
 
-  // Restore scroll position when exiting edit mode
-  useEffect(() => {
-    if (
-      editingSceneNumber === null &&
-      scrollPositionBeforeEditRef.current !== null &&
-      tracksRef.current
-    ) {
-      // Use requestAnimationFrame to ensure DOM has updated
-      requestAnimationFrame(() => {
-        if (tracksRef.current && scrollPositionBeforeEditRef.current !== null) {
-          tracksRef.current.scrollLeft = scrollPositionBeforeEditRef.current;
-          scrollPositionBeforeEditRef.current = null;
-        }
-      });
-    }
-  }, [editingSceneNumber]);
-
-  // Handle scene name change
-  const handleNameChange = useCallback(
-    async (sceneNumber: number, name: string) => {
-      // TODO: Implement name change via ProjectContext
-      console.log('Name change:', sceneNumber, name);
-    },
-    [],
-  );
-
-  // Load markdown content when preview is opened
-  const handleViewSceneDetails = useCallback(
-    async (sceneNumber: number, sceneFolder: string) => {
-      setPreviewSceneNumber(sceneNumber);
-      setIsLoadingMarkdown(true);
-
-      const basePath = projectDirectory || '/mock';
-      const markdownPath = `${basePath}/.kshana/agent/scenes/${sceneFolder}/scene.md`;
-
-      try {
-        const content = await window.electron.project.readFile(markdownPath);
-        if (content !== null) {
-          setMarkdownContent(content);
-        } else {
-          const scene = scenes.find((s) => s.scene_number === sceneNumber);
-          setMarkdownContent(
-            `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
-              scene?.description || 'No details available.'
-            }`,
-          );
-        }
-      } catch (error) {
-        console.error('Failed to load scene markdown:', error);
-        const scene = scenes.find((s) => s.scene_number === sceneNumber);
-        setMarkdownContent(
-          `# Scene ${sceneNumber}: ${scene?.name || 'Untitled'}\n\n${
-            scene?.description || 'No details available.'
-          }`,
-        );
-      } finally {
-        setIsLoadingMarkdown(false);
-      }
-    },
-    [projectDirectory, scenes],
-  );
-
-  const handleClosePreview = useCallback(() => {
-    setPreviewSceneNumber(null);
-    setMarkdownContent('');
-  }, []);
-
-  // Calculate scene blocks for marker context and version selector
-  const sceneBlocks = useMemo(() => {
-    let currentTime = 0;
-    return scenes.map((scene) => {
-      const startTime = currentTime;
-      const duration = scene.duration || 5;
-      currentTime += duration;
-      return {
-        scene,
-        startTime,
-        duration,
-        artifact: artifactsByScene[scene.scene_number],
-      };
-    });
-  }, [scenes, artifactsByScene]);
-
-  // Calculate total duration from timeline items
-  const totalDuration = useMemo(() => {
-    if (timelineItems.length === 0) return 10;
-    const lastItem = timelineItems[timelineItems.length - 1];
-    return Math.max(lastItem.startTime + lastItem.duration, 10);
-  }, [timelineItems]);
+  // Scene-based functionality removed for placement-based timeline
 
   // Load imported videos from asset manifest (for local video import feature)
+  // Note: Imported videos are handled separately and appended after timeline items
   useEffect(() => {
-    if (importedVideoArtifacts.length > 0) {
-      const sceneEndTime =
-        sceneBlocks.length > 0
-          ? sceneBlocks[sceneBlocks.length - 1].startTime +
-            sceneBlocks[sceneBlocks.length - 1].duration
-          : 0;
-      let currentTime = sceneEndTime;
-      const videos = importedVideoArtifacts.map((artifact) => {
-        const startTime = currentTime;
-        const duration = (artifact.metadata?.duration as number) || 5;
-        currentTime += duration;
-        return {
-          path: artifact.file_path,
-          duration,
-          startTime,
-        };
-      });
-      setImportedVideos(videos);
-    } else {
-      // Clear imported videos if none
-      setImportedVideos([]);
-    }
-  }, [importedVideoArtifacts, sceneBlocks]);
+    // Imported videos logic can be added here if needed
+    // For now, they're handled in the timeline items rendering
+  }, []);
 
   // Timeline click handler removed - no longer opens marker prompt
   // Marker functionality can be accessed via keyboard shortcut or toolbar button
@@ -827,6 +1159,8 @@ export default function TimelinePanel({
   // Handle marker creation
   const handleCreateMarker = useCallback(
     async (position: number, prompt: string) => {
+      pushUndoSnapshot();
+
       const newMarker: TimelineMarker = {
         id: `marker-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         position,
@@ -848,18 +1182,17 @@ export default function TimelinePanel({
 
       // Send to backend via WebSocket
       try {
-        // Get current scene context
-        const currentScene = sceneBlocks.find(
-          (block) =>
-            position >= block.startTime &&
-            position < block.startTime + block.duration,
+        // Get current timeline item context (placement-based)
+        const currentItem = timelineItems.find(
+          (item) => position >= item.startTime && position < item.endTime,
         );
 
-        const previousScenes = sceneBlocks
-          .filter((block) => block.startTime + block.duration <= position)
-          .map((block) => ({
-            scene_number: block.scene.scene_number,
-            description: block.scene.description,
+        const previousItems = timelineItems
+          .filter((item) => item.endTime <= position)
+          .map((item) => ({
+            placementNumber: item.placementNumber,
+            label: item.label,
+            prompt: item.prompt,
           }));
 
         await sendTimelineMarker({
@@ -867,8 +1200,13 @@ export default function TimelinePanel({
           position,
           prompt,
           scene_context: {
-            current_scene: currentScene?.scene.scene_number,
-            previous_scenes: previousScenes,
+            current_scene: currentItem?.placementNumber,
+            previous_scenes: previousItems
+              .filter((item) => item.placementNumber !== undefined)
+              .map((item) => ({
+                scene_number: item.placementNumber!,
+                description: item.prompt || item.label,
+              })),
           },
         });
       } catch {
@@ -880,7 +1218,7 @@ export default function TimelinePanel({
         );
       }
     },
-    [sceneBlocks, sendTimelineMarker],
+    [timelineItems, sendTimelineMarker, pushUndoSnapshot],
   );
 
   // Open marker popover at current playhead position (keyboard shortcut)
@@ -938,6 +1276,16 @@ export default function TimelinePanel({
   // Offset for the timeline content margin
   const TIMELINE_OFFSET = 10;
 
+  // Helper function to clear text selection
+  const clearSelection = useCallback(() => {
+    if (window.getSelection) {
+      const selection = window.getSelection();
+      if (selection) {
+        selection.removeAllRanges();
+      }
+    }
+  }, []);
+
   // Calculate position from mouse event
   const calculatePositionFromMouse = useCallback(
     (clientX: number): number => {
@@ -950,11 +1298,134 @@ export default function TimelinePanel({
     [scrollLeft, zoomLevel, totalDuration, currentPosition],
   );
 
+  const closeContextMenu = useCallback(() => {
+    setContextMenuState(null);
+  }, []);
+
+  const openContextMenuAtPointer = useCallback(
+    (
+      event: React.MouseEvent<HTMLDivElement>,
+      item: TimelineItem | null = null,
+    ) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const positionSeconds = calculatePositionFromMouse(event.clientX);
+      setContextMenuState({
+        x: event.clientX,
+        y: event.clientY,
+        positionSeconds,
+        item,
+      });
+    },
+    [calculatePositionFromMouse],
+  );
+
+  const handleTimelineContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const target = event.target as HTMLElement;
+
+      // Item-level handlers own their own context menu to preserve target info.
+      if (
+        target.closest(`.${styles.sceneBlock}`) ||
+        target.closest(`.${styles.videoBlock}`) ||
+        target.closest(`.${styles.audioBlock}`) ||
+        target.closest(`.${styles.textOverlayBlock}`)
+      ) {
+        return;
+      }
+
+      openContextMenuAtPointer(event, null);
+    },
+    [openContextMenuAtPointer],
+  );
+
+  const handleTimelineItemContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
+      openContextMenuAtPointer(event, item);
+    },
+    [openContextMenuAtPointer],
+  );
+
+  const handleAddTimelineInstructionFromContextMenu = useCallback(() => {
+    if (!contextMenuState) return;
+
+    setMarkerPromptPosition(contextMenuState.positionSeconds);
+    setMarkerPromptOpen(true);
+    setContextMenuState(null);
+  }, [contextMenuState]);
+
+  const handleUndoFromContextMenu = useCallback(() => {
+    undoLastTimelineEdit();
+  }, [undoLastTimelineEdit]);
+
+  const handleGenerateWordCaptions = useCallback(async () => {
+    if (!projectDirectory || isGeneratingWordCaptions) return;
+
+    const contextualAudioPath =
+      contextMenuState?.item?.type === 'audio'
+        ? contextMenuState.item.audioPath
+        : undefined;
+    const fallbackAudioPath =
+      audioTimelineItems.length > 0
+        ? [...audioTimelineItems].sort((a, b) => b.duration - a.duration)[0]
+            ?.audioPath
+        : undefined;
+    const selectedAudioPath = contextualAudioPath || fallbackAudioPath;
+
+    if (!selectedAudioPath) {
+      setCaptionGenerationMessage('No audio track available for captions.');
+      return;
+    }
+
+    setIsGeneratingWordCaptions(true);
+    setCaptionGenerationMessage(
+      'Generating word captions... First run may take longer while Whisper installs.',
+    );
+
+    try {
+      const result = await window.electron.project.generateWordCaptions(
+        projectDirectory,
+        selectedAudioPath,
+      );
+
+      if (!result.success) {
+        setCaptionGenerationMessage(
+          result.error || 'Failed to generate word captions.',
+        );
+        return;
+      }
+
+      const wordCount = result.words?.length ?? 0;
+      setCaptionGenerationMessage(
+        `Generated word captions (${wordCount} words).`,
+      );
+    } catch (error) {
+      setCaptionGenerationMessage(
+        error instanceof Error
+          ? error.message
+          : 'Failed to generate word captions.',
+      );
+    } finally {
+      setIsGeneratingWordCaptions(false);
+    }
+  }, [
+    projectDirectory,
+    isGeneratingWordCaptions,
+    contextMenuState,
+    audioTimelineItems,
+  ]);
+
+  const canGenerateWordCaptions = audioTimelineItems.length > 0;
+
   // Handle playhead drag start
   const handlePlayheadMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+
       e.preventDefault();
       e.stopPropagation();
+      closeContextMenu();
 
       if (!tracksRef.current) return;
 
@@ -1020,176 +1491,226 @@ export default function TimelinePanel({
       setIsPlaying,
       setCurrentPosition,
       onDragStateChange,
+      closeContextMenu,
     ],
   );
 
-  // Handle scene drag start
-  const handleSceneDragStart = useCallback(
-    (e: React.DragEvent<HTMLDivElement>, sceneNumber: number) => {
-      startDrag(sceneNumber);
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', String(sceneNumber));
-    },
-    [startDrag],
-  );
+  const handleImageResizeMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
+      if (item.type !== 'image' || item.placementNumber === undefined) return;
+      if (e.button !== 0) return;
 
-  // Handle scene drag end
-  const handleSceneDragEnd = useCallback(() => {
-    endDrag();
-  }, [endDrag]);
+      e.stopPropagation();
+      e.preventDefault();
+      scrollPositionBeforeEditRef.current = tracksRef.current?.scrollLeft ?? null;
 
-  // Calculate insertion index from mouse position
-  const calculateInsertIndex = useCallback(
-    (clientX: number): number | null => {
-      if (!tracksRef.current || !sceneBlocks.length) return null;
+      const sourceStartTime = item.sourceStartTime ?? item.startTime;
+      const sourceEndTime = item.sourceEndTime ?? item.endTime;
+      const initialStartTime = item.startTime;
+      const initialEndTime = item.endTime;
 
-      const rect = tracksRef.current.getBoundingClientRect();
-      const x = clientX - rect.left + scrollLeft - TIMELINE_OFFSET;
-      const position = pixelsToSeconds(x, zoomLevel);
+      let lastStartTime = initialStartTime;
+      let lastEndTime = initialEndTime;
+      let hasRecordedUndoSnapshot = false;
+      const interactionSnapshot = captureSnapshot();
 
-      // Find which scene index to insert before/after
-      for (let i = 0; i < sceneBlocks.length; i += 1) {
-        const block = sceneBlocks[i];
-        const blockStart = block.startTime;
-        const blockCenter = blockStart + block.duration / 2;
+      setActiveEditingItemId(item.id);
+      setIsDragging(true);
+      if (onDragStateChange) {
+        onDragStateChange(true);
+      }
+      wasPlayingBeforeDragRef.current = isPlaying;
+      dragStartXRef.current = e.clientX;
+      dragStartPositionRef.current = currentPosition;
 
-        // If position is before this block's center, insert before it
-        if (position < blockCenter) {
-          return i;
-        }
+      if (isPlaying) {
+        setIsPlaying(false);
       }
 
-      // If position is after all scenes, insert at the end
-      return sceneBlocks.length;
-    },
-    [sceneBlocks, scrollLeft, zoomLevel],
-  );
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const deltaX = moveEvent.clientX - dragStartXRef.current;
+        if (Math.abs(deltaX) <= 5) {
+          return;
+        }
 
-  // Handle drag over on track content
-  const handleTrackDragOver = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      if (draggedSceneNumber === null) return;
+        const deltaSeconds = pixelsToSeconds(deltaX, zoomLevel);
+        const nextRange = clampImageResizeRight({
+          startTime: initialStartTime,
+          desiredEnd: initialEndTime + deltaSeconds,
+          maxEnd: totalDuration,
+          minDuration: 1,
+        });
 
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = 'move';
+        if (
+          nextRange.startTime !== lastStartTime ||
+          nextRange.endTime !== lastEndTime
+        ) {
+          if (!hasRecordedUndoSnapshot) {
+            pushUndoSnapshot(interactionSnapshot);
+            hasRecordedUndoSnapshot = true;
+          }
 
-      const insertIndex = calculateInsertIndex(e.clientX);
-      setDropIndex(insertIndex);
-    },
-    [draggedSceneNumber, calculateInsertIndex, setDropIndex],
-  );
-
-  // Handle drop on track content
-  const handleTrackDrop = useCallback(
-    async (e: React.DragEvent<HTMLDivElement>) => {
-      if (draggedSceneNumber === null || dropInsertIndex === null) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Find the scene number at the target index
-      const targetScene = sceneBlocks[dropInsertIndex];
-      if (!targetScene) {
-        // Dropping at the end
-        const lastScene = sceneBlocks[sceneBlocks.length - 1];
-        if (lastScene) {
-          await reorderScenes(
-            draggedSceneNumber,
-            sceneBlocks.length,
-            null, // projectState no longer needed
-            projectDirectory,
-            () => {}, // No-op function for state update
+          lastStartTime = nextRange.startTime;
+          lastEndTime = nextRange.endTime;
+          commitImageTimingOverride(
+            item.placementNumber!,
+            sourceStartTime,
+            sourceEndTime,
+            nextRange.startTime,
+            nextRange.endTime,
           );
         }
-      } else {
-        // Find the index of the dragged scene in sceneBlocks
-        const draggedIndex = sceneBlocks.findIndex(
-          (block) => block.scene.scene_number === draggedSceneNumber,
-        );
-        if (draggedIndex !== -1) {
-          await reorderScenes(
-            draggedSceneNumber,
-            dropInsertIndex,
-            null, // projectState no longer needed
-            projectDirectory,
-            () => {}, // No-op function for state update
-          );
-        }
-      }
+      };
 
-      endDrag();
+      const handleMouseUpGlobal = () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUpGlobal);
+        setIsDragging(false);
+        if (onDragStateChange) {
+          onDragStateChange(false);
+        }
+        setActiveEditingItemId(null);
+
+        if (wasPlayingBeforeDragRef.current) {
+          setIsPlaying(true);
+        }
+      };
+
+      document.addEventListener('mousemove', handleMouseMove, {
+        passive: true,
+      });
+      document.addEventListener('mouseup', handleMouseUpGlobal);
     },
     [
-      draggedSceneNumber,
-      dropInsertIndex,
-      sceneBlocks,
-      reorderScenes,
-      projectDirectory,
-      endDrag,
+      isPlaying,
+      currentPosition,
+      onDragStateChange,
+      zoomLevel,
+      totalDuration,
+      commitImageTimingOverride,
+      captureSnapshot,
+      pushUndoSnapshot,
+      setIsPlaying,
     ],
   );
 
-  // Handle scene block click to select scene
-  const handleSceneBlockClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>, sceneNumber: number) => {
-      // Don't select if we're dragging
-      if (draggedSceneNumber !== null) {
+  const handleInfographicDragMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
+      if (item.type !== 'infographic' || item.placementNumber === undefined) {
         return;
       }
+      if (e.button !== 0) return;
 
       e.stopPropagation();
       e.preventDefault();
+      scrollPositionBeforeEditRef.current = tracksRef.current?.scrollLeft ?? null;
 
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const multiKey = isMac ? e.metaKey : e.ctrlKey;
-      const rangeKey = e.shiftKey;
+      const sourceStartTime = item.sourceStartTime ?? item.startTime;
+      const sourceEndTime = item.sourceEndTime ?? item.endTime;
+      const initialStartTime = item.startTime;
+      const initialDuration = Math.max(1, item.duration);
 
-      // If clicking on an already-selected scene (and not multi-select), show popover
-      if (selectedScenes.has(sceneNumber) && !multiKey && !rangeKey) {
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        setPopoverPosition({
-          x: rect.left + rect.width / 2,
-          y: rect.top + rect.height,
-        });
-        setPopoverSceneNumber(sceneNumber);
-      } else {
-        selectScene(sceneNumber, multiKey, rangeKey);
-        // Close popover if selecting a different scene
-        if (popoverSceneNumber !== sceneNumber) {
-          setPopoverSceneNumber(null);
-          setPopoverPosition(null);
-        }
+      let lastStartTime = initialStartTime;
+      let hasRecordedUndoSnapshot = false;
+      const interactionSnapshot = captureSnapshot();
+
+      setActiveEditingItemId(item.id);
+      setIsDragging(true);
+      if (onDragStateChange) {
+        onDragStateChange(true);
       }
+      wasPlayingBeforeDragRef.current = isPlaying;
+      dragStartXRef.current = e.clientX;
+      dragStartPositionRef.current = currentPosition;
+
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const deltaX = moveEvent.clientX - dragStartXRef.current;
+        if (Math.abs(deltaX) <= 5) {
+          return;
+        }
+
+        const deltaSeconds = pixelsToSeconds(deltaX, zoomLevel);
+        const nextRange = clampImageMove({
+          desiredStart: initialStartTime + deltaSeconds,
+          duration: initialDuration,
+          minStart: 0,
+          maxEnd: totalDuration,
+        });
+
+        if (nextRange.startTime !== lastStartTime) {
+          if (!hasRecordedUndoSnapshot) {
+            pushUndoSnapshot(interactionSnapshot);
+            hasRecordedUndoSnapshot = true;
+          }
+
+          lastStartTime = nextRange.startTime;
+          commitInfographicTimingOverride(
+            item.placementNumber!,
+            sourceStartTime,
+            sourceEndTime,
+            nextRange.startTime,
+            nextRange.endTime,
+          );
+        }
+      };
+
+      const handleMouseUpGlobal = () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUpGlobal);
+        setIsDragging(false);
+        if (onDragStateChange) {
+          onDragStateChange(false);
+        }
+        setActiveEditingItemId(null);
+
+        if (wasPlayingBeforeDragRef.current) {
+          setIsPlaying(true);
+        }
+      };
+
+      document.addEventListener('mousemove', handleMouseMove, {
+        passive: true,
+      });
+      document.addEventListener('mouseup', handleMouseUpGlobal);
     },
-    [draggedSceneNumber, selectedScenes, selectScene, popoverSceneNumber],
+    [
+      isPlaying,
+      currentPosition,
+      onDragStateChange,
+      zoomLevel,
+      totalDuration,
+      captureSnapshot,
+      pushUndoSnapshot,
+      commitInfographicTimingOverride,
+      setIsPlaying,
+    ],
   );
 
-  // Handle video block click
-  const handleVideoBlockClick = useCallback(
+  // Handle timeline item click (placement-based)
+  const handleItemClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
-      // Don't handle if we're dragging
-      if (draggedSceneNumber !== null) {
-        return;
-      }
-
       e.stopPropagation();
       e.preventDefault();
 
-      // If video has an associated scene, treat it like a scene click
-      if (item.scene) {
-        handleSceneBlockClick(e, item.scene.scene_number);
-      } else {
-        // For videos without scenes (imported videos), seek to the video's start position
-        setCurrentPosition(item.startTime);
-      }
+      // Seek to item's start position
+      setCurrentPosition(item.startTime);
     },
-    [draggedSceneNumber, handleSceneBlockClick, setCurrentPosition],
+    [setCurrentPosition],
   );
 
   // Handle timeline area scrubbing (click and drag)
   const handleTimelineMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.button !== 0) {
+        return;
+      }
+
+      closeContextMenu();
+
       // Don't start scrubbing if clicking on playhead (it has its own handler)
       const target = e.target as HTMLElement;
       if (target.closest(`.${styles.playhead}`)) {
@@ -1274,6 +1795,7 @@ export default function TimelinePanel({
       setCurrentPosition,
       onDragStateChange,
       clearSelection,
+      closeContextMenu,
     ],
   );
 
@@ -1322,7 +1844,7 @@ export default function TimelinePanel({
 
       // Copy video to videos/imported folder
       const videoFileName =
-        videoPath.split('/').pop() || `video-${Date.now()}.mp4`;
+        videoPath.replace(/\\/g, '/').split('/').pop() || `video-${Date.now()}.mp4`;
       const destPath = await window.electron.project.copy(
         videoPath,
         videosFolder,
@@ -1332,7 +1854,7 @@ export default function TimelinePanel({
       // Get video duration
       const video = document.createElement('video');
       video.preload = 'metadata';
-      video.src = `file://${destPath}`;
+      video.src = toFileUrl(destPath);
 
       // eslint-disable-next-line compat/compat
       await new Promise<void>((resolve, reject) => {
@@ -1390,65 +1912,162 @@ export default function TimelinePanel({
     }
   }, [projectDirectory, totalDuration, addAsset]);
 
+  // Handle audio import from file
+  const handleImportAudioFromFile = useCallback(async () => {
+    if (!projectDirectory) return;
+
+    try {
+      const audioPath = await window.electron.project.selectAudioFile();
+      if (!audioPath) return;
+
+      // Create .kshana/agent/audio folder structure if it doesn't exist
+      const parts = PROJECT_PATHS.AGENT_AUDIO.split('/');
+      let basePath = projectDirectory;
+      for (const part of parts) {
+        if (part) {
+          await window.electron.project.createFolder(basePath, part);
+          basePath = `${basePath}/${part}`;
+        }
+      }
+      const audioFolder = basePath;
+
+      // Copy audio to .kshana/agent/audio folder
+      const audioFileName =
+        audioPath.replace(/\\/g, '/').split('/').pop() || `audio-${Date.now()}.mp3`;
+      await window.electron.project.copy(audioPath, audioFolder);
+
+      // Add small delay before refresh to ensure file copy completes
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Refresh audio files so both timeline and video library view update
+      refreshAudioFiles();
+      console.log('Audio file imported successfully');
+    } catch (error) {
+      console.error('Failed to import audio file:', error);
+    }
+  }, [projectDirectory, refreshAudioFiles]);
+
+  // YouTube audio import removed - can be re-added later if needed
+  const handleImportAudioFromYouTube = useCallback(
+    async (_youtubeUrl: string) => {
+      // YouTube extraction functionality removed
+      alert('YouTube audio extraction is currently disabled');
+    },
+    [],
+  );
+
   // Drag handlers removed - not used in unified timeline
 
-  // Handle scene split at playhead
+  // Handle scene split at playhead (disabled for placement-based timeline)
   const handleSplitScene = useCallback(() => {
-    const currentSceneIndex = sceneBlocks.findIndex(
-      (block) =>
-        currentPosition >= block.startTime &&
-        currentPosition < block.startTime + block.duration,
-    );
+    // Placements are timestamp-based and cannot be split
+    // This functionality is not applicable to placement-based timeline
+    console.log('Split scene not supported for placement-based timeline');
+  }, []);
 
-    if (currentSceneIndex === -1) {
+  const isPlacementVideoContextTarget = useMemo(() => {
+    if (!contextMenuState?.item) return false;
+    return (
+      contextMenuState.item.type === 'video' &&
+      contextMenuState.item.placementNumber !== undefined
+    );
+  }, [contextMenuState]);
+
+  const canSplitContextTarget = useMemo(() => {
+    if (!contextMenuState?.item || !isPlacementVideoContextTarget) return false;
+
+    const item = contextMenuState.item;
+    const sourceOffset = item.sourceOffsetSeconds ?? 0;
+    const sourceDuration =
+      item.sourcePlacementDurationSeconds ??
+      Math.max(
+        1,
+        (item.sourceEndTime ?? item.endTime) - (item.sourceStartTime ?? item.startTime),
+      );
+    const splitOffset = snapToSecond(
+      sourceOffset + (currentPosition - item.startTime),
+    );
+    return splitOffset > 0 && splitOffset < sourceDuration;
+  }, [contextMenuState, isPlacementVideoContextTarget, currentPosition]);
+
+  const handleContextSplitClip = useCallback(() => {
+    if (!contextMenuState?.item) {
+      setContextMenuState(null);
       return;
     }
 
-    const block = sceneBlocks[currentSceneIndex];
-    const splitTime = currentPosition - block.startTime;
-
-    if (splitTime > 0 && splitTime < block.duration) {
-      // Split the scene
-      // TODO: Update project state with split scenes
-      // const firstPart = {
-      //   ...block.scene,
-      //   duration: splitTime,
-      // };
-      // const secondPart = {
-      //   ...block.scene,
-      //   scene_number: block.scene.scene_number + 0.5, // Temporary number
-      //   duration: block.duration - splitTime,
-      // };
+    const shouldResumePlayback = isPlaying;
+    if (shouldResumePlayback) {
+      setIsPlaying(false);
     }
-  }, [currentPosition, sceneBlocks]);
+
+    const snapshot = captureSnapshot();
+    const didSplit = commitVideoSplitAtTime(
+      contextMenuState.item,
+      currentPosition,
+    );
+    if (didSplit) {
+      pushUndoSnapshot(snapshot);
+    }
+    setContextMenuState(null);
+    if (shouldResumePlayback) {
+      setIsPlaying(true);
+    }
+  }, [
+    contextMenuState,
+    isPlaying,
+    commitVideoSplitAtTime,
+    setIsPlaying,
+    currentPosition,
+    captureSnapshot,
+    pushUndoSnapshot,
+  ]);
 
   // Keyboard shortcuts
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input, textarea, or contenteditable element
+      const target = e.target as HTMLElement;
+      const isTyping = 
+        target.tagName === 'INPUT' || 
+        target.tagName === 'TEXTAREA' || 
+        target.isContentEditable;
+
+      // Ctrl/Cmd+Z: Undo timeline edits (only when not typing)
+      if (
+        e.code === 'KeyZ' &&
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        !isTyping
+      ) {
+        e.preventDefault();
+        undoLastTimelineEdit();
+      }
+      
       // Space: Play/Pause
-      if (e.code === 'Space' && e.target === document.body) {
+      else if (e.code === 'Space' && e.target === document.body) {
         e.preventDefault();
         setIsPlaying((prev) => !prev);
       }
-      // Arrow Left: Step back
-      else if (e.code === 'ArrowLeft' && !e.shiftKey) {
+      // Arrow Left: Step back (only when not typing)
+      else if (e.code === 'ArrowLeft' && !e.shiftKey && !isTyping) {
         e.preventDefault();
         setCurrentPosition((prev) => Math.max(0, prev - 0.1));
       }
-      // Arrow Right: Step forward
-      else if (e.code === 'ArrowRight' && !e.shiftKey) {
+      // Arrow Right: Step forward (only when not typing)
+      else if (e.code === 'ArrowRight' && !e.shiftKey && !isTyping) {
         e.preventDefault();
         setCurrentPosition((prev) => Math.min(totalDuration, prev + 0.1));
       }
-      // Shift+Arrow Left: Jump back 1 second
-      else if (e.code === 'ArrowLeft' && e.shiftKey) {
+      // Shift+Arrow Left: Jump back 1 second (only when not typing)
+      else if (e.code === 'ArrowLeft' && e.shiftKey && !isTyping) {
         e.preventDefault();
         setCurrentPosition((prev) => Math.max(0, prev - 1));
       }
-      // Shift+Arrow Right: Jump forward 1 second
-      else if (e.code === 'ArrowRight' && e.shiftKey) {
+      // Shift+Arrow Right: Jump forward 1 second (only when not typing)
+      else if (e.code === 'ArrowRight' && e.shiftKey && !isTyping) {
         e.preventDefault();
         setCurrentPosition((prev) => Math.min(totalDuration, prev + 1));
       }
@@ -1468,13 +2087,13 @@ export default function TimelinePanel({
         e.preventDefault();
         handleZoomOut();
       }
-      // S: Split scene at playhead
-      else if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      // S: Split scene at playhead (only when not typing)
+      else if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !isTyping) {
         e.preventDefault();
         handleSplitScene();
       }
-      // M: Add marker at current playhead position
-      else if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      // M: Add marker at current playhead position (only when not typing)
+      else if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !isTyping) {
         e.preventDefault();
         handleOpenMarkerPopover();
       }
@@ -1492,12 +2111,13 @@ export default function TimelinePanel({
     handleZoomOut,
     handleSplitScene,
     handleOpenMarkerPopover,
+    undoLastTimelineEdit,
     setCurrentPosition,
     setIsPlaying,
   ]);
 
-  // Show empty state if no project and not using mock data
-  if (!projectDirectory && !useMockData) {
+  // Show empty state if no project
+  if (!projectDirectory) {
     return (
       <div className={styles.container}>
         <div className={styles.emptyState}>
@@ -1517,18 +2137,22 @@ export default function TimelinePanel({
 
   const effectiveProjectDir = projectDirectory || '/mock';
 
-  // Calculate timeline width based on total duration (ensure minimum width)
-  const minDuration = Math.max(totalDuration, 10); // At least 10 seconds
-  // Round up to next multiple of 5 for better visibility (e.g., 38s -> 40s)
-  const maxMarkerTime = Math.ceil(minDuration / 5) * 5;
-  const timelineWidth = secondsToPixels(maxMarkerTime, zoomLevel);
-  const playheadPosition = secondsToPixels(currentPosition, zoomLevel);
+  // Timeline extends past content by TAIL_PADDING_SECONDS so user can scroll into empty space. Playhead stays in [0, totalDuration].
+  const displayDuration =
+    totalDuration > 0 ? totalDuration + TAIL_PADDING_SECONDS : 10;
+  const timelineWidth = secondsToPixels(displayDuration, zoomLevel);
+  const maxMarkerTime = Math.ceil(displayDuration / 5) * 5;
 
-  // Generate time markers for ruler
   const timeMarkers: number[] = [];
   for (let i = 0; i <= maxMarkerTime; i += 5) {
     timeMarkers.push(i);
   }
+
+  // Playhead stays within content only; currentPosition is already clamped to [0, totalDuration]
+  const playheadPosition = Math.min(
+    secondsToPixels(currentPosition, zoomLevel),
+    secondsToPixels(totalDuration, zoomLevel),
+  );
 
   return (
     <div className={styles.container}>
@@ -1570,14 +2194,28 @@ export default function TimelinePanel({
               </span>
             </div>
             <div className={styles.toolbarRight}>
+              {captionGenerationMessage && (
+                <span className={styles.captionGenerationStatus}>
+                  {captionGenerationMessage}
+                </span>
+              )}
               <button
                 type="button"
                 className={styles.toolbarButton}
                 onClick={handleImportVideo}
-                title="Import Video (Ctrl+I)"
+                title={`Import Video (${modKey}+I)`}
               >
                 <Upload size={14} />
                 <span>Import</span>
+              </button>
+              <button
+                type="button"
+                className={styles.toolbarButton}
+                onClick={() => setIsAudioModalOpen(true)}
+                title="Import Audio"
+              >
+                <Music size={14} />
+                <span>Import Audio</span>
               </button>
               <button
                 type="button"
@@ -1591,7 +2229,7 @@ export default function TimelinePanel({
                 type="button"
                 className={styles.zoomButton}
                 onClick={handleZoomOut}
-                title="Zoom Out (Ctrl+-)"
+                title={`Zoom Out (${modKey}+-)`}
               >
                 <ZoomOut size={14} />
               </button>
@@ -1602,7 +2240,7 @@ export default function TimelinePanel({
                 type="button"
                 className={styles.zoomButton}
                 onClick={handleZoomIn}
-                title="Zoom In (Ctrl++)"
+                title={`Zoom In (${modKey}++)`}
               >
                 <ZoomIn size={14} />
               </button>
@@ -1611,16 +2249,17 @@ export default function TimelinePanel({
 
           <div className={styles.timelineContainer} ref={timelineRef}>
             <VersionSelector
-              sceneBlocks={sceneBlocks}
+              timelineItems={timelineItems}
               activeVersions={activeVersions}
-              onVersionSelect={(sceneNumber, assetType, version) => {
-                setActiveVersions((prev) => ({
-                  ...prev,
-                  [sceneNumber]: {
-                    ...prev[sceneNumber],
+              onVersionSelect={(placementNumber, assetType, version) => {
+                const newVersions: Record<number, SceneVersions> = {
+                  ...activeVersions,
+                  [placementNumber]: {
+                    ...activeVersions[placementNumber],
                     [assetType]: version,
                   },
-                }));
+                };
+                setActiveVersions(newVersions);
               }}
             />
             {/* eslint-disable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
@@ -1629,6 +2268,7 @@ export default function TimelinePanel({
               ref={tracksRef}
               onScroll={handleScroll}
               onMouseDown={handleTimelineMouseDown}
+              onContextMenu={handleTimelineContextMenu}
               onWheel={handleWheel}
               role="application"
               aria-label="Timeline tracks"
@@ -1676,45 +2316,58 @@ export default function TimelinePanel({
                   }}
                 />
 
-                {/* Unified Track */}
-                {timelineItems.length > 0 && (
+                {/* Main Track */}
+                {timelineItems.filter((item) => item.type !== 'audio').length >
+                  0 && (
                   <div className={styles.track}>
-                    <div
-                      className={styles.trackContent}
-                      onDragOver={handleTrackDragOver}
-                      onDrop={handleTrackDrop}
-                      onDragLeave={(e) => {
-                        // Only clear if actually leaving the track area
-                        const rect = (
-                          e.currentTarget as HTMLElement
-                        ).getBoundingClientRect();
-                        const x = e.clientX;
-                        const y = e.clientY;
-                        if (
-                          x < rect.left ||
-                          x > rect.right ||
-                          y < rect.top ||
-                          y > rect.bottom
-                        ) {
-                          setDropIndex(null);
-                        }
-                      }}
-                    >
-                      {timelineItems.map((item) => {
-                        const left = secondsToPixels(item.startTime, zoomLevel);
-                        const width = secondsToPixels(item.duration, zoomLevel);
-                        const isSelected = Boolean(
-                          item.scene &&
-                            selectedScenes.has(item.scene.scene_number),
-                        );
-                        const isSceneDragging = Boolean(
-                          item.scene &&
-                            draggedSceneNumber === item.scene.scene_number,
-                        );
+                    <div className={styles.trackContent}>
+                      {timelineItems
+                        .filter((item) => item.type !== 'audio')
+                        .map((item) => {
+                          const left = secondsToPixels(
+                            item.startTime,
+                            zoomLevel,
+                          );
+                          const width = secondsToPixels(
+                            item.duration,
+                            zoomLevel,
+                          );
 
-                        const sceneFolder = item.scene
-                          ? sceneFoldersByNumber[item.scene.scene_number]
-                          : undefined;
+                          return (
+                            <TimelineItemComponent
+                              key={item.id}
+                              item={item}
+                              left={left}
+                              width={width}
+                              projectDirectory={projectDirectory || null}
+                              isSelected={activeEditingItemId === item.id}
+                              onItemClick={handleItemClick}
+                              onImageResizeMouseDown={handleImageResizeMouseDown}
+                              onInfographicDragMouseDown={
+                                handleInfographicDragMouseDown
+                              }
+                              onItemContextMenu={handleTimelineItemContextMenu}
+                              isEditing={activeEditingItemId === item.id}
+                            />
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Overlay Track (Infographics) */}
+                {overlayItems.length > 0 && (
+                  <div className={`${styles.track} ${styles.overlayTrack}`}>
+                    <div className={styles.trackContent}>
+                      {overlayItems.map((item) => {
+                        const left = secondsToPixels(
+                          item.startTime,
+                          zoomLevel,
+                        );
+                        const width = secondsToPixels(
+                          item.duration,
+                          zoomLevel,
+                        );
 
                         return (
                           <TimelineItemComponent
@@ -1723,66 +2376,81 @@ export default function TimelinePanel({
                             left={left}
                             width={width}
                             projectDirectory={projectDirectory || null}
-                            useMockData={useMockData}
-                            isSelected={isSelected}
-                            isSceneDragging={isSceneDragging}
-                            editingSceneNumber={editingSceneNumber}
-                            editedSceneName={editedSceneName}
-                            sceneFolder={sceneFolder}
-                            activeVersions={activeVersions}
-                            onSceneDragStart={handleSceneDragStart}
-                            onSceneDragEnd={handleSceneDragEnd}
-                            onSceneBlockClick={handleSceneBlockClick}
-                            onVideoBlockClick={handleVideoBlockClick}
-                            onNameChange={handleNameChange}
-                            onEditedNameChange={setEditedSceneName}
-                            onViewDetails={handleViewSceneDetails}
-                            onEditingCancel={() => {
-                              // Restore scroll position on cancel
-                              if (
-                                scrollPositionBeforeEditRef.current !== null &&
-                                tracksRef.current
-                              ) {
-                                tracksRef.current.scrollLeft =
-                                  scrollPositionBeforeEditRef.current;
-                                scrollPositionBeforeEditRef.current = null;
-                              }
-                              setEditingSceneNumber(null);
-                              if (item.scene) {
-                                setEditedSceneName(item.scene.name || '');
-                              }
-                            }}
+                            isSelected={activeEditingItemId === item.id}
+                            onItemClick={handleItemClick}
+                            onInfographicDragMouseDown={
+                              handleInfographicDragMouseDown
+                            }
+                            onItemContextMenu={handleTimelineItemContextMenu}
+                            isEditing={activeEditingItemId === item.id}
                           />
                         );
                       })}
+                    </div>
+                  </div>
+                )}
 
-                      {/* Drop Indicator Line */}
-                      {dropInsertIndex !== null &&
-                        draggedSceneNumber !== null &&
-                        (() => {
-                          let indicatorLeft = 0;
-                          if (dropInsertIndex < sceneBlocks.length) {
-                            indicatorLeft = secondsToPixels(
-                              sceneBlocks[dropInsertIndex].startTime,
-                              zoomLevel,
-                            );
-                          } else if (sceneBlocks.length > 0) {
-                            const lastBlock =
-                              sceneBlocks[sceneBlocks.length - 1];
-                            indicatorLeft = secondsToPixels(
-                              lastBlock.startTime + lastBlock.duration,
-                              zoomLevel,
-                            );
-                          }
+                {/* Text Overlay Track (Word Sync Captions) */}
+                {textOverlayItems.length > 0 && (
+                  <div className={`${styles.track} ${styles.textOverlayTrack}`}>
+                    <div className={styles.trackContent}>
+                      {textOverlayItems.map((item) => {
+                        const left = secondsToPixels(
+                          item.startTime,
+                          zoomLevel,
+                        );
+                        const width = secondsToPixels(
+                          item.duration,
+                          zoomLevel,
+                        );
+
+                        return (
+                          <TimelineItemComponent
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            isSelected={false}
+                            onItemClick={handleItemClick}
+                            onItemContextMenu={handleTimelineItemContextMenu}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Audio Track */}
+                {timelineItems.filter((item) => item.type === 'audio').length >
+                  0 && (
+                  <div className={`${styles.track} ${styles.audioTrack}`}>
+                    <div className={styles.trackContent}>
+                      {timelineItems
+                        .filter((item) => item.type === 'audio')
+                        .map((item) => {
+                          const left = secondsToPixels(
+                            item.startTime,
+                            zoomLevel,
+                          );
+                          const width = secondsToPixels(
+                            item.duration,
+                            zoomLevel,
+                          );
+
                           return (
-                            <div
-                              className={styles.dropIndicatorLine}
-                              style={{
-                                left: `${indicatorLeft}px`,
-                              }}
+                            <TimelineItemComponent
+                              key={item.id}
+                              item={item}
+                              left={left}
+                              width={width}
+                              projectDirectory={projectDirectory || null}
+                              isSelected={false}
+                              onItemClick={handleItemClick}
+                              onItemContextMenu={handleTimelineItemContextMenu}
                             />
                           );
-                        })()}
+                        })}
                     </div>
                   </div>
                 )}
@@ -1800,6 +2468,27 @@ export default function TimelinePanel({
             {/* eslint-enable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
           </div>
 
+          {contextMenuState && (
+            <TimelineContextMenu
+              x={contextMenuState.x}
+              y={contextMenuState.y}
+              canUndo={canUndo}
+              canGenerateWordCaptions={canGenerateWordCaptions}
+              isGeneratingWordCaptions={isGeneratingWordCaptions}
+              showVideoEditActions={isPlacementVideoContextTarget}
+              onUndo={handleUndoFromContextMenu}
+              onAddTimelineInstruction={handleAddTimelineInstructionFromContextMenu}
+              onGenerateWordCaptions={handleGenerateWordCaptions}
+              onSplitClip={
+                isPlacementVideoContextTarget && canSplitContextTarget
+                  ? handleContextSplitClip
+                  : undefined
+              }
+              onTrimLeftToPlayhead={undefined}
+              onClose={closeContextMenu}
+            />
+          )}
+
           {markerPromptOpen && markerPromptPosition !== null && (
             <MarkerPromptPopover
               position={markerPromptPosition}
@@ -1815,48 +2504,12 @@ export default function TimelinePanel({
             />
           )}
 
-          {popoverSceneNumber !== null && popoverPosition && (
-            <SceneActionPopover
-              sceneNumber={popoverSceneNumber}
-              position={popoverPosition}
-              onClose={() => {
-                setPopoverSceneNumber(null);
-                setPopoverPosition(null);
-              }}
-              onRegenerate={(sceneNum, prompt) => {
-                // TODO: Implement regenerate scene logic with prompt
-                // This will call backend/agent to regenerate the scene with the given prompt
-                // Parameters: sceneNum (number), prompt (string)
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                const unusedParams = { sceneNum, prompt };
-                return unusedParams;
-              }}
-              onGenerateNext={(sceneNum, prompt) => {
-                // TODO: Implement generate next scene logic with prompt
-                // This will call backend/agent to generate a new scene after sceneNum with the given prompt
-                // Parameters: sceneNum (number), prompt (string)
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                const unusedParams = { sceneNum, prompt };
-                return unusedParams;
-              }}
-            />
-          )}
-
-          {previewSceneNumber !== null && (
-            <MarkdownPreview
-              isOpen={previewSceneNumber !== null}
-              title={
-                scenes.find((s) => s.scene_number === previewSceneNumber)
-                  ?.name || `Scene ${previewSceneNumber}`
-              }
-              content={
-                isLoadingMarkdown
-                  ? 'Loading...'
-                  : markdownContent || 'Loading...'
-              }
-              onClose={handleClosePreview}
-            />
-          )}
+          <AudioImportModal
+            isOpen={isAudioModalOpen}
+            onClose={() => setIsAudioModalOpen(false)}
+            onImportFromFile={handleImportAudioFromFile}
+            onImportFromYouTube={handleImportAudioFromYouTube}
+          />
         </>
       )}
     </div>

@@ -1,0 +1,290 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  @include flex-column;
+  height: 100%;
+  width: 100%;
+  background-color: $color-background-dark;
+  border-radius: $radius-lg;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-sm $spacing-md;
+  background-color: $color-panel-background;
+  border-bottom: 1px solid $color-panel-border;
+  flex-shrink: 0;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.fileName {
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.dirtyIndicator {
+  color: $color-accent-green;
+  font-size: $font-size-xs;
+  margin-left: $spacing-xs;
+}
+
+.modeToggle {
+  @include button-secondary;
+  padding: $spacing-xs $spacing-md;
+  font-size: $font-size-xs;
+  gap: $spacing-xs;
+  
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+.content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.textarea {
+  flex: 1;
+  width: 100%;
+  padding: $spacing-md;
+  background-color: $color-background-dark;
+  color: $color-text-primary;
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  line-height: $line-height-normal;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+  overflow-wrap: normal;
+  @include custom-scrollbar;
+
+  &::placeholder {
+    color: $color-text-muted;
+  }
+}
+
+.preview {
+  flex: 1;
+  overflow: auto;
+  padding: $spacing-lg;
+  color: $color-text-primary;
+  @include custom-scrollbar;
+
+  // Markdown content styling
+  :global {
+    // Headings
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: $spacing-xl;
+      margin-bottom: $spacing-md;
+      font-weight: $font-weight-semibold;
+      color: $color-text-primary;
+      line-height: $line-height-tight;
+
+      &:first-child {
+        margin-top: 0;
+      }
+    }
+
+    h1 {
+      font-size: $font-size-2xl;
+      border-bottom: 1px solid $color-panel-border;
+      padding-bottom: $spacing-sm;
+    }
+
+    h2 {
+      font-size: $font-size-xl;
+      border-bottom: 1px solid $color-panel-border;
+      padding-bottom: $spacing-xs;
+    }
+
+    h3 {
+      font-size: $font-size-lg;
+    }
+
+    h4 {
+      font-size: $font-size-base;
+    }
+
+    h5, h6 {
+      font-size: $font-size-sm;
+    }
+
+    // Paragraphs
+    p {
+      margin-bottom: $spacing-md;
+      line-height: $line-height-relaxed;
+      color: $color-text-primary;
+    }
+
+    // Lists
+    ul, ol {
+      margin-bottom: $spacing-md;
+      padding-left: $spacing-xl;
+      color: $color-text-primary;
+
+      li {
+        margin-bottom: $spacing-xs;
+        line-height: $line-height-normal;
+
+        p {
+          margin-bottom: $spacing-xs;
+        }
+      }
+    }
+
+    ul {
+      list-style-type: disc;
+    }
+
+    ol {
+      list-style-type: decimal;
+    }
+
+    // Code blocks
+    pre {
+      background-color: $color-panel-background;
+      border: 1px solid $color-panel-border;
+      border-radius: $radius-md;
+      padding: $spacing-md;
+      margin-bottom: $spacing-md;
+      overflow-x: auto;
+      @include custom-scrollbar;
+
+      code {
+        font-family: $font-family-mono;
+        font-size: $font-size-sm;
+        color: $color-text-primary;
+        background: transparent;
+        padding: 0;
+        border: none;
+      }
+    }
+
+    // Inline code
+    code {
+      font-family: $font-family-mono;
+      font-size: $font-size-sm;
+      background-color: $color-panel-background;
+      color: $color-accent-green;
+      padding: 2px 6px;
+      border-radius: $radius-sm;
+      border: 1px solid $color-panel-border;
+    }
+
+    // Links
+    a {
+      color: $color-accent-cyan;
+      text-decoration: none;
+      transition: color $transition-fast;
+
+      &:hover {
+        color: $color-accent-green;
+        text-decoration: underline;
+      }
+    }
+
+    // Blockquotes
+    blockquote {
+      border-left: 3px solid $color-accent-green;
+      padding-left: $spacing-md;
+      margin: $spacing-md 0;
+      color: $color-text-secondary;
+      font-style: italic;
+      background-color: rgba($color-accent-green, 0.05);
+      padding: $spacing-md;
+      border-radius: 0 $radius-md $radius-md 0;
+    }
+
+    // Tables (from remark-gfm)
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: $spacing-md;
+      border: 1px solid $color-panel-border;
+      border-radius: $radius-md;
+      overflow: hidden;
+    }
+
+    thead {
+      background-color: $color-panel-background;
+    }
+
+    th {
+      padding: $spacing-sm $spacing-md;
+      text-align: left;
+      font-weight: $font-weight-semibold;
+      color: $color-text-primary;
+      border-bottom: 2px solid $color-panel-border;
+    }
+
+    td {
+      padding: $spacing-sm $spacing-md;
+      border-bottom: 1px solid $color-panel-border;
+      color: $color-text-primary;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover {
+      background-color: rgba($color-accent-green, 0.05);
+    }
+
+    // Horizontal rule
+    hr {
+      border: none;
+      border-top: 1px solid $color-panel-border;
+      margin: $spacing-xl 0;
+    }
+
+    // Images
+    img {
+      max-width: 100%;
+      height: auto;
+      border-radius: $radius-md;
+      margin: $spacing-md 0;
+    }
+
+    // Strong and emphasis
+    strong {
+      font-weight: $font-weight-bold;
+      color: $color-text-primary;
+    }
+
+    em {
+      font-style: italic;
+      color: $color-text-primary;
+    }
+
+    // Strikethrough (from remark-gfm)
+    del {
+      text-decoration: line-through;
+      color: $color-text-muted;
+    }
+
+    // Task lists (from remark-gfm)
+    input[type="checkbox"] {
+      margin-right: $spacing-sm;
+      accent-color: $color-accent-green;
+    }
+  }
+}

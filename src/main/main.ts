@@ -12,34 +12,44 @@ import path from 'path';
 import fs from 'fs/promises';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import log from 'electron-log';
+import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import ffprobeInstaller from '@ffprobe-installer/ffprobe';
+import { normalizePathForFFmpeg } from './utils/pathNormalizer';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
-import backendManager, {
-  BackendEnvOverrides,
+import serverConnectionManager, {
   BackendState,
-} from './backendManager';
+  ServerConnectionConfig,
+} from './serverConnectionManager';
 import {
   AppSettings,
   getSettings,
-  toBackendEnv,
   updateSettings,
 } from './settingsManager';
 import fileSystemManager from './fileSystemManager';
+import { remotionManager } from './remotionManager';
+import { generateWordCaptions } from './services/wordCaptionService';
 import type { FileChangeEvent } from '../shared/fileSystemTypes';
+import type {
+  RemotionTimelineItem,
+  ParsedInfographicPlacement,
+} from '../shared/remotionTypes';
+import * as desktopLogger from './services/DesktopLogger';
+import {
+  generateCapcutProject,
+  type ExportTimelineItem,
+  type ExportOverlayItem,
+  type ExportTextOverlayCue,
+} from './exporters/capcutGenerator';
 
-const buildBackendEnv = (
-  overrides: BackendEnvOverrides = {},
-): BackendEnvOverrides => {
-  const base = toBackendEnv(getSettings());
-  return {
-    ...base,
-    ...overrides,
-  };
-};
+if (app.isPackaged) {
+  process.env.KSHANA_PACKAGED = '1';
+}
 
 let mainWindow: BrowserWindow | null = null;
 
-backendManager.on('state', (state: BackendState) => {
+serverConnectionManager.on('state', (state: BackendState) => {
   if (mainWindow) {
     mainWindow.webContents.send('backend:state', state);
   }
@@ -52,20 +62,19 @@ ipcMain.on('ipc-example', async (event, arg) => {
 });
 
 ipcMain.handle('backend:get-state', async (): Promise<BackendState> => {
-  return backendManager.status;
+  return serverConnectionManager.status;
 });
 
 ipcMain.handle(
   'backend:start',
   async (
     _event,
-    overrides: BackendEnvOverrides = {},
+    config: ServerConnectionConfig = { serverUrl: getSettings().serverUrl },
   ): Promise<BackendState> => {
     try {
-      await backendManager.start(buildBackendEnv(overrides));
-      return backendManager.status;
+      return await serverConnectionManager.connect(config);
     } catch (error) {
-      log.error(`Failed to start backend: ${(error as Error).message}`);
+      log.error(`Failed to connect to server: ${(error as Error).message}`);
       return {
         status: 'error',
         message: (error as Error).message,
@@ -76,12 +85,15 @@ ipcMain.handle(
 
 ipcMain.handle(
   'backend:restart',
-  async (_event, overrides: BackendEnvOverrides = {}) => {
+  async (_event, _config?: ServerConnectionConfig) => {
     try {
-      await backendManager.restart(buildBackendEnv(overrides));
-      return backendManager.status;
+      const settings = getSettings();
+      await serverConnectionManager.disconnect();
+      return await serverConnectionManager.connect({
+        serverUrl: settings.serverUrl || 'http://localhost:8001',
+      });
     } catch (error) {
-      log.error(`Failed to restart backend: ${(error as Error).message}`);
+      log.error(`Failed to reconnect to server: ${(error as Error).message}`);
       return {
         status: 'error',
         message: (error as Error).message,
@@ -91,8 +103,7 @@ ipcMain.handle(
 );
 
 ipcMain.handle('backend:stop', async () => {
-  await backendManager.stop();
-  return backendManager.status;
+  return serverConnectionManager.disconnect();
 });
 
 ipcMain.handle('settings:get', async (): Promise<AppSettings> => {
@@ -142,6 +153,82 @@ ipcMain.handle('project:select-video-file', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('project:select-audio-file', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: 'Select Audio File',
+    filters: [
+      {
+        name: 'Audio Files',
+        extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'wma'],
+      },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
+async function getAudioDuration(audioPath: string): Promise<number> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      log.warn(`[Audio Duration] Timed out getting duration for: ${audioPath}`);
+      resolve(0);
+    }, 10000);
+
+    ffmpeg.ffprobe(audioPath, (err, metadata) => {
+      clearTimeout(timeout);
+      if (err) {
+        log.warn(`[Audio Duration] Could not get duration: ${err.message}`);
+        resolve(0);
+        return;
+      }
+      const duration = metadata?.format?.duration || 0;
+      resolve(duration);
+    });
+  });
+}
+
+ipcMain.handle(
+  'project:get-audio-duration',
+  async (_event, audioPath: string): Promise<number> => {
+    try {
+      // Normalize path separators for Windows and resolve to absolute
+      const fullPath = path.normalize(
+        path.isAbsolute(audioPath) ? audioPath : path.resolve(audioPath),
+      );
+      return await getAudioDuration(fullPath);
+    } catch (error) {
+      log.warn(
+        `[Audio Duration IPC] Error getting duration for ${audioPath}:`,
+        error,
+      );
+      return 0;
+    }
+  },
+);
+
+ipcMain.handle(
+  'project:generate-word-captions',
+  async (
+    _event,
+    projectDirectory: string,
+    audioPath?: string,
+  ): Promise<{ success: boolean; outputPath?: string; words?: unknown[]; error?: string }> => {
+    const result = await generateWordCaptions(projectDirectory, audioPath);
+    if (result.success && result.outputPath) {
+      fileSystemManager.emit('file-change', {
+        type: 'change',
+        path: result.outputPath,
+      });
+    }
+    return result;
+  },
+);
+
 ipcMain.handle(
   'project:read-tree',
   async (_event, dirPath: string, depth?: number) => {
@@ -152,6 +239,95 @@ ipcMain.handle(
 ipcMain.handle('project:watch-directory', async (_event, dirPath: string) => {
   fileSystemManager.watchDirectory(dirPath);
 });
+
+ipcMain.handle(
+  'project:watch-manifest',
+  async (_event, manifestPath: string) => {
+    await fileSystemManager.watchManifest(manifestPath);
+  },
+);
+
+ipcMain.handle(
+  'project:watch-image-placements',
+  async (_event, imagePlacementsDir: string) => {
+    await fileSystemManager.watchImagePlacements(imagePlacementsDir);
+  },
+);
+
+ipcMain.handle(
+  'project:watch-infographic-placements',
+  async (_event, infographicPlacementsDir: string) => {
+    await fileSystemManager.watchInfographicPlacements(infographicPlacementsDir);
+  },
+);
+
+ipcMain.handle(
+  'project:refresh-assets',
+  async (_event, projectDirectory: string) => {
+    const manifestPath = path.join(
+      projectDirectory,
+      '.kshana',
+      'agent',
+      'manifest.json',
+    );
+
+    try {
+      await fs.access(manifestPath);
+      fileSystemManager.emit('file-change', {
+        type: 'change',
+        path: manifestPath,
+      });
+      console.log('[Main][refresh-assets] Triggered manifest refresh', {
+        source: 'ipc_refresh_assets',
+        manifestPath,
+      });
+      return { success: true };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Manifest not found';
+      console.warn('[Main][refresh-assets] Failed to trigger manifest refresh', {
+        source: 'ipc_refresh_assets',
+        manifestPath,
+        error: message,
+      });
+      return { success: false, error: message };
+    }
+  },
+);
+
+// Listen for asset update notifications (can be called from backend or external processes)
+// Note: This is optional - file watcher should handle most cases automatically
+ipcMain.on(
+  'project:asset-updated',
+  async (
+    _event,
+    data: { projectDirectory: string; assetId: string; assetType: string },
+  ) => {
+    console.log('[Main] Asset updated notification received:', data);
+    // Trigger refresh by emitting file change event
+    if (data.projectDirectory) {
+      const manifestPath = path.join(
+        data.projectDirectory,
+        '.kshana',
+        'agent',
+        'manifest.json',
+      );
+      try {
+        await fs.access(manifestPath);
+        fileSystemManager.emit('file-change', {
+          type: 'change',
+          path: manifestPath,
+        });
+      } catch (error) {
+        console.warn('[Main][asset-updated] Manifest refresh skipped', {
+          source: 'ipc_asset_updated',
+          manifestPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  },
+);
 
 ipcMain.handle('project:unwatch-directory', async () => {
   fileSystemManager.unwatchDirectory();
@@ -198,6 +374,18 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'project:check-file-exists',
+  async (_event, filePath: string): Promise<boolean> => {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+);
+
+ipcMain.handle(
   'project:read-file-base64',
   async (_event, filePath: string): Promise<string | null> => {
     try {
@@ -232,6 +420,93 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'project:read-all-files',
+  async (
+    _event,
+    projectDir: string,
+  ): Promise<Array<{ path: string; content: string; isBinary: boolean }>> => {
+    const kshanaDir = path.join(projectDir, '.kshana');
+    const results: Array<{ path: string; content: string; isBinary: boolean }> = [];
+    const TEXT_EXTS = new Set([
+      '.json',
+      '.md',
+      '.txt',
+      '.yaml',
+      '.yml',
+      '.ts',
+      '.tsx',
+      '.js',
+      '.jsx',
+      '.css',
+      '.html',
+      '.xml',
+    ]);
+    const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', '__pycache__']);
+    const MAX_TEXT_BYTES = 5 * 1024 * 1024;
+    let skippedNonText = 0;
+    let skippedOversized = 0;
+
+    async function walk(dir: string): Promise<void> {
+      let entries;
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!SKIP_DIRS.has(entry.name)) {
+            await walk(fullPath);
+          }
+        } else {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (!TEXT_EXTS.has(ext)) {
+            skippedNonText += 1;
+            continue;
+          }
+
+          try {
+            const stat = await fs.stat(fullPath);
+            if (stat.size > MAX_TEXT_BYTES) {
+              skippedOversized += 1;
+              continue;
+            }
+
+            const content = await fs.readFile(fullPath, 'utf-8');
+            results.push({ path: fullPath, content, isBinary: false });
+          } catch {
+            // Skip files that can't be read
+          }
+        }
+      }
+    }
+
+    try {
+      await walk(kshanaDir);
+    } catch {
+      // .kshana directory might not exist yet
+    }
+
+    log.info(
+      `[project:read-all-files] Read ${results.length} text files from ${kshanaDir} ` +
+      `(skipped non-text: ${skippedNonText}, skipped oversized: ${skippedOversized})`,
+    );
+    return results;
+  },
+);
+
+ipcMain.handle(
+  'project:mkdir',
+  async (_event, dirPath: string): Promise<void> => {
+    const normalizedPath = path.isAbsolute(dirPath)
+      ? path.normalize(dirPath)
+      : path.resolve(dirPath);
+    await fs.mkdir(normalizedPath, { recursive: true });
+  },
+);
+
+ipcMain.handle(
   'project:write-file',
   async (_event, filePath: string, content: string): Promise<void> => {
     // Normalize the file path to ensure it's resolved correctly
@@ -241,7 +516,21 @@ ipcMain.handle(
     // Ensure directory exists before writing
     const dirPath = path.dirname(normalizedPath);
     await fs.mkdir(dirPath, { recursive: true });
-    return fs.writeFile(normalizedPath, content, 'utf-8');
+    // Atomic write: write to temp file then rename to avoid corruption.
+    // Falls back to direct write if rename fails (e.g. OneDrive on Windows).
+    const tmpPath = `${normalizedPath}.tmp`;
+    try {
+      await fs.writeFile(tmpPath, content, 'utf-8');
+      await fs.rename(tmpPath, normalizedPath);
+    } catch {
+      await fs.writeFile(normalizedPath, content, 'utf-8');
+      // Clean up orphaned tmp file if it exists
+      try {
+        await fs.unlink(tmpPath);
+      } catch {
+        // ignore
+      }
+    }
   },
 );
 
@@ -350,11 +639,1086 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle('project:save-video-file', async () => {
+  if (!mainWindow) return null;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Video',
+    defaultPath: `kshana-timeline-${timestamp}.mp4`,
+    filters: [
+      {
+        name: 'Video Files',
+        extensions: ['mp4'],
+      },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+  return result.filePath;
+});
+
+// ── Export to CapCut ────────────────────────────────────────────────────────
+ipcMain.handle(
+  'project:export-capcut',
+  async (
+    _event,
+    timelineItems: ExportTimelineItem[],
+    projectDirectory: string,
+    audioPath?: string,
+    overlayItems?: ExportOverlayItem[],
+    textOverlayCues?: ExportTextOverlayCue[],
+  ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
+    console.log('[Export:CapCut] Starting CapCut export...');
+    try {
+      const projectName = projectDirectory.split(/[/\\]/).filter(Boolean).pop() || 'Project';
+      const result = await generateCapcutProject(
+        projectName,
+        timelineItems,
+        projectDirectory,
+        audioPath,
+        overlayItems,
+        textOverlayCues,
+      );
+
+      console.log('[Export:CapCut] Exported successfully to:', result.outputDir);
+      return { success: true, outputPath: result.outputDir };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Export:CapCut] Failed:', message);
+      return { success: false, error: message };
+    }
+  },
+);
+
+// Configure ffmpeg/ffprobe to use bundled binaries
+// In packaged builds, binaries are in app.asar.unpacked (not inside the read-only app.asar)
+let ffmpegPath = ffmpegInstaller.path;
+let ffprobePath = ffprobeInstaller.path;
+if (app.isPackaged) {
+  ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+  ffprobePath = ffprobePath.replace('app.asar', 'app.asar.unpacked');
+}
+ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfprobePath(ffprobePath);
+log.info('[FFmpeg] Paths configured:', { ffmpeg: ffmpegPath, ffprobe: ffprobePath });
+
+interface TimelineItem {
+  type: 'image' | 'video' | 'placeholder';
+  path: string;
+  duration: number;
+  startTime: number;
+  endTime: number;
+  sourceOffsetSeconds?: number;
+}
+
+interface OverlayItem {
+  path: string;
+  duration: number;
+  startTime: number;
+  endTime: number;
+}
+
+interface TextOverlayWord {
+  text: string;
+  startTime: number;
+  endTime: number;
+  charStart: number;
+  charEnd: number;
+}
+
+interface TextOverlayCue {
+  id: string;
+  startTime: number;
+  endTime: number;
+  text: string;
+  words: TextOverlayWord[];
+}
+
+function formatAssTimestamp(seconds: number): string {
+  const totalCentiseconds = Math.max(0, Math.round(seconds * 100));
+  const centiseconds = totalCentiseconds % 100;
+  const totalSeconds = Math.floor(totalCentiseconds / 100);
+  const secs = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const mins = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  return `${hours}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(centiseconds).padStart(2, '0')}`;
+}
+
+function escapeAssText(input: string): string {
+  return input
+    .replace(/\\/g, '\\\\')
+    .replace(/{/g, '(')
+    .replace(/}/g, ')')
+    .replace(/\r?\n/g, ' ')
+    .trim();
+}
+
+function buildAssDialogueText(cue: TextOverlayCue): string {
+  if (cue.words.length === 0) {
+    return escapeAssText(cue.text);
+  }
+
+  const segments: string[] = [];
+  cue.words.forEach((word, index) => {
+    const safeText = escapeAssText(word.text);
+    const durationCentiseconds = Math.max(
+      1,
+      Math.round((word.endTime - word.startTime) * 100),
+    );
+    const suffix = index < cue.words.length - 1 ? ' ' : '';
+    segments.push(`{\\k${durationCentiseconds}}${safeText}${suffix}`);
+  });
+  return segments.join('');
+}
+
+function buildAssFromTextOverlayCues(cues: TextOverlayCue[]): string {
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    'PlayResX: 1920',
+    'PlayResY: 1080',
+    'WrapStyle: 2',
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding',
+    'Style: WordSync,Arial,42,&H00FFFFFF,&H00FFD700,&H00000000,&HA0000000,1,0,0,0,100,100,0,0,3,2,0,2,80,80,60,1',
+    '',
+    '[Events]',
+    'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text',
+  ];
+
+  const events = cues
+    .filter((cue) => Number.isFinite(cue.startTime) && Number.isFinite(cue.endTime))
+    .filter((cue) => cue.endTime > cue.startTime)
+    .sort((a, b) => a.startTime - b.startTime)
+    .map((cue) => {
+      const start = formatAssTimestamp(cue.startTime);
+      const end = formatAssTimestamp(cue.endTime);
+      const text = buildAssDialogueText(cue);
+      return `Dialogue: 0,${start},${end},WordSync,,0,0,0,,${text}`;
+    });
+
+  return [...header, ...events, ''].join('\n');
+}
+
+async function burnWordCaptionsIntoVideo(
+  inputVideoPath: string,
+  assPath: string,
+  outputVideoPath: string,
+): Promise<void> {
+  // Validate ASS file exists
+  try {
+    await fs.access(assPath);
+    console.log(`[VideoComposition] ASS file validated: ${assPath}`);
+  } catch (error) {
+    throw new Error(`ASS file not found: ${assPath}`);
+  }
+
+  // Define multiple filter strategies to try in order
+  const strategies: Array<{ filter: string; description: string }> = [];
+
+  if (process.platform === 'win32') {
+    // On Windows, FFmpeg subtitle filters require heavy escaping:
+    // - Backslashes must be escaped as \\\\ (four backslashes)
+    // - Colons must be escaped as \\: (two backslashes + colon)
+    
+    // First, convert Windows backslashes to forward slashes
+    const normalizedAssPath = assPath.replace(/\\/g, '/');
+    
+    // Then escape for FFmpeg filter syntax:
+    // Escape colons: C:/path -> C\\:/path
+    const escapedAssPath = normalizedAssPath.replace(/:/g, '\\\\:');
+    
+    // Verify fonts directory exists
+    const fontsDir = 'C:/Windows/Fonts';
+    let fontsDirExists = false;
+    try {
+      await fs.access(fontsDir.replace(/\//g, '\\'));
+      fontsDirExists = true;
+      console.log(`[VideoComposition] Fonts directory validated: ${fontsDir}`);
+    } catch (error) {
+      console.warn(`[VideoComposition] Fonts directory not accessible: ${fontsDir}`);
+    }
+
+    if (fontsDirExists) {
+      // Strategy 1: subtitles filter with fontsdir
+      const fontsDirEscaped = 'C\\\\:/Windows/Fonts';
+      strategies.push({
+        filter: `subtitles=${escapedAssPath}:fontsdir=${fontsDirEscaped}`,
+        description: 'subtitles filter with fontsdir',
+      });
+    }
+
+    // Strategy 2: subtitles filter without fontsdir
+    strategies.push({
+      filter: `subtitles=${escapedAssPath}`,
+      description: 'subtitles filter (default fonts)',
+    });
+
+    // Strategy 3: ass filter without fontsdir (fallback)
+    strategies.push({
+      filter: `ass=${escapedAssPath}`,
+      description: 'ass filter (default fonts)',
+    });
+    
+    // Strategy 4: Try with original Windows backslashes (heavily escaped)
+    const heavyEscapedPath = assPath
+      .replace(/\\/g, '\\\\\\\\')  // Each backslash becomes 4 backslashes
+      .replace(/:/g, '\\\\:');       // Each colon gets escaped with 2 backslashes
+    strategies.push({
+      filter: `subtitles=${heavyEscapedPath}`,
+      description: 'subtitles filter (Windows backslash escaping)',
+    });
+  } else {
+    // On Unix-like systems, use subtitles filter with forward slashes
+    const normalizedAssPath = assPath.replace(/\\/g, '/');
+    strategies.push({
+      filter: `subtitles=${normalizedAssPath}`,
+      description: 'subtitles filter',
+    });
+  }
+
+  // Try each strategy in order until one succeeds
+  let lastError: Error | null = null;
+  
+  for (let i = 0; i < strategies.length; i++) {
+    const strategy = strategies[i];
+    console.log(
+      `[VideoComposition] Attempting strategy ${i + 1}/${strategies.length}: ${strategy.description}`,
+    );
+    console.log(`[VideoComposition] Filter string: ${strategy.filter}`);
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg()
+          .input(inputVideoPath)
+          .videoFilters(strategy.filter)
+          .outputOptions([
+            '-c:v libx264',
+            '-crf 18',
+            '-preset medium',
+            '-c:a copy',
+            '-pix_fmt yuv420p',
+          ])
+          .output(outputVideoPath)
+          .on('start', (cmd) =>
+            console.log(`[VideoComposition] FFmpeg command: ${cmd}`),
+          )
+          .on('progress', (progress) => {
+            if (progress.percent != null) {
+              console.log(
+                `[VideoComposition] Subtitle burn progress: ${Math.round(progress.percent)}%`,
+              );
+            }
+          })
+          .on('end', () => {
+            console.log(
+              `[VideoComposition] Subtitle burn completed using: ${strategy.description}`,
+            );
+            resolve();
+          })
+          .on('error', (error, _stdout, stderr) => {
+            console.error(
+              `[VideoComposition] Strategy failed (${strategy.description}): ${error.message}`,
+            );
+            if (stderr) {
+              console.error(
+                `[VideoComposition] FFmpeg stderr: ${stderr.slice(-500)}`,
+              );
+            }
+            reject(error);
+          })
+          .run();
+      });
+
+      // If we reach here, the strategy succeeded
+      console.log(
+        `[VideoComposition] Successfully burned captions using: ${strategy.description}`,
+      );
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.warn(
+        `[VideoComposition] Strategy ${i + 1}/${strategies.length} failed, trying next...`,
+      );
+    }
+  }
+
+  // All strategies failed
+  throw new Error(
+    `Failed to burn captions after trying ${strategies.length} strategies. Last error: ${lastError?.message}`,
+  );
+}
+
+ipcMain.handle(
+  'project:compose-timeline-video',
+  async (
+    _event,
+    timelineItems: TimelineItem[],
+    projectDirectory: string,
+    audioPath?: string,
+    overlayItems?: OverlayItem[],
+    textOverlayCues?: TextOverlayCue[],
+  ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
+    console.log('[VideoComposition] Starting video composition...');
+    console.log('[VideoComposition] Timeline items:', timelineItems.length);
+
+    if (!timelineItems || timelineItems.length === 0) {
+      console.error('[VideoComposition] No timeline items to compose');
+      return { success: false, error: 'No timeline items to compose' };
+    }
+
+    const tempDir = path.join(projectDirectory, '.kshana', 'temp');
+    await fs.mkdir(tempDir, { recursive: true });
+    console.log('[VideoComposition] Temp directory:', tempDir);
+
+    const segmentFiles: string[] = [];
+    const cleanupFiles: string[] = [];
+    const normalizedOverlayItems: Array<OverlayItem & { absolutePath: string }> = [];
+
+    if (overlayItems && overlayItems.length > 0) {
+      for (const overlay of overlayItems) {
+        let cleanPath = overlay.path.replace(/^file:\/\/\/?/, '');
+        if (/^\/[A-Za-z]:/.test(cleanPath)) {
+          cleanPath = cleanPath.slice(1);
+        }
+        if (!cleanPath || cleanPath.trim() === '') {
+          console.warn('[VideoComposition] Skipping overlay: empty path');
+          continue;
+        }
+
+        const absolutePath = path.isAbsolute(cleanPath)
+          ? cleanPath
+          : path.join(projectDirectory, cleanPath);
+
+        try {
+          const stats = await fs.stat(absolutePath);
+          if (stats.isDirectory()) {
+            console.warn(
+              `[VideoComposition] Skipping overlay: path is a directory: ${absolutePath}`,
+            );
+            continue;
+          }
+        } catch (error) {
+          console.warn(
+            `[VideoComposition] Skipping overlay: file not found: ${absolutePath}`,
+            error,
+          );
+          continue;
+        }
+
+        normalizedOverlayItems.push({ ...overlay, absolutePath });
+      }
+    }
+
+    try {
+      // Process each timeline item
+      for (let i = 0; i < timelineItems.length; i++) {
+        const item = timelineItems[i]!;
+        const segmentPath = path.join(tempDir, `segment-${i}.mp4`);
+        console.log(
+          `[VideoComposition] Processing segment ${i + 1}/${timelineItems.length}: ${item.type} (${item.duration}s)`,
+        );
+
+        if (item.type === 'video') {
+          // For video segments, use the full video file
+          // The timeline startTime/endTime are for positioning, not extraction
+          // Strip file:// protocol if present, handling Windows drive letters
+          let cleanPath = item.path.replace(/^file:\/\/\/?/, '');
+          if (/^\/[A-Za-z]:/.test(cleanPath)) {
+            cleanPath = cleanPath.slice(1);
+          }
+
+          // Skip items with empty paths
+          if (!cleanPath || cleanPath.trim() === '') {
+            console.warn(
+              `[VideoComposition] Skipping video segment ${i + 1}: empty path`,
+            );
+            continue;
+          }
+
+          const absolutePath = path.isAbsolute(cleanPath)
+            ? cleanPath
+            : path.join(projectDirectory, cleanPath);
+
+          console.log(
+            `[VideoComposition] Video segment ${i + 1}: ${absolutePath}`,
+          );
+
+          // Check if path exists and is a file (not a directory)
+          try {
+            const stats = await fs.stat(absolutePath);
+            if (stats.isDirectory()) {
+              console.warn(
+                `[VideoComposition] Skipping video segment ${i + 1}: path is a directory: ${absolutePath}`,
+              );
+              continue;
+            }
+            console.log(
+              `[VideoComposition] Video file exists: ${absolutePath}`,
+            );
+          } catch (error) {
+            if (
+              error instanceof Error &&
+              error.message.includes('is a directory')
+            ) {
+              console.warn(
+                `[VideoComposition] Skipping video segment ${i + 1}: path is a directory`,
+              );
+              continue;
+            }
+            console.warn(
+              `[VideoComposition] Skipping video segment ${i + 1}: file not found: ${absolutePath}`,
+            );
+            continue;
+          }
+
+          console.log(
+            `[VideoComposition] Converting video segment ${i + 1}...`,
+          );
+          await new Promise<void>((resolve, reject) => {
+            const command = ffmpeg(absolutePath);
+            if (
+              typeof item.sourceOffsetSeconds === 'number' &&
+              item.sourceOffsetSeconds > 0
+            ) {
+              command.inputOptions([`-ss ${item.sourceOffsetSeconds}`]);
+            }
+
+            command
+              .outputOptions([
+                '-c:v libx264',
+                '-c:a aac',
+                '-preset medium',
+                '-crf 23',
+                '-pix_fmt yuv420p',
+                '-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+                '-t',
+                item.duration.toString(), // Limit to segment duration
+              ])
+              .output(segmentPath)
+              .on('start', (commandLine) => {
+                console.log(
+                  `[VideoComposition] FFmpeg command: ${commandLine}`,
+                );
+              })
+              .on('progress', (progress) => {
+                if (progress.percent) {
+                  console.log(
+                    `[VideoComposition] Video segment ${i + 1} progress: ${Math.round(progress.percent)}%`,
+                  );
+                }
+              })
+              .on('end', () => {
+                console.log(
+                  `[VideoComposition] Video segment ${i + 1} completed`,
+                );
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error(
+                  `[VideoComposition] Video segment ${i + 1} error:`,
+                  err,
+                );
+                reject(err);
+              })
+              .run();
+          });
+
+          segmentFiles.push(segmentPath);
+          cleanupFiles.push(segmentPath);
+        } else if (item.type === 'image') {
+          // Convert image to video
+          // Strip file:// protocol if present, handling Windows drive letters
+          let cleanPath = item.path.replace(/^file:\/\/\/?/, '');
+          if (/^\/[A-Za-z]:/.test(cleanPath)) {
+            cleanPath = cleanPath.slice(1);
+          }
+
+          // Skip items with empty paths
+          if (!cleanPath || cleanPath.trim() === '') {
+            console.warn(
+              `[VideoComposition] Skipping image segment ${i + 1}: empty path`,
+            );
+            continue;
+          }
+
+          const absolutePath = path.isAbsolute(cleanPath)
+            ? cleanPath
+            : path.join(projectDirectory, cleanPath);
+
+          console.log(
+            `[VideoComposition] Image segment ${i + 1}: ${absolutePath}`,
+          );
+
+          // Check if file exists
+          try {
+            await fs.access(absolutePath);
+            console.log(
+              `[VideoComposition] Image file exists: ${absolutePath}`,
+            );
+          } catch {
+            console.warn(
+              `[VideoComposition] Skipping image segment ${i + 1}: file not found: ${absolutePath}`,
+            );
+            continue;
+          }
+
+          console.log(
+            `[VideoComposition] Converting image segment ${i + 1} to video (${item.duration}s)...`,
+          );
+          await new Promise<void>((resolve, reject) => {
+            ffmpeg(absolutePath)
+              .inputOptions(['-loop 1'])
+              .outputOptions([
+                '-t',
+                item.duration.toString(),
+                '-c:v libx264',
+                '-preset medium',
+                '-crf 23',
+                '-pix_fmt yuv420p',
+                '-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+              ])
+              .output(segmentPath)
+              .on('start', (commandLine) => {
+                console.log(
+                  `[VideoComposition] FFmpeg command: ${commandLine}`,
+                );
+              })
+              .on('progress', (progress) => {
+                if (progress.percent) {
+                  console.log(
+                    `[VideoComposition] Image segment ${i + 1} progress: ${Math.round(progress.percent)}%`,
+                  );
+                }
+              })
+              .on('end', () => {
+                console.log(
+                  `[VideoComposition] Image segment ${i + 1} completed`,
+                );
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error(
+                  `[VideoComposition] Image segment ${i + 1} error:`,
+                  err,
+                );
+                reject(err);
+              })
+              .run();
+          });
+
+          let finalSegmentPath = segmentPath;
+          cleanupFiles.push(segmentPath);
+
+          if (normalizedOverlayItems.length > 0) {
+            const overlaysForItem = normalizedOverlayItems.filter(
+              (overlay) =>
+                overlay.startTime >= item.startTime &&
+                overlay.endTime <= item.endTime,
+            );
+            const orderedOverlays = overlaysForItem.sort(
+              (a, b) => a.startTime - b.startTime,
+            );
+
+            if (orderedOverlays.length > 0) {
+              const overlaySegmentPath = path.join(
+                tempDir,
+                `segment-${i}-overlays.mp4`,
+              );
+              const filterParts: string[] = ['[0:v]setpts=PTS-STARTPTS[base0]'];
+              let currentBase = 'base0';
+
+              console.log(
+                `[VideoComposition] Applying ${orderedOverlays.length} overlay(s) to image segment ${i + 1}`,
+                orderedOverlays.map((overlay) => ({
+                  startTime: overlay.startTime,
+                  endTime: overlay.endTime,
+                  path: overlay.absolutePath,
+                })),
+              );
+
+              orderedOverlays.forEach((overlay, overlayIndex) => {
+                const overlayOffset = Math.max(
+                  0,
+                  overlay.startTime - item.startTime,
+                );
+                const inputIndex = overlayIndex + 1;
+                const overlayLabel = `ov${overlayIndex}`;
+                const nextBase = `base${overlayIndex + 1}`;
+
+                filterParts.push(
+                  `[${inputIndex}:v]format=rgba,setpts=PTS-STARTPTS+${overlayOffset}/TB[${overlayLabel}]`,
+                );
+                filterParts.push(
+                  `[${currentBase}][${overlayLabel}]overlay=(W-w)/2:(H-h)/2:format=auto:eof_action=pass[${nextBase}]`,
+                );
+                currentBase = nextBase;
+              });
+
+              await new Promise<void>((resolve, reject) => {
+                const command = ffmpeg(segmentPath);
+                orderedOverlays.forEach((overlay) => {
+                  command
+                    .input(overlay.absolutePath)
+                    .inputOptions(['-c:v', 'libvpx-vp9']);
+                });
+
+                command
+                  .complexFilter(filterParts.join(';'))
+                  .outputOptions([
+                    '-map',
+                    `[${currentBase}]`,
+                    '-c:v libx264',
+                    '-preset medium',
+                    '-crf 23',
+                    '-pix_fmt yuv420p',
+                    '-an',
+                    '-t',
+                    item.duration.toString(),
+                  ])
+                  .output(overlaySegmentPath)
+                  .on('start', (cmd) => {
+                    console.log(
+                      `[VideoComposition] Overlay FFmpeg command for segment ${i + 1}: ${cmd}`,
+                    );
+                  })
+                  .on('end', () => {
+                    console.log(
+                      `[VideoComposition] Overlay chain applied for segment ${i + 1}`,
+                    );
+                    resolve();
+                  })
+                  .on('error', (err) => {
+                    console.error(
+                      `[VideoComposition] Overlay error for segment ${i + 1}:`,
+                      err,
+                    );
+                    reject(err);
+                  })
+                  .run();
+              });
+
+              finalSegmentPath = overlaySegmentPath;
+              cleanupFiles.push(overlaySegmentPath);
+            }
+          }
+
+          segmentFiles.push(finalSegmentPath);
+        } else if (item.type === 'placeholder') {
+          // Create black video frames
+          console.log(
+            `[VideoComposition] Creating placeholder segment ${i + 1} (${item.duration}s)...`,
+          );
+          await new Promise<void>((resolve, reject) => {
+            ffmpeg()
+              .input(`color=c=black:s=1920x1080:d=${item.duration}`)
+              .inputOptions(['-f lavfi'])
+              .outputOptions([
+                '-c:v libx264',
+                '-preset medium',
+                '-crf 23',
+                '-pix_fmt yuv420p',
+              ])
+              .output(segmentPath)
+              .on('start', (commandLine) => {
+                console.log(
+                  `[VideoComposition] FFmpeg command: ${commandLine}`,
+                );
+              })
+              .on('end', () => {
+                console.log(
+                  `[VideoComposition] Placeholder segment ${i + 1} completed`,
+                );
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error(
+                  `[VideoComposition] Placeholder segment ${i + 1} error:`,
+                  err,
+                );
+                reject(err);
+              })
+              .run();
+          });
+
+          segmentFiles.push(segmentPath);
+          cleanupFiles.push(segmentPath);
+        }
+      }
+
+      // Check if we have any valid segments
+      if (segmentFiles.length === 0) {
+        console.error(
+          '[VideoComposition] No valid segments to compose. All timeline items were skipped.',
+        );
+        return {
+          success: false,
+          error:
+            'No valid segments found. All timeline items were skipped due to missing or invalid file paths.',
+        };
+      }
+
+      console.log(
+        `[VideoComposition] All ${segmentFiles.length} segments processed. Creating concat list...`,
+      );
+
+      // Create concat file list
+      const concatListPath = path.join(tempDir, 'concat-list.txt');
+      const concatList = segmentFiles
+        .map((file) => `file '${file.replace(/'/g, "'\\''")}'`)
+        .join('\n');
+      await fs.writeFile(concatListPath, concatList, 'utf-8');
+      cleanupFiles.push(concatListPath);
+      console.log(
+        `[VideoComposition] Concat list created with ${segmentFiles.length} files`,
+      );
+
+      // Step 1: Concatenate all video segments
+      const concatenatedVideoPath = path.join(
+        tempDir,
+        'concatenated-video.mp4',
+      );
+      console.log(
+        `[VideoComposition] Concatenating segments into video: ${concatenatedVideoPath}`,
+      );
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg()
+          .input(concatListPath)
+          .inputOptions(['-f concat', '-safe 0'])
+          .outputOptions([
+            '-c copy', // Copy streams without re-encoding for speed
+          ])
+          .output(concatenatedVideoPath)
+          .on('start', (commandLine) => {
+            console.log(
+              `[VideoComposition] FFmpeg concat command: ${commandLine}`,
+            );
+          })
+          .on('progress', (progress) => {
+            if (progress.percent) {
+              console.log(
+                `[VideoComposition] Concatenation progress: ${Math.round(progress.percent)}%`,
+              );
+            }
+          })
+          .on('end', () => {
+            console.log(`[VideoComposition] Concatenation completed`);
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error(`[VideoComposition] Concatenation error:`, err);
+            reject(err);
+          })
+          .run();
+      });
+
+      // Step 2: Mix audio if provided
+      const baseOutputPath = path.join(tempDir, 'composed-video.mp4');
+      if (audioPath) {
+        // Normalize audio path (strips file://, resolves relative paths)
+        const normalizedAudioPath = await normalizePathForFFmpeg(
+          audioPath,
+          projectDirectory,
+        );
+
+        if (!normalizedAudioPath) {
+          console.warn(
+            '[VideoComposition] Audio path is empty after normalization',
+          );
+          await fs.copyFile(concatenatedVideoPath, baseOutputPath);
+          console.log(
+            '[VideoComposition] No audio track provided, using video only',
+          );
+        } else {
+          // Check if audio file exists
+          try {
+            await fs.access(normalizedAudioPath);
+            console.log(
+              `[VideoComposition] Mixing audio track: ${normalizedAudioPath}`,
+            );
+
+            await new Promise<void>((resolve, reject) => {
+              ffmpeg()
+                .input(concatenatedVideoPath)
+                .input(normalizedAudioPath)
+                .outputOptions([
+                  '-c:v copy', // Copy video stream (no re-encoding)
+                  '-c:a aac', // Encode audio to AAC format
+                  '-map 0:v:0', // Use video from first input (concatenated video)
+                  '-map 1:a:0', // Use audio from second input (audio file)
+                  '-shortest', // End when shortest stream ends (prevents length mismatch)
+                ])
+                .output(baseOutputPath)
+                .on('start', (commandLine) => {
+                  console.log(
+                    `[VideoComposition] FFmpeg audio mix command: ${commandLine}`,
+                  );
+                })
+                .on('progress', (progress) => {
+                  if (progress.percent) {
+                    console.log(
+                      `[VideoComposition] Audio mixing progress: ${Math.round(progress.percent)}%`,
+                    );
+                  }
+                })
+                .on('end', () => {
+                  console.log(`[VideoComposition] Audio mixing completed`);
+                  resolve();
+                })
+                .on('error', (err) => {
+                  console.error(`[VideoComposition] Audio mixing error:`, err);
+                  // Fall back to video-only if audio mixing fails
+                  console.warn(
+                    '[VideoComposition] Falling back to video-only output',
+                  );
+                  fs.copyFile(concatenatedVideoPath, baseOutputPath)
+                    .then(() => resolve())
+                    .catch((copyErr) => {
+                      console.error(
+                        '[VideoComposition] Failed to copy video-only output:',
+                        copyErr,
+                      );
+                      reject(err);
+                    });
+                })
+                .run();
+            });
+          } catch (error) {
+            // Audio file doesn't exist - use video only
+            console.warn(
+              `[VideoComposition] Audio file not found: ${normalizedAudioPath}, using video only`,
+            );
+            await fs.copyFile(concatenatedVideoPath, baseOutputPath);
+          }
+        }
+      } else {
+        // No audio provided - just use concatenated video
+        console.log(
+          '[VideoComposition] No audio track provided, using video only',
+        );
+        await fs.copyFile(concatenatedVideoPath, baseOutputPath);
+      }
+
+      let finalOutputPath = baseOutputPath;
+
+      if (textOverlayCues && textOverlayCues.length > 0) {
+        const assPath = path.join(tempDir, 'word-captions.ass');
+        const captionedOutputPath = path.join(
+          tempDir,
+          'composed-video-captions.mp4',
+        );
+        const assContent = buildAssFromTextOverlayCues(textOverlayCues);
+        await fs.writeFile(assPath, assContent, 'utf-8');
+        cleanupFiles.push(assPath);
+
+        try {
+          await burnWordCaptionsIntoVideo(
+            baseOutputPath,
+            assPath,
+            captionedOutputPath,
+          );
+          cleanupFiles.push(captionedOutputPath);
+          finalOutputPath = captionedOutputPath;
+        } catch (error) {
+          console.warn(
+            `[VideoComposition] Word caption burn failed, proceeding without captions: ${
+              error instanceof Error ? error.message : 'Unknown error'
+            }`,
+          );
+        }
+      }
+
+      // Verify output file exists
+      try {
+        const stats = await fs.stat(finalOutputPath);
+        console.log(
+          `[VideoComposition] Output file created: ${finalOutputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`,
+        );
+      } catch {
+        console.error(
+          `[VideoComposition] Output file not found: ${finalOutputPath}`,
+        );
+        throw new Error('Composed video file was not created');
+      }
+
+      console.log(
+        '[VideoComposition] Video composition completed successfully!',
+      );
+      return { success: true, outputPath: finalOutputPath };
+    } catch (error) {
+      console.error('[VideoComposition] Error during composition:', error);
+      // Clean up temporary files on error
+      console.log(
+        `[VideoComposition] Cleaning up ${cleanupFiles.length} temporary files...`,
+      );
+      for (const file of cleanupFiles) {
+        try {
+          await fs.unlink(file);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[VideoComposition] Composition failed: ${errorMessage}`);
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    }
+  },
+);
+
 // Forward file change events to renderer
 fileSystemManager.on('file-change', (event: FileChangeEvent) => {
   if (mainWindow) {
     mainWindow.webContents.send('project:file-changed', event);
+    if (event.path.endsWith('.kshana/agent/manifest.json')) {
+      mainWindow.webContents.send('project:manifest-written', {
+        path: event.path,
+        at: Date.now(),
+      });
+    }
   }
+});
+
+// Remotion IPC handlers
+ipcMain.handle(
+  'remotion:render-infographics',
+  async (
+    _event,
+    projectDirectory: string,
+    timelineItems: RemotionTimelineItem[],
+    infographicPlacements: ParsedInfographicPlacement[],
+  ) => {
+    return remotionManager.startRender(
+      projectDirectory,
+      timelineItems,
+      infographicPlacements,
+    );
+  },
+);
+
+ipcMain.handle('remotion:cancel-job', async (_event, jobId: string) => {
+  remotionManager.cancelJob(jobId);
+});
+
+ipcMain.handle('remotion:get-job', async (_event, jobId: string) => {
+  return remotionManager.getJob(jobId);
+});
+
+remotionManager.on('progress', (progress) => {
+  if (mainWindow) {
+    mainWindow.webContents.send('remotion:progress', progress);
+  }
+});
+
+remotionManager.on('job-complete', (job) => {
+  if (mainWindow) {
+    mainWindow.webContents.send('remotion:job-complete', job);
+  }
+});
+
+// Logger IPC handlers
+ipcMain.handle('logger:init', () => {
+  desktopLogger.initUILog();
+});
+
+ipcMain.handle('logger:user-input', (_event, content: string) => {
+  desktopLogger.logUserInput(content);
+});
+
+ipcMain.handle(
+  'logger:agent-text',
+  (_event, text: string, agentName?: string) => {
+    desktopLogger.logAgentText(text, agentName);
+  },
+);
+
+ipcMain.handle(
+  'logger:tool-start',
+  (_event, toolName: string, args?: Record<string, unknown>) => {
+    desktopLogger.logToolStart(toolName, args);
+  },
+);
+
+ipcMain.handle(
+  'logger:tool-complete',
+  (
+    _event,
+    toolName: string,
+    result: unknown,
+    duration?: number,
+    isError?: boolean,
+  ) => {
+    desktopLogger.logToolComplete(toolName, result, duration, isError);
+  },
+);
+
+ipcMain.handle(
+  'logger:question',
+  (
+    _event,
+    question: string,
+    options?: Array<{ label: string; description?: string }>,
+    isConfirmation?: boolean,
+    autoApproveTimeoutMs?: number,
+  ) => {
+    desktopLogger.logQuestion(
+      question,
+      options,
+      isConfirmation,
+      autoApproveTimeoutMs,
+    );
+  },
+);
+
+ipcMain.handle(
+  'logger:status-change',
+  (_event, status: string, agentName?: string, message?: string) => {
+    desktopLogger.logStatusChange(status, agentName, message);
+  },
+);
+
+ipcMain.handle(
+  'logger:phase-transition',
+  (
+    _event,
+    fromPhase: string,
+    toPhase: string,
+    success: boolean,
+    reason?: string,
+  ) => {
+    desktopLogger.logPhaseTransition(fromPhase, toPhase, success, reason);
+  },
+);
+
+ipcMain.handle(
+  'logger:todo-update',
+  (_event, todos: Array<{ content: string; status: string }>) => {
+    desktopLogger.logTodoUpdate(todos);
+  },
+);
+
+ipcMain.handle(
+  'logger:error',
+  (_event, error: string, context?: Record<string, unknown>) => {
+    desktopLogger.logError(error, context);
+  },
+);
+
+ipcMain.handle('logger:session-end', () => {
+  desktopLogger.logSessionEnd();
+});
+
+ipcMain.handle('logger:get-paths', () => {
+  return desktopLogger.getLogPaths();
 });
 
 if (process.env.NODE_ENV === 'production') {
@@ -407,9 +1771,6 @@ const createWindow = async () => {
       webSecurity: false, // Allow file:// protocol for media preview
     },
   });
-
-  // Open DevTools to debug black screen
-  mainWindow.webContents.openDevTools();
 
   const htmlPath = resolveHtmlPath('index.html');
   log.info(`Loading HTML from: ${htmlPath}`);
@@ -493,6 +1854,16 @@ const createWindow = async () => {
  * Add event listeners...
  */
 
+// Handle unhandled promise rejections to prevent crashes
+process.on('unhandledRejection', (reason, promise) => {
+  log.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  log.error('Uncaught Exception:', error);
+});
+
 app.on('window-all-closed', () => {
   // Respect the OSX convention of having the application in memory even
   // after all windows have been closed
@@ -502,16 +1873,20 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  backendManager.stop().catch((error) => {
-    log.error(`Failed to stop backend: ${(error as Error).message}`);
+  desktopLogger.logSessionEnd();
+  serverConnectionManager.disconnect().catch((error) => {
+    log.error(`Failed to disconnect from server: ${(error as Error).message}`);
   });
 });
 
 const bootstrapBackend = async () => {
   try {
-    await backendManager.start(buildBackendEnv());
+    const settings = getSettings();
+    await serverConnectionManager.connect({
+      serverUrl: settings.serverUrl || 'http://localhost:8001',
+    });
   } catch (error) {
-    log.error(`Failed to bootstrap backend: ${(error as Error).message}`);
+    log.error(`Failed to connect to server: ${(error as Error).message}`);
   }
 };
 
@@ -527,6 +1902,14 @@ const startBackendInBackground = () => {
 app
   .whenReady()
   .then(async () => {
+    // Initialize logger for this session
+    desktopLogger.initUILog();
+
+    // Clean up stale Remotion temp jobs from previous sessions
+    remotionManager.cleanupOnStartup().catch((err) => {
+      log.warn('[RemotionManager] Startup cleanup error:', err);
+    });
+
     // Create window first so UI appears immediately
     await createWindow();
 

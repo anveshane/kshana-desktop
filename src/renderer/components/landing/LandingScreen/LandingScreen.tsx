@@ -4,7 +4,7 @@ import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import RecentProjects from '../RecentProjects/RecentProjects';
 import styles from './LandingScreen.module.scss';
 
-const APP_VERSION = 'v1.0.2';
+const APP_VERSION = 'v1.0.5';
 
 export default function LandingScreen() {
   const { recentProjects, openProject, isLoading } = useWorkspace();

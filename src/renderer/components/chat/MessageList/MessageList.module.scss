@@ -42,3 +42,56 @@
   padding: $spacing-md $spacing-lg;
 }
 
+.phaseBanner {
+  margin: $spacing-lg 0;
+  padding: $spacing-md 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: center;
+}
+
+.phaseBannerContent {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: $radius-md;
+}
+
+.phaseIcon {
+  font-size: $font-size-lg;
+}
+
+.phaseName {
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  text-transform: capitalize;
+}
+
+.thinkingIndicator {
+  padding: $spacing-md $spacing-lg;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+}
+
+.thinkingText {
+  color: #06b6d4; // cyan color
+}
+
+.thinkingDots {
+  display: inline-block;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+

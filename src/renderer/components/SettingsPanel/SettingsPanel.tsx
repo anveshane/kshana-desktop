@@ -8,14 +8,22 @@ type Props = {
   onClose: () => void;
   onSave: (settings: AppSettings) => Promise<void> | void;
   isRestarting: boolean;
+  error?: string | null;
 };
 
 const emptySettings: AppSettings = {
+  serverUrl: 'http://localhost:8001',
   comfyuiUrl: 'http://localhost:8000',
   lmStudioUrl: 'http://127.0.0.1:1234',
   lmStudioModel: 'qwen3',
   llmProvider: 'lmstudio',
   googleApiKey: '',
+  geminiModel: 'gemini-2.5-flash',
+  openaiApiKey: '',
+  openaiBaseUrl: 'https://api.openai.com/v1',
+  openaiModel: 'gpt-4o',
+  openRouterApiKey: '',
+  openRouterModel: 'z-ai/glm-4.7-flash',
 };
 
 export default function SettingsPanel({
@@ -24,6 +32,7 @@ export default function SettingsPanel({
   onClose,
   onSave,
   isRestarting,
+  error,
 }: Props) {
   const [form, setForm] = useState<AppSettings>(settings ?? emptySettings);
 
@@ -76,8 +85,8 @@ export default function SettingsPanel({
       <div className={styles.panel}>
         <div className={styles.header}>
           <div>
-            <h2>Runtime settings</h2>
-            <p>Values apply to the kshana-ink backend at the next restart.</p>
+            <h2>Settings</h2>
+            <p>Configure the backend server connection.</p>
           </div>
           <button
             type="button"
@@ -90,6 +99,21 @@ export default function SettingsPanel({
         </div>
         <form className={styles.form} onSubmit={handleSubmit}>
           <label className={styles.label}>
+            Backend URL
+            <input
+              type="url"
+              className={styles.input}
+              value={form.serverUrl}
+              onChange={(event) =>
+                handleInput('serverUrl', event.target.value)
+              }
+              placeholder="http://localhost:8001"
+              required
+            />
+          </label>
+
+          {/* TODO: Re-enable when needed
+          <label className={styles.label}>
             ComfyUI URL
             <input
               type="url"
@@ -100,52 +124,6 @@ export default function SettingsPanel({
               }
               placeholder="http://localhost:8000"
               required
-            />
-          </label>
-
-          <label className={styles.label}>
-            LM Studio URL
-            <input
-              type="url"
-              className={styles.input}
-              value={form.lmStudioUrl}
-              onChange={(event) =>
-                handleInput('lmStudioUrl', event.target.value)
-              }
-              placeholder="http://127.0.0.1:1234"
-              required
-            />
-          </label>
-
-          <label className={styles.label}>
-            LM Studio Model ID
-            <input
-              type="text"
-              className={styles.input}
-              value={form.lmStudioModel}
-              onChange={(event) =>
-                handleInput('lmStudioModel', event.target.value)
-              }
-              placeholder="qwen3"
-              required
-            />
-          </label>
-
-          <label className={styles.label}>
-            Preferred backend port
-            <input
-              type="number"
-              className={styles.input}
-              min={1025}
-              max={65535}
-              value={form.preferredPort ?? ''}
-              onChange={(event) =>
-                handleInput(
-                  'preferredPort',
-                  event.target.value ? Number(event.target.value) : undefined,
-                )
-              }
-              placeholder="8001"
             />
           </label>
 
@@ -184,23 +162,181 @@ export default function SettingsPanel({
                 />
                 Gemini (cloud)
               </label>
+              <label className={styles.radioLabel}>
+                <input
+                  type="radio"
+                  className={styles.radioInput}
+                  name="llm-provider"
+                  value="openai"
+                  checked={form.llmProvider === 'openai'}
+                  onChange={(event) =>
+                    handleInput(
+                      'llmProvider',
+                      event.target.value as AppSettings['llmProvider'],
+                    )
+                  }
+                />
+                OpenAI (cloud)
+              </label>
+              <label className={styles.radioLabel}>
+                <input
+                  type="radio"
+                  className={styles.radioInput}
+                  name="llm-provider"
+                  value="openrouter"
+                  checked={form.llmProvider === 'openrouter'}
+                  onChange={(event) =>
+                    handleInput(
+                      'llmProvider',
+                      event.target.value as AppSettings['llmProvider'],
+                    )
+                  }
+                />
+                OpenRouter (cloud)
+              </label>
             </div>
           </fieldset>
 
+          {form.llmProvider === 'lmstudio' && (
+            <>
+              <label className={styles.label}>
+                LM Studio URL
+                <input
+                  type="url"
+                  className={styles.input}
+                  value={form.lmStudioUrl}
+                  onChange={(event) =>
+                    handleInput('lmStudioUrl', event.target.value)
+                  }
+                  placeholder="http://127.0.0.1:1234"
+                  required
+                />
+              </label>
+              <label className={styles.label}>
+                LM Studio Model ID
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={form.lmStudioModel}
+                  onChange={(event) =>
+                    handleInput('lmStudioModel', event.target.value)
+                  }
+                  placeholder="qwen3"
+                  required
+                />
+              </label>
+            </>
+          )}
+
           {form.llmProvider === 'gemini' && (
-            <label className={styles.label}>
-              Google API Key
-              <input
-                type="password"
-                className={styles.input}
-                value={form.googleApiKey}
-                onChange={(event) =>
-                  handleInput('googleApiKey', event.target.value)
-                }
-                placeholder="AIza..."
-                required
-              />
-            </label>
+            <>
+              <label className={styles.label}>
+                Google API Key
+                <input
+                  type="password"
+                  className={styles.input}
+                  value={form.googleApiKey}
+                  onChange={(event) =>
+                    handleInput('googleApiKey', event.target.value)
+                  }
+                  placeholder="AIza..."
+                  required
+                />
+              </label>
+              <label className={styles.label}>
+                Gemini Model ID
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={form.geminiModel}
+                  onChange={(event) =>
+                    handleInput('geminiModel', event.target.value)
+                  }
+                  placeholder="gemini-2.5-flash"
+                  required
+                />
+              </label>
+            </>
+          )}
+
+          {form.llmProvider === 'openai' && (
+            <>
+              <label className={styles.label}>
+                OpenAI API Key
+                <input
+                  type="password"
+                  className={styles.input}
+                  value={form.openaiApiKey}
+                  onChange={(event) =>
+                    handleInput('openaiApiKey', event.target.value)
+                  }
+                  placeholder="sk-..."
+                  required
+                />
+              </label>
+              <label className={styles.label}>
+                OpenAI Base URL
+                <input
+                  type="url"
+                  className={styles.input}
+                  value={form.openaiBaseUrl}
+                  onChange={(event) =>
+                    handleInput('openaiBaseUrl', event.target.value)
+                  }
+                  placeholder="https://api.openai.com/v1"
+                  required
+                />
+              </label>
+              <label className={styles.label}>
+                OpenAI Model ID
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={form.openaiModel}
+                  onChange={(event) =>
+                    handleInput('openaiModel', event.target.value)
+                  }
+                  placeholder="gpt-4o"
+                  required
+                />
+              </label>
+            </>
+          )}
+
+          {form.llmProvider === 'openrouter' && (
+            <>
+              <label className={styles.label}>
+                OpenRouter API Key
+                <input
+                  type="password"
+                  className={styles.input}
+                  value={form.openRouterApiKey}
+                  onChange={(event) =>
+                    handleInput('openRouterApiKey', event.target.value)
+                  }
+                  placeholder="sk-or-v1-..."
+                  required
+                />
+              </label>
+              <label className={styles.label}>
+                OpenRouter Model ID
+                <input
+                  type="text"
+                  className={styles.input}
+                  value={form.openRouterModel}
+                  onChange={(event) =>
+                    handleInput('openRouterModel', event.target.value)
+                  }
+                  placeholder="z-ai/glm-4.7-flash"
+                  required
+                />
+              </label>
+            </>
+          )}
+          */}
+
+          {error && (
+            <div className={styles.error}>{error}</div>
           )}
 
           <div className={styles.actions}>
@@ -216,7 +352,7 @@ export default function SettingsPanel({
               className={styles.submitButton}
               disabled={isRestarting}
             >
-              {isRestarting ? 'Applying…' : 'Save & Restart'}
+              {isRestarting ? 'Reconnecting…' : 'Save & Reconnect'}
             </button>
           </div>
         </form>
