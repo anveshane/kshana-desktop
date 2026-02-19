@@ -292,11 +292,14 @@ export function useAudioController(
       // Only sync if difference exceeds threshold (prevent jitter)
       // Don't reset to 0 if audio is playing
       if (difference > 0.2 && expectedAudioTime > 0) {
-        // Clamp to valid range
-        const clampedTime = Math.max(
-          0,
-          Math.min(expectedAudioTime, audioFile.duration),
-        );
+        // Use the HTML element's native duration as fallback when metadata duration is 0
+        const effectiveDuration =
+          audioFile.duration ||
+          (Number.isFinite(audioElement.duration) ? audioElement.duration : 0);
+        const clampedTime =
+          effectiveDuration > 0
+            ? Math.max(0, Math.min(expectedAudioTime, effectiveDuration))
+            : expectedAudioTime;
 
         // Only update if clamped time is different from current
         if (Math.abs(audioElement.currentTime - clampedTime) > 0.1) {
@@ -333,14 +336,16 @@ export function useAudioController(
     const audioElement = audioRef.current;
 
     const handleEnded = () => {
-      // Get current playback time from ref (most up-to-date value)
       const currentPlaybackTime = playbackTimeRef.current;
+      const nativeDur = audioElement.duration;
+      const effectiveDuration =
+        audioFile.duration ||
+        (Number.isFinite(nativeDur) ? nativeDur : 0);
 
-      // Check if we're still within a video placement
       const videoEndTime = currentVideoItem?.endTime;
       const shouldStop = videoEndTime
-        ? currentPlaybackTime >= Math.max(audioFile.duration, videoEndTime)
-        : currentPlaybackTime >= audioFile.duration;
+        ? currentPlaybackTime >= Math.max(effectiveDuration, videoEndTime)
+        : effectiveDuration > 0 && currentPlaybackTime >= effectiveDuration;
 
       // Only pause playback if we're past both audio duration AND video end time (if video exists)
       if (shouldStop && onPlaybackStateChange) {

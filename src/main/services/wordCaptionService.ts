@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import { app } from 'electron';
 import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import type {
   downloadWhisperModel as downloadWhisperModelType,
   installWhisperCpp as installWhisperCppType,
@@ -56,13 +57,13 @@ const WORD_CAPTIONS_PATH = '.kshana/agent/content/word-captions.json';
 
 // In packaged builds, binaries are in app.asar.unpacked (not inside the read-only app.asar)
 let ffmpegBinaryPath = ffmpegInstaller.path;
+let ffprobeBinaryPath = ffprobeInstaller.path;
 if (app.isPackaged) {
   ffmpegBinaryPath = ffmpegBinaryPath.replace('app.asar', 'app.asar.unpacked');
+  ffprobeBinaryPath = ffprobeBinaryPath.replace('app.asar', 'app.asar.unpacked');
 }
 ffmpeg.setFfmpegPath(ffmpegBinaryPath);
-ffmpeg.setFfprobePath(
-  ffmpegBinaryPath.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1'),
-);
+ffmpeg.setFfprobePath(ffprobeBinaryPath);
 
 interface WhisperInstallerModule {
   installWhisperCpp: typeof installWhisperCppType;
@@ -228,7 +229,10 @@ function sanitizeWord(word: WordTimestamp): WordTimestamp | null {
 }
 
 function normalizeInputPath(projectDirectory: string, rawPath: string): string {
-  const stripped = rawPath.replace(/^file:\/\//, '');
+  let stripped = rawPath.replace(/^file:\/\/\/?/, '');
+  if (/^\/[A-Za-z]:/.test(stripped)) {
+    stripped = stripped.slice(1);
+  }
   if (path.isAbsolute(stripped)) return stripped;
   return path.join(projectDirectory, stripped);
 }

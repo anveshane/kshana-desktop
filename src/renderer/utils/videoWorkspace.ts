@@ -4,6 +4,8 @@
  * Handles video versioning, current.txt tracking, and metadata
  */
 
+import { stripFileProtocol } from './pathNormalizer';
+
 /**
  * Video metadata stored in vN_info.json files
  */
@@ -63,7 +65,7 @@ export async function copyVideoToScene(
   // Read video as base64 and write as binary (similar to images)
   try {
     // Remove file:// protocol if present
-    const cleanPath = videoPath.replace(/^file:\/\//, '');
+    const cleanPath = stripFileProtocol(videoPath);
 
     // Read video file as base64
     const base64DataUri =

@@ -65,6 +65,16 @@ export class ProjectService {
 
   private currentProject: KshanaProject | null = null;
 
+  private lastOpenTimestamp = 0;
+
+  private lastOpenDirectory: string | null = null;
+
+  private lastOpenResult: ProjectResult<KshanaProject> | null = null;
+
+  private pendingOpen: Promise<ProjectResult<KshanaProject>> | null = null;
+
+  private static readonly MIN_OPEN_INTERVAL_MS = 2000;
+
   /**
    * Gets the current project directory
    */
@@ -118,104 +128,126 @@ export class ProjectService {
   }
 
   /**
-   * Opens a project from the given directory
+   * Opens a project from the given directory.
+   * Rate-limited: subsequent calls for the same directory within MIN_OPEN_INTERVAL_MS
+   * return the cached result to avoid redundant disk reads from multiple trigger sources.
    */
   async openProject(directory: string): Promise<ProjectResult<KshanaProject>> {
-    try {
-      // Validate the project
-      const validation = await this.validateProject(directory);
-      if (!validation.isValid) {
+    const now = Date.now();
+    const sameDir = directory === this.lastOpenDirectory;
+
+    if (
+      sameDir &&
+      this.lastOpenResult &&
+      now - this.lastOpenTimestamp < ProjectService.MIN_OPEN_INTERVAL_MS
+    ) {
+      return this.lastOpenResult;
+    }
+
+    // Deduplicate concurrent calls: if one is already in flight, piggyback on it
+    if (sameDir && this.pendingOpen) {
+      return this.pendingOpen;
+    }
+
+    const doOpen = async (): Promise<ProjectResult<KshanaProject>> => {
+      try {
+        const validation = await this.validateProject(directory);
+        if (!validation.isValid) {
+          return {
+            success: false,
+            error: validation.errors.join('; '),
+          };
+        }
+
+        const agentState = await this.readAgentState(directory);
+        if (!agentState) {
+          return { success: false, error: 'Failed to read agent project file' };
+        }
+
+        let manifest = await this.readManifest(directory);
+        if (!manifest) {
+          manifest = createDefaultManifest(
+            agentState.id,
+            agentState.title || 'Untitled Project',
+            '1.0.0',
+          );
+          await this.writeManifest(directory, manifest);
+        }
+
+        const sameLoadedProject = this.projectDirectory === directory;
+        const inMemoryAssetManifest = sameLoadedProject
+          ? this.currentProject?.assetManifest ?? null
+          : null;
+
+        const assetManifestResult = await this.readAssetManifestWithStatus(
+          directory,
+        );
+        let assetManifest: AssetManifest;
+
+        if (assetManifestResult.status === 'ok' && assetManifestResult.manifest) {
+          assetManifest = assetManifestResult.manifest;
+          console.log('[ProjectService] Asset manifest loaded:', {
+            source: 'disk',
+            assetCount: assetManifest.assets.length,
+            imageAssets: assetManifest.assets.filter(
+              (a) => a.type === 'scene_image',
+            ).length,
+          });
+        } else if (assetManifestResult.status === 'missing') {
+          console.log('[ProjectService] Asset manifest missing, creating default', {
+            source: 'open_project',
+            path: ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
+          });
+          assetManifest = createDefaultAssetManifest();
+          await this.writeAssetManifest(directory, assetManifest);
+        } else {
+          console.warn('[ProjectService] Asset manifest invalid; preserving in-memory state when available', {
+            source: 'open_project',
+            path: ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
+            hasInMemoryManifest: !!inMemoryAssetManifest,
+            error: assetManifestResult.error,
+          });
+          assetManifest =
+            inMemoryAssetManifest ?? createDefaultAssetManifest();
+        }
+
+        let timelineState = await this.readTimelineState(directory);
+        if (!timelineState) {
+          timelineState = { ...DEFAULT_TIMELINE_STATE };
+        }
+
+        let contextIndex = await this.readContextIndex(directory);
+        if (!contextIndex) {
+          contextIndex = createDefaultContextIndex();
+        }
+
+        this.projectDirectory = directory;
+        this.currentProject = {
+          manifest,
+          agentState,
+          assetManifest,
+          timelineState,
+          contextIndex,
+        };
+
+        return { success: true, data: this.currentProject };
+      } catch (error) {
         return {
           success: false,
-          error: validation.errors.join('; '),
+          error: error instanceof Error ? error.message : 'Unknown error',
         };
       }
+    };
 
-      // Read agent state (primary source - required)
-      const agentState = await this.readAgentState(directory);
-      if (!agentState) {
-        return { success: false, error: 'Failed to read agent project file' };
-      }
-
-      // Read manifest (optional - generate from agent state if missing)
-      let manifest = await this.readManifest(directory);
-      if (!manifest) {
-        // Generate manifest from agent state for backward compatibility
-        manifest = createDefaultManifest(
-          agentState.id,
-          agentState.title || 'Untitled Project',
-          '1.0.0',
-        );
-        await this.writeManifest(directory, manifest);
-      }
-
-      const sameLoadedProject = this.projectDirectory === directory;
-      const inMemoryAssetManifest = sameLoadedProject
-        ? this.currentProject?.assetManifest ?? null
-        : null;
-
-      // Read asset manifest with explicit status handling.
-      // Missing file -> create default.
-      // Invalid JSON -> keep existing in-memory manifest when available.
-      const assetManifestResult = await this.readAssetManifestWithStatus(
-        directory,
-      );
-      let assetManifest: AssetManifest;
-
-      if (assetManifestResult.status === 'ok' && assetManifestResult.manifest) {
-        assetManifest = assetManifestResult.manifest;
-        console.log('[ProjectService] Asset manifest loaded:', {
-          source: 'disk',
-          assetCount: assetManifest.assets.length,
-          imageAssets: assetManifest.assets.filter(
-            (a) => a.type === 'scene_image',
-          ).length,
-        });
-      } else if (assetManifestResult.status === 'missing') {
-        console.log('[ProjectService] Asset manifest missing, creating default', {
-          source: 'open_project',
-          path: ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
-        });
-        assetManifest = createDefaultAssetManifest();
-        await this.writeAssetManifest(directory, assetManifest);
-      } else {
-        console.warn('[ProjectService] Asset manifest invalid; preserving in-memory state when available', {
-          source: 'open_project',
-          path: ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
-          hasInMemoryManifest: !!inMemoryAssetManifest,
-          error: assetManifestResult.error,
-        });
-        assetManifest =
-          inMemoryAssetManifest ?? createDefaultAssetManifest();
-      }
-
-      // Read timeline state (use default if missing)
-      let timelineState = await this.readTimelineState(directory);
-      if (!timelineState) {
-        timelineState = { ...DEFAULT_TIMELINE_STATE };
-      }
-
-      // Read context index (create default if missing)
-      let contextIndex = await this.readContextIndex(directory);
-      if (!contextIndex) {
-        contextIndex = createDefaultContextIndex();
-      }
-
-      this.projectDirectory = directory;
-      this.currentProject = {
-        manifest,
-        agentState,
-        assetManifest,
-        timelineState,
-        contextIndex,
-      };
-
-      return { success: true, data: this.currentProject };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
+    this.pendingOpen = doOpen();
+    try {
+      const result = await this.pendingOpen;
+      this.lastOpenTimestamp = Date.now();
+      this.lastOpenDirectory = directory;
+      this.lastOpenResult = result;
+      return result;
+    } finally {
+      this.pendingOpen = null;
     }
   }
 
@@ -421,6 +453,20 @@ export class ProjectService {
       try {
         return { status: 'ok', data: JSON.parse(content) as T };
       } catch (parseError) {
+        // Primary file is corrupt -- try the atomic-write temp file as fallback
+        try {
+          const tmpContent = await window.electron.project.readFile(`${path}.tmp`);
+          if (tmpContent) {
+            const tmpData = JSON.parse(tmpContent) as T;
+            console.warn(
+              `[ProjectService] Recovered from corrupt JSON via .tmp fallback: ${path}`,
+            );
+            return { status: 'ok', data: tmpData };
+          }
+        } catch {
+          // .tmp file also missing or corrupt -- fall through
+        }
+
         return {
           status: 'invalid',
           error:

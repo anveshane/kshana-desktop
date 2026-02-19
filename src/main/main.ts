@@ -14,6 +14,7 @@ import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import log from 'electron-log';
 import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import { normalizePathForFFmpeg } from './utils/pathNormalizer';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
@@ -373,6 +374,18 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'project:check-file-exists',
+  async (_event, filePath: string): Promise<boolean> => {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+);
+
+ipcMain.handle(
   'project:read-file-base64',
   async (_event, filePath: string): Promise<string | null> => {
     try {
@@ -503,7 +516,21 @@ ipcMain.handle(
     // Ensure directory exists before writing
     const dirPath = path.dirname(normalizedPath);
     await fs.mkdir(dirPath, { recursive: true });
-    return fs.writeFile(normalizedPath, content, 'utf-8');
+    // Atomic write: write to temp file then rename to avoid corruption.
+    // Falls back to direct write if rename fails (e.g. OneDrive on Windows).
+    const tmpPath = `${normalizedPath}.tmp`;
+    try {
+      await fs.writeFile(tmpPath, content, 'utf-8');
+      await fs.rename(tmpPath, normalizedPath);
+    } catch {
+      await fs.writeFile(normalizedPath, content, 'utf-8');
+      // Clean up orphaned tmp file if it exists
+      try {
+        await fs.unlink(tmpPath);
+      } catch {
+        // ignore
+      }
+    }
   },
 );
 
@@ -669,11 +696,12 @@ ipcMain.handle(
 // Configure ffmpeg/ffprobe to use bundled binaries
 // In packaged builds, binaries are in app.asar.unpacked (not inside the read-only app.asar)
 let ffmpegPath = ffmpegInstaller.path;
+let ffprobePath = ffprobeInstaller.path;
 if (app.isPackaged) {
   ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+  ffprobePath = ffprobePath.replace('app.asar', 'app.asar.unpacked');
 }
 ffmpeg.setFfmpegPath(ffmpegPath);
-const ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1');
 ffmpeg.setFfprobePath(ffprobePath);
 log.info('[FFmpeg] Paths configured:', { ffmpeg: ffmpegPath, ffprobe: ffprobePath });
 
@@ -783,21 +811,148 @@ async function burnWordCaptionsIntoVideo(
   assPath: string,
   outputVideoPath: string,
 ): Promise<void> {
-  const normalizedAssPath = assPath
-    .replace(/\\/g, '/')
-    .replace(/:/g, '\\:')
-    .replace(/,/g, '\\,');
+  // Validate ASS file exists
+  try {
+    await fs.access(assPath);
+    console.log(`[VideoComposition] ASS file validated: ${assPath}`);
+  } catch (error) {
+    throw new Error(`ASS file not found: ${assPath}`);
+  }
 
-  await new Promise<void>((resolve, reject) => {
-    ffmpeg()
-      .input(inputVideoPath)
-      .videoFilters(`subtitles=${normalizedAssPath}`)
-      .outputOptions(['-c:v libx264', '-crf 18', '-preset medium', '-c:a copy'])
-      .output(outputVideoPath)
-      .on('end', () => resolve())
-      .on('error', (error) => reject(error))
-      .run();
-  });
+  // Define multiple filter strategies to try in order
+  const strategies: Array<{ filter: string; description: string }> = [];
+
+  if (process.platform === 'win32') {
+    // On Windows, FFmpeg subtitle filters require heavy escaping:
+    // - Backslashes must be escaped as \\\\ (four backslashes)
+    // - Colons must be escaped as \\: (two backslashes + colon)
+    
+    // First, convert Windows backslashes to forward slashes
+    const normalizedAssPath = assPath.replace(/\\/g, '/');
+    
+    // Then escape for FFmpeg filter syntax:
+    // Escape colons: C:/path -> C\\:/path
+    const escapedAssPath = normalizedAssPath.replace(/:/g, '\\\\:');
+    
+    // Verify fonts directory exists
+    const fontsDir = 'C:/Windows/Fonts';
+    let fontsDirExists = false;
+    try {
+      await fs.access(fontsDir.replace(/\//g, '\\'));
+      fontsDirExists = true;
+      console.log(`[VideoComposition] Fonts directory validated: ${fontsDir}`);
+    } catch (error) {
+      console.warn(`[VideoComposition] Fonts directory not accessible: ${fontsDir}`);
+    }
+
+    if (fontsDirExists) {
+      // Strategy 1: subtitles filter with fontsdir
+      const fontsDirEscaped = 'C\\\\:/Windows/Fonts';
+      strategies.push({
+        filter: `subtitles=${escapedAssPath}:fontsdir=${fontsDirEscaped}`,
+        description: 'subtitles filter with fontsdir',
+      });
+    }
+
+    // Strategy 2: subtitles filter without fontsdir
+    strategies.push({
+      filter: `subtitles=${escapedAssPath}`,
+      description: 'subtitles filter (default fonts)',
+    });
+
+    // Strategy 3: ass filter without fontsdir (fallback)
+    strategies.push({
+      filter: `ass=${escapedAssPath}`,
+      description: 'ass filter (default fonts)',
+    });
+    
+    // Strategy 4: Try with original Windows backslashes (heavily escaped)
+    const heavyEscapedPath = assPath
+      .replace(/\\/g, '\\\\\\\\')  // Each backslash becomes 4 backslashes
+      .replace(/:/g, '\\\\:');       // Each colon gets escaped with 2 backslashes
+    strategies.push({
+      filter: `subtitles=${heavyEscapedPath}`,
+      description: 'subtitles filter (Windows backslash escaping)',
+    });
+  } else {
+    // On Unix-like systems, use subtitles filter with forward slashes
+    const normalizedAssPath = assPath.replace(/\\/g, '/');
+    strategies.push({
+      filter: `subtitles=${normalizedAssPath}`,
+      description: 'subtitles filter',
+    });
+  }
+
+  // Try each strategy in order until one succeeds
+  let lastError: Error | null = null;
+  
+  for (let i = 0; i < strategies.length; i++) {
+    const strategy = strategies[i];
+    console.log(
+      `[VideoComposition] Attempting strategy ${i + 1}/${strategies.length}: ${strategy.description}`,
+    );
+    console.log(`[VideoComposition] Filter string: ${strategy.filter}`);
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg()
+          .input(inputVideoPath)
+          .videoFilters(strategy.filter)
+          .outputOptions([
+            '-c:v libx264',
+            '-crf 18',
+            '-preset medium',
+            '-c:a copy',
+            '-pix_fmt yuv420p',
+          ])
+          .output(outputVideoPath)
+          .on('start', (cmd) =>
+            console.log(`[VideoComposition] FFmpeg command: ${cmd}`),
+          )
+          .on('progress', (progress) => {
+            if (progress.percent != null) {
+              console.log(
+                `[VideoComposition] Subtitle burn progress: ${Math.round(progress.percent)}%`,
+              );
+            }
+          })
+          .on('end', () => {
+            console.log(
+              `[VideoComposition] Subtitle burn completed using: ${strategy.description}`,
+            );
+            resolve();
+          })
+          .on('error', (error, _stdout, stderr) => {
+            console.error(
+              `[VideoComposition] Strategy failed (${strategy.description}): ${error.message}`,
+            );
+            if (stderr) {
+              console.error(
+                `[VideoComposition] FFmpeg stderr: ${stderr.slice(-500)}`,
+              );
+            }
+            reject(error);
+          })
+          .run();
+      });
+
+      // If we reach here, the strategy succeeded
+      console.log(
+        `[VideoComposition] Successfully burned captions using: ${strategy.description}`,
+      );
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.warn(
+        `[VideoComposition] Strategy ${i + 1}/${strategies.length} failed, trying next...`,
+      );
+    }
+  }
+
+  // All strategies failed
+  throw new Error(
+    `Failed to burn captions after trying ${strategies.length} strategies. Last error: ${lastError?.message}`,
+  );
 }
 
 ipcMain.handle(
@@ -828,7 +983,10 @@ ipcMain.handle(
 
     if (overlayItems && overlayItems.length > 0) {
       for (const overlay of overlayItems) {
-        const cleanPath = overlay.path.replace(/^file:\/\//, '');
+        let cleanPath = overlay.path.replace(/^file:\/\/\/?/, '');
+        if (/^\/[A-Za-z]:/.test(cleanPath)) {
+          cleanPath = cleanPath.slice(1);
+        }
         if (!cleanPath || cleanPath.trim() === '') {
           console.warn('[VideoComposition] Skipping overlay: empty path');
           continue;
@@ -1368,8 +1526,8 @@ ipcMain.handle(
           cleanupFiles.push(captionedOutputPath);
           finalOutputPath = captionedOutputPath;
         } catch (error) {
-          throw new Error(
-            `Failed to burn word captions: ${
+          console.warn(
+            `[VideoComposition] Word caption burn failed, proceeding without captions: ${
               error instanceof Error ? error.message : 'Unknown error'
             }`,
           );

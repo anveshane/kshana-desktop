@@ -5,6 +5,18 @@
  */
 
 /**
+ * Strips the file:// protocol from a URL and returns a valid filesystem path.
+ * Handles Windows drive-letter paths (file:///C:/...) correctly.
+ */
+export function stripFileProtocol(filePath: string): string {
+  let cleanPath = filePath.replace(/^file:\/\/\/?/, '');
+  if (/^\/[A-Za-z]:/.test(cleanPath)) {
+    cleanPath = cleanPath.slice(1);
+  }
+  return cleanPath;
+}
+
+/**
  * Normalizes a path for export operations (IPC communication)
  * Strips file:// protocol and returns clean path
  */
@@ -13,7 +25,7 @@ export function normalizePathForExport(
 ): string | null {
   if (!path) return null;
 
-  const cleanPath = path.replace(/^file:\/\//, '');
+  const cleanPath = stripFileProtocol(path);
 
   if (!cleanPath.trim()) return null;
 

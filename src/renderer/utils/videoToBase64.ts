@@ -4,6 +4,8 @@
  * Useful for packaging videos with the app (similar to images)
  */
 
+import { stripFileProtocol } from './pathNormalizer';
+
 /**
  * Converts a video file to base64 data URI
  * @param videoPath - Absolute path to the video file
@@ -12,7 +14,7 @@
 export async function videoToBase64(videoPath: string): Promise<string | null> {
   try {
     // Remove file:// protocol if present
-    const cleanPath = videoPath.replace(/^file:\/\//, '');
+    const cleanPath = stripFileProtocol(videoPath);
 
     // Read file as base64 using IPC
     if (

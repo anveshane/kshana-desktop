@@ -117,6 +117,9 @@ const projectBridge = {
   readFile(filePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:read-file', filePath);
   },
+  checkFileExists(filePath: string): Promise<boolean> {
+    return ipcRenderer.invoke('project:check-file-exists', filePath);
+  },
   readAllFiles(projectDir: string): Promise<Array<{ path: string; content: string; isBinary: boolean }>> {
     return ipcRenderer.invoke('project:read-all-files', projectDir);
   },

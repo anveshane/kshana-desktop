@@ -103,15 +103,16 @@
     "@codemirror/theme-one-dark": "^6.1.3",
     "@codemirror/view": "^6.38.8",
     "@electron/notarize": "^3.0.0",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
+    "@remotion/install-whisper-cpp": "4.0.409",
+    "@remotion/renderer": "4.0.409",
+    "@ts-ffmpeg/fluent-ffmpeg": "^2.2.6",
     "chokidar": "^5.0.0",
     "electron-debug": "^4.1.0",
     "electron-log": "^5.3.2",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.3.9",
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "@remotion/install-whisper-cpp": "4.0.409",
-    "@remotion/renderer": "4.0.409",
-    "@ts-ffmpeg/fluent-ffmpeg": "^2.2.6",
     "lucide-react": "^0.555.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -234,7 +235,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico"

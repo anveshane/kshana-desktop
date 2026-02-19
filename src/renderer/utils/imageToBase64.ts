@@ -4,6 +4,8 @@
  * Useful for packaging images with the app
  */
 
+import { stripFileProtocol } from './pathNormalizer';
+
 /**
  * Converts an image file to base64 data URI
  * @param imagePath - Absolute path to the image file
@@ -12,7 +14,7 @@
 export async function imageToBase64(imagePath: string): Promise<string | null> {
   try {
     // Remove file:// protocol if present
-    const cleanPath = imagePath.replace(/^file:\/\//, '');
+    const cleanPath = stripFileProtocol(imagePath);
 
     // Read file as base64 using IPC
     if (

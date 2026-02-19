@@ -37,6 +37,7 @@
     "react-syntax-highlighter": "^16.1.0",
     "remark-gfm": "^1.0.0",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
     "@ts-ffmpeg/fluent-ffmpeg": "^2.2.6",
     "@remotion/renderer": "4.0.409",
     "@remotion/install-whisper-cpp": "4.0.409"

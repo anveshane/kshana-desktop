@@ -3,6 +3,8 @@
  * Handles path resolution for assets, especially test assets in mock mode
  */
 
+import { stripFileProtocol } from './pathNormalizer';
+
 /**
  * Build a file:// URL from an absolute path.
  * On Windows (C:/...) produces file:///C:/... ; on Unix (/...) produces file:///...
@@ -124,7 +126,7 @@ export async function resolveTestAssetPathToAbsolute(
 
   // Handle file:// URLs
   if (testAssetPath.startsWith('file://')) {
-    return testAssetPath.slice(7);
+    return stripFileProtocol(testAssetPath);
   }
 
   // If already absolute, normalize and return
@@ -243,11 +245,12 @@ export async function resolveAssetPathForDisplay(
  */
 async function checkFileExists(filePath: string): Promise<boolean> {
   try {
-    if (typeof window !== 'undefined' && window.electron?.project?.readFile) {
-      const content = await window.electron.project.readFile(filePath);
-      return content !== null;
+    if (
+      typeof window !== 'undefined' &&
+      window.electron?.project?.checkFileExists
+    ) {
+      return await window.electron.project.checkFileExists(filePath);
     }
-    // Fallback: assume file exists if we can't check
     return true;
   } catch (error) {
     console.debug(
@@ -307,7 +310,7 @@ export async function resolveAssetPathWithRetry(
       if (verifyExists && resolvedPath) {
         // Remove file:// prefix for existence check
         const filePath = resolvedPath.startsWith('file://')
-          ? resolvedPath.slice(7)
+          ? stripFileProtocol(resolvedPath)
           : resolvedPath;
 
         const exists = await checkFileExists(filePath);

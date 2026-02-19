@@ -15,7 +15,7 @@ import {
   resolveAssetPathForDisplay,
   resolveAssetPathWithRetry,
 } from '../../../utils/pathResolver';
-import { normalizePathForExport } from '../../../utils/pathNormalizer';
+import { normalizePathForExport, stripFileProtocol } from '../../../utils/pathNormalizer';
 import type { Artifact } from '../../../types/projectState';
 import type { SceneRef } from '../../../types/kshana/entities';
 import type { SceneVersions } from '../../../types/kshana/timeline';
@@ -28,7 +28,7 @@ function normalizeVideoSourcePath(path: string): string {
   if (!trimmed) return '';
 
   if (trimmed.startsWith('file://')) {
-    return decodeURIComponent(trimmed.replace(/^file:\/\//, '')).replace(/\\/g, '/');
+    return decodeURIComponent(stripFileProtocol(trimmed)).replace(/\\/g, '/');
   }
 
   return trimmed.replace(/\\/g, '/');
@@ -1319,10 +1319,12 @@ export default function VideoLibraryView({
       console.log('[VideoDownload] Save path selected:', savePath);
 
       // Extract directory and filename from savePath
-      const lastSlash = savePath.lastIndexOf('/');
-      const saveDir = lastSlash >= 0 ? savePath.substring(0, lastSlash) : '';
+      // Normalize path separators to handle both Windows and Unix paths
+      const normalizedSavePath = savePath.replace(/\\/g, '/');
+      const lastSlash = normalizedSavePath.lastIndexOf('/');
+      const saveDir = lastSlash >= 0 ? normalizedSavePath.substring(0, lastSlash) : '';
       const saveFileName =
-        lastSlash >= 0 ? savePath.substring(lastSlash + 1) : savePath;
+        lastSlash >= 0 ? normalizedSavePath.substring(lastSlash + 1) : normalizedSavePath;
 
       console.log('[VideoDownload] Copying video to:', saveDir);
       console.log('[VideoDownload] Target filename:', saveFileName);
@@ -1336,9 +1338,14 @@ export default function VideoLibraryView({
       console.log('[VideoDownload] Video copied to:', copiedPath);
 
       // Rename to the user's chosen filename if different
-      const finalPath = savePath;
-      if (copiedPath !== finalPath) {
-        console.log('[VideoDownload] Renaming to:', saveFileName);
+      // Normalize copiedPath for comparison
+      const normalizedCopiedPath = copiedPath.replace(/\\/g, '/');
+      const copiedFileName = normalizedCopiedPath.substring(
+        normalizedCopiedPath.lastIndexOf('/') + 1
+      );
+      
+      if (copiedFileName !== saveFileName) {
+        console.log('[VideoDownload] Renaming from:', copiedFileName, 'to:', saveFileName);
         await window.electron.project.rename(copiedPath, saveFileName);
       }
 

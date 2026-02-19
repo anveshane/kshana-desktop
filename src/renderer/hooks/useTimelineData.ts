@@ -182,6 +182,9 @@ export function useTimelineData(
   const [imagePlacementFiles, setImagePlacementFiles] = useState<
     Record<number, string>
   >({});
+  const [videoPlacementFiles, setVideoPlacementFiles] = useState<
+    Record<number, string>
+  >({});
   const [imagePlacementRefreshTrigger, setImagePlacementRefreshTrigger] =
     useState(0);
   const [imageProjectionSnapshot, setImageProjectionSnapshot] =
@@ -321,7 +324,29 @@ export function useTimelineData(
 
       if (debounceTimeout) clearTimeout(debounceTimeout);
       debounceTimeout = setTimeout(() => {
-        // Reuse existing refresh triggers to force a rerender & reload cycle.
+        setTimelineRefreshTrigger((prev) => prev + 1);
+        debounceTimeout = null;
+      }, 250);
+    });
+
+    return () => {
+      unsubscribe();
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+    };
+  }, [projectDirectory]);
+
+  // Subscribe to file changes under .kshana/agent/video-placements for fallback video loading
+  useEffect(() => {
+    if (!projectDirectory) return;
+
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const filePath = event.path.replace(/\\/g, '/');
+      if (!filePath.includes('.kshana/agent/video-placements')) return;
+
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
         setTimelineRefreshTrigger((prev) => prev + 1);
         debounceTimeout = null;
       }, 250);
@@ -497,6 +522,49 @@ export function useTimelineData(
     loadInfographicPlacementFiles();
   }, [projectDirectory, isLoaded, timelineRefreshTrigger]);
 
+  // Load video placement files for fallback resolution
+  useEffect(() => {
+    if (!projectDirectory || !isLoaded) return;
+
+    const loadVideoPlacementFiles = async () => {
+      try {
+        const videoDir = `${projectDirectory}/.kshana/agent/video-placements`;
+        const files = await window.electron.project.readTree(videoDir, 1);
+
+        const placementMap: Record<number, string> = {};
+        if (files && files.children) {
+          const candidateFiles = files.children
+            .filter((file) => file.type === 'file')
+            .map((file) => file.name)
+            .sort((a, b) => b.localeCompare(a));
+
+          for (const name of candidateFiles) {
+            const match = name.match(/^video(\d+)[-_].+\.(mp4|mov|webm)$/i);
+            if (!match) continue;
+            const placementNumber = parseInt(match[1], 10);
+            if (!Number.isNaN(placementNumber) && !placementMap[placementNumber]) {
+              placementMap[placementNumber] = `agent/video-placements/${name}`;
+            }
+          }
+        }
+
+        setVideoPlacementFiles((prev) =>
+          arePlacementMapsEqual(prev, placementMap) ? prev : placementMap,
+        );
+      } catch (error) {
+        console.debug(
+          '[useTimelineData] Video placements directory not found or error loading:',
+          error,
+        );
+        setVideoPlacementFiles((prev) =>
+          Object.keys(prev).length === 0 ? prev : {},
+        );
+      }
+    };
+
+    loadVideoPlacementFiles();
+  }, [projectDirectory, isLoaded, timelineRefreshTrigger]);
+
   // Debug: Log assetManifest state
   useEffect(() => {
     console.log('[useTimelineData] AssetManifest state:', {
@@ -665,6 +733,9 @@ export function useTimelineData(
         activeVersions,
       );
 
+      const videoFallbackPath = videoPlacementFiles[placement.placementNumber];
+      const resolvedVideoPath = asset?.path || videoFallbackPath || undefined;
+
       items.push({
         id: `vd-placement-${placement.placementNumber}`,
         type: 'video',
@@ -674,7 +745,7 @@ export function useTimelineData(
         label: `vd-placement-${placement.placementNumber}`,
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
-        videoPath: asset?.path,
+        videoPath: resolvedVideoPath,
         sourceStartTime: startSeconds,
         sourceEndTime: endSeconds,
         sourceOffsetSeconds: 0,
@@ -700,6 +771,7 @@ export function useTimelineData(
     assetManifest,
     activeVersions,
     imagePlacementFiles,
+    videoPlacementFiles,
     imageProjectionSnapshot,
     isImageSyncV2CompareEnabled,
     isImageSyncV2Enabled,

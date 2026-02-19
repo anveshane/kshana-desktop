@@ -474,8 +474,11 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         imageSyncEngineRef.current?.triggerReconcile('file_watch', filePath);
       }
 
-      // Reload project when key files change
-      if (isProjectStateFile || isManifestFile) {
+      // Reload project when key files change.
+      // When V2 sync is enabled, skip manifest-only changes here --
+      // the dedicated onManifestWritten handler owns those to avoid duplicate reads.
+      const shouldReload = isProjectStateFile || (isManifestFile && !isImageSyncV2Enabled);
+      if (shouldReload) {
         console.log('[ProjectContext][file_watch] File change detected', {
           source: 'file_watch',
           path: filePath,
@@ -957,12 +960,20 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     let pollIntervalMs = 1000;
     let consecutiveFailures = 0;
     const MAX_POLL_INTERVAL = 5000;
+    const MAX_CONSECUTIVE_FAILURES = 20;
     const BACKOFF_MULTIPLIER = 1.5;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let isCancelled = false;
 
     const pollForUpdates = async () => {
       if (isCancelled) return;
+
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        console.warn(
+          `[ProjectContext][poll] Stopping poll after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`,
+        );
+        return;
+      }
 
       try {
         const result = await projectService.openProject(projectDirectory);
@@ -1014,12 +1025,14 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
             Math.floor(1000 * BACKOFF_MULTIPLIER ** consecutiveFailures),
             MAX_POLL_INTERVAL,
           );
-          console.warn('[ProjectContext][poll] Poll openProject failed', {
-            source: 'poll',
-            consecutiveFailures,
-            nextIntervalMs: pollIntervalMs,
-            error: result.error,
-          });
+          if (consecutiveFailures <= 3) {
+            console.warn('[ProjectContext][poll] Poll openProject failed', {
+              source: 'poll',
+              consecutiveFailures,
+              nextIntervalMs: pollIntervalMs,
+              error: result.error,
+            });
+          }
         }
       } catch (error) {
         consecutiveFailures++;
@@ -1027,12 +1040,14 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           Math.floor(1000 * BACKOFF_MULTIPLIER ** consecutiveFailures),
           MAX_POLL_INTERVAL,
         );
-        console.debug('[ProjectContext][poll] Poll check failed', {
-          source: 'poll',
-          consecutiveFailures,
-          nextIntervalMs: pollIntervalMs,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        if (consecutiveFailures <= 3) {
+          console.debug('[ProjectContext][poll] Poll check failed', {
+            source: 'poll',
+            consecutiveFailures,
+            nextIntervalMs: pollIntervalMs,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
 
       if (!isCancelled) {
