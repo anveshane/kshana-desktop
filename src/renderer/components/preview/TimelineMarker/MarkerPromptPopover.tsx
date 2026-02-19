@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import styles from './MarkerPromptPopover.module.scss';
 
+const modKey = navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? 'Cmd' : 'Ctrl';
+
 interface MarkerPromptPopoverProps {
   position: number; // in seconds
   onClose: () => void;
@@ -81,7 +83,7 @@ export default function MarkerPromptPopover({
               />
             </label>
             <div className={styles.hint}>
-              Press <kbd>Cmd/Ctrl+Enter</kbd> to submit, <kbd>Esc</kbd> to
+              Press <kbd>{modKey}+Enter</kbd> to submit, <kbd>Esc</kbd> to
               cancel
             </div>
             <div className={styles.actions}>

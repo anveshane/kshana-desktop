@@ -252,7 +252,7 @@ export function useTimelineData(
     let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const unsubscribe = window.electron.project.onFileChange((event) => {
-      const filePath = event.path;
+      const filePath = event.path.replace(/\\/g, '/');
       if (!filePath.includes('.kshana/agent/audio')) return;
 
       console.log('[useTimelineData][file_watch]', {
@@ -281,7 +281,7 @@ export function useTimelineData(
     let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const unsubscribe = window.electron.project.onFileChange((event) => {
-      const filePath = event.path;
+      const filePath = event.path.replace(/\\/g, '/');
       if (!filePath.includes('.kshana/agent/image-placements')) return;
 
       console.log('[useTimelineData][file_watch]', {
@@ -310,7 +310,7 @@ export function useTimelineData(
     let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const unsubscribe = window.electron.project.onFileChange((event) => {
-      const filePath = event.path;
+      const filePath = event.path.replace(/\\/g, '/');
       if (!filePath.includes('.kshana/agent/infographic-placements')) return;
 
       console.log('[useTimelineData][file_watch]', {

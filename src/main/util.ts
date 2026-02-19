@@ -18,5 +18,8 @@ export function resolveHtmlPath(htmlFileName: string) {
   const htmlPath = path.join(__dirname, '../renderer/', htmlFileName);
   // Normalize the path and ensure it works with ASAR
   const normalizedPath = path.normalize(htmlPath).replace(/\\/g, '/');
-  return `file://${normalizedPath}`;
+  // On Windows paths start with C:/ not /, so need file:/// prefix
+  return normalizedPath.startsWith('/')
+    ? `file://${normalizedPath}`
+    : `file:///${normalizedPath}`;
 }

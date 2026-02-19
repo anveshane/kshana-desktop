@@ -445,7 +445,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     if (!isImageSyncV2Enabled || !projectDirectory) return undefined;
 
     const unsubscribe = window.electron.project.onManifestWritten((event) => {
-      if (!event.path.includes('.kshana/agent/manifest.json')) return;
+      if (!event.path.replace(/\\/g, '/').includes('.kshana/agent/manifest.json')) return;
       imageSyncEngineRef.current?.triggerReconcile('manifest_written', event.path);
     });
 
@@ -461,7 +461,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const unsubscribe = window.electron.project.onFileChange((event) => {
-      const filePath = event.path;
+      const filePath = event.path.replace(/\\/g, '/');
       const isManifestFile = filePath.includes('.kshana/agent/manifest.json');
       const isProjectStateFile =
         filePath.includes('.kshana/agent/project.json') ||

@@ -22,8 +22,11 @@ export async function normalizePathForFFmpeg(
 ): Promise<string | null> {
   if (!filePath) return null;
 
-  // Strip file:// protocol if present
-  const cleanPath = filePath.replace(/^file:\/\//, '');
+  // Strip file:// protocol if present, handling Windows drive letters (file:///C:/...)
+  let cleanPath = filePath.replace(/^file:\/\/\/?/, '');
+  if (/^\/[A-Za-z]:/.test(cleanPath)) {
+    cleanPath = cleanPath.slice(1);
+  }
 
   if (!cleanPath.trim()) return null;
 

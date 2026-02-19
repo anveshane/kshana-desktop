@@ -4,6 +4,17 @@
  */
 
 /**
+ * Build a file:// URL from an absolute path.
+ * On Windows (C:/...) produces file:///C:/... ; on Unix (/...) produces file:///...
+ */
+export function toFileUrl(absolutePath: string): string {
+  const normalized = absolutePath.replace(/\\/g, '/');
+  return normalized.startsWith('/')
+    ? `file://${normalized}`
+    : `file:///${normalized}`;
+}
+
+/**
  * Test asset folder names
  */
 const TEST_ASSET_FOLDERS = ['test_image', 'test_video'] as const;
@@ -175,7 +186,7 @@ export async function resolveAssetPathForDisplay(
   if (isTestAssetPath(trimmedPath)) {
     const absolutePath = await resolveTestAssetPathToAbsolute(trimmedPath);
     if (absolutePath) {
-      const result = `file://${absolutePath}`;
+      const result = toFileUrl(absolutePath);
       if (assetPath.endsWith('.mp4')) {
         console.log(
           `[PathResolver] Resolved test video: ${assetPath} -> ${result}`,
@@ -188,7 +199,7 @@ export async function resolveAssetPathForDisplay(
 
   // If assetPath is already absolute, use it directly
   if (trimmedPath.startsWith('/') || /^[A-Za-z]:/.test(trimmedPath)) {
-    return `file://${trimmedPath.replace(/\\/g, '/')}`;
+    return toFileUrl(trimmedPath);
   }
 
   // Otherwise, construct path relative to project directory
@@ -197,21 +208,21 @@ export async function resolveAssetPathForDisplay(
 
     // Handle paths that already start with .kshana
     if (trimmedPath.startsWith('.kshana/')) {
-      return `file://${normalizedProjectDir}/${trimmedPath}`;
+      return toFileUrl(`${normalizedProjectDir}/${trimmedPath}`);
     }
 
     // Handle paths relative to .kshana/agent/ (e.g., characters/alice-chen/image.png)
     if (trimmedPath.match(/^(characters|settings|props|plans|scenes)\//)) {
-      return `file://${normalizedProjectDir}/.kshana/agent/${trimmedPath}`;
+      return toFileUrl(`${normalizedProjectDir}/.kshana/agent/${trimmedPath}`);
     }
 
     // Handle paths starting with "agent/" (e.g., agent/image-placements/...)
     if (trimmedPath.startsWith('agent/')) {
-      return `file://${normalizedProjectDir}/.kshana/${trimmedPath}`;
+      return toFileUrl(`${normalizedProjectDir}/.kshana/${trimmedPath}`);
     }
 
     // Handle other relative paths
-    const result = `file://${normalizedProjectDir}/${trimmedPath}`;
+    const result = toFileUrl(`${normalizedProjectDir}/${trimmedPath}`);
     if (assetPath.endsWith('.mp4')) {
       console.log(
         `[PathResolver] Resolved project video: ${assetPath} -> ${result}`,
@@ -224,7 +235,7 @@ export async function resolveAssetPathForDisplay(
   console.warn(
     `[PathResolver] No project directory provided for relative path: ${trimmedPath}`,
   );
-  return `file://${trimmedPath.replace(/\\/g, '/')}`;
+  return toFileUrl(trimmedPath);
 }
 
 /**

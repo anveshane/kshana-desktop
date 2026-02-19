@@ -172,11 +172,17 @@ ipcMain.handle('project:select-audio-file', async () => {
 });
 
 async function getAudioDuration(audioPath: string): Promise<number> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      log.warn(`[Audio Duration] Timed out getting duration for: ${audioPath}`);
+      resolve(0);
+    }, 10000);
+
     ffmpeg.ffprobe(audioPath, (err, metadata) => {
+      clearTimeout(timeout);
       if (err) {
         log.warn(`[Audio Duration] Could not get duration: ${err.message}`);
-        resolve(0); // Return 0 if we can't get duration
+        resolve(0);
         return;
       }
       const duration = metadata?.format?.duration || 0;
@@ -189,10 +195,10 @@ ipcMain.handle(
   'project:get-audio-duration',
   async (_event, audioPath: string): Promise<number> => {
     try {
-      // Ensure we have an absolute path
-      const fullPath = path.isAbsolute(audioPath)
-        ? audioPath
-        : path.resolve(audioPath);
+      // Normalize path separators for Windows and resolve to absolute
+      const fullPath = path.normalize(
+        path.isAbsolute(audioPath) ? audioPath : path.resolve(audioPath),
+      );
       return await getAudioDuration(fullPath);
     } catch (error) {
       log.warn(
@@ -660,8 +666,16 @@ ipcMain.handle(
   },
 );
 
-// Configure ffmpeg to use bundled binary
-ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+// Configure ffmpeg/ffprobe to use bundled binaries
+// In packaged builds, binaries are in app.asar.unpacked (not inside the read-only app.asar)
+let ffmpegPath = ffmpegInstaller.path;
+if (app.isPackaged) {
+  ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+}
+ffmpeg.setFfmpegPath(ffmpegPath);
+const ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1');
+ffmpeg.setFfprobePath(ffprobePath);
+log.info('[FFmpeg] Paths configured:', { ffmpeg: ffmpegPath, ffprobe: ffprobePath });
 
 interface TimelineItem {
   type: 'image' | 'video' | 'placeholder';
@@ -856,8 +870,11 @@ ipcMain.handle(
         if (item.type === 'video') {
           // For video segments, use the full video file
           // The timeline startTime/endTime are for positioning, not extraction
-          // Strip file:// protocol if present
-          const cleanPath = item.path.replace(/^file:\/\//, '');
+          // Strip file:// protocol if present, handling Windows drive letters
+          let cleanPath = item.path.replace(/^file:\/\/\/?/, '');
+          if (/^\/[A-Za-z]:/.test(cleanPath)) {
+            cleanPath = cleanPath.slice(1);
+          }
 
           // Skip items with empty paths
           if (!cleanPath || cleanPath.trim() === '') {
@@ -959,8 +976,11 @@ ipcMain.handle(
           cleanupFiles.push(segmentPath);
         } else if (item.type === 'image') {
           // Convert image to video
-          // Strip file:// protocol if present
-          const cleanPath = item.path.replace(/^file:\/\//, '');
+          // Strip file:// protocol if present, handling Windows drive letters
+          let cleanPath = item.path.replace(/^file:\/\/\/?/, '');
+          if (/^\/[A-Za-z]:/.test(cleanPath)) {
+            cleanPath = cleanPath.slice(1);
+          }
 
           // Skip items with empty paths
           if (!cleanPath || cleanPath.trim() === '') {

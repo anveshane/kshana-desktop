@@ -193,7 +193,8 @@
     "asar": true,
     "afterSign": ".erb/scripts/notarize.js",
     "asarUnpack": [
-      "**\\*.{node,dll}"
+      "**\\*.{node,dll}",
+      "**/node_modules/@ffmpeg-installer/**"
     ],
     "files": [
       "dist",
@@ -231,8 +232,19 @@
     },
     "win": {
       "target": [
-        "nsis"
-      ]
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
     "linux": {
       "target": [

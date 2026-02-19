@@ -97,7 +97,11 @@ function nowSeconds(): number {
 }
 
 function cleanPath(filePath: string): string {
-  return filePath.replace(/^file:\/\//, '');
+  let cleaned = filePath.replace(/^file:\/\/\/?/, '');
+  if (/^\/[A-Za-z]:/.test(cleaned)) {
+    cleaned = cleaned.slice(1);
+  }
+  return cleaned;
 }
 
 // ── CapCut projects directory ─────────────────────────────────────────────

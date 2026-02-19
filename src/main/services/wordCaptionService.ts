@@ -54,7 +54,15 @@ const DEFAULT_MODEL = 'tiny.en';
 const DEFAULT_WHISPER_CPP_VERSION = '1.5.5';
 const WORD_CAPTIONS_PATH = '.kshana/agent/content/word-captions.json';
 
-ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+// In packaged builds, binaries are in app.asar.unpacked (not inside the read-only app.asar)
+let ffmpegBinaryPath = ffmpegInstaller.path;
+if (app.isPackaged) {
+  ffmpegBinaryPath = ffmpegBinaryPath.replace('app.asar', 'app.asar.unpacked');
+}
+ffmpeg.setFfmpegPath(ffmpegBinaryPath);
+ffmpeg.setFfprobePath(
+  ffmpegBinaryPath.replace(/ffmpeg(\.exe)?$/, 'ffprobe$1'),
+);
 
 interface WhisperInstallerModule {
   installWhisperCpp: typeof installWhisperCppType;

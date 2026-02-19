@@ -24,6 +24,7 @@ import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
 import {
   resolveAssetPathForDisplay,
   resolveAssetPathWithRetry,
+  toFileUrl,
 } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import {
@@ -48,6 +49,9 @@ import VersionSelector from '../VersionSelector';
 import AudioImportModal from './AudioImportModal';
 import TimelineContextMenu from './TimelineContextMenu';
 import styles from './TimelinePanel.module.scss';
+
+const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+const modKey = isMac ? 'Cmd' : 'Ctrl';
 
 // Timeline Item Component for proper hook usage
 interface TimelineItemComponentProps {
@@ -1850,7 +1854,7 @@ export default function TimelinePanel({
       // Get video duration
       const video = document.createElement('video');
       video.preload = 'metadata';
-      video.src = `file://${destPath.replace(/\\/g, '/')}`;
+      video.src = toFileUrl(destPath);
 
       // eslint-disable-next-line compat/compat
       await new Promise<void>((resolve, reject) => {
@@ -2199,7 +2203,7 @@ export default function TimelinePanel({
                 type="button"
                 className={styles.toolbarButton}
                 onClick={handleImportVideo}
-                title="Import Video (Ctrl+I)"
+                title={`Import Video (${modKey}+I)`}
               >
                 <Upload size={14} />
                 <span>Import</span>
@@ -2225,7 +2229,7 @@ export default function TimelinePanel({
                 type="button"
                 className={styles.zoomButton}
                 onClick={handleZoomOut}
-                title="Zoom Out (Ctrl+-)"
+                title={`Zoom Out (${modKey}+-)`}
               >
                 <ZoomOut size={14} />
               </button>
@@ -2236,7 +2240,7 @@ export default function TimelinePanel({
                 type="button"
                 className={styles.zoomButton}
                 onClick={handleZoomIn}
-                title="Zoom In (Ctrl++)"
+                title={`Zoom In (${modKey}++)`}
               >
                 <ZoomIn size={14} />
               </button>

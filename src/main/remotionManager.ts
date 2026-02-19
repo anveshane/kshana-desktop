@@ -143,6 +143,7 @@ class RemotionManager extends EventEmitter {
       {
         cwd: remotionDir,
         env: remotionEnv,
+        shell: process.platform === 'win32',
       },
     );
 
