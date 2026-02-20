@@ -159,10 +159,11 @@ class FileSystemManager extends EventEmitter {
     type: FileChangeEvent['type'],
     filePath: string,
   ): void {
+    const normalizedPath = filePath.replace(/\\/g, '/');
     // Store the latest event for each file path
-    this.pendingEvents.set(filePath, {
+    this.pendingEvents.set(normalizedPath, {
       type,
-      path: filePath,
+      path: normalizedPath,
     } as FileChangeEvent);
 
     // Clear existing timeout

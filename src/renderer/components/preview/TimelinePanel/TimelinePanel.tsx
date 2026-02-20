@@ -94,7 +94,6 @@ function TimelineItemComponent({
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [imagePath, setImagePath] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState<boolean>(false);
-  const [imageLoadError, setImageLoadError] = useState<boolean>(false);
   const imageRetryCountRef = React.useRef<number>(0);
   const imageResolveAbortRef = React.useRef<AbortController | null>(null);
 
@@ -119,7 +118,6 @@ function TimelineItemComponent({
     if (item.type !== 'image') {
       setImagePath(null);
       setImageLoading(false);
-      setImageLoadError(false);
       imageRetryCountRef.current = 0;
       return;
     }
@@ -132,7 +130,6 @@ function TimelineItemComponent({
     const abortController = imageResolveAbortRef.current;
 
     setImageLoading(true);
-    setImageLoadError(false);
 
     const pathToResolve = item.imagePath;
 
@@ -196,23 +193,8 @@ function TimelineItemComponent({
           );
           setImageLoading(false);
 
-          // Retry mechanism for image load failures
-          if (imageRetryCountRef.current < 3) {
-            imageRetryCountRef.current += 1;
-            const retryDelay = 1000 * imageRetryCountRef.current;
-            console.log(
-              `[TimelineItemComponent] Retrying image load in ${retryDelay}ms (attempt ${imageRetryCountRef.current}/3)`,
-            );
-            setTimeout(() => {
-              if (!abortController.signal.aborted) {
-                // Trigger re-resolution by updating a dependency
-                setImageLoadError(true);
-              }
-            }, retryDelay);
-          } else {
-            setImageLoadError(true);
-            setImagePath(null);
-          }
+          // No retry loop; show placeholder on failure
+          setImagePath(null);
         });
     } else {
       if (item.type === 'image') {
@@ -241,7 +223,6 @@ function TimelineItemComponent({
     item.label,
     item.placementNumber,
     projectDirectory,
-    imageLoadError,
   ]);
 
   // Handle placeholder type

@@ -218,9 +218,12 @@ function normalizeProjectDirectoryPath(
 
 function getImageSyncV2Flag(): boolean {
   try {
-    return window.localStorage.getItem('renderer.image_sync_v2') === 'true';
+    const stored = window.localStorage.getItem('renderer.image_sync_v2');
+    if (stored === 'false') return false;
+    // Default ON unless explicitly disabled
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -667,7 +670,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   }, []);
 
   const scheduleManifestReconcile = useCallback(
-    (source: 'ws_asset' | 'file_watch' | 'poll', delayMs: number = 250) => {
+    (source: 'ws_asset' | 'file_watch', delayMs: number = 1500) => {
       if (manifestRefreshTimeoutRef.current) {
         clearTimeout(manifestRefreshTimeoutRef.current);
       }
@@ -954,120 +957,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   // Poll for manifest updates as a source-agnostic fallback.
   // This keeps timeline hydration convergent even if websocket/file-watch signals are missed.
   useEffect(() => {
-    if (isImageSyncV2Enabled) return;
-    if (!projectDirectory || !state.isLoaded) return;
-
-    let pollIntervalMs = 1000;
-    let consecutiveFailures = 0;
-    const MAX_POLL_INTERVAL = 5000;
-    const MAX_CONSECUTIVE_FAILURES = 20;
-    const BACKOFF_MULTIPLIER = 1.5;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let isCancelled = false;
-
-    const pollForUpdates = async () => {
-      if (isCancelled) return;
-
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        console.warn(
-          `[ProjectContext][poll] Stopping poll after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`,
-        );
-        return;
-      }
-
-      try {
-        const result = await projectService.openProject(projectDirectory);
-        if (result.success) {
-          const project = result.data;
-
-          // Use functional setState to compare with latest state (avoids stale closure)
-          setState((prev) => {
-            const assetsChanged = compareAssetManifests(
-              prev.assetManifest,
-              project.assetManifest,
-            );
-
-            if (assetsChanged) {
-              console.log(
-                '[ProjectContext][poll] Assets changed, updating manifest',
-                {
-                  source: 'poll',
-                  oldCount: prev.assetManifest?.assets?.length || 0,
-                  newCount: project.assetManifest?.assets?.length || 0,
-                  addedAssets:
-                    project.assetManifest?.assets
-                      ?.filter(
-                        (a) =>
-                          !prev.assetManifest?.assets?.some(
-                            (old) => old.id === a.id,
-                          ),
-                      )
-                      .map((a) => ({
-                        id: a.id,
-                        placementNumber: a.metadata?.placementNumber,
-                        path: a.path,
-                      })) || [],
-                },
-              );
-
-              pollIntervalMs = 1000;
-              consecutiveFailures = 0;
-              return {
-                ...prev,
-                assetManifest: project.assetManifest,
-              };
-            }
-            return prev;
-          });
-        } else {
-          consecutiveFailures++;
-          pollIntervalMs = Math.min(
-            Math.floor(1000 * BACKOFF_MULTIPLIER ** consecutiveFailures),
-            MAX_POLL_INTERVAL,
-          );
-          if (consecutiveFailures <= 3) {
-            console.warn('[ProjectContext][poll] Poll openProject failed', {
-              source: 'poll',
-              consecutiveFailures,
-              nextIntervalMs: pollIntervalMs,
-              error: result.error,
-            });
-          }
-        }
-      } catch (error) {
-        consecutiveFailures++;
-        pollIntervalMs = Math.min(
-          Math.floor(1000 * BACKOFF_MULTIPLIER ** consecutiveFailures),
-          MAX_POLL_INTERVAL,
-        );
-        if (consecutiveFailures <= 3) {
-          console.debug('[ProjectContext][poll] Poll check failed', {
-            source: 'poll',
-            consecutiveFailures,
-            nextIntervalMs: pollIntervalMs,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      if (!isCancelled) {
-        timeoutId = setTimeout(pollForUpdates, pollIntervalMs);
-      }
-    };
-
-    pollForUpdates();
-
-    return () => {
-      isCancelled = true;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    };
-  }, [
-    isImageSyncV2Enabled,
-    projectDirectory,
-    state.isLoaded,
-  ]);
+    // Polling removed: v2 sync + manifest/file-watch signals handle convergence.
+    return undefined;
+  }, [isImageSyncV2Enabled, projectDirectory, state.isLoaded]);
 
   // Load project from directory
   const loadProject = useCallback(

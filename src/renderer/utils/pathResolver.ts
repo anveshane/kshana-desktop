@@ -175,8 +175,8 @@ export async function resolveAssetPathForDisplay(
   if (!assetPath || !assetPath.trim()) {
     return '';
   }
-
-  const trimmedPath = assetPath.trim();
+  // Normalize backslashes early for cross-platform consistency
+  const trimmedPath = assetPath.trim().replace(/\\/g, '/');
 
   // If it's already a file:// URL, return as-is
   if (trimmedPath.startsWith('file://')) {
@@ -208,23 +208,38 @@ export async function resolveAssetPathForDisplay(
   if (projectDirectory && projectDirectory.trim()) {
     const normalizedProjectDir = projectDirectory.trim().replace(/\\/g, '/');
 
+    // Deduplicate agent/ prefix (backend on Windows may write agent/agent/...)
+    let cleanedPath = trimmedPath;
+    if (cleanedPath.startsWith('agent/agent/')) {
+      cleanedPath = cleanedPath.slice('agent/'.length);
+    }
+    // Strip directory-traversal segments sometimes emitted by backend
+    // e.g., agent/../../other/.kshana/agent/image-placements/img.png -> agent/image-placements/img.png
+    if (cleanedPath.includes('../')) {
+      const marker = '.kshana/agent/';
+      const lastIdx = cleanedPath.lastIndexOf(marker);
+      if (lastIdx !== -1) {
+        cleanedPath = 'agent/' + cleanedPath.slice(lastIdx + marker.length);
+      }
+    }
+
     // Handle paths that already start with .kshana
-    if (trimmedPath.startsWith('.kshana/')) {
-      return toFileUrl(`${normalizedProjectDir}/${trimmedPath}`);
+    if (cleanedPath.startsWith('.kshana/')) {
+      return toFileUrl(`${normalizedProjectDir}/${cleanedPath}`);
     }
 
     // Handle paths relative to .kshana/agent/ (e.g., characters/alice-chen/image.png)
-    if (trimmedPath.match(/^(characters|settings|props|plans|scenes)\//)) {
-      return toFileUrl(`${normalizedProjectDir}/.kshana/agent/${trimmedPath}`);
+    if (cleanedPath.match(/^(characters|settings|props|plans|scenes)\//)) {
+      return toFileUrl(`${normalizedProjectDir}/.kshana/agent/${cleanedPath}`);
     }
 
     // Handle paths starting with "agent/" (e.g., agent/image-placements/...)
-    if (trimmedPath.startsWith('agent/')) {
-      return toFileUrl(`${normalizedProjectDir}/.kshana/${trimmedPath}`);
+    if (cleanedPath.startsWith('agent/')) {
+      return toFileUrl(`${normalizedProjectDir}/.kshana/${cleanedPath}`);
     }
 
     // Handle other relative paths
-    const result = toFileUrl(`${normalizedProjectDir}/${trimmedPath}`);
+    const result = toFileUrl(`${normalizedProjectDir}/${cleanedPath}`);
     if (assetPath.endsWith('.mp4')) {
       console.log(
         `[PathResolver] Resolved project video: ${assetPath} -> ${result}`,

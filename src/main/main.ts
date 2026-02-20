@@ -1577,14 +1577,19 @@ ipcMain.handle(
 
 // Forward file change events to renderer
 fileSystemManager.on('file-change', (event: FileChangeEvent) => {
-  if (mainWindow) {
-    mainWindow.webContents.send('project:file-changed', event);
-    if (event.path.endsWith('.kshana/agent/manifest.json')) {
-      mainWindow.webContents.send('project:manifest-written', {
-        path: event.path,
-        at: Date.now(),
-      });
-    }
+  if (!mainWindow) return;
+
+  // Normalize path to forward slashes before forwarding to renderer
+  const normalizedPath = event.path.replace(/\\/g, '/');
+  const normalizedEvent: FileChangeEvent = { ...event, path: normalizedPath };
+
+  mainWindow.webContents.send('project:file-changed', normalizedEvent);
+
+  if (normalizedPath.endsWith('.kshana/agent/manifest.json')) {
+    mainWindow.webContents.send('project:manifest-written', {
+      path: normalizedPath,
+      at: Date.now(),
+    });
   }
 });
 
