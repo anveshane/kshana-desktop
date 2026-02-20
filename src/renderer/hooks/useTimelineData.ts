@@ -779,7 +779,7 @@ export function useTimelineData(
     timelineState.video_split_overrides,
   ]);
 
-  // Convert infographic placements to overlay items (contained within images)
+  // Convert infographic placements to overlay items (can be standalone or within images)
   const overlayItems: TimelineItem[] = useMemo(() => {
     const items: TimelineItem[] = [];
     const assets = assetManifest?.assets ?? [];
@@ -803,15 +803,15 @@ export function useTimelineData(
       );
 
       if (!contained) {
-        console.warn(
-          `[useTimelineData] Dropping infographic placement ${placement.placementNumber}: not contained within any image placement`,
+        console.info(
+          `[useTimelineData] Infographic placement ${placement.placementNumber} is standalone (not contained within an image placement)`,
           {
             placementNumber: placement.placementNumber,
             startSeconds,
             endSeconds,
           },
         );
-        return;
+        // Continue processing instead of dropping the infographic
       }
 
       const asset = findAssetByPlacementNumber(

@@ -655,26 +655,34 @@ export function parseInfographicPlacementsWithErrors(
       continue;
     }
 
+    // Pattern 1: type=VALUE format (e.g., "type=diagram")
     let match = trimmedLine.match(
-      /^[•\-]?\s*Placement\s+(\d+)\s*:\s*([^\|]+?)\s*\|\s*type\s*=\s*([^\|]+?)\s*\|\s*(.+)$/,
+      /^[•\-]?\s*Placement\s+(\d+)\s*:\s*([^\|]+?)\s*\|\s*type\s*[:=]\s*([^\|]+?)\s*\|\s*(.+)$/i,
     );
+    
+    // Pattern 2: Just the type without prefix (e.g., "diagram")
     if (!match || !match[1] || !match[2] || !match[3] || !match[4]) {
-      const alt = trimmedLine.match(
-        /Placement\s+(\d+)\s*:\s*([^\|]+?)\s*\|\s*type\s*=\s*([^\|]+?)\s*\|\s*(.+)$/,
+      match = trimmedLine.match(
+        /^[•\-]?\s*Placement\s+(\d+)\s*:\s*([^\|]+?)\s*\|\s*(bar_chart|line_chart|diagram|statistic|stat|list|bar|line)\s*\|\s*(.+)$/i,
       );
-      if (!alt || !alt[1] || !alt[2] || !alt[3] || !alt[4]) {
-        if (strict) {
-          errors.push({
-            line: lineNum + 1,
-            content: trimmedLine,
-            reason: 'Failed to match placement pattern',
-            suggestion:
-              'Expected format: "- Placement N: startTime-endTime | type=bar_chart|line_chart|diagram|statistic|list | prompt text [| motion=minimal|energetic|bouncy|slide]"',
-          });
-        }
-        continue;
+    }
+    
+    if (!match || !match[1] || !match[2] || !match[3] || !match[4]) {
+      if (strict) {
+        errors.push({
+          line: lineNum + 1,
+          content: trimmedLine,
+          reason: 'Failed to match placement pattern',
+          suggestion:
+            'Expected formats:\n' +
+            '  - Placement N: startTime-endTime | type=diagram | prompt text\n' +
+            '  - Placement N: startTime-endTime | diagram | prompt text\n' +
+            '  - Placement N: M:SS-M:SS | type:bar_chart | prompt text\n' +
+            'Supported types: bar_chart, line_chart, diagram, statistic, list\n' +
+            'Optional fields: | data={...} | motion=minimal|energetic|bouncy|slide',
+        });
       }
-      match = alt;
+      continue;
     }
 
     const placementNumber = parseInt(match[1]!, 10);
@@ -699,7 +707,8 @@ export function parseInfographicPlacementsWithErrors(
           content: trimmedLine,
           reason: `Invalid time range: ${timeRange}`,
           suggestion:
-            'Expected format: "startTime-endTime" (e.g., "0:15-0:33")',
+            'Expected format: "startTime-endTime"\n' +
+            'Examples: "0:15-0:33" (15s to 33s), "1:13-1:20" (73s to 80s), "0:00:15-0:01:05" (15s to 65s)',
         });
       }
       continue;
