@@ -278,26 +278,32 @@ export function useTimelineData(
   }, [projectDirectory]);
 
   // Subscribe to file changes under .kshana/agent/image-placements for fallback image loading
+  // Single consolidated file watcher (debounced) for audio/video/infographic fallback; image placements only when v2 is off.
   useEffect(() => {
-    if (!projectDirectory || isImageSyncV2Enabled) return;
+    if (!projectDirectory) return;
 
     let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const unsubscribe = window.electron.project.onFileChange((event) => {
       const filePath = event.path.replace(/\\/g, '/');
-      if (!filePath.includes('.kshana/agent/image-placements')) return;
+      const isAudio = filePath.includes('.kshana/agent/audio');
+      const isImagePlacement = filePath.includes('.kshana/agent/image-placements');
+      const isInfographic = filePath.includes('.kshana/agent/infographic-placements');
+      const isVideoPlacement = filePath.includes('.kshana/agent/video-placements');
 
-      console.log('[useTimelineData][file_watch]', {
-        source: 'file_watch',
-        scope: 'image-placements',
-        path: filePath,
-      });
+      if (!isAudio && !isImagePlacement && !isInfographic && !isVideoPlacement) return;
 
       if (debounceTimeout) clearTimeout(debounceTimeout);
       debounceTimeout = setTimeout(() => {
-        setImagePlacementRefreshTrigger((prev) => prev + 1);
+        if (isAudio) setAudioRefreshTrigger((prev) => prev + 1);
+        if (isImagePlacement && !isImageSyncV2Enabled) {
+          setImagePlacementRefreshTrigger((prev) => prev + 1);
+        }
+        if (isInfographic || isVideoPlacement) {
+          setTimelineRefreshTrigger((prev) => prev + 1);
+        }
         debounceTimeout = null;
-      }, 250);
+      }, 300);
     });
 
     return () => {
@@ -305,58 +311,6 @@ export function useTimelineData(
       if (debounceTimeout) clearTimeout(debounceTimeout);
     };
   }, [projectDirectory, isImageSyncV2Enabled]);
-
-  // Subscribe to file changes under .kshana/agent/infographic-placements for fallback infographic loading
-  useEffect(() => {
-    if (!projectDirectory) return;
-
-    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    const unsubscribe = window.electron.project.onFileChange((event) => {
-      const filePath = event.path.replace(/\\/g, '/');
-      if (!filePath.includes('.kshana/agent/infographic-placements')) return;
-
-      console.log('[useTimelineData][file_watch]', {
-        source: 'file_watch',
-        scope: 'infographic-placements',
-        path: filePath,
-      });
-
-      if (debounceTimeout) clearTimeout(debounceTimeout);
-      debounceTimeout = setTimeout(() => {
-        setTimelineRefreshTrigger((prev) => prev + 1);
-        debounceTimeout = null;
-      }, 250);
-    });
-
-    return () => {
-      unsubscribe();
-      if (debounceTimeout) clearTimeout(debounceTimeout);
-    };
-  }, [projectDirectory]);
-
-  // Subscribe to file changes under .kshana/agent/video-placements for fallback video loading
-  useEffect(() => {
-    if (!projectDirectory) return;
-
-    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    const unsubscribe = window.electron.project.onFileChange((event) => {
-      const filePath = event.path.replace(/\\/g, '/');
-      if (!filePath.includes('.kshana/agent/video-placements')) return;
-
-      if (debounceTimeout) clearTimeout(debounceTimeout);
-      debounceTimeout = setTimeout(() => {
-        setTimelineRefreshTrigger((prev) => prev + 1);
-        debounceTimeout = null;
-      }, 250);
-    });
-
-    return () => {
-      unsubscribe();
-      if (debounceTimeout) clearTimeout(debounceTimeout);
-    };
-  }, [projectDirectory]);
 
   // Load audio files from .kshana/agent/audio directory
   useEffect(() => {
@@ -696,7 +650,7 @@ export function useTimelineData(
       }
 
       const selectedImagePath = isImageSyncV2Enabled
-        ? projectedImagePath || legacyResolvedPath
+        ? projectedImagePath || null
         : legacyResolvedPath;
 
       if (!asset && selectedImagePath) {
@@ -715,7 +669,7 @@ export function useTimelineData(
         label: `PLM-${placement.placementNumber}`,
         prompt: placement.prompt,
         placementNumber: placement.placementNumber,
-        imagePath: selectedImagePath,
+        imagePath: selectedImagePath ?? undefined,
         sourceStartTime: startSeconds,
         sourceEndTime: endSeconds,
       });

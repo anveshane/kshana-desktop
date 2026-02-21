@@ -76,6 +76,27 @@ export class ProjectService {
   private static readonly MIN_OPEN_INTERVAL_MS = 2000;
 
   /**
+   * Invalidate the cached openProject result so the next call reads from disk.
+   * Useful when external processes have just modified project files (e.g., manifest).
+   */
+  invalidateCache(): void {
+    this.lastOpenResult = null;
+    this.lastOpenTimestamp = 0;
+    this.pendingOpen = null;
+  }
+
+  /**
+   * Lightweight manifest-only read that bypasses the openProject cache.
+   */
+  async readAssetManifest(directory: string): Promise<AssetManifest | null> {
+    const result = await this.readAssetManifestWithStatus(directory);
+    if (result.status === 'ok' && result.manifest) {
+      return result.manifest;
+    }
+    return null;
+  }
+
+  /**
    * Gets the current project directory
    */
   getProjectDirectory(): string | null {

@@ -271,16 +271,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
   const readAssetManifestForSync = useCallback(
     async (directory: string): Promise<AssetManifest | null> => {
-      const result = await projectService.openProject(directory);
-      if (!result.success) {
-        console.warn('[ProjectContext][image_sync] Failed to read manifest', {
-          source: 'image_sync',
-          directory,
-          error: result.error,
-        });
-        return null;
-      }
-      return result.data.assetManifest ?? null;
+      return projectService.readAssetManifest(directory);
     },
     [],
   );
@@ -449,6 +440,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
     const unsubscribe = window.electron.project.onManifestWritten((event) => {
       if (!event.path.replace(/\\/g, '/').includes('.kshana/agent/manifest.json')) return;
+      projectService.invalidateCache();
       imageSyncEngineRef.current?.triggerReconcile('manifest_written', event.path);
     });
 
@@ -474,6 +466,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       );
 
       if (isImageSyncV2Enabled && (isManifestFile || isImagePlacementFile)) {
+        projectService.invalidateCache();
         imageSyncEngineRef.current?.triggerReconcile('file_watch', filePath);
       }
 
@@ -827,14 +820,15 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
               });
 
               if (isImageSyncV2Enabled) {
+                projectService.invalidateCache();
                 imageSyncEngineRef.current?.triggerReconcile(
                   'ws_asset',
                   buildAssetDedupeKey(optimisticAsset),
                 );
               } else {
                 upsertAssetInManifest(optimisticAsset);
+                scheduleManifestReconcile('ws_asset');
               }
-              scheduleManifestReconcile('ws_asset');
             } else if (message.type === 'status' && message.data) {
               const statusData = message.data as Record<string, unknown>;
               const status = statusData['status'];

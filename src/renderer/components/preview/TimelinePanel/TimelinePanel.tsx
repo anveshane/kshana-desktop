@@ -406,7 +406,7 @@ function TimelineItemComponent({
             `[TimelineItemComponent] Image load error for ${item.label}`,
           );
           setImagePath(null);
-          setImageLoadError(true);
+          setImageLoading(false);
         }}
       />
     );
@@ -520,6 +520,17 @@ interface TimelineEditSnapshot {
   infographic_timing_overrides: KshanaTimelineState['infographic_timing_overrides'];
   video_split_overrides: KshanaTimelineState['video_split_overrides'];
 }
+
+const MemoTimelineItemComponent = React.memo(
+  TimelineItemComponent,
+  (prev, next) =>
+    prev.item === next.item &&
+    prev.left === next.left &&
+    prev.width === next.width &&
+    prev.projectDirectory === next.projectDirectory &&
+    prev.isSelected === next.isSelected &&
+    prev.isEditing === next.isEditing,
+);
 
 const MAX_TIMELINE_UNDO_STEPS = 100;
 
@@ -2315,7 +2326,7 @@ export default function TimelinePanel({
                           );
 
                           return (
-                            <TimelineItemComponent
+                            <MemoTimelineItemComponent
                               key={item.id}
                               item={item}
                               left={left}
@@ -2351,7 +2362,7 @@ export default function TimelinePanel({
                         );
 
                         return (
-                          <TimelineItemComponent
+                          <MemoTimelineItemComponent
                             key={item.id}
                             item={item}
                             left={left}
@@ -2386,7 +2397,7 @@ export default function TimelinePanel({
                         );
 
                         return (
-                          <TimelineItemComponent
+                          <MemoTimelineItemComponent
                             key={item.id}
                             item={item}
                             left={left}
@@ -2420,7 +2431,7 @@ export default function TimelinePanel({
                           );
 
                           return (
-                            <TimelineItemComponent
+                            <MemoTimelineItemComponent
                               key={item.id}
                               item={item}
                               left={left}
