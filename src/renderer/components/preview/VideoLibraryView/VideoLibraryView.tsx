@@ -1710,7 +1710,7 @@ export default function VideoLibraryView({
                   style={
                     resolvedSceneImagePath
                       ? {
-                          backgroundImage: `url(${resolvedSceneImagePath})`,
+                          backgroundImage: `url("${resolvedSceneImagePath}")`,
                         }
                       : undefined
                   }

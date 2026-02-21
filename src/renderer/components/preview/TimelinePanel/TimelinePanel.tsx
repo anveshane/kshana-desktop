@@ -94,7 +94,6 @@ function TimelineItemComponent({
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [imagePath, setImagePath] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState<boolean>(false);
-  const [imageLoadError, setImageLoadError] = useState<boolean>(false);
   const imageRetryCountRef = React.useRef<number>(0);
   const imageResolveAbortRef = React.useRef<AbortController | null>(null);
 
@@ -119,7 +118,6 @@ function TimelineItemComponent({
     if (item.type !== 'image') {
       setImagePath(null);
       setImageLoading(false);
-      setImageLoadError(false);
       imageRetryCountRef.current = 0;
       return;
     }
@@ -132,7 +130,6 @@ function TimelineItemComponent({
     const abortController = imageResolveAbortRef.current;
 
     setImageLoading(true);
-    setImageLoadError(false);
 
     const pathToResolve = item.imagePath;
 
@@ -196,23 +193,8 @@ function TimelineItemComponent({
           );
           setImageLoading(false);
 
-          // Retry mechanism for image load failures
-          if (imageRetryCountRef.current < 3) {
-            imageRetryCountRef.current += 1;
-            const retryDelay = 1000 * imageRetryCountRef.current;
-            console.log(
-              `[TimelineItemComponent] Retrying image load in ${retryDelay}ms (attempt ${imageRetryCountRef.current}/3)`,
-            );
-            setTimeout(() => {
-              if (!abortController.signal.aborted) {
-                // Trigger re-resolution by updating a dependency
-                setImageLoadError(true);
-              }
-            }, retryDelay);
-          } else {
-            setImageLoadError(true);
-            setImagePath(null);
-          }
+          // No retry loop; show placeholder on failure
+          setImagePath(null);
         });
     } else {
       if (item.type === 'image') {
@@ -241,7 +223,6 @@ function TimelineItemComponent({
     item.label,
     item.placementNumber,
     projectDirectory,
-    imageLoadError,
   ]);
 
   // Handle placeholder type
@@ -425,7 +406,7 @@ function TimelineItemComponent({
             `[TimelineItemComponent] Image load error for ${item.label}`,
           );
           setImagePath(null);
-          setImageLoadError(true);
+          setImageLoading(false);
         }}
       />
     );
@@ -539,6 +520,17 @@ interface TimelineEditSnapshot {
   infographic_timing_overrides: KshanaTimelineState['infographic_timing_overrides'];
   video_split_overrides: KshanaTimelineState['video_split_overrides'];
 }
+
+const MemoTimelineItemComponent = React.memo(
+  TimelineItemComponent,
+  (prev, next) =>
+    prev.item === next.item &&
+    prev.left === next.left &&
+    prev.width === next.width &&
+    prev.projectDirectory === next.projectDirectory &&
+    prev.isSelected === next.isSelected &&
+    prev.isEditing === next.isEditing,
+);
 
 const MAX_TIMELINE_UNDO_STEPS = 100;
 
@@ -2334,7 +2326,7 @@ export default function TimelinePanel({
                           );
 
                           return (
-                            <TimelineItemComponent
+                            <MemoTimelineItemComponent
                               key={item.id}
                               item={item}
                               left={left}
@@ -2370,7 +2362,7 @@ export default function TimelinePanel({
                         );
 
                         return (
-                          <TimelineItemComponent
+                          <MemoTimelineItemComponent
                             key={item.id}
                             item={item}
                             left={left}
@@ -2405,7 +2397,7 @@ export default function TimelinePanel({
                         );
 
                         return (
-                          <TimelineItemComponent
+                          <MemoTimelineItemComponent
                             key={item.id}
                             item={item}
                             left={left}
@@ -2439,7 +2431,7 @@ export default function TimelinePanel({
                           );
 
                           return (
-                            <TimelineItemComponent
+                            <MemoTimelineItemComponent
                               key={item.id}
                               item={item}
                               left={left}

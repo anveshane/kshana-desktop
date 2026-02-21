@@ -218,9 +218,12 @@ function normalizeProjectDirectoryPath(
 
 function getImageSyncV2Flag(): boolean {
   try {
-    return window.localStorage.getItem('renderer.image_sync_v2') === 'true';
+    const stored = window.localStorage.getItem('renderer.image_sync_v2');
+    if (stored === 'false') return false;
+    // Default ON unless explicitly disabled
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -249,6 +252,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   // Get workspace context for sync
   const { projectDirectory } = useWorkspace();
   const lastLoadedDir = useRef<string | null>(null);
+  const loadRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // WebSocket connection refs to prevent duplicate connections
   const wsRef = useRef<WebSocket | null>(null);
@@ -268,16 +272,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
   const readAssetManifestForSync = useCallback(
     async (directory: string): Promise<AssetManifest | null> => {
-      const result = await projectService.openProject(directory);
-      if (!result.success) {
-        console.warn('[ProjectContext][image_sync] Failed to read manifest', {
-          source: 'image_sync',
-          directory,
-          error: result.error,
-        });
-        return null;
-      }
-      return result.data.assetManifest ?? null;
+      return projectService.readAssetManifest(directory);
     },
     [],
   );
@@ -345,24 +340,36 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         setState(initialState);
         lastLoadedDir.current = null;
       }
+      if (loadRetryTimeoutRef.current) {
+        clearTimeout(loadRetryTimeoutRef.current);
+        loadRetryTimeoutRef.current = null;
+      }
       return;
     }
 
     // Don't reload if same directory
     if (projectDirectory === lastLoadedDir.current) return;
 
+    let cancelled = false;
+    const MAX_LOAD_RETRIES = 3;
+    const RETRY_DELAYS = [2000, 4000, 8000];
+
     // Auto-load project when opening a project directory
-    const loadProject = async () => {
+    const loadProject = async (attempt: number = 0) => {
+      if (cancelled) return;
       const normalizedDir =
         normalizeProjectDirectoryPath(projectDirectory) ?? projectDirectory;
-      console.log('[ProjectContext] Loading project from:', normalizedDir);
+      console.log('[ProjectContext] Loading project from:', normalizedDir, attempt > 0 ? `(retry ${attempt})` : '');
       setState((prev) => ({
         ...prev,
         isLoading: true,
         error: null,
       }));
 
+      projectService.invalidateCache();
       const result = await projectService.openProject(normalizedDir);
+
+      if (cancelled) return;
 
       if (result.success) {
         const project = result.data;
@@ -420,10 +427,27 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           isLoaded: false,
         }));
         lastLoadedDir.current = null;
+
+        if (attempt < MAX_LOAD_RETRIES) {
+          const delay = RETRY_DELAYS[attempt] ?? 8000;
+          console.log(`[ProjectContext] Scheduling load retry ${attempt + 1}/${MAX_LOAD_RETRIES} in ${delay}ms`);
+          loadRetryTimeoutRef.current = setTimeout(() => {
+            loadRetryTimeoutRef.current = null;
+            loadProject(attempt + 1);
+          }, delay);
+        }
       }
     };
 
     loadProject();
+
+    return () => {
+      cancelled = true;
+      if (loadRetryTimeoutRef.current) {
+        clearTimeout(loadRetryTimeoutRef.current);
+        loadRetryTimeoutRef.current = null;
+      }
+    };
   }, [projectDirectory]);
 
   useEffect(() => {
@@ -431,7 +455,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       return;
     }
 
-    if (projectDirectory && state.isLoaded) {
+    if (projectDirectory) {
       const normalizedDirectory =
         normalizeProjectDirectoryPath(projectDirectory);
       imageSyncEngineRef.current.setProjectDirectory(normalizedDirectory);
@@ -444,9 +468,27 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   useEffect(() => {
     if (!isImageSyncV2Enabled || !projectDirectory) return undefined;
 
-    const unsubscribe = window.electron.project.onManifestWritten((event) => {
+    const normalizedDir =
+      normalizeProjectDirectoryPath(projectDirectory) ?? projectDirectory;
+
+    const unsubscribe = window.electron.project.onManifestWritten(async (event) => {
       if (!event.path.replace(/\\/g, '/').includes('.kshana/agent/manifest.json')) return;
+      projectService.invalidateCache();
       imageSyncEngineRef.current?.triggerReconcile('manifest_written', event.path);
+
+      try {
+        const manifest = await projectService.readAssetManifest(normalizedDir);
+        if (manifest) {
+          setState((prev) => {
+            const prevCount = prev.assetManifest?.assets?.length ?? 0;
+            const nextCount = manifest.assets?.length ?? 0;
+            if (prevCount === nextCount && prevCount === 0) return prev;
+            return { ...prev, assetManifest: manifest };
+          });
+        }
+      } catch {
+        // Non-critical: engine projection is the primary source for V2
+      }
     });
 
     return () => {
@@ -471,6 +513,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       );
 
       if (isImageSyncV2Enabled && (isManifestFile || isImagePlacementFile)) {
+        projectService.invalidateCache();
         imageSyncEngineRef.current?.triggerReconcile('file_watch', filePath);
       }
 
@@ -667,7 +710,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   }, []);
 
   const scheduleManifestReconcile = useCallback(
-    (source: 'ws_asset' | 'file_watch' | 'poll', delayMs: number = 250) => {
+    (source: 'ws_asset' | 'file_watch', delayMs: number = 1500) => {
       if (manifestRefreshTimeoutRef.current) {
         clearTimeout(manifestRefreshTimeoutRef.current);
       }
@@ -824,14 +867,15 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
               });
 
               if (isImageSyncV2Enabled) {
+                projectService.invalidateCache();
                 imageSyncEngineRef.current?.triggerReconcile(
                   'ws_asset',
                   buildAssetDedupeKey(optimisticAsset),
                 );
               } else {
                 upsertAssetInManifest(optimisticAsset);
+                scheduleManifestReconcile('ws_asset');
               }
-              scheduleManifestReconcile('ws_asset');
             } else if (message.type === 'status' && message.data) {
               const statusData = message.data as Record<string, unknown>;
               const status = statusData['status'];
@@ -954,120 +998,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   // Poll for manifest updates as a source-agnostic fallback.
   // This keeps timeline hydration convergent even if websocket/file-watch signals are missed.
   useEffect(() => {
-    if (isImageSyncV2Enabled) return;
-    if (!projectDirectory || !state.isLoaded) return;
-
-    let pollIntervalMs = 1000;
-    let consecutiveFailures = 0;
-    const MAX_POLL_INTERVAL = 5000;
-    const MAX_CONSECUTIVE_FAILURES = 20;
-    const BACKOFF_MULTIPLIER = 1.5;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let isCancelled = false;
-
-    const pollForUpdates = async () => {
-      if (isCancelled) return;
-
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        console.warn(
-          `[ProjectContext][poll] Stopping poll after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`,
-        );
-        return;
-      }
-
-      try {
-        const result = await projectService.openProject(projectDirectory);
-        if (result.success) {
-          const project = result.data;
-
-          // Use functional setState to compare with latest state (avoids stale closure)
-          setState((prev) => {
-            const assetsChanged = compareAssetManifests(
-              prev.assetManifest,
-              project.assetManifest,
-            );
-
-            if (assetsChanged) {
-              console.log(
-                '[ProjectContext][poll] Assets changed, updating manifest',
-                {
-                  source: 'poll',
-                  oldCount: prev.assetManifest?.assets?.length || 0,
-                  newCount: project.assetManifest?.assets?.length || 0,
-                  addedAssets:
-                    project.assetManifest?.assets
-                      ?.filter(
-                        (a) =>
-                          !prev.assetManifest?.assets?.some(
-                            (old) => old.id === a.id,
-                          ),
-                      )
-                      .map((a) => ({
-                        id: a.id,
-                        placementNumber: a.metadata?.placementNumber,
-                        path: a.path,
-                      })) || [],
-                },
-              );
-
-              pollIntervalMs = 1000;
-              consecutiveFailures = 0;
-              return {
-                ...prev,
-                assetManifest: project.assetManifest,
-              };
-            }
-            return prev;
-          });
-        } else {
-          consecutiveFailures++;
-          pollIntervalMs = Math.min(
-            Math.floor(1000 * BACKOFF_MULTIPLIER ** consecutiveFailures),
-            MAX_POLL_INTERVAL,
-          );
-          if (consecutiveFailures <= 3) {
-            console.warn('[ProjectContext][poll] Poll openProject failed', {
-              source: 'poll',
-              consecutiveFailures,
-              nextIntervalMs: pollIntervalMs,
-              error: result.error,
-            });
-          }
-        }
-      } catch (error) {
-        consecutiveFailures++;
-        pollIntervalMs = Math.min(
-          Math.floor(1000 * BACKOFF_MULTIPLIER ** consecutiveFailures),
-          MAX_POLL_INTERVAL,
-        );
-        if (consecutiveFailures <= 3) {
-          console.debug('[ProjectContext][poll] Poll check failed', {
-            source: 'poll',
-            consecutiveFailures,
-            nextIntervalMs: pollIntervalMs,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      if (!isCancelled) {
-        timeoutId = setTimeout(pollForUpdates, pollIntervalMs);
-      }
-    };
-
-    pollForUpdates();
-
-    return () => {
-      isCancelled = true;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    };
-  }, [
-    isImageSyncV2Enabled,
-    projectDirectory,
-    state.isLoaded,
-  ]);
+    // Polling removed: v2 sync + manifest/file-watch signals handle convergence.
+    return undefined;
+  }, [isImageSyncV2Enabled, projectDirectory, state.isLoaded]);
 
   // Load project from directory
   const loadProject = useCallback(

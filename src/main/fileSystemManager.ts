@@ -15,6 +15,7 @@ const IGNORED_PATTERNS = [
   /\.cache/,
   /__pycache__/,
   /\.pyc$/,
+  /\.tmp$/,
 ];
 
 const MAX_RECENT_PROJECTS = 10;
@@ -159,10 +160,11 @@ class FileSystemManager extends EventEmitter {
     type: FileChangeEvent['type'],
     filePath: string,
   ): void {
+    const normalizedPath = filePath.replace(/\\/g, '/');
     // Store the latest event for each file path
-    this.pendingEvents.set(filePath, {
+    this.pendingEvents.set(normalizedPath, {
       type,
-      path: filePath,
+      path: normalizedPath,
     } as FileChangeEvent);
 
     // Clear existing timeout
@@ -384,7 +386,10 @@ class FileSystemManager extends EventEmitter {
       .on('change', (p: string) => emitChange('change', p))
       .on('unlink', (p: string) => emitChange('unlink', p))
       .on('addDir', (p: string) => emitChange('addDir', p))
-      .on('unlinkDir', (p: string) => emitChange('unlinkDir', p));
+      .on('unlinkDir', (p: string) => emitChange('unlinkDir', p))
+      .on('error', (error: Error) => {
+        console.error('[FileSystemManager] Directory watcher error:', error);
+      });
   }
 
   unwatchDirectory(): void {

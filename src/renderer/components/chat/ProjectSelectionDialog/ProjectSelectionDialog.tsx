@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FolderOpen, Trash2 } from 'lucide-react';
-import type { AgentProjectFile } from '../../../../types/kshana/agentProject';
+import type { AgentProjectFile } from '../../../types/kshana';
+import { safeJsonParse } from '../../../utils/safeJsonParse';
 import styles from './ProjectSelectionDialog.module.scss';
 
 interface ProjectSelectionDialogProps {
@@ -29,27 +30,15 @@ export default function ProjectSelectionDialog({
     const checkProject = async () => {
       setLoading(true);
       try {
-        const state = await window.electron.backend.getState();
-        if (state.status !== 'ready') {
-          // Backend not ready, assume no project
+        const projectFilePath = `${projectDirectory}/.kshana/agent/project.json`;
+        const content = await window.electron.project.readFile(projectFilePath);
+        if (!content) {
           setProjectStatus({ exists: false });
           setLoading(false);
           return;
         }
-
-        const port = state.port ?? 8001;
-        const response = await fetch(
-          `http://127.0.0.1:${port}/api/v1/project?project_dir=${encodeURIComponent(projectDirectory)}`,
-        );
-
-        if (!response.ok) {
-          setProjectStatus({ exists: false });
-          setLoading(false);
-          return;
-        }
-
-        const data = await response.json();
-        setProjectStatus(data);
+        const project = safeJsonParse<AgentProjectFile>(content);
+        setProjectStatus({ exists: true, project });
       } catch (error) {
         console.error(
           '[ProjectSelectionDialog] Error checking project:',
@@ -67,32 +56,9 @@ export default function ProjectSelectionDialog({
   const handleStartNew = async () => {
     setDeleting(true);
     try {
-      const state = await window.electron.backend.getState();
-      if (state.status !== 'ready') {
-        throw new Error('Backend not ready');
-      }
-
-      const port = state.port ?? 8001;
-      const response = await fetch(
-        `http://127.0.0.1:${port}/api/v1/project?project_dir=${encodeURIComponent(projectDirectory)}`,
-        { method: 'DELETE' },
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          `Failed to delete project: ${response.status} ${errorText}`,
-        );
-      }
-
-      const data = await response.json();
-      if (data.success) {
-        // Wait a bit for file system to sync
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        onStartNew();
-      } else {
-        throw new Error('Delete operation returned success: false');
-      }
+      const kshanaDir = `${projectDirectory}/.kshana`;
+      await window.electron.project.delete(kshanaDir);
+      onStartNew();
     } catch (error) {
       console.error('[ProjectSelectionDialog] Error deleting project:', error);
       alert(

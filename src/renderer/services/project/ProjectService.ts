@@ -22,6 +22,7 @@ import {
   createDefaultAssetManifest,
   createDefaultContextIndex,
 } from '../../types/kshana';
+import { safeJsonParse } from '../../utils/safeJsonParse';
 
 /**
  * Result type for async operations
@@ -74,6 +75,27 @@ export class ProjectService {
   private pendingOpen: Promise<ProjectResult<KshanaProject>> | null = null;
 
   private static readonly MIN_OPEN_INTERVAL_MS = 2000;
+
+  /**
+   * Invalidate the cached openProject result so the next call reads from disk.
+   * Useful when external processes have just modified project files (e.g., manifest).
+   */
+  invalidateCache(): void {
+    this.lastOpenResult = null;
+    this.lastOpenTimestamp = 0;
+    this.pendingOpen = null;
+  }
+
+  /**
+   * Lightweight manifest-only read that bypasses the openProject cache.
+   */
+  async readAssetManifest(directory: string): Promise<AssetManifest | null> {
+    const result = await this.readAssetManifestWithStatus(directory);
+    if (result.status === 'ok' && result.manifest) {
+      return result.manifest;
+    }
+    return null;
+  }
 
   /**
    * Gets the current project directory
@@ -451,13 +473,13 @@ export class ProjectService {
         return { status: 'missing' };
       }
       try {
-        return { status: 'ok', data: JSON.parse(content) as T };
+        return { status: 'ok', data: safeJsonParse<T>(content) };
       } catch (parseError) {
         // Primary file is corrupt -- try the atomic-write temp file as fallback
         try {
           const tmpContent = await window.electron.project.readFile(`${path}.tmp`);
           if (tmpContent) {
-            const tmpData = JSON.parse(tmpContent) as T;
+            const tmpData = safeJsonParse<T>(tmpContent);
             console.warn(
               `[ProjectService] Recovered from corrupt JSON via .tmp fallback: ${path}`,
             );
