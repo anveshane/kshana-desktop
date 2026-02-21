@@ -358,14 +358,15 @@ ipcMain.handle('project:get-resources-path', async () => {
 ipcMain.handle(
   'project:read-file',
   async (_event, filePath: string): Promise<string | null> => {
+    const normalizedPath = path.isAbsolute(filePath)
+      ? path.normalize(filePath)
+      : path.resolve(filePath);
     try {
-      // Check if file exists first to avoid noisy ENOENT errors
-      await fs.access(filePath);
-      return await fs.readFile(filePath, 'utf-8');
+      await fs.access(normalizedPath);
+      return await fs.readFile(normalizedPath, 'utf-8');
     } catch (error: unknown) {
       const err = error as { code?: string };
       if (err.code === 'ENOENT') {
-        // Return null for missing files - frontend handles this gracefully
         return null;
       }
       throw error;
@@ -376,8 +377,11 @@ ipcMain.handle(
 ipcMain.handle(
   'project:check-file-exists',
   async (_event, filePath: string): Promise<boolean> => {
+    const normalizedPath = path.isAbsolute(filePath)
+      ? path.normalize(filePath)
+      : path.resolve(filePath);
     try {
-      await fs.access(filePath);
+      await fs.access(normalizedPath);
       return true;
     } catch {
       return false;
@@ -388,15 +392,15 @@ ipcMain.handle(
 ipcMain.handle(
   'project:read-file-base64',
   async (_event, filePath: string): Promise<string | null> => {
+    const normalizedPath = path.isAbsolute(filePath)
+      ? path.normalize(filePath)
+      : path.resolve(filePath);
     try {
-      // Check if file exists first
-      await fs.access(filePath);
-      // Read file as buffer and convert to base64
-      const buffer = await fs.readFile(filePath);
+      await fs.access(normalizedPath);
+      const buffer = await fs.readFile(normalizedPath);
       const base64 = buffer.toString('base64');
 
-      // Determine MIME type from file extension
-      const ext = path.extname(filePath).toLowerCase();
+      const ext = path.extname(normalizedPath).toLowerCase();
       const mimeTypes: Record<string, string> = {
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',

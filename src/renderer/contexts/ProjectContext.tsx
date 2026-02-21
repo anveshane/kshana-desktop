@@ -252,6 +252,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   // Get workspace context for sync
   const { projectDirectory } = useWorkspace();
   const lastLoadedDir = useRef<string | null>(null);
+  const loadRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // WebSocket connection refs to prevent duplicate connections
   const wsRef = useRef<WebSocket | null>(null);
@@ -339,24 +340,36 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         setState(initialState);
         lastLoadedDir.current = null;
       }
+      if (loadRetryTimeoutRef.current) {
+        clearTimeout(loadRetryTimeoutRef.current);
+        loadRetryTimeoutRef.current = null;
+      }
       return;
     }
 
     // Don't reload if same directory
     if (projectDirectory === lastLoadedDir.current) return;
 
+    let cancelled = false;
+    const MAX_LOAD_RETRIES = 3;
+    const RETRY_DELAYS = [2000, 4000, 8000];
+
     // Auto-load project when opening a project directory
-    const loadProject = async () => {
+    const loadProject = async (attempt: number = 0) => {
+      if (cancelled) return;
       const normalizedDir =
         normalizeProjectDirectoryPath(projectDirectory) ?? projectDirectory;
-      console.log('[ProjectContext] Loading project from:', normalizedDir);
+      console.log('[ProjectContext] Loading project from:', normalizedDir, attempt > 0 ? `(retry ${attempt})` : '');
       setState((prev) => ({
         ...prev,
         isLoading: true,
         error: null,
       }));
 
+      projectService.invalidateCache();
       const result = await projectService.openProject(normalizedDir);
+
+      if (cancelled) return;
 
       if (result.success) {
         const project = result.data;
@@ -414,10 +427,27 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           isLoaded: false,
         }));
         lastLoadedDir.current = null;
+
+        if (attempt < MAX_LOAD_RETRIES) {
+          const delay = RETRY_DELAYS[attempt] ?? 8000;
+          console.log(`[ProjectContext] Scheduling load retry ${attempt + 1}/${MAX_LOAD_RETRIES} in ${delay}ms`);
+          loadRetryTimeoutRef.current = setTimeout(() => {
+            loadRetryTimeoutRef.current = null;
+            loadProject(attempt + 1);
+          }, delay);
+        }
       }
     };
 
     loadProject();
+
+    return () => {
+      cancelled = true;
+      if (loadRetryTimeoutRef.current) {
+        clearTimeout(loadRetryTimeoutRef.current);
+        loadRetryTimeoutRef.current = null;
+      }
+    };
   }, [projectDirectory]);
 
   useEffect(() => {
@@ -425,7 +455,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       return;
     }
 
-    if (projectDirectory && state.isLoaded) {
+    if (projectDirectory) {
       const normalizedDirectory =
         normalizeProjectDirectoryPath(projectDirectory);
       imageSyncEngineRef.current.setProjectDirectory(normalizedDirectory);
@@ -438,10 +468,27 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   useEffect(() => {
     if (!isImageSyncV2Enabled || !projectDirectory) return undefined;
 
-    const unsubscribe = window.electron.project.onManifestWritten((event) => {
+    const normalizedDir =
+      normalizeProjectDirectoryPath(projectDirectory) ?? projectDirectory;
+
+    const unsubscribe = window.electron.project.onManifestWritten(async (event) => {
       if (!event.path.replace(/\\/g, '/').includes('.kshana/agent/manifest.json')) return;
       projectService.invalidateCache();
       imageSyncEngineRef.current?.triggerReconcile('manifest_written', event.path);
+
+      try {
+        const manifest = await projectService.readAssetManifest(normalizedDir);
+        if (manifest) {
+          setState((prev) => {
+            const prevCount = prev.assetManifest?.assets?.length ?? 0;
+            const nextCount = manifest.assets?.length ?? 0;
+            if (prevCount === nextCount && prevCount === 0) return prev;
+            return { ...prev, assetManifest: manifest };
+          });
+        }
+      } catch {
+        // Non-critical: engine projection is the primary source for V2
+      }
     });
 
     return () => {

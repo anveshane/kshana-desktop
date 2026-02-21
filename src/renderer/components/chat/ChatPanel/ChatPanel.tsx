@@ -1371,16 +1371,11 @@ export default function ChatPanel() {
         // Check for existing project before connecting
         if (projectDirectory && !projectDialogResolved) {
           try {
-            const port = state.port ?? 8001;
-            const response = await fetch(
-              `http://127.0.0.1:${port}/api/v1/project?project_dir=${encodeURIComponent(projectDirectory)}`,
-            );
-            if (response.ok) {
-              const data = await response.json();
-              if (data.exists) {
-                setShowProjectDialog(true);
-                return; // Don't connect yet, wait for user decision
-              }
+            const projectFilePath = `${projectDirectory}/.kshana/agent/project.json`;
+            const exists = await window.electron.project.checkFileExists(projectFilePath);
+            if (exists) {
+              setShowProjectDialog(true);
+              return; // Don't connect yet, wait for user decision
             }
           } catch (error) {
             console.error('[ChatPanel] Error checking project:', error);
@@ -1459,16 +1454,11 @@ export default function ChatPanel() {
         if (state.status === 'ready') {
           // Check for existing project before connecting
           try {
-            const port = state.port ?? 8001;
-            const response = await fetch(
-              `http://127.0.0.1:${port}/api/v1/project?project_dir=${encodeURIComponent(projectDirectory)}`,
-            );
-            if (response.ok) {
-              const data = await response.json();
-              if (data.exists) {
-                setShowProjectDialog(true);
-                return; // Don't connect yet, wait for user decision
-              }
+            const projectFilePath = `${projectDirectory}/.kshana/agent/project.json`;
+            const exists = await window.electron.project.checkFileExists(projectFilePath);
+            if (exists) {
+              setShowProjectDialog(true);
+              return; // Don't connect yet, wait for user decision
             }
           } catch (error) {
             console.error('[ChatPanel] Error checking project:', error);
