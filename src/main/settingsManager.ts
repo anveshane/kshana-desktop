@@ -14,6 +14,9 @@ const defaults: AppSettings = {
   openaiModel: 'gpt-4o',
   openRouterApiKey: '',
   openRouterModel: 'z-ai/glm-4.7-flash',
+  feature: {
+    rich_editor_beta: false,
+  },
 };
 
 const store = new Store<AppSettings>({

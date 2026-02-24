@@ -22,6 +22,21 @@ const manifest = path.resolve(webpackPaths.dllPath, 'renderer.json');
 const skipDLLs =
   module.parent?.filename.includes('webpack.config.renderer.dev.dll') ||
   module.parent?.filename.includes('webpack.config.eslint');
+const vendorRoot = path.join(webpackPaths.srcRendererPath, 'vendor');
+const postcssConfigPath = path.resolve(__dirname, '../../postcss.config.cjs');
+
+function hasVendorPostCssTooling(): boolean {
+  try {
+    require.resolve('postcss-loader');
+    require.resolve('tailwindcss');
+    require.resolve('autoprefixer');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const useVendorPostCss = hasVendorPostCssTooling();
 
 /**
  * Warn if the DLL is not built
@@ -63,7 +78,36 @@ const configuration: webpack.Configuration = {
   module: {
     rules: [
       {
+        test: /\.s?(c|a)ss$/,
+        include: [vendorRoot],
+        use: [
+          'style-loader',
+          'css-loader',
+          ...(useVendorPostCss
+            ? [
+                {
+                  loader: 'postcss-loader',
+                  options: {
+                    postcssOptions: {
+                      config: postcssConfigPath,
+                    },
+                  },
+                },
+              ]
+            : []),
+          {
+            loader: 'sass-loader',
+            options: {
+              sassOptions: {
+                silenceDeprecations: ['import'],
+              },
+            },
+          },
+        ],
+      },
+      {
         test: /\.module\.s?(c|a)ss$/,
+        exclude: [vendorRoot],
         use: [
           'style-loader',
           {
@@ -101,7 +145,7 @@ const configuration: webpack.Configuration = {
             },
           },
         ],
-        exclude: /\.module\.s?(c|a)ss$/,
+        exclude: [/\.module\.s?(c|a)ss$/, vendorRoot],
       },
       // Fonts
       {
@@ -254,6 +298,23 @@ const configuration: webpack.Configuration = {
 
   resolve: {
     alias: {
+      '@': path.join(webpackPaths.srcRendererPath, 'vendor'),
+      'next/image': path.join(
+        webpackPaths.srcRendererPath,
+        'vendor/shims/nextImage.tsx',
+      ),
+      sonner: path.join(
+        webpackPaths.srcRendererPath,
+        'vendor/shims/sonner.tsx',
+      ),
+      '@openreel/ui': path.join(
+        webpackPaths.srcRendererPath,
+        'vendor/ui/openreel/index.tsx',
+      ),
+      '@opencut/ui': path.join(
+        webpackPaths.srcRendererPath,
+        'vendor/ui/opencut/index.tsx',
+      ),
       // Force React resolution to project root
       react: path.dirname(require.resolve('react/package.json')),
       'react-dom': path.dirname(require.resolve('react-dom/package.json')),

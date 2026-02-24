@@ -1,0 +1,530 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.container {
+  width: clamp(296px, 30vw, 344px);
+  height: 100%;
+  display: flex;
+  flex-direction: row;
+  border-right: 1px solid $color-panel-border;
+  background: linear-gradient(
+    180deg,
+    rgba($color-background-dark, 0.96) 0%,
+    rgba($color-panel-background, 0.96) 100%
+  );
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.collapsed {
+  width: 64px;
+}
+
+.iconRail {
+  width: 64px;
+  border-right: 1px solid rgba($color-panel-border, 0.85);
+  background: rgba($color-background-dark, 0.88);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0;
+  gap: 10px;
+  overflow-y: auto;
+  @include custom-scrollbar;
+}
+
+.iconRailPrimary,
+.iconRailSecondary,
+.iconRailFooter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.iconRailSecondary {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba($color-panel-border, 0.6);
+}
+
+.iconRailFooter {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba($color-panel-border, 0.6);
+}
+
+.iconButton,
+.iconButtonMuted {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba($color-text-muted, 0.82);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    color: $color-text-secondary;
+    background: rgba($color-text-primary, 0.08);
+  }
+}
+
+.iconButtonActive {
+  color: #26b9ff;
+  border-color: rgba(#26b9ff, 0.85);
+  background: linear-gradient(
+    180deg,
+    rgba(#0c2a3b, 0.92) 0%,
+    rgba(#0b1f2f, 0.96) 100%
+  );
+  box-shadow:
+    inset 0 0 0 1px rgba(#26b9ff, 0.2),
+    0 0 0 1px rgba(#26b9ff, 0.18);
+}
+
+.iconButtonMuted {
+  color: rgba($color-text-muted, 0.7);
+  cursor: not-allowed;
+
+  &:hover {
+    color: rgba($color-text-muted, 0.7);
+    background: transparent;
+  }
+}
+
+.panelArea {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.collapseToggle {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translate(50%, -50%);
+  width: 18px;
+  height: 52px;
+  border: 1px solid rgba($color-panel-border, 0.9);
+  border-radius: 0 999px 999px 0;
+  background: rgba($color-background-dark, 0.96);
+  color: $color-text-muted;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 4;
+
+  &:hover {
+    color: $color-text-secondary;
+    border-color: rgba($color-accent-green, 0.35);
+  }
+}
+
+.panelHeader {
+  height: 44px;
+  border-bottom: 1px solid rgba($color-panel-border, 0.7);
+  display: flex;
+  align-items: center;
+  padding: 0 $spacing-sm;
+  background: rgba($color-background-dark, 0.25);
+
+  h4 {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: $color-text-muted;
+    font-weight: $font-weight-semibold;
+  }
+}
+
+@media (max-width: 1360px) {
+  .container {
+    width: 300px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .container {
+    width: 280px;
+  }
+
+  .cardGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tabContent {
+  position: relative;
+  flex: 1;
+  overflow-y: auto;
+  padding: $spacing-sm;
+  @include custom-scrollbar;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+.mediaToolbar {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.searchBox {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: $radius-sm;
+  border: 1px solid $color-panel-border;
+  background: rgba($color-background-dark, 0.9);
+
+  svg {
+    color: $color-text-muted;
+    flex-shrink: 0;
+  }
+
+  input {
+    width: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: $color-text-primary;
+    font-size: $font-size-xs;
+  }
+}
+
+.importButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba($color-accent-green, 0.45);
+  background: rgba($color-accent-green, 0.16);
+  color: $color-accent-green;
+  border-radius: $radius-sm;
+  padding: 7px 9px;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $spacing-sm;
+}
+
+.assetCard {
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  background: rgba($color-background-dark, 0.62);
+  overflow: hidden;
+}
+
+.assetThumbnail {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba($color-background-dark, 0.8);
+}
+
+.assetTypeBadge {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: $radius-sm;
+  background: rgba($color-text-primary, 0.08);
+  color: $color-text-muted;
+}
+
+.thumbnailImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.missingBadge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: $font-weight-semibold;
+  border-radius: $radius-sm;
+  padding: 2px 5px;
+  background: #ffd66b;
+  color: #141414;
+}
+
+.assetInfo {
+  padding: 7px;
+}
+
+.assetName {
+  font-size: $font-size-xs;
+  color: $color-text-primary;
+  @include truncate;
+}
+
+.assetMeta {
+  margin-top: 2px;
+  font-size: 10px;
+  color: $color-text-muted;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.assetActions {
+  padding: 0 7px 7px;
+  display: flex;
+  gap: 6px;
+}
+
+.addButton,
+.replaceButton,
+.secondaryButton {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: $radius-sm;
+  padding: 5px 6px;
+  font-size: 10px;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+}
+
+.addButton {
+  border: 1px solid rgba($color-accent-green, 0.45);
+  background: rgba($color-accent-green, 0.14);
+  color: $color-accent-green;
+}
+
+.replaceButton {
+  border: 1px solid rgba(#f8c44f, 0.6);
+  background: rgba(#f8c44f, 0.18);
+  color: #f8c44f;
+}
+
+.secondaryButton {
+  border: 1px solid $color-panel-border;
+  background: rgba($color-text-primary, 0.06);
+  color: $color-text-secondary;
+  width: 100%;
+}
+
+.emptyState {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-xs;
+  border: 1px dashed rgba($color-panel-border, 0.8);
+  border-radius: $radius-sm;
+  padding: $spacing-lg;
+  color: $color-text-muted;
+  text-align: center;
+
+  p {
+    margin: 0;
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+  }
+
+  span {
+    font-size: 10px;
+  }
+}
+
+.dropOverlay {
+  position: absolute;
+  inset: $spacing-sm;
+  border: 2px dashed rgba($color-accent-green, 0.85);
+  border-radius: $radius-sm;
+  background: rgba($color-background-dark, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.dropOverlayText {
+  border-radius: $radius-sm;
+  background: rgba($color-accent-green, 0.18);
+  color: $color-text-primary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  padding: $spacing-xs $spacing-sm;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: $spacing-sm;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+}
+
+.buttonList {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+}
+
+.presetButton {
+  width: 100%;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  padding: $spacing-sm;
+  background: rgba($color-background-dark, 0.55);
+  color: $color-text-secondary;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  cursor: pointer;
+
+  strong {
+    display: block;
+    color: $color-text-primary;
+    font-size: $font-size-xs;
+    margin-bottom: 2px;
+  }
+
+  span {
+    font-size: 10px;
+    color: $color-text-muted;
+  }
+}
+
+.stickerGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: $spacing-xs;
+}
+
+.stickerCard {
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  background: rgba($color-background-dark, 0.55);
+  padding: $spacing-xs;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.stickerPreview {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.stickerName {
+  font-size: 10px;
+  color: $color-text-muted;
+  text-align: center;
+}
+
+.graphicsSection {
+  margin-bottom: $spacing-md;
+
+  h4 {
+    margin: 0 0 $spacing-xs;
+    font-size: 11px;
+    color: $color-text-muted;
+    font-weight: $font-weight-semibold;
+  }
+}
+
+.shapeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $spacing-xs;
+}
+
+.shapeButton {
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  background: rgba($color-background-dark, 0.55);
+  color: $color-text-secondary;
+  padding: 7px;
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.presetChipGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+}
+
+.presetChip {
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-full;
+  background: rgba($color-background-dark, 0.55);
+  color: $color-text-secondary;
+  padding: 4px 8px;
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.aiPlaceholder {
+  min-height: 180px;
+  border: 1px dashed rgba($color-panel-border, 0.9);
+  border-radius: $radius-sm;
+  padding: $spacing-md;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-xs;
+  text-align: center;
+  color: $color-text-muted;
+
+  strong {
+    color: $color-text-secondary;
+    font-size: $font-size-sm;
+  }
+
+  p {
+    margin: 0;
+    font-size: $font-size-xs;
+  }
+}

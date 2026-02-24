@@ -87,6 +87,55 @@
   min-height: 36px;
 }
 
+.textPropertiesBar {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-lg;
+  border-bottom: 1px solid $color-panel-border;
+  background: rgba($color-panel-background, 0.95);
+}
+
+.textPropertiesInput {
+  flex: 1;
+  min-width: 180px;
+  padding: 6px 8px;
+  border-radius: $radius-sm;
+  border: 1px solid $color-panel-border;
+  background: rgba($color-background-dark, 0.9);
+  color: $color-text-primary;
+  font-size: $font-size-xs;
+}
+
+.textPropertiesNumber {
+  width: 72px;
+  padding: 6px 8px;
+  border-radius: $radius-sm;
+  border: 1px solid $color-panel-border;
+  background: rgba($color-background-dark, 0.9);
+  color: $color-text-primary;
+  font-size: $font-size-xs;
+}
+
+.textPropertiesColor {
+  width: 34px;
+  height: 34px;
+  border-radius: $radius-sm;
+  border: 1px solid $color-panel-border;
+  background: rgba($color-background-dark, 0.9);
+  padding: 2px;
+}
+
+.textPropertiesSelect {
+  min-width: 120px;
+  padding: 6px 8px;
+  border-radius: $radius-sm;
+  border: 1px solid $color-panel-border;
+  background: rgba($color-background-dark, 0.9);
+  color: $color-text-primary;
+  font-size: $font-size-xs;
+}
+
 .toolbarLeft {
   display: flex;
   align-items: center;
@@ -149,6 +198,17 @@
   span {
     font-size: $font-size-xs;
   }
+}
+
+.textPresetSelect {
+  min-width: 110px;
+  height: 28px;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  background: rgba($color-background-dark, 0.9);
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  padding: 0 $spacing-xs;
 }
 
 .zoomButton {
@@ -595,6 +655,60 @@
   @include truncate;
 }
 
+.textTrackBlock {
+  @extend .textOverlayBlock;
+  border-color: rgba(120, 227, 169, 0.65);
+  background: linear-gradient(
+    180deg,
+    rgba(120, 227, 169, 0.24) 0%,
+    rgba(37, 167, 112, 0.12) 100%
+  );
+}
+
+.textTrackLabel {
+  color: #e8ffee;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  width: 100%;
+  @include truncate;
+}
+
+.stickerTrackBlock {
+  @extend .textOverlayBlock;
+  border-color: rgba(255, 199, 72, 0.8);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 199, 72, 0.28) 0%,
+    rgba(255, 156, 44, 0.14) 100%
+  );
+}
+
+.stickerTrackLabel {
+  color: #fff4d6;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  width: 100%;
+  @include truncate;
+}
+
+.graphicsTrackBlock {
+  @extend .textOverlayBlock;
+  border-color: rgba(186, 156, 255, 0.7);
+  background: linear-gradient(
+    180deg,
+    rgba(186, 156, 255, 0.25) 0%,
+    rgba(129, 89, 224, 0.14) 100%
+  );
+}
+
+.graphicsTrackLabel {
+  color: #efe5ff;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  width: 100%;
+  @include truncate;
+}
+
 .audioBlock {
   position: absolute;
   top: 50%;
@@ -647,6 +761,19 @@
   @include truncate;
   max-width: 100%;
   padding: 0 $spacing-xs;
+}
+
+.missingBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 2px 6px;
+  border-radius: $radius-sm;
+  font-size: 10px;
+  font-weight: $font-weight-semibold;
+  color: #141414;
+  background: #ffd66b;
+  z-index: 5;
 }
 
 .emptyState {

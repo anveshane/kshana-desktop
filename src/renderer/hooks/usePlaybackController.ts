@@ -51,11 +51,13 @@ export function usePlaybackController(
   const playbackState = useMemo(() => {
     if (isDragging) {
       // Don't update during drag - return current state
-      return stateMachineRef.current?.getCurrentState() || { type: 'IDLE' };
+      return (
+        stateMachineRef.current?.getCurrentState() ?? ({ type: 'IDLE' } as const)
+      );
     }
 
     if (!stateMachineRef.current) {
-      return { type: 'IDLE' };
+      return { type: 'IDLE' } as const;
     }
 
     // Get current seeking state (handle both boolean and function)

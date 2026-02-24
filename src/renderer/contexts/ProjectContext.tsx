@@ -134,6 +134,19 @@ interface ProjectActions {
     overrides: KshanaTimelineState['video_split_overrides'],
   ) => void;
 
+  /** Update rich timeline tracks (schema v2) */
+  updateTimelineTracks: (tracks: KshanaTimelineState['tracks']) => void;
+
+  /** Update timeline bookmarks (schema v2) */
+  updateTimelineBookmarks: (
+    bookmarks: KshanaTimelineState['bookmarks'],
+  ) => void;
+
+  /** Patch timeline viewport state (schema v2) */
+  updateTimelineViewState: (
+    patch: Partial<KshanaTimelineState['view_state']>,
+  ) => void;
+
   /** Add an asset to the asset manifest */
   addAsset: (assetInfo: AssetInfo) => Promise<boolean>;
 
@@ -1140,7 +1153,14 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   const updatePlayhead = useCallback((seconds: number) => {
     setState((prev) => ({
       ...prev,
-      timelineState: { ...prev.timelineState, playhead_seconds: seconds },
+      timelineState: {
+        ...prev.timelineState,
+        playhead_seconds: seconds,
+        view_state: {
+          ...prev.timelineState.view_state,
+          playhead_time: seconds,
+        },
+      },
     }));
   }, []);
 
@@ -1148,7 +1168,14 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   const updateZoom = useCallback((level: number) => {
     setState((prev) => ({
       ...prev,
-      timelineState: { ...prev.timelineState, zoom_level: level },
+      timelineState: {
+        ...prev.timelineState,
+        zoom_level: level,
+        view_state: {
+          ...prev.timelineState.view_state,
+          zoom_level: level,
+        },
+      },
     }));
   }, []);
 
@@ -1246,6 +1273,53 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           video_split_overrides: overrides,
         },
       }));
+    },
+    [],
+  );
+
+  const updateTimelineTracks = useCallback(
+    (tracks: KshanaTimelineState['tracks']) => {
+      setState((prev) => ({
+        ...prev,
+        timelineState: {
+          ...prev.timelineState,
+          tracks,
+        },
+      }));
+    },
+    [],
+  );
+
+  const updateTimelineBookmarks = useCallback(
+    (bookmarks: KshanaTimelineState['bookmarks']) => {
+      setState((prev) => ({
+        ...prev,
+        timelineState: {
+          ...prev.timelineState,
+          bookmarks,
+        },
+      }));
+    },
+    [],
+  );
+
+  const updateTimelineViewState = useCallback(
+    (patch: Partial<KshanaTimelineState['view_state']>) => {
+      setState((prev) => {
+        const nextViewState = {
+          ...prev.timelineState.view_state,
+          ...patch,
+        };
+        return {
+          ...prev,
+          timelineState: {
+            ...prev.timelineState,
+            view_state: nextViewState,
+            zoom_level: nextViewState.zoom_level,
+            playhead_seconds: nextViewState.playhead_time,
+          },
+        };
+      });
     },
     [],
   );
@@ -1349,6 +1423,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       infographic_timing_overrides:
         state.timelineState.infographic_timing_overrides,
       video_split_overrides: state.timelineState.video_split_overrides,
+      tracks: state.timelineState.tracks,
+      bookmarks: state.timelineState.bookmarks,
+      view_state: state.timelineState.view_state,
+      assets_version: state.timelineState.assets_version,
     });
 
     // Only save if state actually changed
@@ -1386,6 +1464,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     JSON.stringify(state.timelineState.image_timing_overrides),
     JSON.stringify(state.timelineState.infographic_timing_overrides),
     JSON.stringify(state.timelineState.video_split_overrides),
+    JSON.stringify(state.timelineState.tracks),
+    JSON.stringify(state.timelineState.bookmarks),
+    JSON.stringify(state.timelineState.view_state),
+    state.timelineState.assets_version,
     saveTimelineState,
   ]);
 
@@ -1437,6 +1519,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateImageTimingOverrides,
       updateInfographicTimingOverrides,
       updateVideoSplitOverrides,
+      updateTimelineTracks,
+      updateTimelineBookmarks,
+      updateTimelineViewState,
       addAsset,
       refreshAssetManifest,
       subscribeImageProjection,
@@ -1461,6 +1546,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateImageTimingOverrides,
       updateInfographicTimingOverrides,
       updateVideoSplitOverrides,
+      updateTimelineTracks,
+      updateTimelineBookmarks,
+      updateTimelineViewState,
       addAsset,
       refreshAssetManifest,
       subscribeImageProjection,
@@ -1517,15 +1605,29 @@ export function useProjectTimeline(): {
   timelineState: KshanaTimelineState;
   updatePlayhead: (seconds: number) => void;
   updateZoom: (level: number) => void;
+  updateTimelineViewState: (
+    patch: Partial<KshanaTimelineState['view_state']>,
+  ) => void;
   setActiveVersion: (
     sceneFolder: string,
     assetType: 'image' | 'video',
     version: number,
   ) => void;
 } {
-  const { timelineState, updatePlayhead, updateZoom, setActiveVersion } =
-    useProject();
-  return { timelineState, updatePlayhead, updateZoom, setActiveVersion };
+  const {
+    timelineState,
+    updatePlayhead,
+    updateZoom,
+    updateTimelineViewState,
+    setActiveVersion,
+  } = useProject();
+  return {
+    timelineState,
+    updatePlayhead,
+    updateZoom,
+    updateTimelineViewState,
+    setActiveVersion,
+  };
 }
 
 export default ProjectContext;

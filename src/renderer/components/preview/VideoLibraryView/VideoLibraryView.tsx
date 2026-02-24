@@ -5,18 +5,32 @@ import React, {
   useRef,
   useMemo,
 } from 'react';
-import { Film, Play, Calendar, Pause, Download, ChevronDown } from 'lucide-react';
+import { Film, Play, Pause, Download, ChevronDown } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
 import { useAudioController } from '../../../hooks/useAudioController';
 import { usePlaybackController } from '../../../hooks/usePlaybackController';
+import VideoPreviewLeftPanel from '../VideoPreviewLeftPanel/VideoPreviewLeftPanel';
+import {
+  appendImportedMediaToTimelineState,
+  importedMediaToAssetInfo,
+  importMediaToProject,
+  replaceMediaInProject,
+  type ImportedMediaData,
+} from '../../../services/media';
+import {
+  insertShape,
+  insertSticker,
+  insertSvg,
+  insertTextPreset,
+  type TextPresetType,
+} from '../../../services/timeline';
 import {
   resolveAssetPathForDisplay,
   resolveAssetPathWithRetry,
 } from '../../../utils/pathResolver';
 import { normalizePathForExport, stripFileProtocol } from '../../../utils/pathNormalizer';
-import type { Artifact } from '../../../types/projectState';
 import type { SceneRef } from '../../../types/kshana/entities';
 import type { SceneVersions } from '../../../types/kshana/timeline';
 import type { TextOverlayCue } from '../../../types/captions';
@@ -45,53 +59,34 @@ function doesVideoSourceMatch(currentSrc: string, expectedSrc: string): boolean 
   return normalizedCurrent === normalizedExpected;
 }
 
-// Video Card Component
-interface VideoCardProps {
-  artifact: Artifact;
-  formatDate: (dateString: string) => string;
-  projectDirectory: string | null;
-}
+type InsertShapeType = 'rectangle' | 'circle' | 'triangle' | 'star' | 'arrow' | 'polygon';
 
-function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
-  const [videoPath, setVideoPath] = useState<string>('');
+function inferImportedAssetType(
+  assetType: string,
+  path: string,
+): ImportedMediaData['type'] | null {
+  const loweredPath = path.toLowerCase();
+  if (
+    assetType === 'final_audio' ||
+    /\.(mp3|wav|m4a|aac|ogg|flac|wma)$/i.test(loweredPath)
+  ) {
+    return 'audio';
+  }
+  if (
+    assetType === 'scene_image' ||
+    /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(loweredPath)
+  ) {
+    return 'image';
+  }
+  if (
+    assetType === 'scene_video' ||
+    assetType === 'final_video' ||
+    /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(loweredPath)
+  ) {
+    return 'video';
+  }
 
-  useEffect(() => {
-    resolveAssetPathForDisplay(artifact.file_path, projectDirectory).then(
-      (resolved) => {
-        setVideoPath(resolved);
-      },
-    );
-  }, [artifact.file_path, projectDirectory]);
-
-  return (
-    <div className={styles.videoCard}>
-      <div className={styles.videoThumbnail}>
-        {videoPath && (
-          <video
-            src={videoPath}
-            className={styles.video}
-            preload="metadata"
-            muted
-          />
-        )}
-        {artifact.scene_number && (
-          <div className={styles.sceneBadge}>Scene {artifact.scene_number}</div>
-        )}
-      </div>
-      <div className={styles.videoInfo}>
-        <div className={styles.videoTitle}>
-          {(artifact.metadata?.title as string) ||
-            `Video ${artifact.artifact_id.slice(-8)}`}
-        </div>
-        <div className={styles.videoMeta}>
-          <div className={styles.metaItem}>
-            <Calendar size={12} />
-            <span>{formatDate(artifact.created_at)}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }
 
 interface VideoLibraryViewProps {
@@ -112,20 +107,28 @@ export default function VideoLibraryView({
   onPlaybackTimeChange,
   onPlaybackStateChange,
   onTotalDurationChange,
-  activeVersions = {},
-  projectScenes = [],
 }: VideoLibraryViewProps) {
   const { projectDirectory } = useWorkspace();
-  const { isLoading, assetManifest } = useProject();
+  const {
+    isLoading,
+    manifest,
+    assetManifest,
+    timelineState,
+    addAsset,
+    updateTimelineTracks,
+    updateImportedClips,
+  } = useProject();
 
-  // Create scene folder map
-  const sceneFoldersByNumber = useMemo(() => {
-    const map: Record<number, string> = {};
-    projectScenes.forEach((scene) => {
-      map[scene.scene_number] = scene.folder;
-    });
-    return map;
-  }, [projectScenes]);
+  const mediaAssetCount = useMemo(() => {
+    if (!assetManifest?.assets) return 0;
+    return assetManifest.assets.filter((asset) => {
+      const mediaType = inferImportedAssetType(asset.type, asset.path);
+      if (!mediaType) return false;
+      const importedFlag = Boolean(asset.metadata?.imported);
+      const inAssetsDir = asset.path.startsWith('.kshana/assets/');
+      return importedFlag || inAssetsDir;
+    }).length;
+  }, [assetManifest?.assets]);
 
   // Use unified timeline data from context (single source of truth for TimelinePanel + VideoLibraryView)
   const {
@@ -135,44 +138,24 @@ export default function VideoLibraryView({
     totalDuration,
   } = useTimelineDataContext();
 
+  const visualTimelineItems = useMemo(
+    () =>
+      timelineItems.filter(
+        (item) =>
+          item.type === 'video' ||
+          item.type === 'image' ||
+          item.type === 'infographic' ||
+          item.type === 'placeholder',
+      ),
+    [timelineItems],
+  );
+
   // Notify parent when totalDuration changes (for playback bounds checking)
   useEffect(() => {
     if (onTotalDurationChange) {
       onTotalDurationChange(totalDuration);
     }
   }, [totalDuration, onTotalDurationChange]);
-
-  // Get video artifacts from asset manifest for the sidebar
-  const videoArtifacts = useMemo(() => {
-    if (!assetManifest?.assets) return [];
-    return assetManifest.assets
-      .filter(
-        (asset) => asset.type === 'scene_video' || asset.type === 'final_video',
-      )
-      .map((asset) => {
-        let createdAt: string;
-        if (asset.created_at) {
-          const date = new Date(asset.created_at);
-          createdAt = isNaN(date.getTime())
-            ? new Date().toISOString()
-            : date.toISOString();
-        } else {
-          createdAt = new Date().toISOString();
-        }
-        return {
-          artifact_id: asset.id,
-          artifact_type: 'video',
-          file_path: asset.path,
-          created_at: createdAt,
-          scene_number: asset.scene_number,
-          metadata: {
-            title: asset.path.replace(/\\/g, '/').split('/').pop(),
-            duration: asset.metadata?.duration,
-            imported: asset.metadata?.imported,
-          },
-        };
-      });
-  }, [assetManifest]);
 
   // Refs must be declared before usePlaybackController hook
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -191,28 +174,12 @@ export default function VideoLibraryView({
 
   // Use production-grade playback controller instead of manual state management
   const { currentItem, currentItemIndex } = usePlaybackController(
-    timelineItems,
+    visualTimelineItems,
     playbackTime,
     isPlaying,
     isDragging,
     () => isSeekingRef.current, // Pass function to get current seeking state
   );
-
-  // Format date
-  const formatDate = (dateString: string): string => {
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return dateString;
-    }
-  };
 
   // Format time display
   const formatTime = (seconds: number): string => {
@@ -488,10 +455,10 @@ export default function VideoLibraryView({
 
     if (
       currentItemIndex !== null &&
-      currentItemIndex < timelineItems.length - 1
+      currentItemIndex < visualTimelineItems.length - 1
     ) {
       const nextIndex = currentItemIndex + 1;
-      const nextItem = timelineItems[nextIndex];
+      const nextItem = visualTimelineItems[nextIndex];
       if (nextItem) {
         // Advance playbackTime to next item's start - playback controller will handle the transition
         safeSetPlaybackTime(nextItem.startTime, false);
@@ -508,7 +475,7 @@ export default function VideoLibraryView({
     }
   }, [
     currentItemIndex,
-    timelineItems,
+    visualTimelineItems,
     safeSetPlaybackTime,
     onPlaybackStateChange,
     isDragging,
@@ -1069,7 +1036,11 @@ export default function VideoLibraryView({
 
   // Handle video download
   const handleDownloadVideo = useCallback(async () => {
-    if (!projectDirectory || timelineItems.length === 0 || isDownloading) {
+    if (
+      !projectDirectory ||
+      visualTimelineItems.length === 0 ||
+      isDownloading
+    ) {
       return;
     }
 
@@ -1364,6 +1335,7 @@ export default function VideoLibraryView({
   }, [
     projectDirectory,
     timelineItems,
+    visualTimelineItems.length,
     overlayItems,
     textOverlayCues,
     isDownloading,
@@ -1389,7 +1361,7 @@ export default function VideoLibraryView({
 
   // Helper: resolve timeline items + overlays for export (shared by all export handlers)
   const resolveExportData = useCallback(async () => {
-    if (!projectDirectory || timelineItems.length === 0) return null;
+    if (!projectDirectory || visualTimelineItems.length === 0) return null;
 
     // Extract audio path
     const audioItems = timelineItems.filter((item) => item.type === 'audio');
@@ -1486,11 +1458,19 @@ export default function VideoLibraryView({
       overlayItemsData,
       textOverlayCues,
     };
-  }, [projectDirectory, timelineItems, overlayItems, textOverlayCues]);
+  }, [
+    projectDirectory,
+    timelineItems,
+    overlayItems,
+    textOverlayCues,
+    visualTimelineItems.length,
+  ]);
 
   // Handle CapCut export
   const handleExportCapcut = useCallback(async () => {
-    if (!projectDirectory || timelineItems.length === 0 || isExporting) return;
+    if (!projectDirectory || visualTimelineItems.length === 0 || isExporting) {
+      return;
+    }
     setIsExporting(true);
     setShowExportMenu(false);
     try {
@@ -1550,7 +1530,242 @@ export default function VideoLibraryView({
     } finally {
       setIsExporting(false);
     }
-  }, [projectDirectory, timelineItems, isExporting, resolveExportData]);
+  }, [
+    projectDirectory,
+    visualTimelineItems.length,
+    isExporting,
+    resolveExportData,
+  ]);
+
+  const applyTimelineMutation = useCallback(
+    (
+      nextState: Pick<typeof timelineState, 'tracks' | 'imported_clips'>,
+    ) => {
+      updateTimelineTracks(nextState.tracks);
+      updateImportedClips(nextState.imported_clips);
+    },
+    [updateTimelineTracks, updateImportedClips],
+  );
+
+  const isAspectRatioCompatible = useCallback(
+    (metadata?: Record<string, unknown>) => {
+      const projectWidth = manifest?.settings?.resolution?.width;
+      const projectHeight = manifest?.settings?.resolution?.height;
+      if (!projectWidth || !projectHeight || !metadata) {
+        return true;
+      }
+
+      const mediaWidth = metadata.width;
+      const mediaHeight = metadata.height;
+      if (typeof mediaWidth !== 'number' || typeof mediaHeight !== 'number') {
+        return true;
+      }
+
+      const projectRatio = projectWidth / projectHeight;
+      const mediaRatio = mediaWidth / mediaHeight;
+      const ratioDelta = Math.abs(projectRatio - mediaRatio);
+      if (ratioDelta <= 0.03) {
+        return true;
+      }
+
+      return window.confirm(
+        `Imported media aspect ratio (${mediaWidth}x${mediaHeight}) differs from project ratio (${projectWidth}x${projectHeight}). Add to timeline anyway?`,
+      );
+    },
+    [manifest?.settings?.resolution?.height, manifest?.settings?.resolution?.width],
+  );
+
+  const handleImportMedia = useCallback(
+    async (sourcePath: string) => {
+      if (!projectDirectory || !sourcePath) {
+        return;
+      }
+
+      try {
+        const imported = await importMediaToProject({
+          projectDirectory,
+          sourcePath,
+        });
+        await addAsset(importedMediaToAssetInfo(imported));
+      } catch (error) {
+        console.error('[VideoLibraryView] Failed to import media:', error);
+      }
+    },
+    [projectDirectory, addAsset],
+  );
+
+  const handleReplaceMedia = useCallback(
+    async (assetId: string, sourcePath: string) => {
+      if (!projectDirectory || !sourcePath || !assetManifest?.assets) {
+        return;
+      }
+
+      const asset = assetManifest.assets.find((candidate) => candidate.id === assetId);
+      if (!asset) {
+        return;
+      }
+
+      const mediaType = inferImportedAssetType(asset.type, asset.path);
+      if (!mediaType) {
+        console.warn('[VideoLibraryView] Unsupported asset type for replace:', asset);
+        return;
+      }
+
+      try {
+        const result = await replaceMediaInProject({
+          projectDirectory,
+          currentRelativePath: asset.path,
+          sourcePath,
+        });
+        const nextAsset = importedMediaToAssetInfo({
+          id: asset.id,
+          type: mediaType,
+          relativePath: result.relativePath,
+          absolutePath: result.absolutePath,
+          metadata: result.metadata,
+          thumbnailRelativePath: result.thumbnailRelativePath,
+          waveformRelativePath: result.waveformRelativePath,
+          extractedAudioRelativePath: result.extractedAudioRelativePath,
+        });
+        const existingMetadata = (asset.metadata ?? {}) as Record<string, unknown>;
+        const nextMetadata = (nextAsset.metadata ?? {}) as Record<string, unknown>;
+        nextAsset.metadata = {
+          ...existingMetadata,
+          ...nextMetadata,
+          thumbnailPath:
+            result.thumbnailRelativePath ??
+            (existingMetadata.thumbnailPath as string | undefined),
+          waveformPath:
+            result.waveformRelativePath ??
+            (existingMetadata.waveformPath as string | undefined),
+          extractedAudioPath:
+            result.extractedAudioRelativePath ??
+            (existingMetadata.extractedAudioPath as string | undefined),
+          imported: true,
+          replacedAt: Date.now(),
+        };
+        await addAsset(nextAsset);
+      } catch (error) {
+        console.error('[VideoLibraryView] Failed to replace media:', error);
+      }
+    },
+    [projectDirectory, assetManifest?.assets, addAsset],
+  );
+
+  const handleAddMediaToTimeline = useCallback(
+    async (assetIdOrPath: string) => {
+      if (!projectDirectory || !assetManifest?.assets) {
+        return;
+      }
+
+      const asset = assetManifest.assets.find(
+        (candidate) =>
+          candidate.id === assetIdOrPath || candidate.path === assetIdOrPath,
+      );
+      if (!asset) {
+        console.warn('[VideoLibraryView] Asset not found for timeline insert:', assetIdOrPath);
+        return;
+      }
+
+      const mediaType = inferImportedAssetType(asset.type, asset.path);
+      if (!mediaType) {
+        console.warn('[VideoLibraryView] Unsupported asset for timeline insert:', asset);
+        return;
+      }
+
+      const metadata = (asset.metadata ?? {}) as Record<string, unknown>;
+      if (
+        (mediaType === 'video' || mediaType === 'image') &&
+        !isAspectRatioCompatible(metadata)
+      ) {
+        return;
+      }
+
+      const importedData: ImportedMediaData = {
+        id: asset.id,
+        type: mediaType,
+        relativePath: asset.path,
+        absolutePath:
+          asset.path.startsWith('/') || /^[A-Za-z]:/.test(asset.path)
+            ? asset.path
+            : `${projectDirectory}/${asset.path}`,
+        extractedAudioRelativePath:
+          typeof metadata.extractedAudioPath === 'string'
+            ? metadata.extractedAudioPath
+            : undefined,
+        thumbnailRelativePath:
+          typeof metadata.thumbnailPath === 'string'
+            ? metadata.thumbnailPath
+            : undefined,
+        waveformRelativePath:
+          typeof metadata.waveformPath === 'string'
+            ? metadata.waveformPath
+            : undefined,
+        metadata: {
+          duration:
+            typeof metadata.duration === 'number' ? metadata.duration : undefined,
+          width: typeof metadata.width === 'number' ? metadata.width : undefined,
+          height:
+            typeof metadata.height === 'number' ? metadata.height : undefined,
+          fps: typeof metadata.fps === 'number' ? metadata.fps : undefined,
+          size: typeof metadata.size === 'number' ? metadata.size : 0,
+          lastModified:
+            typeof metadata.lastModified === 'number'
+              ? metadata.lastModified
+              : Date.now(),
+        },
+      };
+
+      const nextTimelineState = appendImportedMediaToTimelineState(
+        timelineState,
+        importedData,
+      );
+      applyTimelineMutation(nextTimelineState);
+    },
+    [
+      projectDirectory,
+      assetManifest?.assets,
+      isAspectRatioCompatible,
+      timelineState,
+      applyTimelineMutation,
+    ],
+  );
+
+  const handleAddTextPreset = useCallback(
+    (preset: TextPresetType) => {
+      const nextTimelineState = insertTextPreset(timelineState, preset, playbackTime);
+      applyTimelineMutation(nextTimelineState);
+    },
+    [timelineState, playbackTime, applyTimelineMutation],
+  );
+
+  const handleAddSticker = useCallback(
+    (stickerId: string) => {
+      const nextTimelineState = insertSticker(timelineState, stickerId, playbackTime);
+      applyTimelineMutation(nextTimelineState);
+    },
+    [timelineState, playbackTime, applyTimelineMutation],
+  );
+
+  const handleAddShape = useCallback(
+    (shapeType: InsertShapeType) => {
+      const nextTimelineState = insertShape(timelineState, shapeType, playbackTime);
+      applyTimelineMutation(nextTimelineState);
+    },
+    [timelineState, playbackTime, applyTimelineMutation],
+  );
+
+  const handleAddSvg = useCallback(
+    (svgContentOrPath: string) => {
+      const nextTimelineState = insertSvg(
+        timelineState,
+        svgContentOrPath,
+        playbackTime,
+      );
+      applyTimelineMutation(nextTimelineState);
+    },
+    [timelineState, playbackTime, applyTimelineMutation],
+  );
 
   // Show empty state if no project
   if (!projectDirectory) {
@@ -1579,7 +1794,7 @@ export default function VideoLibraryView({
         <div className={styles.headerLeft}>
           <Film size={16} />
           <h3>Video Library</h3>
-          <span className={styles.count}>{videoArtifacts.length}</span>
+          <span className={styles.count}>{mediaAssetCount}</span>
         </div>
         <div className={styles.headerRight}>
           <div className={styles.exportDropdownWrapper} ref={exportMenuRef}>
@@ -1587,7 +1802,11 @@ export default function VideoLibraryView({
               type="button"
               className={styles.downloadButton}
               onClick={handleDownloadVideo}
-              disabled={isDownloading || isExporting || timelineItems.length === 0}
+              disabled={
+                isDownloading ||
+                isExporting ||
+                visualTimelineItems.length === 0
+              }
               title="Download complete timeline video as MP4"
             >
               <Download size={16} />
@@ -1597,7 +1816,11 @@ export default function VideoLibraryView({
               type="button"
               className={styles.exportDropdownToggle}
               onClick={() => setShowExportMenu((prev) => !prev)}
-              disabled={isDownloading || isExporting || timelineItems.length === 0}
+              disabled={
+                isDownloading ||
+                isExporting ||
+                visualTimelineItems.length === 0
+              }
               title="Export options"
             >
               <ChevronDown size={14} />
@@ -1629,33 +1852,21 @@ export default function VideoLibraryView({
       </div>
 
       <div className={styles.content}>
-        {/* Left Sidebar - Video Grid */}
-        <div className={styles.sidebar}>
-          {videoArtifacts.length === 0 ? (
-            <div className={styles.emptyState}>
-              <Film size={32} className={styles.emptyIcon} />
-              <p>No videos available</p>
-              <p className={styles.emptySubtext}>
-                Videos will appear here once they are generated or imported
-              </p>
-            </div>
-          ) : (
-            <div className={styles.videoGrid}>
-              {videoArtifacts.map((artifact) => (
-                <VideoCard
-                  key={artifact.artifact_id}
-                  artifact={artifact}
-                  formatDate={formatDate}
-                  projectDirectory={projectDirectory || null}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        <VideoPreviewLeftPanel
+          projectDirectory={projectDirectory || null}
+          playheadSeconds={playbackTime}
+          onAddMediaToTimeline={handleAddMediaToTimeline}
+          onAddTextPreset={handleAddTextPreset}
+          onAddSticker={handleAddSticker}
+          onAddShape={handleAddShape}
+          onAddSvg={handleAddSvg}
+          onImport={handleImportMedia}
+          onReplace={handleReplaceMedia}
+        />
 
         {/* Right Side - Timeline Preview */}
         <div className={styles.playerSection}>
-          {timelineItems.length > 0 ? (
+          {visualTimelineItems.length > 0 ? (
             <div className={styles.videoPlayer}>
               <video
                 ref={videoRef}
@@ -1802,7 +2013,7 @@ export default function VideoLibraryView({
                 </div>
               )}
             </div>
-          ) : timelineItems.length === 0 ? (
+          ) : visualTimelineItems.length === 0 ? (
             /* Empty state - only show if no scene and no items in timeline */
             <div className={styles.emptyPlayer}>
               <Film size={48} className={styles.emptyPlayerIcon} />

@@ -51,18 +51,6 @@ export class TimeIndex {
   }
 
   /**
-   * Get the item index at a specific time (returns the index in the original timelineItems array)
-   */
-  getItemIndexAtTime(time: number): number | null {
-    const range = this.binarySearch(time);
-    if (!range) return null;
-
-    // Find the original index in timelineItems by matching the item
-    // We need to search through ranges to find which one matches
-    return range.itemIndex;
-  }
-
-  /**
    * Get the item index at a specific time
    * Returns the original index from the timelineItems array
    */

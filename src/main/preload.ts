@@ -92,6 +92,77 @@ const projectBridge = {
   selectAudioFile(): Promise<string | null> {
     return ipcRenderer.invoke('project:select-audio-file');
   },
+  selectImageFile(): Promise<string | null> {
+    return ipcRenderer.invoke('project:select-image-file');
+  },
+  selectMediaFiles(options: {
+    kind: 'all' | 'video' | 'audio' | 'image';
+    multiple: boolean;
+  }): Promise<string[]> {
+    return ipcRenderer.invoke('project:select-media-files', options);
+  },
+  importMedia(
+    projectDirectory: string,
+    sourcePath: string,
+    forceType?: 'video' | 'audio' | 'image',
+  ): Promise<{
+    success: boolean;
+    data?: {
+      id: string;
+      type: 'video' | 'audio' | 'image';
+      relativePath: string;
+      absolutePath: string;
+      thumbnailRelativePath?: string;
+      waveformRelativePath?: string;
+      extractedAudioRelativePath?: string;
+      metadata: {
+        duration?: number;
+        width?: number;
+        height?: number;
+        fps?: number;
+        size: number;
+        lastModified: number;
+      };
+    };
+    error?: string;
+  }> {
+    return ipcRenderer.invoke(
+      'project:import-media',
+      projectDirectory,
+      sourcePath,
+      forceType,
+    );
+  },
+  replaceMedia(
+    projectDirectory: string,
+    currentRelativePath: string,
+    sourcePath: string,
+  ): Promise<{
+    success: boolean;
+    data?: {
+      relativePath: string;
+      absolutePath: string;
+      thumbnailRelativePath?: string;
+      waveformRelativePath?: string;
+      extractedAudioRelativePath?: string;
+      metadata: {
+        duration?: number;
+        width?: number;
+        height?: number;
+        fps?: number;
+        size: number;
+        lastModified: number;
+      };
+    };
+    error?: string;
+  }> {
+    return ipcRenderer.invoke(
+      'project:replace-media',
+      projectDirectory,
+      currentRelativePath,
+      sourcePath,
+    );
+  },
   getAudioDuration(audioPath: string): Promise<number> {
     return ipcRenderer.invoke('project:get-audio-duration', audioPath);
   },

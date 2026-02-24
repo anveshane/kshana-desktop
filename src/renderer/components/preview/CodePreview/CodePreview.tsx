@@ -154,18 +154,6 @@ export default function CodePreview({
   filePath,
   onDirtyChange,
 }: CodePreviewProps) {
-  // Use plain text fallback if CodeMirror is not available
-  if (!codemirrorAvailable) {
-    return (
-      <PlainTextEditor
-        content={content}
-        fileName={fileName}
-        filePath={filePath}
-        onDirtyChange={onDirtyChange}
-      />
-    );
-  }
-
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<any>(null);
   const originalContentRef = useRef<string>(content);
@@ -211,12 +199,9 @@ export default function CodePreview({
   }, [saveFile, openFind]);
 
   useEffect(() => {
-    if (!editorRef.current) return;
+    if (!codemirrorAvailable || !editorRef.current) return;
 
-    // Check if CodeMirror is actually available before trying to use it
-    // Specifically check for EditorView.updateListener which is needed
     if (
-      !codemirrorAvailable ||
       !EditorView ||
       !EditorState ||
       typeof EditorView.updateListener === 'undefined'
@@ -225,11 +210,9 @@ export default function CodePreview({
       return;
     }
 
-    // Ensure content is a string (handle null/undefined)
     const safeContent = typeof content === 'string' ? content : '';
 
     try {
-      // Clean up existing editor instance
       if (viewRef.current) {
         viewRef.current.destroy();
         viewRef.current = null;
@@ -238,7 +221,6 @@ export default function CodePreview({
       originalContentRef.current = safeContent;
       const languageExtensions = getLanguageExtension(extension);
 
-      // Double-check that EditorView is available
       if (!EditorView || typeof EditorView.updateListener === 'undefined') {
         throw new Error('CodeMirror EditorView not properly loaded');
       }
@@ -279,7 +261,6 @@ export default function CodePreview({
       setIsDirty(false);
     } catch (err) {
       console.error('Failed to initialize CodeMirror editor:', err);
-      // Fall back to plain text editor
       setError('FALLBACK_TO_PLAINTEXT');
     }
 
@@ -290,6 +271,17 @@ export default function CodePreview({
       }
     };
   }, [content, extension, onDirtyChange]);
+
+  if (!codemirrorAvailable) {
+    return (
+      <PlainTextEditor
+        content={content}
+        fileName={fileName}
+        filePath={filePath}
+        onDirtyChange={onDirtyChange}
+      />
+    );
+  }
 
   // If CodeMirror fails to initialize, fall back to plain text editor
   if (error === 'FALLBACK_TO_PLAINTEXT') {

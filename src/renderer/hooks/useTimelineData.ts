@@ -12,7 +12,7 @@ import { useTranscript } from './useTranscript';
 import { useWordCaptions } from './useWordCaptions';
 import { timeStringToSeconds } from '../utils/placementParsers';
 import type { AssetInfo } from '../types/kshana/assetManifest';
-import type { SceneVersions } from '../types/kshana/timeline';
+import type { SceneVersions, TimelineTrack } from '../types/kshana/timeline';
 import type { TextOverlayCue } from '../types/captions';
 import { PROJECT_PATHS } from '../types/kshana';
 import {
@@ -37,7 +37,10 @@ export interface TimelineItem {
     | 'infographic'
     | 'placeholder'
     | 'audio'
-    | 'text_overlay';
+    | 'text_overlay'
+    | 'text'
+    | 'sticker'
+    | 'graphics';
   startTime: number; // seconds
   endTime: number; // seconds
   duration: number; // calculated: endTime - startTime
@@ -54,6 +57,10 @@ export interface TimelineItem {
   sourcePlacementDurationSeconds?: number; // original full source duration
   segmentIndex?: number; // derived segment index for split video
   textOverlayCue?: TextOverlayCue;
+  trackId?: string;
+  elementId?: string;
+  textContent?: string;
+  isMissing?: boolean;
 }
 
 export interface TimelineData {
@@ -150,6 +157,112 @@ function fillGapsWithPlaceholders(
   return allItems;
 }
 
+function resolveElementPathForExistence(
+  projectDirectory: string | null,
+  sourcePath: string,
+): string {
+  const normalized = sourcePath.replace(/\\/g, '/');
+  if (!projectDirectory) return normalized;
+  if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) {
+    return normalized;
+  }
+  return `${projectDirectory}/${normalized}`;
+}
+
+function mapRichTracksToTimelineItems(
+  tracks: TimelineTrack[],
+  missingPaths: Set<string>,
+): TimelineItem[] {
+  const items: TimelineItem[] = [];
+
+  tracks.forEach((track) => {
+    if (track.hidden) return;
+
+    track.elements.forEach((element) => {
+      const startTime = element.start_time_seconds;
+      const duration = Math.max(0, element.duration_seconds);
+      const endTime = startTime + duration;
+
+      if (element.type === 'video' || element.type === 'image') {
+        const sourcePath = element.source_path;
+        items.push({
+          id: `track-${track.id}-${element.id}`,
+          type: element.type,
+          startTime,
+          endTime,
+          duration,
+          label: element.name,
+          videoPath: element.type === 'video' ? sourcePath : undefined,
+          imagePath: element.type === 'image' ? sourcePath : undefined,
+          trackId: track.id,
+          elementId: element.id,
+          isMissing: missingPaths.has(sourcePath),
+        });
+        return;
+      }
+
+      if (element.type === 'audio') {
+        if (track.muted || element.muted) return;
+        items.push({
+          id: `track-${track.id}-${element.id}`,
+          type: 'audio',
+          startTime,
+          endTime,
+          duration,
+          label: element.name || 'Audio',
+          audioPath: element.source_path,
+          trackId: track.id,
+          elementId: element.id,
+          isMissing: missingPaths.has(element.source_path),
+        });
+        return;
+      }
+
+      if (element.type === 'text') {
+        items.push({
+          id: `track-${track.id}-${element.id}`,
+          type: 'text',
+          startTime,
+          endTime,
+          duration,
+          label: element.name || 'Text',
+          textContent: element.content,
+          trackId: track.id,
+          elementId: element.id,
+        });
+        return;
+      }
+
+      if (element.type === 'sticker') {
+        items.push({
+          id: `track-${track.id}-${element.id}`,
+          type: 'sticker',
+          startTime,
+          endTime,
+          duration,
+          label: element.name || 'Sticker',
+          trackId: track.id,
+          elementId: element.id,
+        });
+        return;
+      }
+
+      items.push({
+        id: `track-${track.id}-${element.id}`,
+        type: 'graphics',
+        startTime,
+        endTime,
+        duration,
+        label: element.name || 'Graphics',
+        trackId: track.id,
+        elementId: element.id,
+      });
+    });
+  });
+
+  return items;
+}
+
 /**
  * Custom hook that provides unified timeline data
  * Single source of truth for timeline calculations
@@ -189,6 +302,9 @@ export function useTimelineData(
     useState(0);
   const [imageProjectionSnapshot, setImageProjectionSnapshot] =
     useState<ImageProjectionSnapshot>(() => getImageProjectionSnapshot());
+  const [missingTrackPaths, setMissingTrackPaths] = useState<Set<string>>(
+    new Set(),
+  );
   const isImageSyncV2CompareEnabled = useMemo(() => {
     try {
       return window.localStorage.getItem('renderer.image_sync_v2_compare') === 'true';
@@ -199,6 +315,63 @@ export function useTimelineData(
   // Keep infographic fallback mapping in a ref so we don't introduce new hook state
   // (avoids React Fast Refresh hook order issues in dev).
   const infographicPlacementFilesRef = useRef<Record<number, string>>({});
+
+  useEffect(() => {
+    if (!projectDirectory || !isLoaded) {
+      setMissingTrackPaths(new Set());
+      return;
+    }
+
+    const sourcePaths = new Set<string>();
+    (timelineState.tracks ?? []).forEach((track) => {
+      track.elements.forEach((element) => {
+        if (
+          (element.type === 'video' ||
+            element.type === 'image' ||
+            element.type === 'audio') &&
+          element.source_path
+        ) {
+          sourcePaths.add(element.source_path);
+        }
+      });
+    });
+
+    if (sourcePaths.size === 0) {
+      setMissingTrackPaths(new Set());
+      return;
+    }
+
+    let cancelled = false;
+    const checkPaths = async () => {
+      const missing = new Set<string>();
+      await Promise.all(
+        [...sourcePaths].map(async (sourcePath) => {
+          const absolutePath = resolveElementPathForExistence(
+            projectDirectory,
+            sourcePath,
+          );
+          const exists =
+            await window.electron.project.checkFileExists(absolutePath);
+          if (!exists) {
+            missing.add(sourcePath);
+          }
+        }),
+      );
+      if (!cancelled) {
+        setMissingTrackPaths(missing);
+      }
+    };
+
+    checkPaths().catch(() => {
+      if (!cancelled) {
+        setMissingTrackPaths(new Set());
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectDirectory, isLoaded, timelineState.tracks]);
 
   useEffect(() => {
     if (!isImageSyncV2Enabled) {
@@ -831,6 +1004,12 @@ export function useTimelineData(
     ];
   }, [wordCaptionCues]);
 
+  const richTrackItems: TimelineItem[] = useMemo(() => {
+    const tracks = timelineState.tracks ?? [];
+    if (tracks.length === 0) return [];
+    return mapRichTracksToTimelineItems(tracks, missingTrackPaths);
+  }, [timelineState.tracks, missingTrackPaths]);
+
   // Calculate total duration from all sources (audio, placements, transcript)
   // Use whichever is longest - audio may be longer than scenes, or scenes may be longer than audio
   const calculatedTotalDuration = useMemo(() => {
@@ -854,12 +1033,18 @@ export function useTimelineData(
         ? Math.max(...wordCaptionCues.map((cue) => cue.endTime))
         : 0;
 
+    const richTrackDuration =
+      richTrackItems.length > 0
+        ? Math.max(...richTrackItems.map((item) => item.endTime))
+        : 0;
+
     // Use the maximum of all three - whichever is longest
     const maxDuration = Math.max(
       maxAudioDuration,
       lastPlacementEndTime,
       transcriptDur,
       textOverlayDuration,
+      richTrackDuration,
     );
 
     console.log('[useTimelineData] Calculated total duration:', {
@@ -867,16 +1052,23 @@ export function useTimelineData(
       lastPlacementEndTime,
       transcriptDur,
       textOverlayDuration,
+      richTrackDuration,
       maxDuration,
     });
 
     return maxDuration;
-  }, [audioFiles, basePlacementItems, transcriptDuration, wordCaptionCues]);
+  }, [
+    audioFiles,
+    basePlacementItems,
+    transcriptDuration,
+    wordCaptionCues,
+    richTrackItems,
+  ]);
 
   // Resolve asset paths for display
   const timelineItems: TimelineItem[] = useMemo(() => {
-    // Start with placement items
-    const items = [...basePlacementItems];
+    // Start with placement items and rich track items from timeline schema v2.
+    const items = [...basePlacementItems, ...richTrackItems];
 
     // Add audio items - they span the full duration
     audioFiles.forEach((audioFile, index) => {
@@ -891,17 +1083,26 @@ export function useTimelineData(
       });
     });
 
-    // Fill gaps with placeholders (but don't fill gaps for audio items)
-    const nonAudioItems = items.filter((item) => item.type !== 'audio');
-    // Use calculated total duration instead of just transcriptDuration
+    // Fill gaps only for primary visual clips.
+    const primaryVisualItems = items.filter(
+      (item) =>
+        item.type === 'image' ||
+        item.type === 'video' ||
+        item.type === 'infographic',
+    );
     const filledItems = fillGapsWithPlaceholders(
-      nonAudioItems,
+      primaryVisualItems,
       calculatedTotalDuration,
     );
 
-    // Add audio items back
-    const audioItems = items.filter((item) => item.type === 'audio');
-    filledItems.push(...audioItems);
+    // Add non-primary tracks back without affecting placeholder generation.
+    const nonPrimaryItems = items.filter(
+      (item) =>
+        item.type !== 'image' &&
+        item.type !== 'video' &&
+        item.type !== 'infographic',
+    );
+    filledItems.push(...nonPrimaryItems);
 
     // If no placements and no transcript, return empty
     if (filledItems.length === 0 && calculatedTotalDuration === 0) {
@@ -917,7 +1118,13 @@ export function useTimelineData(
     filledItems.sort((a, b) => a.startTime - b.startTime);
 
     return filledItems;
-  }, [basePlacementItems, transcriptDuration, audioFiles, calculatedTotalDuration]);
+  }, [
+    basePlacementItems,
+    richTrackItems,
+    transcriptDuration,
+    audioFiles,
+    calculatedTotalDuration,
+  ]);
 
   // Return the calculated total duration (already considers all sources)
   const totalDuration = calculatedTotalDuration;

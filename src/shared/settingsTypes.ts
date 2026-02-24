@@ -1,5 +1,10 @@
 export type LlmProvider = 'gemini' | 'lmstudio' | 'openai' | 'openrouter';
 
+export interface AppFeatureFlags {
+  /** Enables side-by-side rich editor beta shell and vendored panels. */
+  rich_editor_beta: boolean;
+}
+
 export interface AppSettings {
   /** URL of the kshana-ink server (default: http://localhost:8001) */
   serverUrl: string;
@@ -16,5 +21,6 @@ export interface AppSettings {
   openaiModel: string;
   openRouterApiKey: string;
   openRouterModel: string;
+  feature: AppFeatureFlags;
   projectDir?: string;
 }

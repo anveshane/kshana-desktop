@@ -17,6 +17,21 @@ import deleteSourceMaps from '../scripts/delete-source-maps';
 
 checkNodeEnv('production');
 deleteSourceMaps();
+const vendorRoot = path.join(webpackPaths.srcRendererPath, 'vendor');
+const postcssConfigPath = path.resolve(__dirname, '../../postcss.config.cjs');
+
+function hasVendorPostCssTooling(): boolean {
+  try {
+    require.resolve('postcss-loader');
+    require.resolve('tailwindcss');
+    require.resolve('autoprefixer');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const useVendorPostCss = hasVendorPostCssTooling();
 
 const configuration: webpack.Configuration = {
   devtool: 'source-map',
@@ -38,6 +53,27 @@ const configuration: webpack.Configuration = {
 
   module: {
     rules: [
+      {
+        test: /\.s?(a|c)ss$/,
+        include: [vendorRoot],
+        use: [
+          MiniCssExtractPlugin.loader,
+          'css-loader',
+          ...(useVendorPostCss
+            ? [
+                {
+                  loader: 'postcss-loader',
+                  options: {
+                    postcssOptions: {
+                      config: postcssConfigPath,
+                    },
+                  },
+                },
+              ]
+            : []),
+          'sass-loader',
+        ],
+      },
       {
         test: /\.s?(a|c)ss$/,
         use: [
@@ -63,11 +99,12 @@ const configuration: webpack.Configuration = {
           },
         ],
         include: /\.module\.s?(c|a)ss$/,
+        exclude: [vendorRoot],
       },
       {
         test: /\.s?(a|c)ss$/,
         use: [MiniCssExtractPlugin.loader, 'css-loader', 'sass-loader'],
-        exclude: /\.module\.s?(c|a)ss$/,
+        exclude: [/\.module\.s?(c|a)ss$/, vendorRoot],
       },
       // Fonts
       {
@@ -172,6 +209,23 @@ const configuration: webpack.Configuration = {
 
   resolve: {
     alias: {
+      '@': path.join(webpackPaths.srcRendererPath, 'vendor'),
+      'next/image': path.join(
+        webpackPaths.srcRendererPath,
+        'vendor/shims/nextImage.tsx',
+      ),
+      sonner: path.join(
+        webpackPaths.srcRendererPath,
+        'vendor/shims/sonner.tsx',
+      ),
+      '@openreel/ui': path.join(
+        webpackPaths.srcRendererPath,
+        'vendor/ui/openreel/index.tsx',
+      ),
+      '@opencut/ui': path.join(
+        webpackPaths.srcRendererPath,
+        'vendor/ui/opencut/index.tsx',
+      ),
       // Force React resolution to project root
       react: path.dirname(require.resolve('react/package.json')),
       'react-dom': path.dirname(require.resolve('react-dom/package.json')),

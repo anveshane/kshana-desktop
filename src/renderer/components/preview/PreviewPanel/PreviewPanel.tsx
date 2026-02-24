@@ -13,10 +13,20 @@ import AssetsView from '../AssetsView/AssetsView';
 import VideoLibraryView from '../VideoLibraryView/VideoLibraryView';
 import PlansView from '../PlansView/PlansView';
 import TimelinePanel from '../TimelinePanel/TimelinePanel';
+import BetaEditorShell from '../BetaEditorShell';
 import SettingsPanel from '../../SettingsPanel';
+import {
+  isRichEditorBetaEnabled,
+  writeRichEditorBetaToStorage,
+} from '../../../services/featureFlags';
 import styles from './PreviewPanel.module.scss';
 
-type Tab = 'storyboard' | 'assets' | 'video-library' | 'preview';
+type Tab =
+  | 'storyboard'
+  | 'assets'
+  | 'video-library'
+  | 'preview'
+  | 'rich-editor-beta';
 
 export default function PreviewPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('video-library');
@@ -166,6 +176,11 @@ export default function PreviewPanel() {
   // Check backend health periodically
   useBackendHealth(settings);
 
+  const richEditorBetaEnabled = useMemo(
+    () => isRichEditorBetaEnabled(settings),
+    [settings],
+  );
+
   // Load settings on mount
   useEffect(() => {
     const loadSettings = async () => {
@@ -185,6 +200,19 @@ export default function PreviewPanel() {
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (settings?.feature?.rich_editor_beta === undefined) {
+      return;
+    }
+    writeRichEditorBetaToStorage(settings.feature.rich_editor_beta);
+  }, [settings?.feature?.rich_editor_beta]);
+
+  useEffect(() => {
+    if (!richEditorBetaEnabled && activeTab === 'rich-editor-beta') {
+      setActiveTab('video-library');
+    }
+  }, [richEditorBetaEnabled, activeTab]);
 
   const handleSaveSettings = useCallback(async (next: AppSettings) => {
     setIsRestartingBackend(true);
@@ -241,6 +269,15 @@ export default function PreviewPanel() {
           >
             Preview
           </button>
+          {richEditorBetaEnabled && (
+            <button
+              type="button"
+              className={`${styles.tab} ${activeTab === 'rich-editor-beta' ? styles.active : ''}`}
+              onClick={() => setActiveTab('rich-editor-beta')}
+            >
+              Rich Editor Beta
+            </button>
+          )}
         </div>
 
         <div className={styles.headerRight}>
@@ -296,6 +333,11 @@ export default function PreviewPanel() {
               <PlansView 
                 fileToOpen={pendingFileNavigation} 
                 onFileOpened={clearFileNavigation}
+              />
+            )}
+            {activeTab === 'rich-editor-beta' && (
+              <BetaEditorShell
+                onSwitchToLegacy={() => setActiveTab('video-library')}
               />
             )}
           </div>

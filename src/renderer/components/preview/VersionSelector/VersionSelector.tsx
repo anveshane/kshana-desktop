@@ -13,6 +13,8 @@ export interface PlacementVersion {
   videoVersions: number[];
 }
 
+export type SceneVersion = PlacementVersion;
+
 interface VersionSelectorProps {
   timelineItems: TimelineItem[];
   activeVersions?: Record<number, SceneVersions>; // placementNumber -> { image?: number, video?: number }
@@ -41,7 +43,10 @@ export default function VersionSelector({
 
     timelineItems.forEach((item) => {
       // Skip placeholders and items without placement numbers
-      if (item.placementNumber === undefined || item.type === 'placeholder') {
+      if (
+        item.placementNumber === undefined ||
+        (item.type !== 'image' && item.type !== 'video')
+      ) {
         return;
       }
 

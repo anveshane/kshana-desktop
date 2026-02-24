@@ -17,6 +17,7 @@ import type {
 import {
   PROJECT_PATHS,
   DEFAULT_TIMELINE_STATE,
+  normalizeTimelineState as normalizeTimelineStateSchema,
   createDefaultManifest,
   createDefaultAgentProject,
   createDefaultAssetManifest,
@@ -666,16 +667,7 @@ export class ProjectService {
   private normalizeTimelineState(
     state: KshanaTimelineState,
   ): KshanaTimelineState {
-    return {
-      ...DEFAULT_TIMELINE_STATE,
-      ...state,
-      active_versions: state.active_versions ?? {},
-      markers: state.markers ?? [],
-      imported_clips: state.imported_clips ?? [],
-      image_timing_overrides: state.image_timing_overrides ?? {},
-      infographic_timing_overrides: state.infographic_timing_overrides ?? {},
-      video_split_overrides: state.video_split_overrides ?? {},
-    };
+    return normalizeTimelineStateSchema(state);
   }
 
   private async readContextIndex(
@@ -698,6 +690,13 @@ export class ProjectService {
       PROJECT_PATHS.AGENT_MUSIC,
       PROJECT_PATHS.AGENT_AUDIO,
       PROJECT_PATHS.AGENT_FINAL,
+      PROJECT_PATHS.ASSETS_DIR,
+      PROJECT_PATHS.ASSETS_VIDEOS,
+      PROJECT_PATHS.ASSETS_IMAGES,
+      PROJECT_PATHS.ASSETS_AUDIO,
+      PROJECT_PATHS.ASSETS_CACHE,
+      PROJECT_PATHS.ASSETS_CACHE_THUMBNAILS,
+      PROJECT_PATHS.ASSETS_CACHE_WAVEFORMS,
       PROJECT_PATHS.UI_DIR,
       PROJECT_PATHS.CONTEXT_DIR,
       PROJECT_PATHS.CONTEXT_CHUNKS,

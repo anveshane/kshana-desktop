@@ -24,6 +24,9 @@ const emptySettings: AppSettings = {
   openaiModel: 'gpt-4o',
   openRouterApiKey: '',
   openRouterModel: 'z-ai/glm-4.7-flash',
+  feature: {
+    rich_editor_beta: false,
+  },
 };
 
 export default function SettingsPanel({
@@ -69,6 +72,19 @@ export default function SettingsPanel({
     }));
   };
 
+  const handleFeatureToggle = (
+    key: keyof AppSettings['feature'],
+    value: boolean,
+  ) => {
+    setForm((prev) => ({
+      ...prev,
+      feature: {
+        ...prev.feature,
+        [key]: value,
+      },
+    }));
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     await onSave(form);
@@ -110,6 +126,18 @@ export default function SettingsPanel({
               placeholder="http://localhost:8001"
               required
             />
+          </label>
+
+          <label className={styles.radioLabel}>
+            <input
+              type="checkbox"
+              className={styles.radioInput}
+              checked={form.feature.rich_editor_beta}
+              onChange={(event) =>
+                handleFeatureToggle('rich_editor_beta', event.target.checked)
+              }
+            />
+            Enable Rich Editor Beta (OpenCut/OpenReel vendored panels)
           </label>
 
           {/* TODO: Re-enable when needed

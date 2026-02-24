@@ -15,6 +15,9 @@ import {
   Upload,
   Scissors,
   Music,
+  Type,
+  Sparkles,
+  Shapes,
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
@@ -24,7 +27,6 @@ import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
 import {
   resolveAssetPathForDisplay,
   resolveAssetPathWithRetry,
-  toFileUrl,
 } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
 import {
@@ -35,14 +37,21 @@ import {
   buildUpdatedVideoSplitOverride,
   snapToSecond,
 } from '../../../utils/timelineImageEditing';
+import {
+  appendImportedMediaToTimelineState,
+  importedMediaToAssetInfo,
+  importMediaToProject,
+} from '../../../services/media';
+import { createTextPresetElement } from '../../../services/timeline';
 import type { TimelineMarker } from '../../../types/projectState';
 import type {
   KshanaTimelineMarker,
   KshanaTimelineState,
   ImportedClip,
 } from '../../../types/kshana';
+import { normalizeTimelineState } from '../../../types/kshana';
+import type { TimelineTextElement } from '../../../types/kshana/timeline';
 import type { SceneVersions } from '../../../types/kshana/timeline';
-import { PROJECT_PATHS, createAssetInfo } from '../../../types/kshana';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
 import VersionSelector from '../VersionSelector';
@@ -275,6 +284,35 @@ function TimelineItemComponent({
       >
         <div className={styles.audioWaveform} />
         <div className={styles.audioLabel}>{item.label}</div>
+        {item.isMissing && (
+          <div className={styles.missingBadge}>Missing</div>
+        )}
+      </div>
+    );
+  }
+
+  if (item.type === 'audio' && !item.audioPath) {
+    return (
+      <div
+        className={`${styles.audioBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.label}
+      >
+        <div className={styles.audioLabel}>{item.label}</div>
+        <div className={styles.missingBadge}>Missing</div>
       </div>
     );
   }
@@ -307,6 +345,38 @@ function TimelineItemComponent({
           muted
         />
         <div className={styles.videoLabel}>{item.label}</div>
+        {item.isMissing && (
+          <div className={styles.missingBadge}>Missing</div>
+        )}
+      </div>
+    );
+  }
+
+  if (item.type === 'video' && !videoPath) {
+    return (
+      <div
+        className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.prompt || item.label}
+      >
+        <div className={styles.scenePlaceholder}>Video</div>
+        <div className={styles.videoLabel}>{item.label}</div>
+        {item.isMissing && (
+          <div className={styles.missingBadge}>Missing</div>
+        )}
       </div>
     );
   }
@@ -393,6 +463,83 @@ function TimelineItemComponent({
     );
   }
 
+  if (item.type === 'text') {
+    return (
+      <div
+        className={`${styles.textTrackBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.textContent || item.label}
+      >
+        <div className={styles.textTrackLabel}>
+          {item.textContent || item.label}
+        </div>
+      </div>
+    );
+  }
+
+  if (item.type === 'sticker') {
+    return (
+      <div
+        className={`${styles.stickerTrackBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.label}
+      >
+        <div className={styles.stickerTrackLabel}>{item.label}</div>
+      </div>
+    );
+  }
+
+  if (item.type === 'graphics') {
+    return (
+      <div
+        className={`${styles.graphicsTrackBlock} ${isSelected ? styles.selected : ''}`}
+        style={{
+          left: `${left}px`,
+          width: `${width}px`,
+        }}
+        onClick={(e) => {
+          if (onItemClick) {
+            onItemClick(e, item);
+          }
+        }}
+        onContextMenu={(e) => {
+          if (onItemContextMenu) {
+            onItemContextMenu(e, item);
+          }
+        }}
+        title={item.label}
+      >
+        <div className={styles.graphicsTrackLabel}>{item.label}</div>
+      </div>
+    );
+  }
+
   // Handle image type
   let thumbnailElement: React.ReactNode;
   if (imagePath) {
@@ -447,6 +594,9 @@ function TimelineItemComponent({
             ? `${item.prompt.substring(0, 50)}...`
             : item.prompt}
         </div>
+      )}
+      {item.isMissing && (
+        <div className={styles.missingBadge}>Missing</div>
       )}
       <div
         className={styles.imageResizeHandle}
@@ -512,6 +662,11 @@ interface TimelineContextMenuState {
   y: number;
   positionSeconds: number;
   item: TimelineItem | null;
+}
+
+interface SelectedTrackElementRef {
+  trackId: string;
+  elementId: string;
 }
 
 interface TimelineEditSnapshot {
@@ -592,14 +747,15 @@ export default function TimelinePanel({
   const {
     isLoaded,
     isLoading,
-    scenes: projectScenes,
+    manifest,
     timelineState,
-    saveTimelineState,
     updatePlayhead,
     updateZoom,
+    updateTimelineViewState,
     setActiveVersion,
     updateMarkers,
     updateImportedClips,
+    updateTimelineTracks,
     updateImageTimingOverrides,
     updateInfographicTimingOverrides,
     updateVideoSplitOverrides,
@@ -616,13 +772,27 @@ export default function TimelinePanel({
   } = useTimelineDataContext();
 
   // Initialize zoom level from timeline state
-  const [zoomLevel, setZoomLevel] = useState(timelineState.zoom_level);
-  const [scrollLeft, setScrollLeft] = useState(0);
+  const [zoomLevel, setZoomLevel] = useState(
+    timelineState.view_state?.zoom_level ?? timelineState.zoom_level,
+  );
+  const [scrollLeft, setScrollLeft] = useState(
+    timelineState.view_state?.scroll_left ?? 0,
+  );
 
   // Sync zoom level to timeline state
   useEffect(() => {
     updateZoom(zoomLevel);
   }, [zoomLevel, updateZoom]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      updateTimelineViewState({
+        zoom_level: zoomLevel,
+        scroll_left: scrollLeft,
+      });
+    }, 150);
+    return () => clearTimeout(timeoutId);
+  }, [zoomLevel, scrollLeft, updateTimelineViewState]);
 
   // Use external playback state if provided, otherwise use internal state
   // Initialize from timeline state if available
@@ -651,6 +821,15 @@ export default function TimelinePanel({
     Math.min(rawCurrentPosition, totalDuration),
   );
   const isPlaying = externalIsPlaying ?? internalIsPlaying;
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      updateTimelineViewState({
+        playhead_time: currentPosition,
+      });
+    }, 150);
+    return () => clearTimeout(timeoutId);
+  }, [currentPosition, updateTimelineViewState]);
 
   // If position was clamped, update internal state
   useEffect(() => {
@@ -819,6 +998,8 @@ export default function TimelinePanel({
   const [markerPromptPosition, setMarkerPromptPosition] = useState<
     number | null
   >(null);
+  const [selectedTrackElement, setSelectedTrackElement] =
+    useState<SelectedTrackElementRef | null>(null);
   const [isAudioModalOpen, setIsAudioModalOpen] = useState(false);
   const [contextMenuState, setContextMenuState] =
     useState<TimelineContextMenuState | null>(null);
@@ -827,6 +1008,9 @@ export default function TimelinePanel({
   const [captionGenerationMessage, setCaptionGenerationMessage] = useState<
     string | null
   >(null);
+  const [selectedTextPreset, setSelectedTextPreset] = useState<
+    'title' | 'subtitle' | 'lower-third' | 'caption'
+  >('title');
   const [canUndo, setCanUndo] = useState(false);
   const undoStackRef = useRef<TimelineEditSnapshot[]>([]);
 
@@ -1688,6 +1872,15 @@ export default function TimelinePanel({
       e.stopPropagation();
       e.preventDefault();
 
+      if (item.trackId && item.elementId) {
+        setSelectedTrackElement({
+          trackId: item.trackId,
+          elementId: item.elementId,
+        });
+      } else {
+        setSelectedTrackElement(null);
+      }
+
       // Seek to item's start position
       setCurrentPosition(item.startTime);
     },
@@ -1814,130 +2007,280 @@ export default function TimelinePanel({
     }
   }, []);
 
+  const confirmAspectRatioBeforePlacement = useCallback(
+    (width?: number, height?: number): boolean => {
+      const projectWidth = manifest?.settings?.resolution?.width;
+      const projectHeight = manifest?.settings?.resolution?.height;
+      if (
+        !projectWidth ||
+        !projectHeight ||
+        !width ||
+        !height ||
+        !Number.isFinite(width) ||
+        !Number.isFinite(height)
+      ) {
+        return true;
+      }
+
+      const projectRatio = projectWidth / projectHeight;
+      const mediaRatio = width / height;
+      const ratioDelta = Math.abs(projectRatio - mediaRatio);
+      if (ratioDelta <= 0.03) {
+        return true;
+      }
+
+      return window.confirm(
+        `Imported media ratio (${width}x${height}) differs from project ratio (${projectWidth}x${projectHeight}). Place on timeline anyway?`,
+      );
+    },
+    [manifest?.settings?.resolution?.height, manifest?.settings?.resolution?.width],
+  );
+
   // Handle video import - copy to videos/imported folder
   const handleImportVideo = useCallback(async () => {
     if (!projectDirectory) return;
 
     try {
-      const videoPath = await window.electron.project.selectVideoFile();
-      if (!videoPath) return;
+      const selectedPath = await window.electron.project.selectVideoFile();
+      if (!selectedPath) return;
 
-      // Create videos/imported folder structure if it doesn't exist
-      // Similar to ProjectService.createProjectStructure - create nested folders
-      const parts = PROJECT_PATHS.VIDEOS_IMPORTED.split('/');
-      let basePath = projectDirectory;
-      for (const part of parts) {
-        if (part) {
-          await window.electron.project.createFolder(basePath, part);
-          basePath = `${basePath}/${part}`;
-        }
-      }
-      const videosFolder = basePath;
-
-      // Copy video to videos/imported folder
-      const videoFileName =
-        videoPath.replace(/\\/g, '/').split('/').pop() || `video-${Date.now()}.mp4`;
-      const destPath = await window.electron.project.copy(
-        videoPath,
-        videosFolder,
-      );
-      const relativePath = `${PROJECT_PATHS.VIDEOS_IMPORTED}/${videoFileName}`;
-
-      // Get video duration
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.src = toFileUrl(destPath);
-
-      // eslint-disable-next-line compat/compat
-      await new Promise<void>((resolve, reject) => {
-        video.onloadedmetadata = async () => {
-          const { duration } = video;
-
-          // Generate unique asset ID
-          const assetId = `imported-video-${Date.now()}-${videoFileName.replace(/[^a-zA-Z0-9]/g, '-')}`;
-
-          // Create asset info for the manifest
-          const assetInfo = createAssetInfo(
-            assetId,
-            'final_video',
-            relativePath,
-            1,
-            {
-              metadata: {
-                imported: true,
-                duration,
-                title: videoFileName,
-              },
-            },
-          );
-
-          // Save to asset manifest
-          const saved = await addAsset(assetInfo);
-          if (!saved) {
-            console.error('Failed to save imported video to asset manifest');
-          }
-
-          // Update local state and timeline state
-          setImportedVideos((prev) => [
-            ...prev,
-            {
-              path: relativePath,
-              duration,
-              startTime: totalDuration,
-            },
-          ]);
-
-          console.log(
-            'Imported video:',
-            relativePath,
-            duration,
-            'saved to manifest:',
-            saved,
-          );
-
-          resolve();
-        };
-        video.onerror = reject;
+      const imported = await importMediaToProject({
+        projectDirectory,
+        sourcePath: selectedPath,
+        forceType: 'video',
       });
-    } catch {
-      // Failed to import video
+
+      const saved = await addAsset(importedMediaToAssetInfo(imported));
+      if (!saved) {
+        console.warn(
+          '[TimelinePanel] Imported video but failed to write asset manifest entry',
+          imported.relativePath,
+        );
+      }
+
+      if (
+        !confirmAspectRatioBeforePlacement(
+          imported.metadata.width,
+          imported.metadata.height,
+        )
+      ) {
+        return;
+      }
+
+      const nextTimelineState = appendImportedMediaToTimelineState(
+        timelineState,
+        imported,
+      );
+      updateTimelineTracks(nextTimelineState.tracks);
+      updateImportedClips(nextTimelineState.imported_clips);
+
+      const latestClip =
+        nextTimelineState.imported_clips[
+          nextTimelineState.imported_clips.length - 1
+        ];
+      if (latestClip) {
+        setImportedVideos((prev) => [
+          ...prev,
+          {
+            path: latestClip.path,
+            duration: latestClip.duration_seconds,
+            startTime: latestClip.start_time_seconds,
+          },
+        ]);
+      }
+
+      if (imported.extractedAudioRelativePath) {
+        refreshAudioFiles();
+      }
+    } catch (error) {
+      console.error('[TimelinePanel] Failed to import video:', error);
     }
-  }, [projectDirectory, totalDuration, addAsset]);
+  }, [
+    projectDirectory,
+    addAsset,
+    confirmAspectRatioBeforePlacement,
+    timelineState,
+    updateTimelineTracks,
+    updateImportedClips,
+    refreshAudioFiles,
+  ]);
 
   // Handle audio import from file
   const handleImportAudioFromFile = useCallback(async () => {
     if (!projectDirectory) return;
 
     try {
-      const audioPath = await window.electron.project.selectAudioFile();
-      if (!audioPath) return;
+      const selectedPath = await window.electron.project.selectAudioFile();
+      if (!selectedPath) return;
 
-      // Create .kshana/agent/audio folder structure if it doesn't exist
-      const parts = PROJECT_PATHS.AGENT_AUDIO.split('/');
-      let basePath = projectDirectory;
-      for (const part of parts) {
-        if (part) {
-          await window.electron.project.createFolder(basePath, part);
-          basePath = `${basePath}/${part}`;
-        }
+      const imported = await importMediaToProject({
+        projectDirectory,
+        sourcePath: selectedPath,
+        forceType: 'audio',
+      });
+
+      const saved = await addAsset(importedMediaToAssetInfo(imported));
+      if (!saved) {
+        console.warn(
+          '[TimelinePanel] Imported audio but failed to write asset manifest entry',
+          imported.relativePath,
+        );
       }
-      const audioFolder = basePath;
 
-      // Copy audio to .kshana/agent/audio folder
-      const audioFileName =
-        audioPath.replace(/\\/g, '/').split('/').pop() || `audio-${Date.now()}.mp3`;
-      await window.electron.project.copy(audioPath, audioFolder);
+      const nextTimelineState = appendImportedMediaToTimelineState(
+        timelineState,
+        imported,
+      );
+      updateTimelineTracks(nextTimelineState.tracks);
 
-      // Add small delay before refresh to ensure file copy completes
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      // Refresh audio files so both timeline and video library view update
       refreshAudioFiles();
-      console.log('Audio file imported successfully');
+      console.log('[TimelinePanel] Audio file imported successfully');
     } catch (error) {
-      console.error('Failed to import audio file:', error);
+      console.error('[TimelinePanel] Failed to import audio file:', error);
     }
-  }, [projectDirectory, refreshAudioFiles]);
+  }, [
+    projectDirectory,
+    addAsset,
+    timelineState,
+    updateTimelineTracks,
+    refreshAudioFiles,
+  ]);
+
+  const ensureTrack = useCallback(
+    (
+      tracks: KshanaTimelineState['tracks'],
+      options: { type: KshanaTimelineState['tracks'][number]['type']; name: string; isMain?: boolean },
+    ) => {
+      const existing = tracks.find((track) => {
+        if (track.type !== options.type) return false;
+        if (options.isMain === undefined) return true;
+        return Boolean(track.is_main) === Boolean(options.isMain);
+      });
+      if (existing) return existing;
+
+      const created = {
+        id: `track-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: options.name,
+        type: options.type,
+        is_main: Boolean(options.isMain),
+        muted: false,
+        hidden: false,
+        elements: [],
+      } as KshanaTimelineState['tracks'][number];
+      tracks.push(created);
+      return created;
+    },
+    [],
+  );
+
+  const appendElementToTrack = useCallback(
+    (
+      tracks: KshanaTimelineState['tracks'],
+      trackId: string,
+      element: KshanaTimelineState['tracks'][number]['elements'][number],
+    ) => {
+      const index = tracks.findIndex((track) => track.id === trackId);
+      if (index < 0) return tracks;
+      const nextTrack = {
+        ...tracks[index],
+        elements: [...tracks[index].elements, element],
+      };
+      const nextTracks = [...tracks];
+      nextTracks[index] = nextTrack;
+      return nextTracks;
+    },
+    [],
+  );
+
+  const handleAddTextPreset = useCallback(
+    (preset: 'title' | 'subtitle' | 'lower-third' | 'caption') => {
+      const normalized = normalizeTimelineState(timelineState);
+      const tracks = [...normalized.tracks];
+      const textTrack = ensureTrack(tracks, {
+        type: 'text',
+        name: 'Text Track',
+      });
+      const textElement = createTextPresetElement(preset, currentPosition);
+      const nextTracks = appendElementToTrack(tracks, textTrack.id, textElement);
+      updateTimelineTracks(nextTracks);
+    },
+    [
+      timelineState,
+      currentPosition,
+      ensureTrack,
+      appendElementToTrack,
+      updateTimelineTracks,
+    ],
+  );
+
+  const handleAddSticker = useCallback(() => {
+    const normalized = normalizeTimelineState(timelineState);
+    const tracks = [...normalized.tracks];
+    const stickerTrack = ensureTrack(tracks, {
+      type: 'sticker',
+      name: 'Sticker Track',
+    });
+    const element = {
+      id: `sticker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'sticker',
+      name: 'Sticker',
+      duration_seconds: 5,
+      start_time_seconds: currentPosition,
+      trim: { in_seconds: 0, out_seconds: 0 },
+      transform: { scale: 1, position: { x: 0, y: 0 }, rotate: 0 },
+      opacity: 1,
+      blend_mode: 'normal',
+      sticker_id: 'emoji:star',
+      metadata: {
+        sourceRef: 'local-sticker',
+      },
+    } as KshanaTimelineState['tracks'][number]['elements'][number];
+
+    const nextTracks = appendElementToTrack(tracks, stickerTrack.id, element);
+    updateTimelineTracks(nextTracks);
+  }, [
+    timelineState,
+    currentPosition,
+    ensureTrack,
+    appendElementToTrack,
+    updateTimelineTracks,
+  ]);
+
+  const handleAddShape = useCallback(() => {
+    const normalized = normalizeTimelineState(timelineState);
+    const tracks = [...normalized.tracks];
+    const graphicsTrack = ensureTrack(tracks, {
+      type: 'graphics',
+      name: 'Graphics Track',
+    });
+    const element = {
+      id: `shape-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'shape',
+      name: 'Rectangle',
+      duration_seconds: 5,
+      start_time_seconds: currentPosition,
+      trim: { in_seconds: 0, out_seconds: 0 },
+      transform: { scale: 1, position: { x: 0, y: 0 }, rotate: 0 },
+      opacity: 1,
+      blend_mode: 'normal',
+      shape_type: 'rectangle',
+      fill_color: '#58C7FF',
+      stroke_color: '#FFFFFF',
+      stroke_width: 0,
+      metadata: {
+        sourceRef: 'local-shape',
+      },
+    } as KshanaTimelineState['tracks'][number]['elements'][number];
+
+    const nextTracks = appendElementToTrack(tracks, graphicsTrack.id, element);
+    updateTimelineTracks(nextTracks);
+  }, [
+    timelineState,
+    currentPosition,
+    ensureTrack,
+    appendElementToTrack,
+    updateTimelineTracks,
+  ]);
 
   // YouTube audio import removed - can be re-added later if needed
   const handleImportAudioFromYouTube = useCallback(
@@ -2108,6 +2451,51 @@ export default function TimelinePanel({
     setIsPlaying,
   ]);
 
+  const selectedTextElement = useMemo(() => {
+    if (!selectedTrackElement) return null;
+    const track = timelineState.tracks.find(
+      (candidate) => candidate.id === selectedTrackElement.trackId,
+    );
+    const element = track?.elements.find(
+      (candidate) => candidate.id === selectedTrackElement.elementId,
+    );
+    if (!track || !element || element.type !== 'text') {
+      return null;
+    }
+    return { track, element };
+  }, [timelineState.tracks, selectedTrackElement]);
+
+  const updateSelectedTextElement = useCallback(
+    (
+      patch: Partial<{
+        content: string;
+        font_size: number;
+        color: string;
+        font_weight: TimelineTextElement['font_weight'];
+        background_color: string;
+      }>,
+    ) => {
+      if (!selectedTextElement) return;
+      const nextTracks = timelineState.tracks.map((track) => {
+        if (track.id !== selectedTextElement.track.id) return track;
+        return {
+          ...track,
+          elements: track.elements.map((element) => {
+            if (
+              element.id !== selectedTextElement.element.id ||
+              element.type !== 'text'
+            ) {
+              return element;
+            }
+            return { ...element, ...patch };
+          }),
+        };
+      });
+      updateTimelineTracks(nextTracks);
+    },
+    [selectedTextElement, timelineState.tracks, updateTimelineTracks],
+  );
+
   // Show empty state if no project
   if (!projectDirectory) {
     return (
@@ -2145,6 +2533,16 @@ export default function TimelinePanel({
     secondsToPixels(currentPosition, zoomLevel),
     secondsToPixels(totalDuration, zoomLevel),
   );
+  const primaryTrackItems = timelineItems.filter(
+    (item) =>
+      item.type === 'image' ||
+      item.type === 'video' ||
+      item.type === 'placeholder',
+  );
+  const richTextItems = timelineItems.filter((item) => item.type === 'text');
+  const stickerItems = timelineItems.filter((item) => item.type === 'sticker');
+  const graphicsItems = timelineItems.filter((item) => item.type === 'graphics');
+  const audioItems = timelineItems.filter((item) => item.type === 'audio');
 
   return (
     <div className={styles.container}>
@@ -2203,6 +2601,52 @@ export default function TimelinePanel({
               <button
                 type="button"
                 className={styles.toolbarButton}
+                onClick={() => handleAddTextPreset(selectedTextPreset)}
+                title="Add Text Preset"
+              >
+                <Type size={14} />
+                <span>Text</span>
+              </button>
+              <select
+                className={styles.textPresetSelect}
+                value={selectedTextPreset}
+                onChange={(event) =>
+                  setSelectedTextPreset(
+                    event.target.value as
+                      | 'title'
+                      | 'subtitle'
+                      | 'lower-third'
+                      | 'caption',
+                  )
+                }
+                title="Text preset"
+              >
+                <option value="title">Title</option>
+                <option value="subtitle">Subtitle</option>
+                <option value="lower-third">Lower Third</option>
+                <option value="caption">Caption</option>
+              </select>
+              <button
+                type="button"
+                className={styles.toolbarButton}
+                onClick={handleAddSticker}
+                title="Add Sticker"
+              >
+                <Sparkles size={14} />
+                <span>Sticker</span>
+              </button>
+              <button
+                type="button"
+                className={styles.toolbarButton}
+                onClick={handleAddShape}
+                title="Add Shape"
+              >
+                <Shapes size={14} />
+                <span>Shape</span>
+              </button>
+              <button
+                type="button"
+                className={styles.toolbarButton}
                 onClick={() => setIsAudioModalOpen(true)}
                 title="Import Audio"
               >
@@ -2238,6 +2682,59 @@ export default function TimelinePanel({
               </button>
             </div>
           </div>
+
+          {selectedTextElement && (
+            <div className={styles.textPropertiesBar}>
+              <input
+                type="text"
+                className={styles.textPropertiesInput}
+                value={selectedTextElement.element.content}
+                onChange={(event) =>
+                  updateSelectedTextElement({ content: event.target.value })
+                }
+                placeholder="Text content"
+              />
+              <input
+                type="number"
+                className={styles.textPropertiesNumber}
+                min={8}
+                max={300}
+                value={selectedTextElement.element.font_size}
+                onChange={(event) =>
+                  updateSelectedTextElement({
+                    font_size: Number(event.target.value || 42),
+                  })
+                }
+                title="Font size"
+              />
+              <input
+                type="color"
+                className={styles.textPropertiesColor}
+                value={selectedTextElement.element.color || '#ffffff'}
+                onChange={(event) =>
+                  updateSelectedTextElement({ color: event.target.value })
+                }
+                title="Text color"
+              />
+              <select
+                className={styles.textPropertiesSelect}
+                value={selectedTextElement.element.font_weight}
+                onChange={(event) =>
+                  updateSelectedTextElement({
+                    font_weight: event.target
+                      .value as TimelineTextElement['font_weight'],
+                  })
+                }
+                title="Font weight"
+              >
+                <option value="400">Regular</option>
+                <option value="500">Medium</option>
+                <option value="600">Semibold</option>
+                <option value="700">Bold</option>
+                <option value="800">Extra Bold</option>
+              </select>
+            </div>
+          )}
 
           <div className={styles.timelineContainer} ref={timelineRef}>
             <VersionSelector
@@ -2309,40 +2806,37 @@ export default function TimelinePanel({
                 />
 
                 {/* Main Track */}
-                {timelineItems.filter((item) => item.type !== 'audio').length >
-                  0 && (
+                {primaryTrackItems.length > 0 && (
                   <div className={styles.track}>
                     <div className={styles.trackContent}>
-                      {timelineItems
-                        .filter((item) => item.type !== 'audio')
-                        .map((item) => {
-                          const left = secondsToPixels(
-                            item.startTime,
-                            zoomLevel,
-                          );
-                          const width = secondsToPixels(
-                            item.duration,
-                            zoomLevel,
-                          );
+                      {primaryTrackItems.map((item) => {
+                        const left = secondsToPixels(
+                          item.startTime,
+                          zoomLevel,
+                        );
+                        const width = secondsToPixels(
+                          item.duration,
+                          zoomLevel,
+                        );
 
-                          return (
-                            <MemoTimelineItemComponent
-                              key={item.id}
-                              item={item}
-                              left={left}
-                              width={width}
-                              projectDirectory={projectDirectory || null}
-                              isSelected={activeEditingItemId === item.id}
-                              onItemClick={handleItemClick}
-                              onImageResizeMouseDown={handleImageResizeMouseDown}
-                              onInfographicDragMouseDown={
-                                handleInfographicDragMouseDown
-                              }
-                              onItemContextMenu={handleTimelineItemContextMenu}
-                              isEditing={activeEditingItemId === item.id}
-                            />
-                          );
-                        })}
+                        return (
+                          <MemoTimelineItemComponent
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            isSelected={activeEditingItemId === item.id}
+                            onItemClick={handleItemClick}
+                            onImageResizeMouseDown={handleImageResizeMouseDown}
+                            onInfographicDragMouseDown={
+                              handleInfographicDragMouseDown
+                            }
+                            onItemContextMenu={handleTimelineItemContextMenu}
+                            isEditing={activeEditingItemId === item.id}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -2373,6 +2867,102 @@ export default function TimelinePanel({
                             onInfographicDragMouseDown={
                               handleInfographicDragMouseDown
                             }
+                            onItemContextMenu={handleTimelineItemContextMenu}
+                            isEditing={activeEditingItemId === item.id}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Rich Text Track */}
+                {richTextItems.length > 0 && (
+                  <div className={`${styles.track} ${styles.textOverlayTrack}`}>
+                    <div className={styles.trackContent}>
+                      {richTextItems.map((item) => {
+                        const left = secondsToPixels(
+                          item.startTime,
+                          zoomLevel,
+                        );
+                        const width = secondsToPixels(
+                          item.duration,
+                          zoomLevel,
+                        );
+
+                        return (
+                          <MemoTimelineItemComponent
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            isSelected={activeEditingItemId === item.id}
+                            onItemClick={handleItemClick}
+                            onItemContextMenu={handleTimelineItemContextMenu}
+                            isEditing={activeEditingItemId === item.id}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sticker Track */}
+                {stickerItems.length > 0 && (
+                  <div className={`${styles.track} ${styles.overlayTrack}`}>
+                    <div className={styles.trackContent}>
+                      {stickerItems.map((item) => {
+                        const left = secondsToPixels(
+                          item.startTime,
+                          zoomLevel,
+                        );
+                        const width = secondsToPixels(
+                          item.duration,
+                          zoomLevel,
+                        );
+
+                        return (
+                          <MemoTimelineItemComponent
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            isSelected={activeEditingItemId === item.id}
+                            onItemClick={handleItemClick}
+                            onItemContextMenu={handleTimelineItemContextMenu}
+                            isEditing={activeEditingItemId === item.id}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Graphics Track */}
+                {graphicsItems.length > 0 && (
+                  <div className={`${styles.track} ${styles.overlayTrack}`}>
+                    <div className={styles.trackContent}>
+                      {graphicsItems.map((item) => {
+                        const left = secondsToPixels(
+                          item.startTime,
+                          zoomLevel,
+                        );
+                        const width = secondsToPixels(
+                          item.duration,
+                          zoomLevel,
+                        );
+
+                        return (
+                          <MemoTimelineItemComponent
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            isSelected={activeEditingItemId === item.id}
+                            onItemClick={handleItemClick}
                             onItemContextMenu={handleTimelineItemContextMenu}
                             isEditing={activeEditingItemId === item.id}
                           />
@@ -2414,35 +3004,32 @@ export default function TimelinePanel({
                 )}
 
                 {/* Audio Track */}
-                {timelineItems.filter((item) => item.type === 'audio').length >
-                  0 && (
+                {audioItems.length > 0 && (
                   <div className={`${styles.track} ${styles.audioTrack}`}>
                     <div className={styles.trackContent}>
-                      {timelineItems
-                        .filter((item) => item.type === 'audio')
-                        .map((item) => {
-                          const left = secondsToPixels(
-                            item.startTime,
-                            zoomLevel,
-                          );
-                          const width = secondsToPixels(
-                            item.duration,
-                            zoomLevel,
-                          );
+                      {audioItems.map((item) => {
+                        const left = secondsToPixels(
+                          item.startTime,
+                          zoomLevel,
+                        );
+                        const width = secondsToPixels(
+                          item.duration,
+                          zoomLevel,
+                        );
 
-                          return (
-                            <MemoTimelineItemComponent
-                              key={item.id}
-                              item={item}
-                              left={left}
-                              width={width}
-                              projectDirectory={projectDirectory || null}
-                              isSelected={false}
-                              onItemClick={handleItemClick}
-                              onItemContextMenu={handleTimelineItemContextMenu}
-                            />
-                          );
-                        })}
+                        return (
+                          <MemoTimelineItemComponent
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            isSelected={false}
+                            onItemClick={handleItemClick}
+                            onItemContextMenu={handleTimelineItemContextMenu}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 )}

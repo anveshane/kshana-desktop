@@ -1,9 +1,35 @@
-import { useState, useEffect } from 'react';
-import { Image as ImageIcon, Video, X, Play, ImagePlus } from 'lucide-react';
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  type ChangeEvent,
+} from 'react';
+import {
+  Image as ImageIcon,
+  Video,
+  X,
+  Play,
+  ImagePlus,
+  Search,
+  Upload,
+  RefreshCw,
+  AlertTriangle,
+  Music,
+} from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import { useProject } from '../../../contexts/ProjectContext';
 import { FileNode, getFileType } from '../../../../shared/fileSystemTypes';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
+import {
+  appendImportedMediaToTimelineState,
+  importedMediaToAssetInfo,
+  importMediaToProject,
+  replaceMediaInProject,
+  type ImportedMediaData,
+} from '../../../services/media';
 import styles from './AssetsView.module.scss';
 
 interface MediaAsset {
@@ -12,8 +38,25 @@ interface MediaAsset {
   type: 'image' | 'video';
 }
 
+interface ImportedAssetRecord {
+  id: string;
+  name: string;
+  path: string;
+  type: 'image' | 'video' | 'audio';
+  metadata?: Record<string, unknown>;
+}
+
 export default function AssetsView() {
   const { projectDirectory } = useWorkspace();
+  const {
+    manifest,
+    assetManifest,
+    addAsset,
+    timelineState,
+    updateTimelineTracks,
+    updateImportedClips,
+  } = useProject();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [generatedImages, setGeneratedImages] = useState<MediaAsset[]>([]);
   const [generatedVideos, setGeneratedVideos] = useState<MediaAsset[]>([]);
@@ -30,6 +73,55 @@ export default function AssetsView() {
   const [infographicPaths, setInfographicPaths] = useState<
     Record<string, string>
   >({});
+  const [importedDisplayPaths, setImportedDisplayPaths] = useState<
+    Record<string, string>
+  >({});
+  const [searchQuery, setSearchQuery] = useState('');
+  const [importingAssetPath, setImportingAssetPath] = useState<string | null>(
+    null,
+  );
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [missingImportedPaths, setMissingImportedPaths] = useState<
+    Record<string, boolean>
+  >({});
+
+  const importedAssets = useMemo<ImportedAssetRecord[]>(() => {
+    if (!assetManifest?.assets) return [];
+
+    return assetManifest.assets
+      .filter((asset) => {
+        const importedFlag = Boolean(asset.metadata?.imported);
+        const inAssetsDir = asset.path.startsWith('.kshana/assets/');
+        return importedFlag || inAssetsDir;
+      })
+      .map((asset) => {
+        const loweredPath = asset.path.toLowerCase();
+        let type: ImportedAssetRecord['type'] = 'video';
+        if (/\.(mp3|wav|m4a|aac|ogg|flac|wma)$/i.test(loweredPath)) {
+          type = 'audio';
+        } else if (/\.(png|jpe?g|webp|gif|bmp)$/i.test(loweredPath)) {
+          type = 'image';
+        }
+
+        return {
+          id: asset.id,
+          name: asset.path.replace(/\\/g, '/').split('/').pop() || asset.id,
+          path: asset.path,
+          type,
+          metadata: asset.metadata,
+        };
+      });
+  }, [assetManifest?.assets]);
+
+  const filteredImportedAssets = useMemo(() => {
+    if (!searchQuery.trim()) return importedAssets;
+    const query = searchQuery.trim().toLowerCase();
+    return importedAssets.filter(
+      (asset) =>
+        asset.name.toLowerCase().includes(query) ||
+        asset.path.toLowerCase().includes(query),
+    );
+  }, [importedAssets, searchQuery]);
 
   // Load generated images and videos from placement directories
   useEffect(() => {
@@ -167,6 +259,235 @@ export default function AssetsView() {
     };
   }, [projectDirectory]);
 
+  useEffect(() => {
+    if (!projectDirectory || importedAssets.length === 0) {
+      setMissingImportedPaths({});
+      return;
+    }
+
+    let cancelled = false;
+    const checkMissingAssets = async () => {
+      const entries = await Promise.all(
+        importedAssets.map(async (asset) => {
+          const absolutePath =
+            asset.path.startsWith('/') || /^[A-Za-z]:/.test(asset.path)
+              ? asset.path
+              : `${projectDirectory}/${asset.path}`;
+          const exists = await window.electron.project.checkFileExists(
+            absolutePath,
+          );
+          return [asset.path, !exists] as const;
+        }),
+      );
+
+      if (!cancelled) {
+        setMissingImportedPaths(Object.fromEntries(entries));
+      }
+    };
+
+    checkMissingAssets().catch(() => {
+      if (!cancelled) {
+        setMissingImportedPaths({});
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectDirectory, importedAssets]);
+
+  const importFromPath = useCallback(
+    async (sourcePath: string) => {
+      if (!projectDirectory || !sourcePath) return;
+      setImportingAssetPath(sourcePath);
+
+      try {
+        const imported = await importMediaToProject({
+          projectDirectory,
+          sourcePath,
+        });
+        await addAsset(importedMediaToAssetInfo(imported));
+      } catch (error) {
+        console.error('[AssetsView] Failed to import asset:', error);
+      } finally {
+        setImportingAssetPath(null);
+      }
+    },
+    [projectDirectory, addAsset],
+  );
+
+  const isAspectRatioCompatible = useCallback(
+    (metadata?: Record<string, unknown>) => {
+      const projectWidth = manifest?.settings?.resolution?.width;
+      const projectHeight = manifest?.settings?.resolution?.height;
+      if (!projectWidth || !projectHeight || !metadata) {
+        return true;
+      }
+
+      const mediaWidth = metadata.width;
+      const mediaHeight = metadata.height;
+      if (typeof mediaWidth !== 'number' || typeof mediaHeight !== 'number') {
+        return true;
+      }
+
+      const projectRatio = projectWidth / projectHeight;
+      const mediaRatio = mediaWidth / mediaHeight;
+      const ratioDelta = Math.abs(projectRatio - mediaRatio);
+      if (ratioDelta <= 0.03) {
+        return true;
+      }
+
+      return window.confirm(
+        `Imported media aspect ratio (${mediaWidth}x${mediaHeight}) differs from project ratio (${projectWidth}x${projectHeight}). Add to timeline anyway?`,
+      );
+    },
+    [manifest?.settings?.resolution?.height, manifest?.settings?.resolution?.width],
+  );
+
+  const appendImportedAssetToTimeline = useCallback(
+    (asset: ImportedAssetRecord) => {
+      if (!projectDirectory || !isAspectRatioCompatible(asset.metadata)) {
+        return;
+      }
+
+      const metadata = asset.metadata ?? {};
+      const imported: ImportedMediaData = {
+        id: asset.id,
+        type: asset.type,
+        relativePath: asset.path,
+        absolutePath:
+          asset.path.startsWith('/') || /^[A-Za-z]:/.test(asset.path)
+            ? asset.path
+            : `${projectDirectory}/${asset.path}`,
+        extractedAudioRelativePath:
+          typeof metadata.extractedAudioPath === 'string'
+            ? metadata.extractedAudioPath
+            : undefined,
+        thumbnailRelativePath:
+          typeof metadata.thumbnailPath === 'string'
+            ? metadata.thumbnailPath
+            : undefined,
+        waveformRelativePath:
+          typeof metadata.waveformPath === 'string'
+            ? metadata.waveformPath
+            : undefined,
+        metadata: {
+          duration:
+            typeof metadata.duration === 'number' ? metadata.duration : undefined,
+          width: typeof metadata.width === 'number' ? metadata.width : undefined,
+          height:
+            typeof metadata.height === 'number' ? metadata.height : undefined,
+          fps: typeof metadata.fps === 'number' ? metadata.fps : undefined,
+          size: typeof metadata.size === 'number' ? metadata.size : 0,
+          lastModified:
+            typeof metadata.lastModified === 'number'
+              ? metadata.lastModified
+              : Date.now(),
+        },
+      };
+
+      const nextTimelineState = appendImportedMediaToTimelineState(
+        timelineState,
+        imported,
+      );
+      updateTimelineTracks(nextTimelineState.tracks);
+      updateImportedClips(nextTimelineState.imported_clips);
+    },
+    [
+      projectDirectory,
+      isAspectRatioCompatible,
+      timelineState,
+      updateTimelineTracks,
+      updateImportedClips,
+    ],
+  );
+
+  const handleFilePickerImport = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileInputChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const files = event.target.files;
+      if (!files || files.length === 0) return;
+      for (const file of Array.from(files)) {
+        // Electron exposes absolute file path on File.
+        const sourcePath = (file as File & { path?: string }).path;
+        if (sourcePath) {
+          // eslint-disable-next-line no-await-in-loop
+          await importFromPath(sourcePath);
+        }
+      }
+      event.target.value = '';
+    },
+    [importFromPath],
+  );
+
+  const handleDropImport = useCallback(
+    async (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      setIsDragOver(false);
+
+      const droppedFiles = Array.from(event.dataTransfer.files);
+      for (const file of droppedFiles) {
+        const sourcePath = (file as File & { path?: string }).path;
+        if (sourcePath) {
+          // eslint-disable-next-line no-await-in-loop
+          await importFromPath(sourcePath);
+        }
+      }
+    },
+    [importFromPath],
+  );
+
+  const handleReplaceImportedAsset = useCallback(
+    async (asset: ImportedAssetRecord) => {
+      if (!projectDirectory) return;
+
+      const selectedPath =
+        asset.type === 'audio'
+          ? await window.electron.project.selectAudioFile()
+          : asset.type === 'image'
+            ? await window.electron.project.selectImageFile()
+          : await window.electron.project.selectVideoFile();
+      if (!selectedPath) return;
+
+      try {
+        const result = await replaceMediaInProject({
+          projectDirectory,
+          currentRelativePath: asset.path,
+          sourcePath: selectedPath,
+        });
+        const nextAsset = importedMediaToAssetInfo({
+          id: asset.id,
+          type: asset.type,
+          relativePath: result.relativePath,
+          absolutePath: result.absolutePath,
+          metadata: result.metadata,
+        });
+        nextAsset.metadata = {
+          ...(asset.metadata || {}),
+          ...(nextAsset.metadata || {}),
+          thumbnailPath:
+            result.thumbnailRelativePath ||
+            (nextAsset.metadata?.thumbnailPath as string | undefined),
+          waveformPath:
+            result.waveformRelativePath ||
+            (nextAsset.metadata?.waveformPath as string | undefined),
+          extractedAudioPath:
+            result.extractedAudioRelativePath ||
+            (nextAsset.metadata?.extractedAudioPath as string | undefined),
+          imported: true,
+          replacedAt: Date.now(),
+        };
+        await addAsset(nextAsset);
+      } catch (error) {
+        console.error('[AssetsView] Failed to replace imported asset:', error);
+      }
+    },
+    [projectDirectory, addAsset],
+  );
+
   // Resolve image paths
   useEffect(() => {
     if (!projectDirectory || generatedImages.length === 0) {
@@ -258,6 +579,34 @@ export default function AssetsView() {
     resolvePaths();
   }, [projectDirectory, generatedInfographics]);
 
+  useEffect(() => {
+    if (!projectDirectory || importedAssets.length === 0) {
+      setImportedDisplayPaths({});
+      return;
+    }
+
+    const resolvePaths = async () => {
+      const nextPaths: Record<string, string> = {};
+      for (const asset of importedAssets) {
+        try {
+          const resolved = await resolveAssetPathForDisplay(
+            asset.path,
+            projectDirectory,
+          );
+          nextPaths[asset.path] = resolved;
+        } catch (error) {
+          console.warn('[AssetsView] Failed to resolve imported asset path:', {
+            assetPath: asset.path,
+            error,
+          });
+        }
+      }
+      setImportedDisplayPaths(nextPaths);
+    };
+
+    resolvePaths();
+  }, [projectDirectory, importedAssets]);
+
   // Show empty state if no project
   if (!projectDirectory) {
     return (
@@ -273,6 +622,7 @@ export default function AssetsView() {
 
   // Show empty state if no assets
   const hasAnyAssets =
+    importedAssets.length > 0 ||
     generatedImages.length > 0 ||
     generatedVideos.length > 0 ||
     generatedInfographics.length > 0;
@@ -282,8 +632,8 @@ export default function AssetsView() {
       <div className={styles.container}>
         <div className={styles.emptyState}>
           <ImageIcon size={48} className={styles.emptyIcon} />
-          <h3>No Generated Assets Yet</h3>
-          <p>Generated images, videos, and infographics will appear here</p>
+          <h3>No Assets Yet</h3>
+          <p>Import media or generate assets to populate this view</p>
         </div>
       </div>
     );
@@ -292,7 +642,136 @@ export default function AssetsView() {
   return (
     <>
       <div className={styles.container}>
-        <div className={styles.content}>
+        <div
+          className={styles.content}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setIsDragOver(true);
+          }}
+          onDragLeave={(event) => {
+            event.preventDefault();
+            if (event.currentTarget === event.target) {
+              setIsDragOver(false);
+            }
+          }}
+          onDrop={handleDropImport}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="video/*,audio/*,image/*"
+            onChange={handleFileInputChange}
+            className={styles.hiddenFileInput}
+          />
+
+          <div className={styles.importHeader}>
+            <div className={styles.searchBox}>
+              <Search size={14} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search imported assets"
+              />
+            </div>
+            <button
+              type="button"
+              className={styles.importButton}
+              onClick={handleFilePickerImport}
+              disabled={!!importingAssetPath}
+            >
+              <Upload size={14} />
+              <span>{importingAssetPath ? 'Importing...' : 'Import Media'}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.aiTabPlaceholder}
+              disabled
+              title="AI-assisted asset tools coming soon"
+            >
+              AI
+            </button>
+          </div>
+
+          <div className={styles.section}>
+            <div className={styles.sectionHeader}>
+              <Upload size={16} />
+              <h3>Imported Assets</h3>
+              <span className={styles.count}>{filteredImportedAssets.length}</span>
+            </div>
+            <div className={styles.importHint}>
+              Double-click an asset to place it on the timeline.
+            </div>
+            <div className={styles.grid}>
+              {filteredImportedAssets.length === 0 ? (
+                <div className={styles.emptySection}>
+                  <p>Import media to add local clips, audio, text, and overlays</p>
+                </div>
+              ) : (
+                filteredImportedAssets.map((asset) => {
+                  const displayPath = importedDisplayPaths[asset.path];
+                  const isMissing = Boolean(missingImportedPaths[asset.path]);
+                  return (
+                    <div
+                      key={asset.id}
+                      className={styles.mediaCard}
+                      onDoubleClick={() => {
+                        if (!isMissing) {
+                          appendImportedAssetToTimeline(asset);
+                        }
+                      }}
+                    >
+                      <div className={styles.mediaThumbnail}>
+                        {asset.type === 'image' && displayPath && (
+                          <img
+                            src={displayPath}
+                            alt={asset.name}
+                            className={styles.thumbnailImage}
+                          />
+                        )}
+                        {(asset.type === 'video' || asset.type === 'audio') && (
+                          <div className={styles.mediaPlaceholder}>
+                            {asset.type === 'video' ? (
+                              <Video size={32} />
+                            ) : (
+                              <Music size={32} />
+                            )}
+                          </div>
+                        )}
+                        {isMissing && (
+                          <div className={styles.missingBadge}>
+                            <AlertTriangle size={12} />
+                            <span>Missing</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className={styles.mediaName}>{asset.name}</div>
+                      {isMissing && (
+                        <button
+                          type="button"
+                          className={styles.replaceButton}
+                          onClick={() => handleReplaceImportedAsset(asset)}
+                        >
+                          <RefreshCw size={12} />
+                          <span>Replace</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {isDragOver && (
+            <div className={styles.dropOverlay}>
+              <div className={styles.dropOverlayContent}>
+                Drop files to import into `.kshana/assets`
+              </div>
+            </div>
+          )}
+
           {/* Generated Images Section */}
           {(generatedImages.length > 0 || isLoadingMedia) && (
             <div className={styles.section}>

@@ -19,7 +19,7 @@ export interface AudioControllerOptions {
 }
 
 export interface AudioController {
-  audioRef: React.RefObject<HTMLAudioElement>;
+  audioRef: React.RefObject<HTMLAudioElement | null>;
   isInitialized: boolean;
 }
 
@@ -358,7 +358,7 @@ export function useAudioController(
     return () => {
       audioElement.removeEventListener('ended', handleEnded);
     };
-  }, [audioFile, playbackTime, onPlaybackStateChange, currentVideoItem]);
+  }, [audioFile, onPlaybackStateChange, currentVideoItem]);
 
   // Cleanup on unmount
   useEffect(() => {

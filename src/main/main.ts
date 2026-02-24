@@ -30,6 +30,7 @@ import {
 import fileSystemManager from './fileSystemManager';
 import { remotionManager } from './remotionManager';
 import { generateWordCaptions } from './services/wordCaptionService';
+import { assetManager } from './services/assetManager';
 import type { FileChangeEvent } from '../shared/fileSystemTypes';
 import type {
   RemotionTimelineItem,
@@ -171,6 +172,180 @@ ipcMain.handle('project:select-audio-file', async () => {
   }
   return result.filePaths[0];
 });
+
+ipcMain.handle('project:select-image-file', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: 'Select Image File',
+    filters: [
+      {
+        name: 'Image Files',
+        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'],
+      },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
+type MediaSelectionKind = 'all' | 'video' | 'audio' | 'image';
+
+function getMediaFilters(kind: MediaSelectionKind) {
+  if (kind === 'video') {
+    return [
+      {
+        name: 'Video Files',
+        extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'],
+      },
+      { name: 'All Files', extensions: ['*'] },
+    ];
+  }
+
+  if (kind === 'audio') {
+    return [
+      {
+        name: 'Audio Files',
+        extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'wma'],
+      },
+      { name: 'All Files', extensions: ['*'] },
+    ];
+  }
+
+  if (kind === 'image') {
+    return [
+      {
+        name: 'Image Files',
+        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'],
+      },
+      { name: 'All Files', extensions: ['*'] },
+    ];
+  }
+
+  return [
+    {
+      name: 'Media Files',
+      extensions: [
+        'mp4',
+        'mov',
+        'avi',
+        'mkv',
+        'webm',
+        'm4v',
+        'mp3',
+        'wav',
+        'm4a',
+        'aac',
+        'ogg',
+        'flac',
+        'wma',
+        'png',
+        'jpg',
+        'jpeg',
+        'webp',
+        'gif',
+        'bmp',
+        'svg',
+      ],
+    },
+    { name: 'All Files', extensions: ['*'] },
+  ];
+}
+
+ipcMain.handle(
+  'project:select-media-files',
+  async (
+    _event,
+    options?: {
+      kind?: MediaSelectionKind;
+      multiple?: boolean;
+    },
+  ): Promise<string[]> => {
+    if (!mainWindow) return [];
+
+    const kind = options?.kind ?? 'all';
+    const multiple = Boolean(options?.multiple);
+    const properties: Array<'openFile' | 'multiSelections'> = ['openFile'];
+    if (multiple) {
+      properties.push('multiSelections');
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties,
+      title: 'Select Media Files',
+      filters: getMediaFilters(kind),
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return [];
+    }
+
+    return result.filePaths;
+  },
+);
+
+ipcMain.handle(
+  'project:import-media',
+  async (
+    _event,
+    projectDirectory: string,
+    sourcePath: string,
+    forceType?: 'video' | 'audio' | 'image',
+  ) => {
+    try {
+      const result = await assetManager.importMedia({
+        projectDirectory,
+        sourcePath,
+        forceType,
+      });
+
+      fileSystemManager.emit('file-change', {
+        type: 'add',
+        path: path.join(projectDirectory, result.relativePath),
+      });
+
+      return { success: true, data: result };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Import failed',
+      };
+    }
+  },
+);
+
+ipcMain.handle(
+  'project:replace-media',
+  async (
+    _event,
+    projectDirectory: string,
+    currentRelativePath: string,
+    sourcePath: string,
+  ) => {
+    try {
+      const result = await assetManager.replaceMedia({
+        projectDirectory,
+        currentRelativePath,
+        sourcePath,
+      });
+
+      fileSystemManager.emit('file-change', {
+        type: 'change',
+        path: path.join(projectDirectory, result.relativePath),
+      });
+
+      return { success: true, data: result };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Replace failed',
+      };
+    }
+  },
+);
 
 async function getAudioDuration(audioPath: string): Promise<number> {
   return new Promise((resolve) => {

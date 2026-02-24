@@ -12,6 +12,76 @@
   overflow-y: auto;
   padding: $spacing-lg;
   @include custom-scrollbar;
+  position: relative;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+.importHeader {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  margin-bottom: $spacing-lg;
+}
+
+.searchBox {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: 8px 10px;
+  border-radius: $radius-md;
+  border: 1px solid $color-panel-border;
+  background: rgba($color-panel-background, 0.8);
+
+  svg {
+    color: $color-text-muted;
+  }
+
+  input {
+    width: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: $color-text-primary;
+    font-size: $font-size-sm;
+  }
+}
+
+.importButton {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  border: 1px solid rgba($color-accent-green, 0.4);
+  background: rgba($color-accent-green, 0.15);
+  color: $color-accent-green;
+  border-radius: $radius-md;
+  padding: 8px 12px;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: rgba($color-accent-green, 0.25);
+  }
+
+  &:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+}
+
+.aiTabPlaceholder {
+  border: 1px dashed rgba($color-text-muted, 0.4);
+  background: transparent;
+  color: $color-text-muted;
+  border-radius: $radius-md;
+  padding: 8px 12px;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
 }
 
 .section {
@@ -55,6 +125,12 @@
   border-radius: $radius-full;
   color: $color-text-secondary;
   margin-left: auto;
+}
+
+.importHint {
+  margin: -$spacing-sm 0 $spacing-md;
+  color: $color-text-muted;
+  font-size: $font-size-xs;
 }
 
 .grid {
@@ -170,6 +246,62 @@
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   }
+}
+
+.replaceButton {
+  margin: 0 $spacing-sm $spacing-sm;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-xs;
+  border: 1px solid rgba(#f8c44f, 0.55);
+  background: rgba(#f8c44f, 0.18);
+  color: #f8c44f;
+  border-radius: $radius-sm;
+  padding: 6px 8px;
+  font-size: $font-size-xs;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(#f8c44f, 0.3);
+  }
+}
+
+.missingBadge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: $radius-sm;
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: $font-weight-semibold;
+  background: #f8c44f;
+  color: #141414;
+}
+
+.dropOverlay {
+  position: absolute;
+  inset: $spacing-lg;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed rgba($color-accent-green, 0.8);
+  border-radius: $radius-lg;
+  background: rgba($color-background-dark, 0.75);
+  pointer-events: none;
+  z-index: 12;
+}
+
+.dropOverlayContent {
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-lg;
+  background: rgba($color-accent-green, 0.2);
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
 }
 
 .mediaThumbnail {
@@ -294,4 +426,3 @@
   text-align: center;
   padding: $spacing-sm;
 }
-

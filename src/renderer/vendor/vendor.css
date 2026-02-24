@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Fallback styles for environments where postcss/tailwind tooling is not
+ * installed yet. These are intentionally minimal.
+ */
+:root {
+  --vendor-panel-border: rgba(255, 255, 255, 0.12);
+}

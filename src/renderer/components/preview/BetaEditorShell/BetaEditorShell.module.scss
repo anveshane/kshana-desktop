@@ -1,0 +1,124 @@
+@import '../../../styles/tokens';
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 12px;
+  padding: 12px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+
+  h3 {
+    margin: 0;
+    font-size: 16px;
+    color: $color-text-primary;
+  }
+
+  p {
+    margin: 4px 0 0;
+    color: $color-text-secondary;
+    font-size: 13px;
+  }
+}
+
+.legacyButton {
+  border: 1px solid $color-panel-border;
+  background: transparent;
+  color: $color-text-primary;
+  border-radius: 8px;
+  height: 32px;
+  padding: 0 10px;
+  cursor: pointer;
+
+  &:hover {
+    border-color: $color-accent-cyan;
+  }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.3fr) minmax(280px, 1fr);
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+}
+
+.card {
+  border: 1px solid $color-panel-border;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid $color-panel-border;
+
+  h4 {
+    margin: 0;
+    font-size: 13px;
+    color: $color-text-primary;
+  }
+
+  span {
+    font-size: 11px;
+    color: $color-text-muted;
+  }
+}
+
+.cardBody {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.adapterBody {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid $color-panel-border;
+  border-radius: 8px;
+  padding: 8px 10px;
+
+  strong {
+    color: $color-text-secondary;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  span {
+    color: $color-text-primary;
+    font-size: 12px;
+  }
+}
+
+.note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: $color-text-muted;
+  line-height: 1.4;
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
