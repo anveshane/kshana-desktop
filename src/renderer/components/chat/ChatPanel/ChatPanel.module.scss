@@ -51,6 +51,10 @@
   }
 }
 
+.exportButton {
+  @extend .clearButton;
+}
+
 .stopButton {
   display: flex;
   align-items: center;

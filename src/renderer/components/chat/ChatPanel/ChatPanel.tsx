@@ -1,13 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Trash2 } from 'lucide-react';
+import { Bot, Download, Trash2 } from 'lucide-react';
 import type { BackendState } from '../../../../shared/backendTypes';
+import type {
+  ChatExportPayload,
+  ChatSnapshotUiState,
+  PersistedChatMessage,
+} from '../../../../shared/chatTypes';
 import type { ChatMessage } from '../../../types/chat';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useAgent } from '../../../contexts/AgentContext';
+import {
+  createChatSnapshot,
+  loadChatSnapshot,
+  saveChatSnapshot,
+} from '../../../services/chatPersistence';
 import MessageList from '../MessageList';
 import ChatInput from '../ChatInput';
 import StatusBar, { AgentStatus } from '../StatusBar';
 import ProjectSelectionDialog from '../ProjectSelectionDialog';
+import {
+  failExecutingToolCalls,
+  isCancelAckStatus,
+} from './chatPanelStopUtils';
 import styles from './ChatPanel.module.scss';
 
 // Message types that shouldn't create new messages if same type already exists
@@ -17,6 +31,21 @@ const backgroundGenerationEventDedupe = new Set<string>();
 type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 
 const DEFAULT_WS_PATH = '/api/v1/ws/chat';
+const SNAPSHOT_SAVE_DEBOUNCE_MS = 500;
+const RECONNECT_BASE_DELAY_MS = 1000;
+const RECONNECT_MAX_DELAY_MS = 30000;
+const OUTBOUND_ACTION_QUEUE_CAP = 200;
+const CONNECTION_BANNER_DEDUPE_MS = 5000;
+const STOP_ACK_TIMEOUT_MS = 12000;
+
+const VALID_AGENT_STATUS: AgentStatus[] = [
+  'idle',
+  'thinking',
+  'executing',
+  'waiting',
+  'completed',
+  'error',
+];
 
 const makeId = () => {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -40,8 +69,11 @@ export default function ChatPanel() {
   const [projectDialogResolved, setProjectDialogResolved] = useState(false);
   const [hasUserSentMessage, setHasUserSentMessage] = useState(false);
   const [isTaskRunning, setIsTaskRunning] = useState(false);
+  const [isStopPending, setIsStopPending] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
-  const { setConnectionStatus, projectDirectory } = useWorkspace();
+  const { setConnectionStatus, projectDirectory, registerProjectSwitchGuard } =
+    useWorkspace();
   const agentContext = useAgent();
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -60,8 +92,45 @@ export default function ChatPanel() {
   const lastTodoMessageIdRef = useRef<string | null>(null);
   // Track the last question message ID to avoid duplicates
   const lastQuestionMessageIdRef = useRef<string | null>(null);
-  // Track if error was already shown for the current connection attempt
-  const connectionErrorShownRef = useRef(false);
+  const reconnectAttemptRef = useRef(0);
+  const pendingOutboundActionsRef = useRef<string[]>([]);
+  const snapshotSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const connectionBannerRef = useRef<{ key: string; at: number } | null>(null);
+  const currentProjectDirectoryRef = useRef<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const agentStatusRef = useRef<AgentStatus>('idle');
+  const agentNameRef = useRef('Kshana');
+  const statusMessageRef = useRef('');
+  const currentPhaseRef = useRef<string | undefined>(undefined);
+  const phaseDisplayNameRef = useRef<string | undefined>(undefined);
+  const hasUserSentMessageRef = useRef(false);
+  const isTaskRunningRef = useRef(false);
+  const isStopPendingRef = useRef(false);
+  const stopRequestRef = useRef<{
+    promise: Promise<boolean>;
+    resolve: (success: boolean) => void;
+    timeoutId: ReturnType<typeof setTimeout>;
+  } | null>(null);
+
+  const resolveAgentStatus = useCallback((value?: string): AgentStatus => {
+    if (value && VALID_AGENT_STATUS.includes(value as AgentStatus)) {
+      return value as AgentStatus;
+    }
+    return 'idle';
+  }, []);
+
+  const resetConversationRefs = useCallback(() => {
+    lastAssistantIdRef.current = null;
+    awaitingResponseRef.current = false;
+    activeToolCallsRef.current.clear();
+    toolCallSequenceRef.current.clear();
+    lastTodoMessageIdRef.current = null;
+    lastQuestionMessageIdRef.current = null;
+    backgroundGenerationEventDedupe.clear();
+  }, []);
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
       const id = message.id ?? makeId();
@@ -116,21 +185,210 @@ export default function ChatPanel() {
     [appendMessage],
   );
 
-  const clearChat = useCallback(() => {
-    setMessages([]);
-    lastAssistantIdRef.current = null;
-    awaitingResponseRef.current = false;
+  useEffect(() => {
+    messagesRef.current = messages;
+    agentStatusRef.current = agentStatus;
+    agentNameRef.current = agentName;
+    statusMessageRef.current = statusMessage;
+    currentPhaseRef.current = currentPhase;
+    phaseDisplayNameRef.current = phaseDisplayName;
+    hasUserSentMessageRef.current = hasUserSentMessage;
+    isTaskRunningRef.current = isTaskRunning;
+    isStopPendingRef.current = isStopPending;
+    sessionIdRef.current = sessionId;
+  }, [
+    messages,
+    agentStatus,
+    agentName,
+    statusMessage,
+    currentPhase,
+    phaseDisplayName,
+    hasUserSentMessage,
+    isTaskRunning,
+    isStopPending,
+    sessionId,
+  ]);
+
+  const appendConnectionBanner = useCallback(
+    (key: string, content: string) => {
+      const now = Date.now();
+      const lastBanner = connectionBannerRef.current;
+      if (
+        lastBanner &&
+        lastBanner.key === key &&
+        now - lastBanner.at < CONNECTION_BANNER_DEDUPE_MS
+      ) {
+        return;
+      }
+      connectionBannerRef.current = { key, at: now };
+      appendSystemMessage(content, 'error');
+    },
+    [appendSystemMessage],
+  );
+
+  const resolveStopRequest = useCallback(
+    (success: boolean, errorMessage?: string): boolean => {
+      const pending = stopRequestRef.current;
+      if (!pending) {
+        return false;
+      }
+
+      clearTimeout(pending.timeoutId);
+      stopRequestRef.current = null;
+      setIsStopPending(false);
+
+      if (success) {
+        setIsTaskRunning(false);
+      } else {
+        setIsTaskRunning(true);
+        const message = errorMessage || 'Failed to stop task.';
+        appendSystemMessage(message, 'error');
+      }
+
+      pending.resolve(success);
+      return true;
+    },
+    [appendSystemMessage],
+  );
+
+  const failActiveToolCalls = useCallback((reason: string) => {
+    const now = Date.now();
+    const activeEntries = Array.from(activeToolCallsRef.current.values());
+    const updated = failExecutingToolCalls(
+      messagesRef.current,
+      activeEntries,
+      reason,
+      now,
+    );
+
+    messagesRef.current = updated;
+    setMessages(updated);
     activeToolCallsRef.current.clear();
     toolCallSequenceRef.current.clear();
-    lastTodoMessageIdRef.current = null;
-    lastQuestionMessageIdRef.current = null;
-    backgroundGenerationEventDedupe.clear();
+    setIsStreaming(false);
+    lastAssistantIdRef.current = null;
+  }, []);
+
+  const buildSnapshotUiState = useCallback((): ChatSnapshotUiState => {
+    return {
+      agentStatus: agentStatusRef.current,
+      agentName: agentNameRef.current,
+      statusMessage: statusMessageRef.current,
+      currentPhase: currentPhaseRef.current,
+      phaseDisplayName: phaseDisplayNameRef.current,
+      hasUserSentMessage: hasUserSentMessageRef.current,
+      isTaskRunning: isTaskRunningRef.current,
+    };
+  }, []);
+
+  const persistSnapshot = useCallback(
+    async (targetProjectDirectory: string): Promise<void> => {
+      const snapshot = createChatSnapshot({
+        projectDirectory: targetProjectDirectory,
+        sessionId: sessionIdRef.current,
+        messages: messagesRef.current,
+        uiState: buildSnapshotUiState(),
+      });
+      await saveChatSnapshot(snapshot);
+    },
+    [buildSnapshotUiState],
+  );
+
+  const scheduleSnapshotSave = useCallback(
+    (targetProjectDirectory: string | null | undefined) => {
+      if (!targetProjectDirectory) {
+        return;
+      }
+      if (snapshotSaveTimeoutRef.current) {
+        clearTimeout(snapshotSaveTimeoutRef.current);
+      }
+      snapshotSaveTimeoutRef.current = setTimeout(() => {
+        snapshotSaveTimeoutRef.current = null;
+        void persistSnapshot(targetProjectDirectory).catch((error) => {
+          console.error('[ChatPanel] Failed to persist chat snapshot:', error);
+        });
+      }, SNAPSHOT_SAVE_DEBOUNCE_MS);
+    },
+    [persistSnapshot],
+  );
+
+  const flushSnapshotSave = useCallback(
+    (targetProjectDirectory: string | null | undefined) => {
+      if (snapshotSaveTimeoutRef.current) {
+        clearTimeout(snapshotSaveTimeoutRef.current);
+        snapshotSaveTimeoutRef.current = null;
+      }
+      if (!targetProjectDirectory) {
+        return;
+      }
+      void persistSnapshot(targetProjectDirectory).catch((error) => {
+        console.error('[ChatPanel] Failed to flush chat snapshot:', error);
+      });
+    },
+    [persistSnapshot],
+  );
+
+  const restoreSnapshot = useCallback(
+    async (targetProjectDirectory: string) => {
+      const pendingStop = stopRequestRef.current;
+      if (pendingStop) {
+        clearTimeout(pendingStop.timeoutId);
+        stopRequestRef.current = null;
+        pendingStop.resolve(false);
+      }
+
+      const snapshot = await loadChatSnapshot(targetProjectDirectory);
+      resetConversationRefs();
+      if (!snapshot) {
+        setMessages([]);
+        setSessionId(null);
+        setAgentStatus('idle');
+        setAgentName('Kshana');
+        setStatusMessage('Ready');
+        setCurrentPhase(undefined);
+        setPhaseDisplayName(undefined);
+        setHasUserSentMessage(false);
+        setIsTaskRunning(false);
+        setIsStopPending(false);
+        return;
+      }
+
+      setMessages(snapshot.messages as ChatMessage[]);
+      setSessionId(snapshot.sessionId);
+      setAgentStatus(resolveAgentStatus(snapshot.uiState.agentStatus));
+      setAgentName(snapshot.uiState.agentName || 'Kshana');
+      setStatusMessage(snapshot.uiState.statusMessage || 'Ready');
+      setCurrentPhase(snapshot.uiState.currentPhase);
+      setPhaseDisplayName(snapshot.uiState.phaseDisplayName);
+      setHasUserSentMessage(Boolean(snapshot.uiState.hasUserSentMessage));
+      setIsTaskRunning(Boolean(snapshot.uiState.isTaskRunning));
+      setIsStopPending(false);
+    },
+    [resetConversationRefs, resolveAgentStatus],
+  );
+
+  const clearChat = useCallback(() => {
+    const pendingStop = stopRequestRef.current;
+    if (pendingStop) {
+      clearTimeout(pendingStop.timeoutId);
+      stopRequestRef.current = null;
+      pendingStop.resolve(false);
+    }
+
+    setMessages([]);
+    setSessionId(null);
+    resetConversationRefs();
     setAgentStatus('idle');
+    setAgentName('Kshana');
     setStatusMessage('Ready');
+    setCurrentPhase(undefined);
+    setPhaseDisplayName(undefined);
     setHasUserSentMessage(false);
     setIsTaskRunning(false);
+    setIsStopPending(false);
+    scheduleSnapshotSave(projectDirectory);
     // Backend will send greeting via WebSocket when connection is re-established
-  }, []);
+  }, [projectDirectory, resetConversationRefs, scheduleSnapshotSave]);
 
   const deleteMessage = useCallback((messageId: string) => {
     setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
@@ -285,6 +543,29 @@ export default function ChatPanel() {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
+    reconnectAttemptRef.current = 0;
+  }, []);
+
+  const flushPendingOutboundActions = useCallback((socket?: WebSocket) => {
+    const targetSocket = socket ?? wsRef.current;
+    if (!targetSocket || targetSocket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    while (pendingOutboundActionsRef.current.length > 0) {
+      const payload = pendingOutboundActionsRef.current.shift();
+      if (!payload) break;
+      targetSocket.send(payload);
+    }
+  }, []);
+
+  const queueOutboundAction = useCallback((payload: string) => {
+    pendingOutboundActionsRef.current.push(payload);
+    if (pendingOutboundActionsRef.current.length > OUTBOUND_ACTION_QUEUE_CAP) {
+      pendingOutboundActionsRef.current = pendingOutboundActionsRef.current.slice(
+        pendingOutboundActionsRef.current.length - OUTBOUND_ACTION_QUEUE_CAP,
+      );
+    }
   }, []);
 
   // Debounce status updates to prevent flicker
@@ -313,6 +594,12 @@ export default function ChatPanel() {
       // Extract data from kshana-ink message format
       const data = (payload.data as Record<string, unknown>) ?? payload;
       const messageType = payload.type as string;
+      const payloadSessionId =
+        typeof payload.sessionId === 'string' ? payload.sessionId : null;
+
+      if (payloadSessionId && payloadSessionId !== sessionIdRef.current) {
+        setSessionId(payloadSessionId);
+      }
 
       // Extract optional agent name logic (if provided by backend)
       // Use functional update to avoid dependency on agentName
@@ -333,6 +620,7 @@ export default function ChatPanel() {
             'Status update';
           const status = data.status as string;
           const agentNameFromStatus = (data.agentName as string) ?? agentName;
+          const isCancelAck = isCancelAckStatus(status, statusMsg);
 
           // Update agent name if it changed
           if (agentNameFromStatus !== agentName) {
@@ -383,6 +671,9 @@ export default function ChatPanel() {
                 statusMsg || 'Waiting for input...',
               );
               setIsTaskRunning(false);
+              if (isCancelAck) {
+                resolveStopRequest(true);
+              }
               window.electron.logger.logStatusChange(
                 'waiting',
                 agentNameFromStatus,
@@ -392,6 +683,9 @@ export default function ChatPanel() {
             case 'completed':
               debouncedSetStatus('completed', statusMsg || 'Task completed');
               setIsTaskRunning(false);
+              if (isStopPendingRef.current) {
+                resolveStopRequest(true);
+              }
               window.electron.logger.logStatusChange(
                 'completed',
                 agentNameFromStatus,
@@ -401,6 +695,9 @@ export default function ChatPanel() {
             case 'error':
               debouncedSetStatus('error', statusMsg);
               setIsTaskRunning(false);
+              if (isStopPendingRef.current) {
+                resolveStopRequest(false, statusMsg || 'Failed to stop task.');
+              }
               window.electron.logger.logStatusChange(
                 'error',
                 agentNameFromStatus,
@@ -770,15 +1067,31 @@ export default function ChatPanel() {
             setAgentStatus('completed');
             setStatusMessage('Completed');
             setIsTaskRunning(false);
+            if (isStopPendingRef.current) {
+              resolveStopRequest(true);
+            }
             window.electron.logger.logStatusChange(
               'completed',
               agentName,
               'Completed',
             );
+          } else if (responseStatus === 'cancelled') {
+            setAgentStatus('waiting');
+            setStatusMessage('Task cancelled');
+            setIsTaskRunning(false);
+            resolveStopRequest(true);
+            window.electron.logger.logStatusChange(
+              'waiting',
+              agentName,
+              'Task cancelled',
+            );
           } else if (responseStatus === 'error') {
             setAgentStatus('error');
             setStatusMessage('Error');
             setIsTaskRunning(false);
+            if (isStopPendingRef.current) {
+              resolveStopRequest(false, 'Failed to stop task.');
+            }
             window.electron.logger.logStatusChange('error', agentName, 'Error');
             window.electron.logger.logError(
               'An error occurred while processing your request.',
@@ -976,6 +1289,13 @@ export default function ChatPanel() {
         }
         case 'error': {
           const errorMsg = (data.message as string) ?? 'An error occurred';
+          const errorCode = (data.code as string) ?? '';
+
+          if (errorCode === 'cancel_failed' && isStopPendingRef.current) {
+            resolveStopRequest(false, errorMsg);
+            break;
+          }
+
           appendSystemMessage(errorMsg, 'error');
           setAgentStatus('error');
           setStatusMessage(errorMsg);
@@ -1065,6 +1385,7 @@ export default function ChatPanel() {
       appendMessage,
       appendSystemMessage,
       debouncedSetStatus,
+      resolveStopRequest,
     ],
   );
 
@@ -1107,8 +1428,33 @@ export default function ChatPanel() {
     }
 
     connectingRef.current = true;
-    connectionErrorShownRef.current = false; // Reset error flag for new connection attempt
     setConnectionState('connecting');
+
+    const scheduleReconnect = () => {
+      if (reconnectTimeoutRef.current) {
+        return;
+      }
+
+      const attempt = reconnectAttemptRef.current;
+      const baseDelay = Math.min(
+        RECONNECT_BASE_DELAY_MS * 2 ** attempt,
+        RECONNECT_MAX_DELAY_MS,
+      );
+      const jitter = Math.floor(Math.random() * Math.max(250, baseDelay * 0.3));
+      const delay = baseDelay + jitter;
+      reconnectAttemptRef.current += 1;
+
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        connectWebSocket().catch((error) => {
+          appendConnectionBanner(
+            'reconnect_failed',
+            `Reconnection failed: ${(error as Error).message}. Retrying...`,
+          );
+          scheduleReconnect();
+        });
+      }, delay);
+    };
 
     try {
       const currentState = await window.electron.backend.getState();
@@ -1142,6 +1488,10 @@ export default function ChatPanel() {
         );
       }
 
+      if (sessionIdRef.current) {
+        url.searchParams.set('session_id', sessionIdRef.current);
+      }
+
       console.log('[ChatPanel] Final WebSocket URL:', url.toString());
 
       return await new Promise((resolve, reject) => {
@@ -1160,6 +1510,8 @@ export default function ChatPanel() {
           clearTimeout(timeout);
           connectingRef.current = false;
           setConnectionState('connected');
+          reconnectAttemptRef.current = 0;
+          connectionBannerRef.current = null;
           // Clear connection error messages on successful connect
           setMessages((prev) =>
             prev.filter(
@@ -1173,6 +1525,7 @@ export default function ChatPanel() {
                 ),
             ),
           );
+          flushPendingOutboundActions(socket);
           resolve(socket);
         };
 
@@ -1180,43 +1533,26 @@ export default function ChatPanel() {
           clearTimeout(timeout);
           connectingRef.current = false;
           console.error('[ChatPanel] WebSocket error:', error);
-          // Only show error if not already shown for this connection attempt
-          if (!connectionErrorShownRef.current) {
-            connectionErrorShownRef.current = true;
-            appendSystemMessage(
-              'WebSocket connection error. Check if backend is running.',
-              'error',
-            );
-          }
-          reject(error);
+          appendConnectionBanner(
+            'ws_connection_error',
+            'WebSocket connection error. Check if backend is running.',
+          );
+          reject(new Error('WebSocket connection error'));
         };
 
         socket.onclose = (event) => {
           clearTimeout(timeout);
           connectingRef.current = false;
           setConnectionState('disconnected');
-          wsRef.current = null;
-          if (event.code !== 1000 && !reconnectTimeoutRef.current) {
-            // Connection lost - attempt reconnection (only if not already reconnecting)
-            // Only show error if not already shown for this connection attempt
-            if (!connectionErrorShownRef.current) {
-              connectionErrorShownRef.current = true;
-              appendSystemMessage(
-                'Connection to backend lost. Attempting to reconnect...',
-                'error',
-              );
-            }
-            reconnectTimeoutRef.current = setTimeout(() => {
-              reconnectTimeoutRef.current = null;
-              connectWebSocket()
-                // Error messages are cleared in socket.onopen on successful connect
-                .catch((err) => {
-                  appendSystemMessage(
-                    `Reconnection failed: ${(err as Error).message}. Will retry...`,
-                    'error',
-                  );
-                });
-            }, 3000);
+          if (wsRef.current === socket) {
+            wsRef.current = null;
+          }
+          if (event.code !== 1000) {
+            appendConnectionBanner(
+              'ws_disconnected',
+              'Connection to backend lost. Attempting to reconnect...',
+            );
+            scheduleReconnect();
           }
         };
 
@@ -1235,51 +1571,65 @@ export default function ChatPanel() {
       throw error;
     }
   }, [
+    appendConnectionBanner,
+    flushPendingOutboundActions,
     handleServerPayload,
     projectDirectory,
-    appendSystemMessage,
     showProjectDialog,
     projectDialogResolved,
   ]);
 
+  const sendClientAction = useCallback(
+    async (message: Record<string, unknown>) => {
+      const serializedMessage = JSON.stringify(message);
+      const activeSocket = wsRef.current;
+
+      if (activeSocket && activeSocket.readyState === WebSocket.OPEN) {
+        activeSocket.send(serializedMessage);
+        return;
+      }
+
+      queueOutboundAction(serializedMessage);
+      try {
+        const socket = await connectWebSocket();
+        flushPendingOutboundActions(socket);
+      } catch (error) {
+        console.warn(
+          '[ChatPanel] Queued outbound action while reconnecting:',
+          (error as Error).message,
+        );
+      }
+    },
+    [connectWebSocket, flushPendingOutboundActions, queueOutboundAction],
+  );
+
   const sendResponse = useCallback(
     async (content: string) => {
       // Used for clicking options in QuestionPrompt
-      try {
-        // Log user response
-        window.electron.logger.logUserInput(content);
+      window.electron.logger.logUserInput(content);
 
-        // Mark that user has sent their first message
-        setHasUserSentMessage(true);
+      // Mark that user has sent their first message
+      setHasUserSentMessage(true);
 
-        const socket = await connectWebSocket();
-        socket.send(
-          JSON.stringify({
-            type: 'user_response',
-            data: { response: content },
-          }),
-        );
-        awaitingResponseRef.current = false;
-        setAgentStatus('thinking');
-        setStatusMessage('Processing...');
+      await sendClientAction({
+        type: 'user_response',
+        data: { response: content },
+      });
+      awaitingResponseRef.current = false;
+      setAgentStatus('thinking');
+      setStatusMessage('Processing...');
 
-        // Clear question ref since we've responded
-        lastQuestionMessageIdRef.current = null;
+      // Clear question ref since we've responded
+      lastQuestionMessageIdRef.current = null;
 
-        // Also append user message for visual feedback
-        appendMessage({
-          role: 'user',
-          type: 'message',
-          content,
-        });
-      } catch (error) {
-        console.error('Failed to send response', error);
-        window.electron.logger.logError('Failed to send response', {
-          error: (error as Error).message,
-        });
-      }
+      // Also append user message for visual feedback
+      appendMessage({
+        role: 'user',
+        type: 'message',
+        content,
+      });
     },
-    [appendMessage, connectWebSocket],
+    [appendMessage, sendClientAction],
   );
 
   const sendMessage = useCallback(
@@ -1305,53 +1655,100 @@ export default function ChatPanel() {
         'Processing...',
       );
 
-      try {
-        const socket = await connectWebSocket();
-
-        if (awaitingResponseRef.current) {
-          socket.send(
-            JSON.stringify({
-              type: 'user_response',
-              data: { response: content },
-            }),
-          );
-          awaitingResponseRef.current = false;
-        } else {
-          socket.send(
-            JSON.stringify({
-              type: 'start_task',
-              data: { task: content },
-            }),
-          );
-        }
-      } catch (error) {
-        const errorMsg = `Unable to send message: ${(error as Error).message}`;
-        appendSystemMessage(errorMsg, 'error');
-        setAgentStatus('error');
-        setIsTaskRunning(false);
-        window.electron.logger.logError(errorMsg, {
-          error: (error as Error).message,
+      if (awaitingResponseRef.current) {
+        await sendClientAction({
+          type: 'user_response',
+          data: { response: content },
+        });
+        awaitingResponseRef.current = false;
+      } else {
+        await sendClientAction({
+          type: 'start_task',
+          data: { task: content },
         });
       }
     },
-    [appendMessage, connectWebSocket, appendSystemMessage, agentName],
+    [appendMessage, sendClientAction, agentName],
+  );
+
+  const requestStop = useCallback(
+    async (reason: 'user_stop' | 'project_switch'): Promise<boolean> => {
+      const existingRequest = stopRequestRef.current;
+      if (existingRequest) {
+        return existingRequest.promise;
+      }
+
+      if (!isTaskRunningRef.current) {
+        return true;
+      }
+
+      let resolveStop: ((success: boolean) => void) | null = null;
+      const promise = new Promise<boolean>((resolve) => {
+        resolveStop = resolve;
+      });
+
+      if (!resolveStop) {
+        return false;
+      }
+
+      const timeoutId = setTimeout(() => {
+        resolveStopRequest(
+          false,
+          'Stop request timed out. Task may still be running.',
+        );
+      }, STOP_ACK_TIMEOUT_MS);
+
+      stopRequestRef.current = {
+        promise,
+        resolve: resolveStop,
+        timeoutId,
+      };
+
+      setIsStopPending(true);
+      setStatusMessage('Stopping...');
+
+      await sendClientAction({
+        type: 'cancel',
+        data: { reason },
+      });
+
+      return promise;
+    },
+    [resolveStopRequest, sendClientAction],
   );
 
   const stopTask = useCallback(async () => {
-    if (!isTaskRunning) return;
-    try {
-      const socket = await connectWebSocket();
-      socket.send(JSON.stringify({ type: 'cancel', data: {} }));
-      setIsTaskRunning(false);
-      appendSystemMessage('Task stopped.', 'status');
-    } catch (error) {
-      const errorMsg = `Unable to stop task: ${(error as Error).message}`;
-      appendSystemMessage(errorMsg, 'error');
-      window.electron.logger.logError(errorMsg, {
-        error: (error as Error).message,
-      });
-    }
-  }, [appendSystemMessage, connectWebSocket, isTaskRunning]);
+    await requestStop('user_stop');
+  }, [requestStop]);
+
+  useEffect(() => {
+    return registerProjectSwitchGuard(async ({ fromProjectDirectory }) => {
+      if (!isTaskRunningRef.current && !isStopPendingRef.current) {
+        return true;
+      }
+
+      const shouldSwitch = window.confirm(
+        'Switching project will stop the current task. Continue?',
+      );
+      if (!shouldSwitch) {
+        return false;
+      }
+
+      const stopped = await requestStop('project_switch');
+      if (!stopped) {
+        return false;
+      }
+
+      failActiveToolCalls('Cancelled due to project switch');
+      flushSnapshotSave(fromProjectDirectory);
+      return true;
+    });
+  }, [
+    failActiveToolCalls,
+    flushSnapshotSave,
+    registerProjectSwitchGuard,
+    requestStop,
+  ]);
 
   // Register sendMessage so other components can trigger agent tasks (e.g. Render Infographics)
   useEffect(() => {
@@ -1361,28 +1758,30 @@ export default function ChatPanel() {
   }, [agentContext?.registerSendTask, sendMessage]);
 
   useEffect(() => {
+    scheduleSnapshotSave(projectDirectory);
+  }, [
+    projectDirectory,
+    messages,
+    agentStatus,
+    agentName,
+    statusMessage,
+    currentPhase,
+    phaseDisplayName,
+    hasUserSentMessage,
+    isTaskRunning,
+    sessionId,
+    scheduleSnapshotSave,
+  ]);
+
+  useEffect(() => {
     const bootstrap = async () => {
       const state = await window.electron.backend.getState();
       if (
         state.status === 'ready' &&
         !wsRef.current &&
-        !connectingRef.current
+        !connectingRef.current &&
+        (projectDialogResolved || !projectDirectory)
       ) {
-        // Check for existing project before connecting
-        if (projectDirectory && !projectDialogResolved) {
-          try {
-            const projectFilePath = `${projectDirectory}/.kshana/agent/project.json`;
-            const exists = await window.electron.project.checkFileExists(projectFilePath);
-            if (exists) {
-              setShowProjectDialog(true);
-              return; // Don't connect yet, wait for user decision
-            }
-          } catch (error) {
-            console.error('[ChatPanel] Error checking project:', error);
-            // Continue with connection if check fails
-          }
-        }
-        // No project or dialog resolved - proceed with connection
         connectWebSocket().catch(() => undefined);
       }
     };
@@ -1405,54 +1804,85 @@ export default function ChatPanel() {
 
     return () => {
       unsubscribeBackend();
+    };
+  }, [
+    connectWebSocket,
+    appendSystemMessage,
+    projectDirectory,
+    projectDialogResolved,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      const pendingStop = stopRequestRef.current;
+      if (pendingStop) {
+        clearTimeout(pendingStop.timeoutId);
+        stopRequestRef.current = null;
+        pendingStop.resolve(false);
+      }
+      flushSnapshotSave(currentProjectDirectoryRef.current);
       disconnectWebSocket();
       if (statusUpdateTimeoutRef.current) {
         clearTimeout(statusUpdateTimeoutRef.current);
       }
     };
-  }, [
-    connectWebSocket,
-    appendSystemMessage,
-    disconnectWebSocket,
-    projectDirectory,
-    projectDialogResolved,
-  ]);
+  }, [disconnectWebSocket, flushSnapshotSave]);
 
-  // Clear chat and reconnect when workspace changes
+  // Restore chat snapshots and reconnect when workspace changes.
   const prevProjectDirectoryRef = useRef<string | null>(null);
   useEffect(() => {
-    // Only reconnect if projectDirectory actually changed
     if (projectDirectory === prevProjectDirectoryRef.current) {
       return;
     }
 
+    const previousProjectDirectory = prevProjectDirectoryRef.current;
     prevProjectDirectoryRef.current = projectDirectory || null;
+    currentProjectDirectoryRef.current = projectDirectory || null;
+
+    const pendingStop = stopRequestRef.current;
+    if (pendingStop) {
+      clearTimeout(pendingStop.timeoutId);
+      stopRequestRef.current = null;
+      pendingStop.resolve(false);
+    }
 
     console.log('[ChatPanel] projectDirectory changed:', {
       newValue: projectDirectory,
       hasValue: !!projectDirectory,
     });
 
-    if (!projectDirectory) {
-      setProjectDialogResolved(false);
-      setShowProjectDialog(false);
-      return;
+    if (previousProjectDirectory) {
+      flushSnapshotSave(previousProjectDirectory);
     }
 
-    clearChat();
+    disconnectWebSocket();
+    reconnectAttemptRef.current = 0;
+    connectionBannerRef.current = null;
+    pendingOutboundActionsRef.current = [];
     setProjectDialogResolved(false);
     setShowProjectDialog(false);
 
-    // Reconnect with new project directory (will check for project in bootstrap)
+    if (!projectDirectory) {
+      resetConversationRefs();
+      setMessages([]);
+      setSessionId(null);
+      setAgentStatus('idle');
+      setAgentName('Kshana');
+      setStatusMessage('Ready');
+      setCurrentPhase(undefined);
+      setPhaseDisplayName(undefined);
+      setHasUserSentMessage(false);
+      setIsTaskRunning(false);
+      setIsStopPending(false);
+      return;
+    }
+
     const reconnect = async () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
       try {
+        await restoreSnapshot(projectDirectory);
+
         const state = await window.electron.backend.getState();
         if (state.status === 'ready') {
-          // Check for existing project before connecting
           try {
             const projectFilePath = `${projectDirectory}/.kshana/agent/project.json`;
             const exists = await window.electron.project.checkFileExists(projectFilePath);
@@ -1462,16 +1892,23 @@ export default function ChatPanel() {
             }
           } catch (error) {
             console.error('[ChatPanel] Error checking project:', error);
-            // Continue with connection if check fails
           }
+          setProjectDialogResolved(true);
           await connectWebSocket();
         }
       } catch (error) {
         console.error('[ChatPanel] Reconnect failed:', error);
       }
     };
-    reconnect();
-  }, [projectDirectory, clearChat, connectWebSocket]);
+    reconnect().catch(() => undefined);
+  }, [
+    connectWebSocket,
+    disconnectWebSocket,
+    flushSnapshotSave,
+    projectDirectory,
+    resetConversationRefs,
+    restoreSnapshot,
+  ]);
 
   const handleProjectContinue = useCallback(() => {
     setShowProjectDialog(false);
@@ -1483,10 +1920,46 @@ export default function ChatPanel() {
   const handleProjectStartNew = useCallback(() => {
     setShowProjectDialog(false);
     setProjectDialogResolved(true);
+    clearChat();
+    pendingOutboundActionsRef.current = [];
+    reconnectAttemptRef.current = 0;
     // Project deletion is handled by ProjectSelectionDialog
     // Now connect WebSocket
     connectWebSocket().catch(() => undefined);
-  }, [connectWebSocket]);
+  }, [clearChat, connectWebSocket]);
+
+  const handleExportChat = useCallback(async () => {
+    if (!projectDirectory) {
+      appendSystemMessage('Open a project before exporting chat history.', 'error');
+      return;
+    }
+
+    const exportPayload: ChatExportPayload = {
+      exportedAt: new Date().toISOString(),
+      projectDirectory,
+      sessionId: sessionIdRef.current,
+      messages: messagesRef.current.map(
+        (message) =>
+          ({
+            id: message.id,
+            role: message.role,
+            type: message.type,
+            content: message.content,
+            timestamp: message.timestamp,
+            author: message.author,
+            meta: message.meta,
+          }) as PersistedChatMessage,
+      ),
+    };
+
+    const result = await window.electron.project.exportChatJson(exportPayload);
+    if (!result.success && !result.canceled) {
+      appendSystemMessage(
+        `Failed to export chat JSON: ${result.error || 'Unknown error'}`,
+        'error',
+      );
+    }
+  }, [appendSystemMessage, projectDirectory]);
 
   // Filter out greeting messages if user has sent a message
   const filteredMessages = useMemo(() => {
@@ -1511,6 +1984,15 @@ export default function ChatPanel() {
         <div className={styles.header}>
           <Bot size={18} className={styles.headerIcon} />
           <span className={styles.headerTitle}>Kshana Assistant</span>
+          <button
+            type="button"
+            className={styles.exportButton}
+            onClick={handleExportChat}
+            title="Export chat as JSON"
+          >
+            <Download size={14} />
+            <span>Export</span>
+          </button>
           <button
             type="button"
             className={styles.clearButton}
@@ -1543,6 +2025,7 @@ export default function ChatPanel() {
         <ChatInput
           disabled={connectionState === 'connecting'}
           isRunning={isTaskRunning}
+          isStopping={isStopPending}
           onSend={sendMessage}
           onStop={stopTask}
         />

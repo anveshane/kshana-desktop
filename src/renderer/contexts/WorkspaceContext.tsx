@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useState,
+  useRef,
   useCallback,
   useEffect,
   useMemo,
@@ -13,8 +14,10 @@ import type {
   SelectedFile,
   ConnectionStatus,
   ConnectionState,
+  ProjectSwitchGuard,
 } from '../types/workspace';
 import type { FileNode } from '../../shared/fileSystemTypes';
+import { runProjectSwitchGuards } from './workspaceGuards';
 
 // Helper to find and update a node in the tree
 const updateNodeInTree = (
@@ -58,6 +61,12 @@ interface WorkspaceProviderProps {
 
 export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const [state, setState] = useState<WorkspaceState>(initialState);
+  const projectSwitchGuardsRef = useRef<Set<ProjectSwitchGuard>>(new Set());
+  const currentProjectDirectoryRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    currentProjectDirectoryRef.current = state.projectDirectory;
+  }, [state.projectDirectory]);
 
   // Load recent projects on mount
   useEffect(() => {
@@ -93,13 +102,58 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     return unsubscribe;
   }, [state.projectDirectory]);
 
+  const registerProjectSwitchGuard = useCallback(
+    (guard: ProjectSwitchGuard) => {
+      projectSwitchGuardsRef.current.add(guard);
+      return () => {
+        projectSwitchGuardsRef.current.delete(guard);
+      };
+    },
+    [],
+  );
+
   const openProject = useCallback(async (path: string) => {
+    const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '');
+    const previousProjectDirectory = currentProjectDirectoryRef.current;
+
+    if (
+      previousProjectDirectory &&
+      previousProjectDirectory !== normalizedPath
+    ) {
+      try {
+        const shouldProceed = await runProjectSwitchGuards(
+          projectSwitchGuardsRef.current,
+          {
+            fromProjectDirectory: previousProjectDirectory,
+            toProjectDirectory: normalizedPath,
+          },
+        );
+        if (!shouldProceed) {
+          return;
+        }
+      } catch (error) {
+        console.error(
+          '[WorkspaceContext] Project switch guard failed, blocking switch:',
+          error,
+        );
+        return;
+      }
+    }
+
     setState((prev) => ({ ...prev, isLoading: true }));
     try {
       // Read only first level to prevent freeze
       const tree = await window.electron.project.readTree(path, 1);
-      const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '');
       const projectName = normalizedPath.split('/').pop() || path;
+
+      if (
+        previousProjectDirectory &&
+        previousProjectDirectory !== normalizedPath
+      ) {
+        await window.electron.project
+          .unwatchDirectory(previousProjectDirectory)
+          .catch(() => undefined);
+      }
 
       // Start watching the directory
       await window.electron.project.watchDirectory(path);
@@ -253,6 +307,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     () => ({
       ...state,
       openProject,
+      registerProjectSwitchGuard,
       closeProject,
       selectFile,
       addToActiveContext,
@@ -266,6 +321,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     [
       state,
       openProject,
+      registerProjectSwitchGuard,
       closeProject,
       selectFile,
       addToActiveContext,

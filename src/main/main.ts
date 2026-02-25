@@ -35,7 +35,9 @@ import type {
   RemotionTimelineItem,
   ParsedInfographicPlacement,
 } from '../shared/remotionTypes';
+import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
 import * as desktopLogger from './services/DesktopLogger';
+import { exportChatJsonWithDialog } from './services/chatExportService';
 import {
   generateCapcutProject,
   type ExportTimelineItem,
@@ -662,6 +664,25 @@ ipcMain.handle('project:save-video-file', async () => {
   }
   return result.filePath;
 });
+
+ipcMain.handle(
+  'project:export-chat-json',
+  async (
+    _event,
+    payload: ChatExportPayload,
+  ): Promise<ChatExportResult> => {
+    const targetWindow = mainWindow;
+    if (!targetWindow) {
+      return { success: false, error: 'Main window is not available' };
+    }
+
+    return exportChatJsonWithDialog(payload, {
+      showSaveDialog: (options) => dialog.showSaveDialog(targetWindow, options),
+      writeFile: (filePath, content, encoding) =>
+        fs.writeFile(filePath, content, encoding),
+    });
+  },
+);
 
 // ── Export to CapCut ────────────────────────────────────────────────────────
 ipcMain.handle(

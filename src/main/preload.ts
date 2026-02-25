@@ -14,6 +14,7 @@ import type {
   RemotionTimelineItem,
   ParsedInfographicPlacement,
 } from '../shared/remotionTypes';
+import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
 
 interface WordTimestamp {
   text: string;
@@ -197,6 +198,9 @@ const projectBridge = {
   },
   saveVideoFile(): Promise<string | null> {
     return ipcRenderer.invoke('project:save-video-file');
+  },
+  exportChatJson(payload: ChatExportPayload): Promise<ChatExportResult> {
+    return ipcRenderer.invoke('project:export-chat-json', payload);
   },
   composeTimelineVideo(
     timelineItems: Array<{
