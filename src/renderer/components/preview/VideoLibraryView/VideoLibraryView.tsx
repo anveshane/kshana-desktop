@@ -405,6 +405,8 @@ export default function VideoLibraryView({
   const [resolvedSceneImagePath, setResolvedSceneImagePath] = useState<
     string | null
   >(null);
+  const [isResolvingSceneImagePath, setIsResolvingSceneImagePath] =
+    useState(false);
 
   const [resolvedOverlayPath, setResolvedOverlayPath] = useState<string | null>(
     null,
@@ -418,9 +420,11 @@ export default function VideoLibraryView({
 
     if (!sceneImagePath || !projectDirectory) {
       setResolvedSceneImagePath(null);
+      setIsResolvingSceneImagePath(false);
       return;
     }
 
+    setIsResolvingSceneImagePath(true);
     resolveAssetPathWithRetry(sceneImagePath, projectDirectory, {
       maxRetries: 3,
       retryDelayBase: 350,
@@ -432,12 +436,14 @@ export default function VideoLibraryView({
           return;
         }
         setResolvedSceneImagePath(resolved);
+        setIsResolvingSceneImagePath(false);
       })
       .catch(() => {
         if (requestId !== sceneImageRequestIdRef.current) {
           return;
         }
         setResolvedSceneImagePath(null);
+        setIsResolvingSceneImagePath(false);
       });
   }, [sceneImagePath, sceneClipIdentity, projectDirectory]);
 
@@ -602,6 +608,26 @@ export default function VideoLibraryView({
       currentItem.expandedPrompt ?? currentItem.prompt ?? '',
     );
   }, [currentItem]);
+  const shouldShowExpandedPrompt = useMemo(() => {
+    if (!currentItem || !activePromptText) return false;
+
+    if (currentItem.type === 'image') {
+      return !resolvedSceneImagePath && !isResolvingSceneImagePath;
+    }
+
+    if (currentItem.type === 'video') {
+      return !shouldShowVideo && !shouldShowLoadingVideo;
+    }
+
+    return true;
+  }, [
+    currentItem,
+    activePromptText,
+    resolvedSceneImagePath,
+    isResolvingSceneImagePath,
+    shouldShowVideo,
+    shouldShowLoadingVideo,
+  ]);
 
   // Construct version-specific path if active version is set (placement-based)
   const versionPath = useMemo(() => {
@@ -1105,7 +1131,7 @@ export default function VideoLibraryView({
       }
     }
 
-    const itemsData = await Promise.all(
+    const exportItemResults = await Promise.all(
       timelineItems
         .filter((item) => item.type !== 'audio' && item.type !== 'text_overlay')
         .map(async (item) => {
@@ -1146,16 +1172,20 @@ export default function VideoLibraryView({
           }
 
           return {
-            type: exportItem.type,
-            path: exportItem.path,
-            duration: exportItem.duration,
-            startTime: exportItem.startTime,
-            endTime: exportItem.endTime,
-            sourceOffsetSeconds: exportItem.sourceOffsetSeconds,
-            label: exportItem.label,
+            item,
+            exportItem,
           };
         }),
     );
+    const itemsData = exportItemResults.map(({ exportItem }) => ({
+      type: exportItem.type,
+      path: exportItem.path,
+      duration: exportItem.duration,
+      startTime: exportItem.startTime,
+      endTime: exportItem.endTime,
+      sourceOffsetSeconds: exportItem.sourceOffsetSeconds,
+      label: exportItem.label,
+    }));
 
     const overlayItemsWithPaths = await Promise.all(
       overlayItems.map(async (item) => {
@@ -1186,7 +1216,21 @@ export default function VideoLibraryView({
       (item) => item.path.length > 0,
     );
 
-    const promptOverlayCues = buildPromptOverlayCues(timelineItems);
+    const promptOverlayCues = buildPromptOverlayCues(
+      exportItemResults
+        .filter(
+          ({ item }) => item.type === 'image' || item.type === 'video',
+        )
+        .map(({ item, exportItem }) => ({
+          id: item.id,
+          type: item.type,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          expandedPrompt: item.expandedPrompt,
+          prompt: item.prompt,
+          hasRenderableMedia: !exportItem.usedPlaceholderForMissingMedia,
+        })),
+    );
 
     return {
       itemsData,
@@ -1221,6 +1265,7 @@ export default function VideoLibraryView({
           startTime: number;
           endTime: number;
           sourceOffsetSeconds?: number;
+          label?: string;
         }>,
         projectDirectory: string,
         audioPath?: string,
@@ -1583,7 +1628,7 @@ export default function VideoLibraryView({
               {currentVideo && (
                 <div className={styles.currentVideoLabel}>{currentVideo.label}</div>
               )}
-              {activePromptText && (
+              {shouldShowExpandedPrompt && (
                 <div className={styles.expandedPromptOverlay}>
                   <div className={styles.expandedPromptHeader}>
                     {currentItem?.label || 'Prompt'}

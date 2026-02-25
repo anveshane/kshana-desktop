@@ -7,6 +7,7 @@ export interface PromptCueTimelineItem {
   endTime: number;
   expandedPrompt?: string;
   prompt?: string;
+  hasRenderableMedia?: boolean;
 }
 
 export interface TimelineExportSourceItem {
@@ -37,7 +38,11 @@ export function buildPromptOverlayCues(
   items: PromptCueTimelineItem[],
 ): PromptOverlayCue[] {
   return items
-    .filter((item) => item.type === 'image' || item.type === 'video')
+    .filter(
+      (item) =>
+        (item.type === 'image' || item.type === 'video') &&
+        !item.hasRenderableMedia,
+    )
     .map((item) => {
       const text = sanitizePromptOverlayText(
         item.expandedPrompt ?? item.prompt ?? '',

@@ -5,7 +5,7 @@ import {
 } from './promptOverlayExport';
 
 describe('promptOverlayExport', () => {
-  it('buildPromptOverlayCues prefers expanded prompt and falls back to prompt', () => {
+  it('buildPromptOverlayCues skips cues when media exists and keeps prompt fallback behavior', () => {
     const cues = buildPromptOverlayCues([
       {
         id: 'PLM-1',
@@ -14,6 +14,7 @@ describe('promptOverlayExport', () => {
         endTime: 24,
         expandedPrompt: 'expanded image prompt',
         prompt: 'original image prompt',
+        hasRenderableMedia: true,
       },
       {
         id: 'vd-placement-2',
@@ -21,6 +22,15 @@ describe('promptOverlayExport', () => {
         startTime: 24,
         endTime: 33,
         prompt: 'original video prompt',
+        hasRenderableMedia: false,
+      },
+      {
+        id: 'PLM-3',
+        type: 'image',
+        startTime: 33,
+        endTime: 40,
+        expandedPrompt: 'expanded image prompt 3',
+        prompt: 'original image prompt 3',
       },
       {
         id: 'placeholder-1',
@@ -33,16 +43,16 @@ describe('promptOverlayExport', () => {
 
     expect(cues).toEqual([
       {
-        id: 'prompt-overlay-PLM-1',
-        startTime: 8,
-        endTime: 24,
-        text: 'expanded image prompt',
-      },
-      {
         id: 'prompt-overlay-vd-placement-2',
         startTime: 24,
         endTime: 33,
         text: 'original video prompt',
+      },
+      {
+        id: 'prompt-overlay-PLM-3',
+        startTime: 33,
+        endTime: 40,
+        text: 'expanded image prompt 3',
       },
     ]);
   });

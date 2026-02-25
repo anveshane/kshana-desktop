@@ -748,6 +748,7 @@ interface TimelineItem {
   startTime: number;
   endTime: number;
   sourceOffsetSeconds?: number;
+  label?: string;
 }
 
 interface OverlayItem {
@@ -1017,26 +1018,94 @@ ipcMain.handle(
     const segmentFiles: string[] = [];
     const cleanupFiles: string[] = [];
     const normalizedOverlayItems: Array<OverlayItem & { absolutePath: string }> = [];
+    const fontCandidates =
+      process.platform === 'win32'
+        ? ['C:/Windows/Fonts/arial.ttf', 'C:/Windows/Fonts/segoeui.ttf']
+        : process.platform === 'darwin'
+          ? [
+              '/System/Library/Fonts/Supplemental/Arial.ttf',
+              '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+              '/System/Library/Fonts/Helvetica.ttc',
+            ]
+          : [
+              '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+              '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+            ];
+
+    let placeholderFontPath: string | null = null;
+    for (const candidate of fontCandidates) {
+      try {
+        await fs.access(candidate);
+        placeholderFontPath = candidate;
+        break;
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    if (!placeholderFontPath) {
+      console.warn(
+        '[VideoComposition] No system font found for placeholder labels; rendering plain placeholders.',
+      );
+    }
 
     const createPlaceholderSegment = async (
       segmentPath: string,
       duration: number,
       segmentNumber: number,
+      label?: string,
     ): Promise<void> => {
+      const fallbackLabel = `placeholder-${segmentNumber}`;
+      const placementLabel =
+        typeof label === 'string' && label.trim().length > 0
+          ? label.trim()
+          : fallbackLabel;
+      const safePlacementLabel =
+        placementLabel.length > 64
+          ? `${placementLabel.slice(0, 61)}...`
+          : placementLabel;
+      const escapedPlacementLabel = safePlacementLabel
+        .replace(/\\/g, '\\\\')
+        .replace(/:/g, '\\:')
+        .replace(/'/g, "\\'")
+        .replace(/[\r\n]+/g, ' ');
+      const escapedFontPath = placeholderFontPath
+        ? placeholderFontPath
+            .replace(/\\/g, '/')
+            .replace(/:/g, '\\:')
+            .replace(/'/g, "\\'")
+        : null;
+      const drawTextFilter = escapedFontPath
+        ? `drawtext=` +
+          `fontfile='${escapedFontPath}':` +
+          `text='${escapedPlacementLabel}':` +
+          `fontcolor=white:` +
+          `fontsize=48:` +
+          `box=1:` +
+          `boxcolor=black@0.6:` +
+          `boxborderw=20:` +
+          `x=(w-text_w)/2:` +
+          `y=(h-text_h)/2`
+        : null;
+      const outputOptions = [
+        '-c:v libx264',
+        '-preset medium',
+        '-crf 23',
+        '-pix_fmt yuv420p',
+      ];
+      if (drawTextFilter) {
+        outputOptions.push('-vf', drawTextFilter);
+      }
+
       await new Promise<void>((resolve, reject) => {
         ffmpeg()
           .input(`color=c=black:s=1920x1080:d=${duration}`)
           .inputOptions(['-f lavfi'])
-          .outputOptions([
-            '-c:v libx264',
-            '-preset medium',
-            '-crf 23',
-            '-pix_fmt yuv420p',
-          ])
+          .outputOptions(outputOptions)
           .output(segmentPath)
           .on('start', (commandLine) => {
             console.log(
-              `[VideoComposition] Placeholder FFmpeg command (${segmentNumber}): ${commandLine}`,
+              `[VideoComposition] Placeholder FFmpeg command (${segmentNumber}, ${placementLabel}): ${commandLine}`,
             );
           })
           .on('end', () => {
@@ -1058,18 +1127,15 @@ ipcMain.handle(
 
     if (overlayItems && overlayItems.length > 0) {
       for (const overlay of overlayItems) {
-        let cleanPath = overlay.path.replace(/^file:\/\/\/?/, '');
-        if (/^\/[A-Za-z]:/.test(cleanPath)) {
-          cleanPath = cleanPath.slice(1);
-        }
-        if (!cleanPath || cleanPath.trim() === '') {
+        const absolutePath = await normalizePathForFFmpeg(
+          overlay.path,
+          projectDirectory,
+        );
+
+        if (!absolutePath) {
           console.warn('[VideoComposition] Skipping overlay: empty path');
           continue;
         }
-
-        const absolutePath = path.isAbsolute(cleanPath)
-          ? cleanPath
-          : path.join(projectDirectory, cleanPath);
 
         try {
           const stats = await fs.stat(absolutePath);
@@ -1103,26 +1169,26 @@ ipcMain.handle(
         if (item.type === 'video') {
           // For video segments, use the full video file
           // The timeline startTime/endTime are for positioning, not extraction
-          // Strip file:// protocol if present, handling Windows drive letters
-          let cleanPath = item.path.replace(/^file:\/\/\/?/, '');
-          if (/^\/[A-Za-z]:/.test(cleanPath)) {
-            cleanPath = cleanPath.slice(1);
-          }
+          const absolutePath = await normalizePathForFFmpeg(
+            item.path,
+            projectDirectory,
+          );
 
           // Missing media should preserve timing, so emit a black placeholder.
-          if (!cleanPath || cleanPath.trim() === '') {
+          if (!absolutePath) {
             console.warn(
               `[VideoComposition] Missing video path for segment ${i + 1}, creating placeholder`,
             );
-            await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+            await createPlaceholderSegment(
+              segmentPath,
+              item.duration,
+              i + 1,
+              item.label,
+            );
             segmentFiles.push(segmentPath);
             cleanupFiles.push(segmentPath);
             continue;
           }
-
-          const absolutePath = path.isAbsolute(cleanPath)
-            ? cleanPath
-            : path.join(projectDirectory, cleanPath);
 
           console.log(
             `[VideoComposition] Video segment ${i + 1}: ${absolutePath}`,
@@ -1135,7 +1201,12 @@ ipcMain.handle(
               console.warn(
                 `[VideoComposition] Video segment ${i + 1} path is a directory (${absolutePath}), creating placeholder`,
               );
-              await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+              await createPlaceholderSegment(
+                segmentPath,
+                item.duration,
+                i + 1,
+                item.label,
+              );
               segmentFiles.push(segmentPath);
               cleanupFiles.push(segmentPath);
               continue;
@@ -1151,7 +1222,12 @@ ipcMain.handle(
               console.warn(
                 `[VideoComposition] Video segment ${i + 1} path resolved as directory, creating placeholder`,
               );
-              await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+              await createPlaceholderSegment(
+                segmentPath,
+                item.duration,
+                i + 1,
+                item.label,
+              );
               segmentFiles.push(segmentPath);
               cleanupFiles.push(segmentPath);
               continue;
@@ -1159,7 +1235,12 @@ ipcMain.handle(
             console.warn(
               `[VideoComposition] Video segment ${i + 1} missing file (${absolutePath}), creating placeholder`,
             );
-            await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+            await createPlaceholderSegment(
+              segmentPath,
+              item.duration,
+              i + 1,
+              item.label,
+            );
             segmentFiles.push(segmentPath);
             cleanupFiles.push(segmentPath);
             continue;
@@ -1221,26 +1302,26 @@ ipcMain.handle(
           cleanupFiles.push(segmentPath);
         } else if (item.type === 'image') {
           // Convert image to video
-          // Strip file:// protocol if present, handling Windows drive letters
-          let cleanPath = item.path.replace(/^file:\/\/\/?/, '');
-          if (/^\/[A-Za-z]:/.test(cleanPath)) {
-            cleanPath = cleanPath.slice(1);
-          }
+          const absolutePath = await normalizePathForFFmpeg(
+            item.path,
+            projectDirectory,
+          );
 
           // Missing media should preserve timing, so emit a black placeholder.
-          if (!cleanPath || cleanPath.trim() === '') {
+          if (!absolutePath) {
             console.warn(
               `[VideoComposition] Missing image path for segment ${i + 1}, creating placeholder`,
             );
-            await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+            await createPlaceholderSegment(
+              segmentPath,
+              item.duration,
+              i + 1,
+              item.label,
+            );
             segmentFiles.push(segmentPath);
             cleanupFiles.push(segmentPath);
             continue;
           }
-
-          const absolutePath = path.isAbsolute(cleanPath)
-            ? cleanPath
-            : path.join(projectDirectory, cleanPath);
 
           console.log(
             `[VideoComposition] Image segment ${i + 1}: ${absolutePath}`,
@@ -1256,7 +1337,12 @@ ipcMain.handle(
             console.warn(
               `[VideoComposition] Image segment ${i + 1} missing file (${absolutePath}), creating placeholder`,
             );
-            await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+            await createPlaceholderSegment(
+              segmentPath,
+              item.duration,
+              i + 1,
+              item.label,
+            );
             segmentFiles.push(segmentPath);
             cleanupFiles.push(segmentPath);
             continue;
@@ -1408,7 +1494,12 @@ ipcMain.handle(
           console.log(
             `[VideoComposition] Creating placeholder segment ${i + 1} (${item.duration}s)...`,
           );
-          await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+          await createPlaceholderSegment(
+            segmentPath,
+            item.duration,
+            i + 1,
+            item.label,
+          );
 
           segmentFiles.push(segmentPath);
           cleanupFiles.push(segmentPath);

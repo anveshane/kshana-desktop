@@ -217,6 +217,7 @@ const projectBridge = {
       startTime: number;
       endTime: number;
       sourceOffsetSeconds?: number;
+      label?: string;
     }>,
     projectDirectory: string,
     audioPath?: string,

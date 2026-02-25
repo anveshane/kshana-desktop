@@ -104,10 +104,42 @@ function nowSeconds(): number {
 }
 
 function cleanPath(filePath: string): string {
-  let cleaned = filePath.replace(/^file:\/\/\/?/, '');
+  if (!filePath.startsWith('file://')) {
+    return filePath;
+  }
+
+  const decodePath = (value: string): string => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+
+  // Remove protocol while preserving leading slash for Unix absolute paths.
+  let cleaned = filePath.replace(/^file:\/\//i, '');
+
+  if (cleaned.startsWith('localhost/')) {
+    cleaned = cleaned.slice('localhost'.length);
+  }
+
+  const queryIndex = cleaned.indexOf('?');
+  const hashIndex = cleaned.indexOf('#');
+  const cutIndexCandidates = [queryIndex, hashIndex].filter((i) => i >= 0);
+  if (cutIndexCandidates.length > 0) {
+    cleaned = cleaned.slice(0, Math.min(...cutIndexCandidates));
+  }
+
+  cleaned = decodePath(cleaned);
+
+  if (!cleaned.startsWith('/') && !/^[A-Za-z]:/.test(cleaned)) {
+    cleaned = `//${cleaned}`;
+  }
+
   if (/^\/[A-Za-z]:/.test(cleaned)) {
     cleaned = cleaned.slice(1);
   }
+
   return cleaned;
 }
 

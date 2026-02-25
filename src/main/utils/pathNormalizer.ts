@@ -6,6 +6,53 @@
 
 import path from 'path';
 
+function decodePath(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Strips file:// protocol from a URL while preserving absolute Unix paths.
+ * Handles Windows drive-letter paths (file:///C:/...) correctly.
+ */
+export function stripFileProtocol(filePath: string): string {
+  if (!filePath.startsWith('file://')) {
+    return filePath;
+  }
+
+  // Remove protocol while preserving leading slash for Unix absolute paths.
+  let cleanPath = filePath.replace(/^file:\/\//i, '');
+
+  // file://localhost/... -> /...
+  if (cleanPath.startsWith('localhost/')) {
+    cleanPath = cleanPath.slice('localhost'.length);
+  }
+
+  // Strip URL query/hash if present.
+  const queryIndex = cleanPath.indexOf('?');
+  const hashIndex = cleanPath.indexOf('#');
+  const cutIndexCandidates = [queryIndex, hashIndex].filter((i) => i >= 0);
+  if (cutIndexCandidates.length > 0) {
+    cleanPath = cleanPath.slice(0, Math.min(...cutIndexCandidates));
+  }
+
+  cleanPath = decodePath(cleanPath);
+
+  // file://server/share/file.png -> //server/share/file.png
+  if (!cleanPath.startsWith('/') && !/^[A-Za-z]:/.test(cleanPath)) {
+    cleanPath = `//${cleanPath}`;
+  }
+
+  if (/^\/[A-Za-z]:/.test(cleanPath)) {
+    cleanPath = cleanPath.slice(1);
+  }
+
+  return cleanPath;
+}
+
 /**
  * Normalizes a path for FFmpeg operations
  * - Strips file:// protocol if present
@@ -22,11 +69,7 @@ export async function normalizePathForFFmpeg(
 ): Promise<string | null> {
   if (!filePath) return null;
 
-  // Strip file:// protocol if present, handling Windows drive letters (file:///C:/...)
-  let cleanPath = filePath.replace(/^file:\/\/\/?/, '');
-  if (/^\/[A-Za-z]:/.test(cleanPath)) {
-    cleanPath = cleanPath.slice(1);
-  }
+  const cleanPath = stripFileProtocol(filePath);
 
   if (!cleanPath.trim()) return null;
 
