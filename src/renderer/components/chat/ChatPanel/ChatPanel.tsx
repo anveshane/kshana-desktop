@@ -22,6 +22,7 @@ import {
   failExecutingToolCalls,
   isCancelAckStatus,
 } from './chatPanelStopUtils';
+<<<<<<< HEAD
 import {
   extractFilePathTransport,
   extractFilePathProtocolVersion,
@@ -33,6 +34,8 @@ import {
   shouldShowFilePathProtocolWarning,
 } from './chatPanelPathProtocolUtils';
 import { pathBasename } from '../../../utils/pathNormalizer';
+=======
+>>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
 import styles from './ChatPanel.module.scss';
 
 // Message types that shouldn't create new messages if same type already exists
@@ -48,9 +51,12 @@ const RECONNECT_MAX_DELAY_MS = 30000;
 const OUTBOUND_ACTION_QUEUE_CAP = 200;
 const CONNECTION_BANNER_DEDUPE_MS = 5000;
 const STOP_ACK_TIMEOUT_MS = 12000;
+<<<<<<< HEAD
 const FILE_PATH_PROTOCOL_WARNING =
   `Server file-op protocol is outdated (requires v${REQUIRED_FILE_PATH_PROTOCOL_VERSION}). ` +
   `Required transport: "${REQUIRED_FILE_PATH_TRANSPORT}". Upgrade kshana-ink server to avoid path compatibility failures.`;
+=======
+>>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
 
 const VALID_AGENT_STATUS: AgentStatus[] = [
   'idle',
@@ -112,8 +118,11 @@ export default function ChatPanel() {
     null,
   );
   const connectionBannerRef = useRef<{ key: string; at: number } | null>(null);
+<<<<<<< HEAD
   const filePathProtocolWarnedSessionIdsRef = useRef<Set<string>>(new Set());
   const filePathProtocolWarnedWithoutSessionRef = useRef(false);
+=======
+>>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
   const currentProjectDirectoryRef = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -146,8 +155,11 @@ export default function ChatPanel() {
     lastTodoMessageIdRef.current = null;
     lastQuestionMessageIdRef.current = null;
     backgroundGenerationEventDedupe.clear();
+<<<<<<< HEAD
     filePathProtocolWarnedSessionIdsRef.current.clear();
     filePathProtocolWarnedWithoutSessionRef.current = false;
+=======
+>>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
   }, []);
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
@@ -287,6 +299,7 @@ export default function ChatPanel() {
     lastAssistantIdRef.current = null;
   }, []);
 
+<<<<<<< HEAD
   const getRendererErrorMessage = useCallback(
     (error: unknown, fallback: string): string => {
       if (
@@ -305,6 +318,8 @@ export default function ChatPanel() {
     [],
   );
 
+=======
+>>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
   const buildSnapshotUiState = useCallback((): ChatSnapshotUiState => {
     return {
       agentStatus: agentStatusRef.current,
@@ -1146,6 +1161,7 @@ export default function ChatPanel() {
               agentName,
               'Task cancelled',
             );
+<<<<<<< HEAD
           } else if (responseStatus === 'max_iterations') {
             setAgentStatus('error');
             setStatusMessage('Agent reached maximum iterations');
@@ -1162,6 +1178,8 @@ export default function ChatPanel() {
               'Agent reached maximum iterations before finishing. Try a narrower request or continue from current output.',
               'error',
             );
+=======
+>>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
           } else if (responseStatus === 'error') {
             setAgentStatus('error');
             setStatusMessage('Error');
@@ -1367,17 +1385,21 @@ export default function ChatPanel() {
         case 'error': {
           const errorMsg = (data.message as string) ?? 'An error occurred';
           const errorCode = (data.code as string) ?? '';
+<<<<<<< HEAD
           const isTransientNetworkError =
             errorCode === 'transient_network_error' ||
             /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|connection reset|network error|fetch failed/i.test(
               errorMsg,
             );
+=======
+>>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
 
           if (errorCode === 'cancel_failed' && isStopPendingRef.current) {
             resolveStopRequest(false, errorMsg);
             break;
           }
 
+<<<<<<< HEAD
           if (isTransientNetworkError) {
             const retryMessage =
               `Transient network issue while contacting the model: ${errorMsg}. ` +
@@ -1398,6 +1420,8 @@ export default function ChatPanel() {
             break;
           }
 
+=======
+>>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
           appendSystemMessage(errorMsg, 'error');
           setAgentStatus('error');
           setStatusMessage(errorMsg);
@@ -1603,7 +1627,10 @@ export default function ChatPanel() {
       appendMessage,
       appendSystemMessage,
       debouncedSetStatus,
+<<<<<<< HEAD
       getRendererErrorMessage,
+=======
+>>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
       resolveStopRequest,
     ],
   );
@@ -2207,11 +2234,18 @@ export default function ChatPanel() {
             type="button"
             className={styles.exportButton}
             onClick={handleExportChat}
+<<<<<<< HEAD
             title="Export chat history as JSON"
             aria-label="Export chat history as JSON"
           >
             <Download size={14} />
             <span>Export Chat</span>
+=======
+            title="Export chat as JSON"
+          >
+            <Download size={14} />
+            <span>Export</span>
+>>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
           </button>
           <button
             type="button"
