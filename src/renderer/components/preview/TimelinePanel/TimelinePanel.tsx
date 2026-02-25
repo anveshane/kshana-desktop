@@ -48,6 +48,8 @@ import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
 import VersionSelector from '../VersionSelector';
 import AudioImportModal from './AudioImportModal';
 import TimelineContextMenu from './TimelineContextMenu';
+import { importAudioFromFileToProject } from './importAudio';
+import { getAudioBlockWidthPx } from './timelineAudioSizing';
 import styles from './TimelinePanel.module.scss';
 
 const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -1906,37 +1908,11 @@ export default function TimelinePanel({
 
   // Handle audio import from file
   const handleImportAudioFromFile = useCallback(async () => {
-    if (!projectDirectory) return;
-
-    try {
-      const audioPath = await window.electron.project.selectAudioFile();
-      if (!audioPath) return;
-
-      // Create .kshana/agent/audio folder structure if it doesn't exist
-      const parts = PROJECT_PATHS.AGENT_AUDIO.split('/');
-      let basePath = projectDirectory;
-      for (const part of parts) {
-        if (part) {
-          await window.electron.project.createFolder(basePath, part);
-          basePath = `${basePath}/${part}`;
-        }
-      }
-      const audioFolder = basePath;
-
-      // Copy audio to .kshana/agent/audio folder
-      const audioFileName =
-        audioPath.replace(/\\/g, '/').split('/').pop() || `audio-${Date.now()}.mp3`;
-      await window.electron.project.copy(audioPath, audioFolder);
-
-      // Add small delay before refresh to ensure file copy completes
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      // Refresh audio files so both timeline and video library view update
-      refreshAudioFiles();
-      console.log('Audio file imported successfully');
-    } catch (error) {
-      console.error('Failed to import audio file:', error);
-    }
+    await importAudioFromFileToProject({
+      projectDirectory,
+      projectBridge: window.electron.project,
+      refreshAudioFiles,
+    });
   }, [projectDirectory, refreshAudioFiles]);
 
   // YouTube audio import removed - can be re-added later if needed
@@ -2425,10 +2401,10 @@ export default function TimelinePanel({
                             item.startTime,
                             zoomLevel,
                           );
-                          const width = secondsToPixels(
-                            item.duration,
+                          const width = getAudioBlockWidthPx({
+                            duration: item.duration,
                             zoomLevel,
-                          );
+                          });
 
                           return (
                             <MemoTimelineItemComponent

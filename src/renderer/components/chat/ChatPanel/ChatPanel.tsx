@@ -474,10 +474,10 @@ export default function ChatPanel() {
               return prev.map((m) =>
                 m.id === msg.id
                   ? {
-                      ...m,
-                      content: m.content + trimmedContent,
-                      timestamp: Date.now(),
-                    }
+                    ...m,
+                    content: m.content + trimmedContent,
+                    timestamp: Date.now(),
+                  }
                   : m,
               );
             }
@@ -504,12 +504,12 @@ export default function ChatPanel() {
           return prev.map((msg) =>
             msg.id === lastMessage.id
               ? {
-                  ...msg,
-                  content: trimmedContent,
-                  type: normalizedType,
-                  author: msg.author || author || 'Kshana',
-                  timestamp: Date.now(),
-                }
+                ...msg,
+                content: trimmedContent,
+                type: normalizedType,
+                author: msg.author || author || 'Kshana',
+                timestamp: Date.now(),
+              }
               : msg,
           );
         }
@@ -719,8 +719,8 @@ export default function ChatPanel() {
           const { iteration, maxIterations, status: progressStatus } = data;
           const percent = maxIterations
             ? Math.round(
-                ((iteration as number) / (maxIterations as number)) * 100,
-              )
+              ((iteration as number) / (maxIterations as number)) * 100,
+            )
             : 0;
           const details = [
             progressStatus ? `${progressStatus}` : null,
@@ -879,19 +879,19 @@ export default function ChatPanel() {
                 prev.map((msg) =>
                   msg.id === activeEntry.messageId
                     ? {
-                        ...msg,
-                        meta: {
-                          ...(msg.meta || {}),
-                          toolCallId: toolCallId || activeKey,
-                          toolName,
-                          args,
-                          status:
-                            toolStatus === 'error' ? 'error' : 'completed',
-                          result: cleanedResult,
-                          duration,
-                        },
-                        timestamp: Date.now(),
-                      }
+                      ...msg,
+                      meta: {
+                        ...(msg.meta || {}),
+                        toolCallId: toolCallId || activeKey,
+                        toolName,
+                        args,
+                        status:
+                          toolStatus === 'error' ? 'error' : 'completed',
+                        result: cleanedResult,
+                        duration,
+                      },
+                      timestamp: Date.now(),
+                    }
                     : msg,
                 ),
               );
@@ -1022,12 +1022,12 @@ export default function ChatPanel() {
                 return prev.map((msg, idx) =>
                   idx === lastAssistantIdx
                     ? {
-                        ...msg,
-                        type: 'agent_response',
-                        content: output,
-                        timestamp: Date.now(),
-                        author: agentName,
-                      }
+                      ...msg,
+                      type: 'agent_response',
+                      content: output,
+                      timestamp: Date.now(),
+                      author: agentName,
+                    }
                     : msg,
                 );
               }
@@ -1085,6 +1085,22 @@ export default function ChatPanel() {
               agentName,
               'Task cancelled',
             );
+          } else if (responseStatus === 'max_iterations') {
+            setAgentStatus('error');
+            setStatusMessage('Agent reached maximum iterations');
+            setIsTaskRunning(false);
+            if (isStopPendingRef.current) {
+              resolveStopRequest(false, 'Agent reached maximum iterations.');
+            }
+            window.electron.logger.logStatusChange(
+              'error',
+              agentName,
+              'Agent reached maximum iterations',
+            );
+            appendSystemMessage(
+              'Agent reached maximum iterations before finishing. Try a narrower request or continue from current output.',
+              'error',
+            );
           } else if (responseStatus === 'error') {
             setAgentStatus('error');
             setStatusMessage('Error');
@@ -1114,8 +1130,8 @@ export default function ChatPanel() {
           // Extract labels if options are objects, otherwise use as-is
           const options = rawOptions
             ? rawOptions.map((opt) =>
-                typeof opt === 'string' ? opt : opt.label,
-              )
+              typeof opt === 'string' ? opt : opt.label,
+            )
             : undefined;
           const questionType = (data.questionType as string) ?? 'text'; // text, confirm, select
           const timeout = (data.timeout as number) ?? undefined;
@@ -1133,8 +1149,8 @@ export default function ChatPanel() {
             // Log question
             const questionOptions = rawOptions
               ? rawOptions.map((opt) =>
-                  typeof opt === 'string' ? { label: opt } : opt,
-                )
+                typeof opt === 'string' ? { label: opt } : opt,
+              )
               : undefined;
             window.electron.logger.logQuestion(
               question,
@@ -1157,16 +1173,16 @@ export default function ChatPanel() {
                   return prev.map((msg) =>
                     msg.id === lastQuestionMessageIdRef.current
                       ? {
-                          ...msg,
-                          content: question,
-                          meta: {
-                            options,
-                            questionType,
-                            timeout,
-                            defaultOption,
-                          },
-                          timestamp: Date.now(),
-                        }
+                        ...msg,
+                        content: question,
+                        meta: {
+                          options,
+                          questionType,
+                          timeout,
+                          defaultOption,
+                        },
+                        timestamp: Date.now(),
+                      }
                       : msg,
                   );
                 }
@@ -1228,10 +1244,10 @@ export default function ChatPanel() {
                 prev.map((msg) =>
                   msg.id === lastTodoMessageIdRef.current
                     ? {
-                        ...msg,
-                        meta: { ...msg.meta, todos },
-                        timestamp: Date.now(),
-                      }
+                      ...msg,
+                      meta: { ...msg.meta, todos },
+                      timestamp: Date.now(),
+                    }
                     : msg,
                 ),
               );
@@ -1290,9 +1306,34 @@ export default function ChatPanel() {
         case 'error': {
           const errorMsg = (data.message as string) ?? 'An error occurred';
           const errorCode = (data.code as string) ?? '';
+          const isTransientNetworkError =
+            errorCode === 'transient_network_error' ||
+            /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|connection reset|network error|fetch failed/i.test(
+              errorMsg,
+            );
 
           if (errorCode === 'cancel_failed' && isStopPendingRef.current) {
             resolveStopRequest(false, errorMsg);
+            break;
+          }
+
+          if (isTransientNetworkError) {
+            const retryMessage =
+              `Transient network issue while contacting the model: ${errorMsg}. ` +
+              'Please retry your last step.';
+            appendSystemMessage(retryMessage, 'status');
+            setAgentStatus('waiting');
+            setStatusMessage('Connection issue. Ready to retry.');
+            setIsTaskRunning(false);
+            window.electron.logger.logError(
+              errorMsg,
+              data as Record<string, unknown>,
+            );
+            window.electron.logger.logStatusChange(
+              'waiting',
+              agentName,
+              'Connection issue. Ready to retry.',
+            );
             break;
           }
 
@@ -1336,9 +1377,20 @@ export default function ChatPanel() {
         case 'file_write': {
           const filePath = data.path as string;
           const fileContent = data.content as string;
+          if (filePath && currentProjectDirectoryRef.current &&
+            !filePath.startsWith(currentProjectDirectoryRef.current)) {
+            console.warn(
+              '[ChatPanel] file_write path outside project directory:',
+              filePath, 'expected prefix:', currentProjectDirectoryRef.current,
+            );
+          }
           if (filePath && fileContent !== undefined) {
             window.electron.project.writeFile(filePath, fileContent).catch((err) => {
               console.error('[ChatPanel] file_write failed:', filePath, err);
+              appendSystemMessage(
+                `⚠️ Failed to save file: ${filePath.split('/').pop() || filePath}`,
+                'error',
+              );
             });
           }
           break;
@@ -1349,6 +1401,10 @@ export default function ChatPanel() {
           if (binPath && binContent) {
             window.electron.project.writeFileBinary(binPath, binContent).catch((err) => {
               console.error('[ChatPanel] file_write_binary failed:', binPath, err);
+              appendSystemMessage(
+                `⚠️ Failed to save binary file: ${binPath.split('/').pop() || binPath}`,
+                'error',
+              );
             });
           }
           break;
@@ -1358,6 +1414,10 @@ export default function ChatPanel() {
           if (mkdirPath) {
             window.electron.project.mkdir(mkdirPath).catch((err) => {
               console.error('[ChatPanel] file_mkdir failed:', mkdirPath, err);
+              appendSystemMessage(
+                `⚠️ Failed to create directory: ${mkdirPath.split('/').pop() || mkdirPath}`,
+                'error',
+              );
             });
           }
           break;
@@ -1785,7 +1845,7 @@ export default function ChatPanel() {
         connectWebSocket().catch(() => undefined);
       }
     };
-    bootstrap().catch(() => {});
+    bootstrap().catch(() => { });
 
     const unsubscribeBackend = window.electron.backend.onStateChange(
       (state: BackendState) => {

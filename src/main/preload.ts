@@ -39,6 +39,13 @@ interface TextOverlayCue {
   words: TextOverlayWord[];
 }
 
+interface PromptOverlayCue {
+  id: string;
+  startTime: number;
+  endTime: number;
+  text: string;
+}
+
 export type Channels = 'ipc-example';
 
 const backendBridge = {
@@ -220,6 +227,7 @@ const projectBridge = {
       endTime: number;
     }>,
     textOverlayCues?: TextOverlayCue[],
+    promptOverlayCues?: PromptOverlayCue[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
     return ipcRenderer.invoke(
       'project:compose-timeline-video',
@@ -228,6 +236,7 @@ const projectBridge = {
       audioPath,
       overlayItems,
       textOverlayCues,
+      promptOverlayCues,
     );
   },
   exportCapcut(
@@ -250,6 +259,7 @@ const projectBridge = {
       label?: string;
     }>,
     textOverlayCues?: TextOverlayCue[],
+    promptOverlayCues?: PromptOverlayCue[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
     return ipcRenderer.invoke(
       'project:export-capcut',
@@ -258,6 +268,7 @@ const projectBridge = {
       audioPath,
       overlayItems,
       textOverlayCues,
+      promptOverlayCues,
     );
   },
   onFileChange(callback: (event: FileChangeEvent) => void) {

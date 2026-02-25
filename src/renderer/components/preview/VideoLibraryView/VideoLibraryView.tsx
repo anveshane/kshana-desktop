@@ -16,10 +16,15 @@ import {
   resolveAssetPathWithRetry,
 } from '../../../utils/pathResolver';
 import { normalizePathForExport, stripFileProtocol } from '../../../utils/pathNormalizer';
+import {
+  buildPromptOverlayCues,
+  buildTimelineExportItem,
+  sanitizePromptOverlayText,
+} from '../../../utils/promptOverlayExport';
 import type { Artifact } from '../../../types/projectState';
 import type { SceneRef } from '../../../types/kshana/entities';
 import type { SceneVersions } from '../../../types/kshana/timeline';
-import type { TextOverlayCue } from '../../../types/captions';
+import type { PromptOverlayCue, TextOverlayCue } from '../../../types/captions';
 import { getActiveCue, getActiveWordIndex } from '../../../utils/captionGrouping';
 import styles from './VideoLibraryView.module.scss';
 
@@ -585,8 +590,18 @@ export default function VideoLibraryView({
 
   // Resolved video path state
   const [currentVideoPath, setCurrentVideoPath] = useState<string>('');
+  const [isResolvingVideoPath, setIsResolvingVideoPath] = useState(false);
   const shouldShowVideo = Boolean(currentVideo && currentVideoPath);
-  const shouldShowLoadingVideo = Boolean(currentVideo && !currentVideoPath);
+  const shouldShowLoadingVideo = Boolean(
+    currentVideo && !currentVideoPath && isResolvingVideoPath,
+  );
+
+  const activePromptText = useMemo(() => {
+    if (!currentItem) return '';
+    return sanitizePromptOverlayText(
+      currentItem.expandedPrompt ?? currentItem.prompt ?? '',
+    );
+  }, [currentItem]);
 
   // Construct version-specific path if active version is set (placement-based)
   const versionPath = useMemo(() => {
@@ -633,6 +648,7 @@ export default function VideoLibraryView({
 
   useEffect(() => {
     setCurrentVideoPath('');
+    setIsResolvingVideoPath(false);
     currentVideoPathRef.current = null;
     appliedClipIdentityRef.current = null;
     isVideoLoadingRef.current = false;
@@ -655,10 +671,12 @@ export default function VideoLibraryView({
       );
       if (requestId === videoPathRequestIdRef.current) {
         setCurrentVideoPath('');
+        setIsResolvingVideoPath(false);
       }
       return undefined;
     }
 
+    setIsResolvingVideoPath(true);
     resolveAssetPathForDisplay(effectiveVersionPath, projectDirectory || null)
       .then((resolved) => {
         if (requestId !== videoPathRequestIdRef.current) {
@@ -676,6 +694,7 @@ export default function VideoLibraryView({
           );
           setCurrentVideoPath('');
         }
+        setIsResolvingVideoPath(false);
       })
       .catch((error) => {
         if (requestId !== videoPathRequestIdRef.current) {
@@ -686,6 +705,7 @@ export default function VideoLibraryView({
           error,
         );
         setCurrentVideoPath('');
+        setIsResolvingVideoPath(false);
       });
   }, [effectiveVersionPath, projectDirectory]);
 
@@ -1067,6 +1087,116 @@ export default function VideoLibraryView({
   // When playbackTime advances, controller automatically determines which item should be active
   // No manual auto-advance logic needed
 
+  // Helper: resolve timeline items + overlays for export (shared by all export handlers)
+  const resolveExportData = useCallback(async () => {
+    if (!projectDirectory || timelineItems.length === 0) return null;
+
+    const audioItems = timelineItems.filter((item) => item.type === 'audio');
+    let resolvedAudioPath: string | null = null;
+    if (audioItems.length > 0 && audioItems[0]?.audioPath) {
+      try {
+        const displayPath = await resolveAssetPathForDisplay(
+          audioItems[0].audioPath,
+          projectDirectory,
+        );
+        resolvedAudioPath = normalizePathForExport(displayPath);
+      } catch (error) {
+        console.warn('[Export] Failed to resolve audio path:', error);
+      }
+    }
+
+    const itemsData = await Promise.all(
+      timelineItems
+        .filter((item) => item.type !== 'audio' && item.type !== 'text_overlay')
+        .map(async (item) => {
+          let resolvedPath = '';
+          try {
+            if (
+              (item.type === 'video' || item.type === 'infographic') &&
+              item.videoPath
+            ) {
+              resolvedPath = await resolveAssetPathForDisplay(
+                item.videoPath,
+                projectDirectory,
+              );
+            } else if (item.type === 'image' && item.imagePath) {
+              resolvedPath = await resolveAssetPathForDisplay(
+                item.imagePath,
+                projectDirectory,
+              );
+            }
+          } catch (error) {
+            console.warn(
+              `[Export] Failed to resolve media path for ${item.label}:`,
+              error,
+            );
+          }
+
+          const fallbackPath = item.videoPath || item.imagePath || '';
+          const exportItem = buildTimelineExportItem(
+            item,
+            resolvedPath,
+            fallbackPath,
+          );
+
+          if (exportItem.usedPlaceholderForMissingMedia) {
+            console.warn(
+              `[Export] Missing media for ${item.label}; using placeholder segment for ${item.startTime.toFixed(2)}-${item.endTime.toFixed(2)}s`,
+            );
+          }
+
+          return {
+            type: exportItem.type,
+            path: exportItem.path,
+            duration: exportItem.duration,
+            startTime: exportItem.startTime,
+            endTime: exportItem.endTime,
+            sourceOffsetSeconds: exportItem.sourceOffsetSeconds,
+            label: exportItem.label,
+          };
+        }),
+    );
+
+    const overlayItemsWithPaths = await Promise.all(
+      overlayItems.map(async (item) => {
+        let resolvedPath = '';
+        try {
+          if (item.videoPath) {
+            resolvedPath = await resolveAssetPathForDisplay(
+              item.videoPath,
+              projectDirectory,
+            );
+          }
+        } catch (error) {
+          console.warn(
+            `[Export] Failed to resolve overlay path for ${item.label}:`,
+            error,
+          );
+        }
+        return {
+          path: (resolvedPath || item.videoPath || '').trim(),
+          duration: item.duration,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          label: item.label,
+        };
+      }),
+    );
+    const overlayItemsData = overlayItemsWithPaths.filter(
+      (item) => item.path.length > 0,
+    );
+
+    const promptOverlayCues = buildPromptOverlayCues(timelineItems);
+
+    return {
+      itemsData,
+      resolvedAudioPath,
+      overlayItemsData,
+      textOverlayCues,
+      promptOverlayCues,
+    };
+  }, [projectDirectory, timelineItems, overlayItems, textOverlayCues]);
+
   // Handle video download
   const handleDownloadVideo = useCallback(async () => {
     if (!projectDirectory || timelineItems.length === 0 || isDownloading) {
@@ -1077,139 +1207,12 @@ export default function VideoLibraryView({
 
     try {
       console.log('[VideoDownload] Starting video download process...');
-      console.log('[VideoDownload] Timeline items:', timelineItems.length);
-      console.log('[VideoDownload] Project directory:', projectDirectory);
-
-      // Extract audio path before filtering out audio items
-      const audioItems = timelineItems.filter((item) => item.type === 'audio');
-      let resolvedAudioPath: string | null = null;
-
-      if (audioItems.length > 0 && audioItems[0]?.audioPath) {
-        try {
-          // Step 1: Resolve for display (returns file:// URL)
-          const displayPath = await resolveAssetPathForDisplay(
-            audioItems[0].audioPath,
-            projectDirectory,
-          );
-
-          // Step 2: Normalize for export (strips file://)
-          resolvedAudioPath = normalizePathForExport(displayPath);
-
-          console.log('[VideoDownload] Audio path resolution:', {
-            original: audioItems[0].audioPath,
-            display: displayPath,
-            normalized: resolvedAudioPath,
-          });
-        } catch (error) {
-          console.warn('[VideoDownload] Failed to resolve audio path:', error);
-        }
-      } else {
-        console.log('[VideoDownload] No audio items found in timeline');
-      }
-
-      // Prepare timeline items data with resolved paths
-      // Filter out audio items as they're not part of video composition
-      console.log('[VideoDownload] Resolving asset paths...');
-      const itemsDataWithPaths = await Promise.all(
-        timelineItems
-          .filter((item) => item.type !== 'audio') // Exclude audio items
-          .map(async (item, index) => {
-            let resolvedPath = '';
-            if (
-              (item.type === 'video' || item.type === 'infographic') &&
-              item.videoPath
-            ) {
-              resolvedPath = await resolveAssetPathForDisplay(
-                item.videoPath,
-                projectDirectory,
-              );
-              console.log(
-                `[VideoDownload] Resolved ${item.type} ${index + 1}: ${item.videoPath} -> ${resolvedPath}`,
-              );
-            } else if (item.type === 'image' && item.imagePath) {
-              resolvedPath = await resolveAssetPathForDisplay(
-                item.imagePath,
-                projectDirectory,
-              );
-              console.log(
-                `[VideoDownload] Resolved image ${index + 1}: ${item.imagePath} -> ${resolvedPath}`,
-              );
-            }
-
-            const finalPath =
-              resolvedPath || item.videoPath || item.imagePath || '';
-            const exportType =
-              item.type === 'infographic' ? 'video' : item.type;
-            return {
-              type: exportType as 'video' | 'image' | 'placeholder',
-              path: finalPath,
-              duration: item.duration,
-              startTime: item.startTime,
-              endTime: item.endTime,
-              sourceOffsetSeconds:
-                exportType === 'video' ? item.sourceOffsetSeconds ?? 0 : 0,
-              originalIndex: index,
-              label: item.label,
-            };
-          }),
-      );
-
-      // Filter out items with empty paths and log warnings
-      const skippedItems: Array<{
-        index: number;
-        type: string;
-        label?: string;
-      }> = [];
-      const itemsData = itemsDataWithPaths.filter((item, index) => {
-        const hasValidPath = item.path && item.path.trim() !== '';
-        if (!hasValidPath) {
-          skippedItems.push({
-            index: item.originalIndex + 1,
-            type: item.type,
-            label: item.label,
-          });
-          console.warn(
-            `[VideoDownload] Skipping timeline item ${item.originalIndex + 1} (${item.type}): no file path`,
-            {
-              type: item.type,
-              label: item.label,
-            },
-          );
-        }
-        return hasValidPath;
-      });
-
-      if (skippedItems.length > 0) {
-        console.warn(
-          `[VideoDownload] Skipped ${skippedItems.length} timeline item(s) with missing paths:`,
-          skippedItems,
-        );
-      }
-
-      if (itemsData.length === 0) {
-        console.error('[VideoDownload] No valid timeline items to compose');
-        alert(
-          'No valid timeline items found. Please ensure at least one timeline item has a valid video or image path.',
-        );
-        setIsDownloading(false);
+      const data = await resolveExportData();
+      if (!data || data.itemsData.length === 0) {
+        alert('No valid timeline items found for export.');
         return;
       }
 
-      console.log(
-        `[VideoDownload] Starting video composition with ${itemsData.length} valid item(s) (${skippedItems.length} skipped)...`,
-      );
-      console.log(
-        '[VideoDownload] Items data:',
-        itemsData.map((item, i) => ({
-          index: i + 1,
-          type: item.type,
-          path: `${item.path.substring(0, 80)}...`,
-          duration: item.duration,
-        })),
-      );
-
-      // Compose the video with audio track
-      // Type assertion needed due to TypeScript language server cache issue
       const composeVideo = window.electron.project.composeTimelineVideo as (
         timelineItems: Array<{
           type: 'image' | 'video' | 'placeholder';
@@ -1228,128 +1231,55 @@ export default function VideoLibraryView({
           endTime: number;
         }>,
         textOverlayCues?: TextOverlayCue[],
+        promptOverlayCues?: PromptOverlayCue[],
       ) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
 
-      const overlayItemsWithPaths = await Promise.all(
-        overlayItems.map(async (item, index) => {
-          let resolvedPath = '';
-          if (item.videoPath) {
-            resolvedPath = await resolveAssetPathForDisplay(
-              item.videoPath,
-              projectDirectory,
-            );
-            console.log(
-              `[VideoDownload] Resolved overlay ${index + 1}: ${item.videoPath} -> ${resolvedPath}`,
-            );
-          }
-
-          return {
-            path: resolvedPath || item.videoPath || '',
-            duration: item.duration,
-            startTime: item.startTime,
-            endTime: item.endTime,
-            originalIndex: index,
-            label: item.label,
-          };
-        }),
-      );
-
-      const skippedOverlayItems: Array<{
-        index: number;
-        label?: string;
-      }> = [];
-      const overlayItemsData = overlayItemsWithPaths.filter((item) => {
-        const hasValidPath = item.path && item.path.trim() !== '';
-        if (!hasValidPath) {
-          skippedOverlayItems.push({
-            index: item.originalIndex + 1,
-            label: item.label,
-          });
-          console.warn(
-            `[VideoDownload] Skipping overlay item ${item.originalIndex + 1}: no file path`,
-            { label: item.label },
-          );
-        }
-        return hasValidPath;
-      });
-
-      if (skippedOverlayItems.length > 0) {
-        console.warn(
-          `[VideoDownload] Skipped ${skippedOverlayItems.length} overlay item(s) with missing paths:`,
-          skippedOverlayItems,
-        );
-      }
-
       const result = await composeVideo(
-        itemsData,
+        data.itemsData,
         projectDirectory,
-        resolvedAudioPath || undefined, // Pass audio path if available
-        overlayItemsData,
-        textOverlayCues,
+        data.resolvedAudioPath || undefined,
+        data.overlayItemsData,
+        data.textOverlayCues,
+        data.promptOverlayCues,
       );
-
-      console.log('[VideoDownload] Composition result:', result);
 
       if (!result.success) {
-        console.error('[VideoDownload] Composition failed:', result.error);
         alert(`Failed to compose video: ${result.error || 'Unknown error'}`);
         return;
       }
-
       if (!result.outputPath) {
-        console.error('[VideoDownload] No output path returned');
         alert('Video composition completed but no output path was returned');
         return;
       }
 
-      console.log(
-        '[VideoDownload] Composition successful. Output:',
-        result.outputPath,
-      );
-      console.log('[VideoDownload] Opening save dialog...');
-
-      // Open save dialog
       const savePath = await window.electron.project.saveVideoFile();
       if (!savePath) {
-        console.log('[VideoDownload] User cancelled save dialog');
-        // User cancelled
         return;
       }
 
-      console.log('[VideoDownload] Save path selected:', savePath);
-
-      // Extract directory and filename from savePath
-      // Normalize path separators to handle both Windows and Unix paths
       const normalizedSavePath = savePath.replace(/\\/g, '/');
       const lastSlash = normalizedSavePath.lastIndexOf('/');
-      const saveDir = lastSlash >= 0 ? normalizedSavePath.substring(0, lastSlash) : '';
+      const saveDir =
+        lastSlash >= 0 ? normalizedSavePath.substring(0, lastSlash) : '';
       const saveFileName =
-        lastSlash >= 0 ? normalizedSavePath.substring(lastSlash + 1) : normalizedSavePath;
+        lastSlash >= 0
+          ? normalizedSavePath.substring(lastSlash + 1)
+          : normalizedSavePath;
 
-      console.log('[VideoDownload] Copying video to:', saveDir);
-      console.log('[VideoDownload] Target filename:', saveFileName);
-
-      // Copy the composed video to the destination directory
       const copiedPath = await window.electron.project.copy(
         result.outputPath,
         saveDir,
       );
 
-      console.log('[VideoDownload] Video copied to:', copiedPath);
-
-      // Rename to the user's chosen filename if different
-      // Normalize copiedPath for comparison
       const normalizedCopiedPath = copiedPath.replace(/\\/g, '/');
       const copiedFileName = normalizedCopiedPath.substring(
-        normalizedCopiedPath.lastIndexOf('/') + 1
+        normalizedCopiedPath.lastIndexOf('/') + 1,
       );
-      
+
       if (copiedFileName !== saveFileName) {
-        console.log('[VideoDownload] Renaming from:', copiedFileName, 'to:', saveFileName);
         await window.electron.project.rename(copiedPath, saveFileName);
       }
 
-      console.log('[VideoDownload] Video download completed successfully!');
       alert('Video downloaded successfully!');
     } catch (error) {
       console.error('Error downloading video:', error);
@@ -1364,9 +1294,8 @@ export default function VideoLibraryView({
   }, [
     projectDirectory,
     timelineItems,
-    overlayItems,
-    textOverlayCues,
     isDownloading,
+    resolveExportData,
   ]);
 
   // Close export menu when clicking outside
@@ -1387,107 +1316,6 @@ export default function VideoLibraryView({
     };
   }, [showExportMenu]);
 
-  // Helper: resolve timeline items + overlays for export (shared by all export handlers)
-  const resolveExportData = useCallback(async () => {
-    if (!projectDirectory || timelineItems.length === 0) return null;
-
-    // Extract audio path
-    const audioItems = timelineItems.filter((item) => item.type === 'audio');
-    let resolvedAudioPath: string | null = null;
-    if (audioItems.length > 0 && audioItems[0]?.audioPath) {
-      try {
-        const displayPath = await resolveAssetPathForDisplay(
-          audioItems[0].audioPath,
-          projectDirectory,
-        );
-        resolvedAudioPath = normalizePathForExport(displayPath);
-      } catch (error) {
-        console.warn('[Export] Failed to resolve audio path:', error);
-      }
-    }
-
-    // Resolve main timeline items
-    const itemsDataWithPaths = await Promise.all(
-      timelineItems
-        .filter((item) => item.type !== 'audio')
-        .map(async (item) => {
-          let resolvedPath = '';
-          if (
-            (item.type === 'video' || item.type === 'infographic') &&
-            item.videoPath
-          ) {
-            resolvedPath = await resolveAssetPathForDisplay(
-              item.videoPath,
-              projectDirectory,
-            );
-          } else if (item.type === 'image' && item.imagePath) {
-            resolvedPath = await resolveAssetPathForDisplay(
-              item.imagePath,
-              projectDirectory,
-            );
-          }
-          const finalPath =
-            resolvedPath || item.videoPath || item.imagePath || '';
-          const exportType =
-            item.type === 'infographic' ? 'video' : item.type;
-          return {
-            type: exportType as 'video' | 'image' | 'placeholder',
-            path: finalPath,
-            duration: item.duration,
-            startTime: item.startTime,
-            endTime: item.endTime,
-            sourceOffsetSeconds:
-              exportType === 'video' ? item.sourceOffsetSeconds ?? 0 : 0,
-            label: item.label,
-          };
-        }),
-    );
-    const itemsData = itemsDataWithPaths.filter(
-      (item) => item.path && item.path.trim() !== '',
-    );
-
-    // Resolve overlays
-    const overlayItemsWithPaths = await Promise.all(
-      overlayItems.map(async (item) => {
-        let resolvedPath = '';
-        if (item.videoPath) {
-          resolvedPath = await resolveAssetPathForDisplay(
-            item.videoPath,
-            projectDirectory,
-          );
-        }
-        return {
-          path: resolvedPath || item.videoPath || '',
-          duration: item.duration,
-          startTime: item.startTime,
-          endTime: item.endTime,
-          label: item.label,
-        };
-      }),
-    );
-    const overlayItemsData = overlayItemsWithPaths.filter(
-      (item) => item.path && item.path.trim() !== '',
-    );
-
-    console.log(
-      `[Export] Resolved ${overlayItemsData.length}/${overlayItems.length} overlay items`,
-      overlayItemsData.map((o, i) => ({
-        index: i,
-        label: o.label,
-        path: o.path ? `${o.path.substring(0, 60)}...` : '(empty)',
-        start: o.startTime,
-        duration: o.duration,
-      })),
-    );
-
-    return {
-      itemsData,
-      resolvedAudioPath,
-      overlayItemsData,
-      textOverlayCues,
-    };
-  }, [projectDirectory, timelineItems, overlayItems, textOverlayCues]);
-
   // Handle CapCut export
   const handleExportCapcut = useCallback(async () => {
     if (!projectDirectory || timelineItems.length === 0 || isExporting) return;
@@ -1500,9 +1328,6 @@ export default function VideoLibraryView({
         alert('No valid timeline items found for export.');
         return;
       }
-      console.log(
-        `[Export:CapCut] Data: ${data.itemsData.length} timeline items, ${data.overlayItemsData.length} overlays, ${data.textOverlayCues?.length ?? 0} captions`,
-      );
 
       const exportFn = window.electron.project.exportCapcut as (
         timelineItems: Array<{
@@ -1524,6 +1349,7 @@ export default function VideoLibraryView({
           label?: string;
         }>,
         textOverlayCues?: TextOverlayCue[],
+        promptOverlayCues?: PromptOverlayCue[],
       ) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
 
       const result = await exportFn(
@@ -1532,6 +1358,7 @@ export default function VideoLibraryView({
         data.resolvedAudioPath || undefined,
         data.overlayItemsData,
         data.textOverlayCues || undefined,
+        data.promptOverlayCues || undefined,
       );
 
       if (result.error === 'cancelled') return;
@@ -1703,28 +1530,43 @@ export default function VideoLibraryView({
               )}
 
               {!shouldShowVideo && !shouldShowLoadingVideo && (
-                <div
-                  className={`${styles.scenePlaceholder} ${
-                    resolvedSceneImagePath ? styles.hasBackgroundImage : ''
-                  }`}
-                  style={
-                    resolvedSceneImagePath
-                      ? {
-                          backgroundImage: `url("${resolvedSceneImagePath}")`,
-                        }
-                      : undefined
-                  }
-                >
-                  {currentItem &&
-                    (currentItem.type === 'image' ||
-                      currentItem.type === 'placeholder') &&
-                    !resolvedSceneImagePath && (
-                      <div className={styles.scenePlaceholderContent}>
-                        <Film size={64} className={styles.scenePlaceholderIcon} />
-                        <h3>{currentItem.label}</h3>
-                      </div>
-                    )}
-                </div>
+                <>
+                  {currentVideo ? (
+                    <div className={styles.videoUnavailablePlaceholder}>
+                      <Film size={48} className={styles.videoPlaceholderIcon} />
+                      <p>Video unavailable</p>
+                      <p className={styles.videoPlaceholderSubtext}>
+                        Missing media for {currentVideo.label}
+                      </p>
+                    </div>
+                  ) : (
+                    <div
+                      className={`${styles.scenePlaceholder} ${
+                        resolvedSceneImagePath ? styles.hasBackgroundImage : ''
+                      }`}
+                      style={
+                        resolvedSceneImagePath
+                          ? {
+                              backgroundImage: `url("${resolvedSceneImagePath}")`,
+                            }
+                          : undefined
+                      }
+                    >
+                      {currentItem &&
+                        (currentItem.type === 'image' ||
+                          currentItem.type === 'placeholder') &&
+                        !resolvedSceneImagePath && (
+                          <div className={styles.scenePlaceholderContent}>
+                            <Film
+                              size={64}
+                              className={styles.scenePlaceholderIcon}
+                            />
+                            <h3>{currentItem.label}</h3>
+                          </div>
+                        )}
+                    </div>
+                  )}
+                </>
               )}
 
               {!shouldShowVideo && activeOverlay && resolvedOverlayPath && (
@@ -1740,6 +1582,16 @@ export default function VideoLibraryView({
 
               {currentVideo && (
                 <div className={styles.currentVideoLabel}>{currentVideo.label}</div>
+              )}
+              {activePromptText && (
+                <div className={styles.expandedPromptOverlay}>
+                  <div className={styles.expandedPromptHeader}>
+                    {currentItem?.label || 'Prompt'}
+                  </div>
+                  <div className={styles.expandedPromptText}>
+                    {activePromptText}
+                  </div>
+                </div>
               )}
               {activeTextCue && (
                 <div className={styles.wordCaptionOverlay}>

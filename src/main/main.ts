@@ -43,7 +43,12 @@ import {
   type ExportTimelineItem,
   type ExportOverlayItem,
   type ExportTextOverlayCue,
+  type ExportPromptOverlayCue,
 } from './exporters/capcutGenerator';
+import {
+  buildAssFromPromptOverlayCues,
+  type PromptOverlayCue,
+} from './services/promptOverlayAss';
 
 if (app.isPackaged) {
   process.env.KSHANA_PACKAGED = '1';
@@ -543,13 +548,17 @@ ipcMain.handle(
 ipcMain.handle(
   'project:write-file-binary',
   async (_event, filePath: string, base64Data: string): Promise<void> => {
+    // Normalize the file path to ensure it's resolved correctly (matches project:write-file)
+    const normalizedPath = path.isAbsolute(filePath)
+      ? path.normalize(filePath)
+      : path.resolve(filePath);
     // Ensure directory exists before writing
-    const dirPath = path.dirname(filePath);
+    const dirPath = path.dirname(normalizedPath);
     await fs.mkdir(dirPath, { recursive: true });
 
     // Convert base64 string to buffer and write as binary
     const buffer = Buffer.from(base64Data, 'base64');
-    return fs.writeFile(filePath, buffer);
+    return fs.writeFile(normalizedPath, buffer);
   },
 );
 
@@ -694,6 +703,7 @@ ipcMain.handle(
     audioPath?: string,
     overlayItems?: ExportOverlayItem[],
     textOverlayCues?: ExportTextOverlayCue[],
+    promptOverlayCues?: ExportPromptOverlayCue[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
     console.log('[Export:CapCut] Starting CapCut export...');
     try {
@@ -705,6 +715,7 @@ ipcMain.handle(
         audioPath,
         overlayItems,
         textOverlayCues,
+        promptOverlayCues,
       );
 
       console.log('[Export:CapCut] Exported successfully to:', result.outputDir);
@@ -851,14 +862,14 @@ async function burnWordCaptionsIntoVideo(
     // On Windows, FFmpeg subtitle filters require heavy escaping:
     // - Backslashes must be escaped as \\\\ (four backslashes)
     // - Colons must be escaped as \\: (two backslashes + colon)
-    
+
     // First, convert Windows backslashes to forward slashes
     const normalizedAssPath = assPath.replace(/\\/g, '/');
-    
+
     // Then escape for FFmpeg filter syntax:
     // Escape colons: C:/path -> C\\:/path
     const escapedAssPath = normalizedAssPath.replace(/:/g, '\\\\:');
-    
+
     // Verify fonts directory exists
     const fontsDir = 'C:/Windows/Fonts';
     let fontsDirExists = false;
@@ -890,7 +901,7 @@ async function burnWordCaptionsIntoVideo(
       filter: `ass=${escapedAssPath}`,
       description: 'ass filter (default fonts)',
     });
-    
+
     // Strategy 4: Try with original Windows backslashes (heavily escaped)
     const heavyEscapedPath = assPath
       .replace(/\\/g, '\\\\\\\\')  // Each backslash becomes 4 backslashes
@@ -910,7 +921,7 @@ async function burnWordCaptionsIntoVideo(
 
   // Try each strategy in order until one succeeds
   let lastError: Error | null = null;
-  
+
   for (let i = 0; i < strategies.length; i++) {
     const strategy = strategies[i];
     console.log(
@@ -989,6 +1000,7 @@ ipcMain.handle(
     audioPath?: string,
     overlayItems?: OverlayItem[],
     textOverlayCues?: TextOverlayCue[],
+    promptOverlayCues?: PromptOverlayCue[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
     console.log('[VideoComposition] Starting video composition...');
     console.log('[VideoComposition] Timeline items:', timelineItems.length);
@@ -1005,6 +1017,44 @@ ipcMain.handle(
     const segmentFiles: string[] = [];
     const cleanupFiles: string[] = [];
     const normalizedOverlayItems: Array<OverlayItem & { absolutePath: string }> = [];
+
+    const createPlaceholderSegment = async (
+      segmentPath: string,
+      duration: number,
+      segmentNumber: number,
+    ): Promise<void> => {
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg()
+          .input(`color=c=black:s=1920x1080:d=${duration}`)
+          .inputOptions(['-f lavfi'])
+          .outputOptions([
+            '-c:v libx264',
+            '-preset medium',
+            '-crf 23',
+            '-pix_fmt yuv420p',
+          ])
+          .output(segmentPath)
+          .on('start', (commandLine) => {
+            console.log(
+              `[VideoComposition] Placeholder FFmpeg command (${segmentNumber}): ${commandLine}`,
+            );
+          })
+          .on('end', () => {
+            console.log(
+              `[VideoComposition] Placeholder segment ${segmentNumber} completed`,
+            );
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error(
+              `[VideoComposition] Placeholder segment ${segmentNumber} error:`,
+              err,
+            );
+            reject(err);
+          })
+          .run();
+      });
+    };
 
     if (overlayItems && overlayItems.length > 0) {
       for (const overlay of overlayItems) {
@@ -1059,11 +1109,14 @@ ipcMain.handle(
             cleanPath = cleanPath.slice(1);
           }
 
-          // Skip items with empty paths
+          // Missing media should preserve timing, so emit a black placeholder.
           if (!cleanPath || cleanPath.trim() === '') {
             console.warn(
-              `[VideoComposition] Skipping video segment ${i + 1}: empty path`,
+              `[VideoComposition] Missing video path for segment ${i + 1}, creating placeholder`,
             );
+            await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+            segmentFiles.push(segmentPath);
+            cleanupFiles.push(segmentPath);
             continue;
           }
 
@@ -1080,8 +1133,11 @@ ipcMain.handle(
             const stats = await fs.stat(absolutePath);
             if (stats.isDirectory()) {
               console.warn(
-                `[VideoComposition] Skipping video segment ${i + 1}: path is a directory: ${absolutePath}`,
+                `[VideoComposition] Video segment ${i + 1} path is a directory (${absolutePath}), creating placeholder`,
               );
+              await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+              segmentFiles.push(segmentPath);
+              cleanupFiles.push(segmentPath);
               continue;
             }
             console.log(
@@ -1093,13 +1149,19 @@ ipcMain.handle(
               error.message.includes('is a directory')
             ) {
               console.warn(
-                `[VideoComposition] Skipping video segment ${i + 1}: path is a directory`,
+                `[VideoComposition] Video segment ${i + 1} path resolved as directory, creating placeholder`,
               );
+              await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+              segmentFiles.push(segmentPath);
+              cleanupFiles.push(segmentPath);
               continue;
             }
             console.warn(
-              `[VideoComposition] Skipping video segment ${i + 1}: file not found: ${absolutePath}`,
+              `[VideoComposition] Video segment ${i + 1} missing file (${absolutePath}), creating placeholder`,
             );
+            await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+            segmentFiles.push(segmentPath);
+            cleanupFiles.push(segmentPath);
             continue;
           }
 
@@ -1165,11 +1227,14 @@ ipcMain.handle(
             cleanPath = cleanPath.slice(1);
           }
 
-          // Skip items with empty paths
+          // Missing media should preserve timing, so emit a black placeholder.
           if (!cleanPath || cleanPath.trim() === '') {
             console.warn(
-              `[VideoComposition] Skipping image segment ${i + 1}: empty path`,
+              `[VideoComposition] Missing image path for segment ${i + 1}, creating placeholder`,
             );
+            await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+            segmentFiles.push(segmentPath);
+            cleanupFiles.push(segmentPath);
             continue;
           }
 
@@ -1189,8 +1254,11 @@ ipcMain.handle(
             );
           } catch {
             console.warn(
-              `[VideoComposition] Skipping image segment ${i + 1}: file not found: ${absolutePath}`,
+              `[VideoComposition] Image segment ${i + 1} missing file (${absolutePath}), creating placeholder`,
             );
+            await createPlaceholderSegment(segmentPath, item.duration, i + 1);
+            segmentFiles.push(segmentPath);
+            cleanupFiles.push(segmentPath);
             continue;
           }
 
@@ -1340,37 +1408,7 @@ ipcMain.handle(
           console.log(
             `[VideoComposition] Creating placeholder segment ${i + 1} (${item.duration}s)...`,
           );
-          await new Promise<void>((resolve, reject) => {
-            ffmpeg()
-              .input(`color=c=black:s=1920x1080:d=${item.duration}`)
-              .inputOptions(['-f lavfi'])
-              .outputOptions([
-                '-c:v libx264',
-                '-preset medium',
-                '-crf 23',
-                '-pix_fmt yuv420p',
-              ])
-              .output(segmentPath)
-              .on('start', (commandLine) => {
-                console.log(
-                  `[VideoComposition] FFmpeg command: ${commandLine}`,
-                );
-              })
-              .on('end', () => {
-                console.log(
-                  `[VideoComposition] Placeholder segment ${i + 1} completed`,
-                );
-                resolve();
-              })
-              .on('error', (err) => {
-                console.error(
-                  `[VideoComposition] Placeholder segment ${i + 1} error:`,
-                  err,
-                );
-                reject(err);
-              })
-              .run();
-          });
+          await createPlaceholderSegment(segmentPath, item.duration, i + 1);
 
           segmentFiles.push(segmentPath);
           cleanupFiles.push(segmentPath);
@@ -1530,7 +1568,35 @@ ipcMain.handle(
         await fs.copyFile(concatenatedVideoPath, baseOutputPath);
       }
 
-      let finalOutputPath = baseOutputPath;
+      let overlayedOutputPath = baseOutputPath;
+
+      if (promptOverlayCues && promptOverlayCues.length > 0) {
+        const promptAssPath = path.join(tempDir, 'prompt-overlays.ass');
+        const promptOverlayOutputPath = path.join(
+          tempDir,
+          'composed-video-prompts.mp4',
+        );
+        const assContent = buildAssFromPromptOverlayCues(promptOverlayCues);
+        await fs.writeFile(promptAssPath, assContent, 'utf-8');
+        cleanupFiles.push(promptAssPath);
+
+        try {
+          await burnWordCaptionsIntoVideo(
+            baseOutputPath,
+            promptAssPath,
+            promptOverlayOutputPath,
+          );
+          cleanupFiles.push(promptOverlayOutputPath);
+          overlayedOutputPath = promptOverlayOutputPath;
+        } catch (error) {
+          console.warn(
+            `[VideoComposition] Prompt overlay burn failed, proceeding without prompt overlays: ${error instanceof Error ? error.message : 'Unknown error'
+            }`,
+          );
+        }
+      }
+
+      let finalOutputPath = overlayedOutputPath;
 
       if (textOverlayCues && textOverlayCues.length > 0) {
         const assPath = path.join(tempDir, 'word-captions.ass');
@@ -1544,7 +1610,7 @@ ipcMain.handle(
 
         try {
           await burnWordCaptionsIntoVideo(
-            baseOutputPath,
+            overlayedOutputPath,
             assPath,
             captionedOutputPath,
           );
@@ -1552,8 +1618,7 @@ ipcMain.handle(
           finalOutputPath = captionedOutputPath;
         } catch (error) {
           console.warn(
-            `[VideoComposition] Word caption burn failed, proceeding without captions: ${
-              error instanceof Error ? error.message : 'Unknown error'
+            `[VideoComposition] Word caption burn failed, proceeding without captions: ${error instanceof Error ? error.message : 'Unknown error'
             }`,
           );
         }

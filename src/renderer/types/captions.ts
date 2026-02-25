@@ -21,3 +21,26 @@ export interface TextOverlayCue {
   words: TextOverlayWord[];
 }
 
+export interface PromptOverlayCue {
+  id: string;
+  startTime: number;
+  endTime: number;
+  text: string;
+}
+
+export interface ExpandedPlacementPromptEntry {
+  placementNumber: number;
+  startTime: string;
+  endTime: string;
+  originalPrompt: string;
+  expandedPrompt: string;
+  isExpanded: boolean;
+  negativePrompt?: string;
+}
+
+export interface ExpandedPlacementPromptsFile {
+  schemaVersion: 1;
+  updatedAt: string;
+  image: ExpandedPlacementPromptEntry[];
+  video: ExpandedPlacementPromptEntry[];
+}
