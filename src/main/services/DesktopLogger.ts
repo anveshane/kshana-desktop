@@ -293,6 +293,52 @@ export function logError(
   }
 }
 
+export interface FileOpFailureLogContext {
+  operation: string;
+  rawPath: string;
+  normalizedPath?: string;
+  resolvedPath?: string;
+  activeProjectRoot?: string;
+  errorCode?: string;
+  errorMessage: string;
+  sessionId?: string | null;
+  projectDirectory?: string | null;
+}
+
+/**
+ * Log structured file operation failures for cross-process debugging.
+ */
+export function logFileOpFailure(context: FileOpFailureLogContext): void {
+  const timestamp = new Date().toISOString();
+  const payload = {
+    timestamp,
+    operation: context.operation,
+    rawPath: context.rawPath,
+    normalizedPath: context.normalizedPath ?? null,
+    resolvedPath: context.resolvedPath ?? null,
+    activeProjectRoot: context.activeProjectRoot ?? null,
+    errorCode: context.errorCode ?? 'FILE_OP_FAILED',
+    errorMessage: context.errorMessage,
+    sessionId: context.sessionId ?? null,
+    projectDirectory: context.projectDirectory ?? null,
+  };
+
+  writeLog(UI_LOG_PATH, '');
+  writeLog(UI_LOG_PATH, `✗ File operation failed: ${context.operation}`);
+  const uiLines = JSON.stringify(payload, null, 2).split('\n');
+  for (const line of uiLines) {
+    writeLog(UI_LOG_PATH, `  ${line}`);
+  }
+
+  try {
+    ensureLogDir();
+    const workflowLogEntry = `[${timestamp}] [FILE_OP_FAILURE] ${JSON.stringify(payload)}\n`;
+    fs.appendFileSync(WORKFLOW_LOG_PATH, workflowLogEntry);
+  } catch {
+    // Ignore write errors
+  }
+}
+
 /**
  * Log streaming text chunk.
  */

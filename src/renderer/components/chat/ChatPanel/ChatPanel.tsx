@@ -22,6 +22,12 @@ import {
   failExecutingToolCalls,
   isCancelAckStatus,
 } from './chatPanelStopUtils';
+import {
+  extractFilePathProtocolVersion,
+  REQUIRED_FILE_PATH_PROTOCOL_VERSION,
+  shouldShowFilePathProtocolWarning,
+} from './chatPanelPathProtocolUtils';
+import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
 
 // Message types that shouldn't create new messages if same type already exists
@@ -37,6 +43,9 @@ const RECONNECT_MAX_DELAY_MS = 30000;
 const OUTBOUND_ACTION_QUEUE_CAP = 200;
 const CONNECTION_BANNER_DEDUPE_MS = 5000;
 const STOP_ACK_TIMEOUT_MS = 12000;
+const FILE_PATH_PROTOCOL_WARNING =
+  `Server file-op protocol is outdated (requires v${REQUIRED_FILE_PATH_PROTOCOL_VERSION}). ` +
+  'Upgrade kshana-ink server to avoid path compatibility failures.';
 
 const VALID_AGENT_STATUS: AgentStatus[] = [
   'idle',
@@ -98,6 +107,8 @@ export default function ChatPanel() {
     null,
   );
   const connectionBannerRef = useRef<{ key: string; at: number } | null>(null);
+  const filePathProtocolWarnedSessionIdsRef = useRef<Set<string>>(new Set());
+  const filePathProtocolWarnedWithoutSessionRef = useRef(false);
   const currentProjectDirectoryRef = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -130,6 +141,8 @@ export default function ChatPanel() {
     lastTodoMessageIdRef.current = null;
     lastQuestionMessageIdRef.current = null;
     backgroundGenerationEventDedupe.clear();
+    filePathProtocolWarnedSessionIdsRef.current.clear();
+    filePathProtocolWarnedWithoutSessionRef.current = false;
   }, []);
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
@@ -268,6 +281,24 @@ export default function ChatPanel() {
     setIsStreaming(false);
     lastAssistantIdRef.current = null;
   }, []);
+
+  const getRendererErrorMessage = useCallback(
+    (error: unknown, fallback: string): string => {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'message' in error &&
+        typeof (error as { message?: unknown }).message === 'string'
+      ) {
+        const message = (error as { message: string }).message.trim();
+        if (message) {
+          return message;
+        }
+      }
+      return fallback;
+    },
+    [],
+  );
 
   const buildSnapshotUiState = useCallback((): ChatSnapshotUiState => {
     return {
@@ -625,6 +656,25 @@ export default function ChatPanel() {
           // Update agent name if it changed
           if (agentNameFromStatus !== agentName) {
             setAgentName(agentNameFromStatus);
+          }
+
+          const protocolVersion = extractFilePathProtocolVersion(data);
+          const warningDecision = shouldShowFilePathProtocolWarning(
+            protocolVersion,
+            payloadSessionId ?? sessionIdRef.current,
+            filePathProtocolWarnedSessionIdsRef.current,
+            filePathProtocolWarnedWithoutSessionRef.current,
+          );
+          filePathProtocolWarnedWithoutSessionRef.current =
+            warningDecision.warnedWithoutSession;
+
+          if (warningDecision.shouldWarn) {
+            const reportedVersion =
+              protocolVersion === null ? 'missing' : String(protocolVersion);
+            appendSystemMessage(
+              `⚠️ ${FILE_PATH_PROTOCOL_WARNING} (server reported: ${reportedVersion}).`,
+              'error',
+            );
           }
 
           // Map status to agent status with debouncing
@@ -1387,8 +1437,12 @@ export default function ChatPanel() {
           if (filePath && fileContent !== undefined) {
             window.electron.project.writeFile(filePath, fileContent).catch((err) => {
               console.error('[ChatPanel] file_write failed:', filePath, err);
+              const reason = getRendererErrorMessage(
+                err,
+                'Unknown file write error.',
+              );
               appendSystemMessage(
-                `⚠️ Failed to save file: ${filePath.split(/[\/]/).pop() || filePath}`,
+                `⚠️ Failed to save file: ${pathBasename(filePath)}. ${reason}`,
                 'error',
               );
             });
@@ -1401,8 +1455,12 @@ export default function ChatPanel() {
           if (binPath && binContent) {
             window.electron.project.writeFileBinary(binPath, binContent).catch((err) => {
               console.error('[ChatPanel] file_write_binary failed:', binPath, err);
+              const reason = getRendererErrorMessage(
+                err,
+                'Unknown binary write error.',
+              );
               appendSystemMessage(
-                `⚠️ Failed to save binary file: ${binPath.split(/[\/]/).pop() || binPath}`,
+                `⚠️ Failed to save binary file: ${pathBasename(binPath)}. ${reason}`,
                 'error',
               );
             });
@@ -1414,8 +1472,12 @@ export default function ChatPanel() {
           if (mkdirPath) {
             window.electron.project.mkdir(mkdirPath).catch((err) => {
               console.error('[ChatPanel] file_mkdir failed:', mkdirPath, err);
+              const reason = getRendererErrorMessage(
+                err,
+                'Unknown mkdir error.',
+              );
               appendSystemMessage(
-                `⚠️ Failed to create directory: ${mkdirPath.split(/[\/]/).pop() || mkdirPath}`,
+                `⚠️ Failed to create directory: ${pathBasename(mkdirPath)}. ${reason}`,
                 'error',
               );
             });
@@ -1427,6 +1489,14 @@ export default function ChatPanel() {
           if (rmPath) {
             window.electron.project.delete(rmPath).catch((err) => {
               console.error('[ChatPanel] file_rm failed:', rmPath, err);
+              const reason = getRendererErrorMessage(
+                err,
+                'Unknown delete error.',
+              );
+              appendSystemMessage(
+                `⚠️ Failed to delete path: ${pathBasename(rmPath)}. ${reason}`,
+                'error',
+              );
             });
           }
           break;
@@ -1445,6 +1515,7 @@ export default function ChatPanel() {
       appendMessage,
       appendSystemMessage,
       debouncedSetStatus,
+      getRendererErrorMessage,
       resolveStopRequest,
     ],
   );

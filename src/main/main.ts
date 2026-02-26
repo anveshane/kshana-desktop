@@ -17,6 +17,11 @@ import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import { normalizePathForFFmpeg } from './utils/pathNormalizer';
+import {
+  normalizeIncomingPath,
+  ProjectFileOpGuardError,
+  resolveAndValidateProjectPath,
+} from './utils/projectFileOpGuard';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import serverConnectionManager, {
@@ -80,6 +85,89 @@ let appUpdateStatus: AppUpdateStatus = {
   manualCheckAvailable: app.isPackaged && process.platform !== 'linux',
   checkedAt: Date.now(),
 };
+
+type GuardedFileOp =
+  | 'project:write-file'
+  | 'project:write-file-binary'
+  | 'project:mkdir'
+  | 'project:delete';
+
+interface FileOpErrorContext {
+  operation: GuardedFileOp;
+  rawPath: string;
+  normalizedPath?: string;
+  resolvedPath?: string;
+  activeProjectRoot?: string | null;
+  error: unknown;
+}
+
+function getFileOpErrorCode(error: unknown): string {
+  if (error instanceof ProjectFileOpGuardError) {
+    return error.code;
+  }
+
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+  ) {
+    return (error as { code: string }).code;
+  }
+
+  return 'FILE_OP_FAILED';
+}
+
+function getFileOpErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as { message?: unknown }).message === 'string'
+  ) {
+    return (error as { message: string }).message;
+  }
+
+  return 'File operation failed.';
+}
+
+function createIpcFileOpError(code: string, message: string): Error {
+  const rendererError = new Error(`[${code}] ${message}`) as Error & {
+    code?: string;
+  };
+  rendererError.code = code;
+  return rendererError;
+}
+
+function throwFileOpError(context: FileOpErrorContext): never {
+  const errorCode = getFileOpErrorCode(context.error);
+  const errorMessage = getFileOpErrorMessage(context.error);
+  desktopLogger.logFileOpFailure({
+    operation: context.operation,
+    rawPath: context.rawPath,
+    normalizedPath: context.normalizedPath,
+    resolvedPath: context.resolvedPath,
+    activeProjectRoot: context.activeProjectRoot ?? undefined,
+    errorCode,
+    errorMessage,
+    projectDirectory: context.activeProjectRoot ?? null,
+    sessionId: null,
+  });
+  log.error(`[${context.operation}] File operation failed`, {
+    operation: context.operation,
+    rawPath: context.rawPath,
+    normalizedPath: context.normalizedPath,
+    resolvedPath: context.resolvedPath,
+    activeProjectRoot: context.activeProjectRoot ?? undefined,
+    errorCode,
+    errorMessage,
+  });
+  throw createIpcFileOpError(errorCode, errorMessage);
+}
 
 const broadcastAppUpdateStatus = (
   status: Omit<AppUpdateStatus, 'checkedAt'>,
@@ -548,37 +636,76 @@ ipcMain.handle(
 ipcMain.handle(
   'project:mkdir',
   async (_event, dirPath: string): Promise<void> => {
-    const normalizedPath = path.isAbsolute(dirPath)
-      ? path.normalize(dirPath)
-      : path.resolve(dirPath);
-    await fs.mkdir(normalizedPath, { recursive: true });
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        dirPath,
+        process.platform,
+        process.cwd(),
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await fs.mkdir(resolvedPath, { recursive: true });
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:mkdir',
+        rawPath: dirPath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        error,
+      });
+    }
   },
 );
 
 ipcMain.handle(
   'project:write-file',
   async (_event, filePath: string, content: string): Promise<void> => {
-    // Normalize the file path to ensure it's resolved correctly
-    const normalizedPath = path.isAbsolute(filePath)
-      ? path.normalize(filePath)
-      : path.resolve(filePath);
-    // Ensure directory exists before writing
-    const dirPath = path.dirname(normalizedPath);
-    await fs.mkdir(dirPath, { recursive: true });
-    // Atomic write: write to temp file then rename to avoid corruption.
-    // Falls back to direct write if rename fails (e.g. OneDrive on Windows).
-    const tmpPath = `${normalizedPath}.tmp`;
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+
     try {
-      await fs.writeFile(tmpPath, content, 'utf-8');
-      await fs.rename(tmpPath, normalizedPath);
-    } catch {
-      await fs.writeFile(normalizedPath, content, 'utf-8');
-      // Clean up orphaned tmp file if it exists
+      normalizedPath = normalizeIncomingPath(
+        filePath,
+        process.platform,
+        process.cwd(),
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      const dirPath = path.dirname(resolvedPath);
+      await fs.mkdir(dirPath, { recursive: true });
+      // Atomic write: write to temp file then rename to avoid corruption.
+      // Falls back to direct write if rename fails (e.g. OneDrive on Windows).
+      const tmpPath = `${resolvedPath}.tmp`;
       try {
-        await fs.unlink(tmpPath);
+        await fs.writeFile(tmpPath, content, 'utf-8');
+        await fs.rename(tmpPath, resolvedPath);
       } catch {
-        // ignore
+        await fs.writeFile(resolvedPath, content, 'utf-8');
+        // Clean up orphaned tmp file if it exists
+        try {
+          await fs.unlink(tmpPath);
+        } catch {
+          // ignore
+        }
       }
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:write-file',
+        rawPath: filePath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        error,
+      });
     }
   },
 );
@@ -586,17 +713,36 @@ ipcMain.handle(
 ipcMain.handle(
   'project:write-file-binary',
   async (_event, filePath: string, base64Data: string): Promise<void> => {
-    // Normalize the file path to ensure it's resolved correctly (matches project:write-file)
-    const normalizedPath = path.isAbsolute(filePath)
-      ? path.normalize(filePath)
-      : path.resolve(filePath);
-    // Ensure directory exists before writing
-    const dirPath = path.dirname(normalizedPath);
-    await fs.mkdir(dirPath, { recursive: true });
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        filePath,
+        process.platform,
+        process.cwd(),
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      // Ensure directory exists before writing
+      const dirPath = path.dirname(resolvedPath);
+      await fs.mkdir(dirPath, { recursive: true });
 
-    // Convert base64 string to buffer and write as binary
-    const buffer = Buffer.from(base64Data, 'base64');
-    return fs.writeFile(normalizedPath, buffer);
+      // Convert base64 string to buffer and write as binary
+      const buffer = Buffer.from(base64Data, 'base64');
+      await fs.writeFile(resolvedPath, buffer);
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:write-file-binary',
+        rawPath: filePath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        error,
+      });
+    }
   },
 );
 
@@ -667,7 +813,30 @@ ipcMain.handle(
 ipcMain.handle(
   'project:delete',
   async (_event, targetPath: string): Promise<void> => {
-    return fileSystemManager.delete(targetPath);
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        targetPath,
+        process.platform,
+        process.cwd(),
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await fileSystemManager.delete(resolvedPath);
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:delete',
+        rawPath: targetPath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        error,
+      });
+    }
   },
 );
 

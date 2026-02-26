@@ -46,6 +46,8 @@ class FileSystemManager extends EventEmitter {
 
   private readonly DEBOUNCE_DELAY = 200; // 200ms debounce for rapid changes
 
+  private activeProjectRoot: string | null = null;
+
   constructor() {
     super();
     this.store = new Store<FileSystemStore>({
@@ -361,12 +363,15 @@ class FileSystemManager extends EventEmitter {
   }
 
   async watchDirectory(dirPath: string): Promise<void> {
+    const resolvedRoot = path.resolve(dirPath);
+    this.activeProjectRoot = resolvedRoot;
+
     if (this.watcher) {
       this.watcher.close();
     }
 
     const chokidar = await import('chokidar');
-    this.watcher = chokidar.watch(dirPath, {
+    this.watcher = chokidar.watch(resolvedRoot, {
       ignored: IGNORED_PATTERNS,
       persistent: true,
       ignoreInitial: true,
@@ -415,6 +420,11 @@ class FileSystemManager extends EventEmitter {
       this.debounceTimeout = null;
     }
     this.pendingEvents.clear();
+    this.activeProjectRoot = null;
+  }
+
+  getActiveProjectRoot(): string | null {
+    return this.activeProjectRoot;
   }
 
   getRecentProjects(): RecentProject[] {
