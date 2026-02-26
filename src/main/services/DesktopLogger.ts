@@ -301,6 +301,7 @@ export interface FileOpFailureLogContext {
   activeProjectRoot?: string;
   errorCode?: string;
   errorMessage: string;
+  opId?: string | null;
   sessionId?: string | null;
   projectDirectory?: string | null;
 }
@@ -319,6 +320,7 @@ export function logFileOpFailure(context: FileOpFailureLogContext): void {
     activeProjectRoot: context.activeProjectRoot ?? null,
     errorCode: context.errorCode ?? 'FILE_OP_FAILED',
     errorMessage: context.errorMessage,
+    opId: context.opId ?? null,
     sessionId: context.sessionId ?? null,
     projectDirectory: context.projectDirectory ?? null,
   };

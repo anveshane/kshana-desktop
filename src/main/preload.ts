@@ -46,6 +46,11 @@ interface PromptOverlayCue {
   text: string;
 }
 
+interface FileOpMeta {
+  opId?: string | null;
+  source?: 'agent_ws' | 'renderer';
+}
+
 type AppUpdatePhase =
   | 'idle'
   | 'checking'
@@ -149,33 +154,46 @@ const projectBridge = {
   readAllFiles(projectDir: string): Promise<Array<{ path: string; content: string; isBinary: boolean }>> {
     return ipcRenderer.invoke('project:read-all-files', projectDir);
   },
-  mkdir(dirPath: string): Promise<void> {
-    return ipcRenderer.invoke('project:mkdir', dirPath);
+  mkdir(dirPath: string, meta?: FileOpMeta): Promise<void> {
+    return ipcRenderer.invoke('project:mkdir', dirPath, meta);
   },
   readFileBase64(filePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:read-file-base64', filePath);
   },
-  writeFile(filePath: string, content: string): Promise<void> {
-    return ipcRenderer.invoke('project:write-file', filePath, content);
+  writeFile(filePath: string, content: string, meta?: FileOpMeta): Promise<void> {
+    return ipcRenderer.invoke('project:write-file', filePath, content, meta);
   },
-  writeFileBinary(filePath: string, base64Data: string): Promise<void> {
+  writeFileBinary(
+    filePath: string,
+    base64Data: string,
+    meta?: FileOpMeta,
+  ): Promise<void> {
     return ipcRenderer.invoke(
       'project:write-file-binary',
       filePath,
       base64Data,
+      meta,
     );
   },
-  createFile(basePath: string, relativePath: string): Promise<string | null> {
-    return ipcRenderer.invoke('project:create-file', basePath, relativePath);
+  createFile(
+    basePath: string,
+    relativePath: string,
+    meta?: FileOpMeta,
+  ): Promise<string | null> {
+    return ipcRenderer.invoke('project:create-file', basePath, relativePath, meta);
   },
-  createFolder(basePath: string, relativePath: string): Promise<string | null> {
-    return ipcRenderer.invoke('project:create-folder', basePath, relativePath);
+  createFolder(
+    basePath: string,
+    relativePath: string,
+    meta?: FileOpMeta,
+  ): Promise<string | null> {
+    return ipcRenderer.invoke('project:create-folder', basePath, relativePath, meta);
   },
   rename(oldPath: string, newName: string): Promise<string> {
     return ipcRenderer.invoke('project:rename', oldPath, newName);
   },
-  delete(targetPath: string): Promise<void> {
-    return ipcRenderer.invoke('project:delete', targetPath);
+  delete(targetPath: string, meta?: FileOpMeta): Promise<void> {
+    return ipcRenderer.invoke('project:delete', targetPath, meta);
   },
   move(sourcePath: string, destDir: string): Promise<string> {
     return ipcRenderer.invoke('project:move', sourcePath, destDir);

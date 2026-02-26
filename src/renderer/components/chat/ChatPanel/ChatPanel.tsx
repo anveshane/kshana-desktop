@@ -23,8 +23,13 @@ import {
   isCancelAckStatus,
 } from './chatPanelStopUtils';
 import {
+  extractFilePathTransport,
   extractFilePathProtocolVersion,
+  extractIncomingFileOpPath,
+  isAbsoluteWirePath,
+  isFilePathProtocolCompatible,
   REQUIRED_FILE_PATH_PROTOCOL_VERSION,
+  REQUIRED_FILE_PATH_TRANSPORT,
   shouldShowFilePathProtocolWarning,
 } from './chatPanelPathProtocolUtils';
 import { pathBasename } from '../../../utils/pathNormalizer';
@@ -45,7 +50,7 @@ const CONNECTION_BANNER_DEDUPE_MS = 5000;
 const STOP_ACK_TIMEOUT_MS = 12000;
 const FILE_PATH_PROTOCOL_WARNING =
   `Server file-op protocol is outdated (requires v${REQUIRED_FILE_PATH_PROTOCOL_VERSION}). ` +
-  'Upgrade kshana-ink server to avoid path compatibility failures.';
+  `Required transport: "${REQUIRED_FILE_PATH_TRANSPORT}". Upgrade kshana-ink server to avoid path compatibility failures.`;
 
 const VALID_AGENT_STATUS: AgentStatus[] = [
   'idle',
@@ -659,8 +664,13 @@ export default function ChatPanel() {
           }
 
           const protocolVersion = extractFilePathProtocolVersion(data);
-          const warningDecision = shouldShowFilePathProtocolWarning(
+          const protocolTransport = extractFilePathTransport(data);
+          const protocolCompatible = isFilePathProtocolCompatible(
             protocolVersion,
+            protocolTransport,
+          );
+          const warningDecision = shouldShowFilePathProtocolWarning(
+            protocolCompatible,
             payloadSessionId ?? sessionIdRef.current,
             filePathProtocolWarnedSessionIdsRef.current,
             filePathProtocolWarnedWithoutSessionRef.current,
@@ -671,8 +681,9 @@ export default function ChatPanel() {
           if (warningDecision.shouldWarn) {
             const reportedVersion =
               protocolVersion === null ? 'missing' : String(protocolVersion);
+            const reportedTransport = protocolTransport ?? 'missing';
             appendSystemMessage(
-              `⚠️ ${FILE_PATH_PROTOCOL_WARNING} (server reported: ${reportedVersion}).`,
+              `⚠️ ${FILE_PATH_PROTOCOL_WARNING} (server reported version=${reportedVersion}, transport=${reportedTransport}).`,
               'error',
             );
           }
@@ -1425,17 +1436,31 @@ export default function ChatPanel() {
           break;
         }
         case 'file_write': {
-          const filePath = data.path as string;
+          const filePath = extractIncomingFileOpPath(data);
+          const opId =
+            typeof data.opId === 'string' && data.opId.trim()
+              ? data.opId
+              : undefined;
           const fileContent = data.content as string;
-          if (filePath && currentProjectDirectoryRef.current &&
-            !filePath.startsWith(currentProjectDirectoryRef.current)) {
-            console.warn(
-              '[ChatPanel] file_write path outside project directory:',
-              filePath, 'expected prefix:', currentProjectDirectoryRef.current,
+          if (!filePath) {
+            appendSystemMessage(
+              '⚠️ Failed to save file: missing file path in server payload.',
+              'error',
             );
+            break;
+          }
+          if (isAbsoluteWirePath(filePath)) {
+            appendSystemMessage(
+              `⚠️ Rejected unsafe absolute file path from server: ${filePath}`,
+              'error',
+            );
+            break;
           }
           if (filePath && fileContent !== undefined) {
-            window.electron.project.writeFile(filePath, fileContent).catch((err) => {
+            window.electron.project.writeFile(filePath, fileContent, {
+              opId,
+              source: 'agent_ws',
+            }).catch((err) => {
               console.error('[ChatPanel] file_write failed:', filePath, err);
               const reason = getRendererErrorMessage(
                 err,
@@ -1450,10 +1475,31 @@ export default function ChatPanel() {
           break;
         }
         case 'file_write_binary': {
-          const binPath = data.path as string;
+          const binPath = extractIncomingFileOpPath(data);
+          const opId =
+            typeof data.opId === 'string' && data.opId.trim()
+              ? data.opId
+              : undefined;
           const binContent = data.content as string;
+          if (!binPath) {
+            appendSystemMessage(
+              '⚠️ Failed to save binary file: missing file path in server payload.',
+              'error',
+            );
+            break;
+          }
+          if (isAbsoluteWirePath(binPath)) {
+            appendSystemMessage(
+              `⚠️ Rejected unsafe absolute file path from server: ${binPath}`,
+              'error',
+            );
+            break;
+          }
           if (binPath && binContent) {
-            window.electron.project.writeFileBinary(binPath, binContent).catch((err) => {
+            window.electron.project.writeFileBinary(binPath, binContent, {
+              opId,
+              source: 'agent_ws',
+            }).catch((err) => {
               console.error('[ChatPanel] file_write_binary failed:', binPath, err);
               const reason = getRendererErrorMessage(
                 err,
@@ -1468,9 +1514,30 @@ export default function ChatPanel() {
           break;
         }
         case 'file_mkdir': {
-          const mkdirPath = data.path as string;
+          const mkdirPath = extractIncomingFileOpPath(data);
+          const opId =
+            typeof data.opId === 'string' && data.opId.trim()
+              ? data.opId
+              : undefined;
+          if (!mkdirPath) {
+            appendSystemMessage(
+              '⚠️ Failed to create directory: missing path in server payload.',
+              'error',
+            );
+            break;
+          }
+          if (isAbsoluteWirePath(mkdirPath)) {
+            appendSystemMessage(
+              `⚠️ Rejected unsafe absolute directory path from server: ${mkdirPath}`,
+              'error',
+            );
+            break;
+          }
           if (mkdirPath) {
-            window.electron.project.mkdir(mkdirPath).catch((err) => {
+            window.electron.project.mkdir(mkdirPath, {
+              opId,
+              source: 'agent_ws',
+            }).catch((err) => {
               console.error('[ChatPanel] file_mkdir failed:', mkdirPath, err);
               const reason = getRendererErrorMessage(
                 err,
@@ -1485,9 +1552,30 @@ export default function ChatPanel() {
           break;
         }
         case 'file_rm': {
-          const rmPath = data.path as string;
+          const rmPath = extractIncomingFileOpPath(data);
+          const opId =
+            typeof data.opId === 'string' && data.opId.trim()
+              ? data.opId
+              : undefined;
+          if (!rmPath) {
+            appendSystemMessage(
+              '⚠️ Failed to delete path: missing path in server payload.',
+              'error',
+            );
+            break;
+          }
+          if (isAbsoluteWirePath(rmPath)) {
+            appendSystemMessage(
+              `⚠️ Rejected unsafe absolute delete path from server: ${rmPath}`,
+              'error',
+            );
+            break;
+          }
           if (rmPath) {
-            window.electron.project.delete(rmPath).catch((err) => {
+            window.electron.project.delete(rmPath, {
+              opId,
+              source: 'agent_ws',
+            }).catch((err) => {
               console.error('[ChatPanel] file_rm failed:', rmPath, err);
               const reason = getRendererErrorMessage(
                 err,

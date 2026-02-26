@@ -1,5 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import {
+  assertCanonicalProjectContainment,
   normalizeIncomingPath,
   ProjectFileOpGuardError,
   resolveAndValidateProjectPath,
@@ -15,6 +19,14 @@ describe('projectFileOpGuard', () => {
     expect(normalized).toBe(
       '/Users/indhicdev/Documents/Demo-3/.kshana/context/index.json',
     );
+  });
+
+  it('rejects absolute path when allowAbsolute is disabled', () => {
+    expect(() =>
+      normalizeIncomingPath('/Users/dev/project/.kshana/context/index.json', 'darwin', process.cwd(), {
+        allowAbsolute: false,
+      }),
+    ).toThrow(ProjectFileOpGuardError);
   });
 
   it('rejects traversal outside project root', () => {
@@ -50,5 +62,23 @@ describe('projectFileOpGuard', () => {
     expect(resolved).toBe(
       '/Users/indhicdev/Documents/Demo-3/.kshana/context/index.json',
     );
+  });
+
+  it('rejects symlink escape outside canonical project root', async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'kshana-guard-root-'));
+    const tmpOutside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'kshana-guard-outside-'),
+    );
+    const symlinkPath = path.join(tmpRoot, 'linked');
+
+    await fs.symlink(tmpOutside, symlinkPath);
+    const escapedTarget = path.join(symlinkPath, 'escape.txt');
+
+    await expect(
+      assertCanonicalProjectContainment(escapedTarget, tmpRoot),
+    ).rejects.toMatchObject({
+      name: 'ProjectFileOpGuardError',
+      code: 'SYMLINK_ESCAPE_DETECTED',
+    });
   });
 });

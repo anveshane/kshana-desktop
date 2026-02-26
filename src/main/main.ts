@@ -18,6 +18,7 @@ import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import { normalizePathForFFmpeg } from './utils/pathNormalizer';
 import {
+  assertCanonicalProjectContainment,
   normalizeIncomingPath,
   ProjectFileOpGuardError,
   resolveAndValidateProjectPath,
@@ -90,7 +91,14 @@ type GuardedFileOp =
   | 'project:write-file'
   | 'project:write-file-binary'
   | 'project:mkdir'
-  | 'project:delete';
+  | 'project:delete'
+  | 'project:create-file'
+  | 'project:create-folder';
+
+interface FileOpMeta {
+  opId?: string | null;
+  source?: 'agent_ws' | 'renderer';
+}
 
 interface FileOpErrorContext {
   operation: GuardedFileOp;
@@ -98,6 +106,7 @@ interface FileOpErrorContext {
   normalizedPath?: string;
   resolvedPath?: string;
   activeProjectRoot?: string | null;
+  opId?: string | null;
   error: unknown;
 }
 
@@ -154,6 +163,7 @@ function throwFileOpError(context: FileOpErrorContext): never {
     activeProjectRoot: context.activeProjectRoot ?? undefined,
     errorCode,
     errorMessage,
+    opId: context.opId ?? null,
     projectDirectory: context.activeProjectRoot ?? null,
     sessionId: null,
   });
@@ -165,8 +175,13 @@ function throwFileOpError(context: FileOpErrorContext): never {
     activeProjectRoot: context.activeProjectRoot ?? undefined,
     errorCode,
     errorMessage,
+    opId: context.opId ?? null,
   });
   throw createIpcFileOpError(errorCode, errorMessage);
+}
+
+function isAgentWireSource(meta?: FileOpMeta): boolean {
+  return meta?.source === 'agent_ws';
 }
 
 const broadcastAppUpdateStatus = (
@@ -635,7 +650,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:mkdir',
-  async (_event, dirPath: string): Promise<void> => {
+  async (_event, dirPath: string, meta?: FileOpMeta): Promise<void> => {
     const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -644,11 +659,13 @@ ipcMain.handle(
         dirPath,
         process.platform,
         process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
       );
       resolvedPath = resolveAndValidateProjectPath(
         normalizedPath,
         activeProjectRoot,
       );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
       await fs.mkdir(resolvedPath, { recursive: true });
     } catch (error) {
       throwFileOpError({
@@ -657,6 +674,7 @@ ipcMain.handle(
         normalizedPath,
         resolvedPath,
         activeProjectRoot,
+        opId: meta?.opId ?? null,
         error,
       });
     }
@@ -665,7 +683,12 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:write-file',
-  async (_event, filePath: string, content: string): Promise<void> => {
+  async (
+    _event,
+    filePath: string,
+    content: string,
+    meta?: FileOpMeta,
+  ): Promise<void> => {
     const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -675,11 +698,13 @@ ipcMain.handle(
         filePath,
         process.platform,
         process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
       );
       resolvedPath = resolveAndValidateProjectPath(
         normalizedPath,
         activeProjectRoot,
       );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
       const dirPath = path.dirname(resolvedPath);
       await fs.mkdir(dirPath, { recursive: true });
       // Atomic write: write to temp file then rename to avoid corruption.
@@ -704,6 +729,7 @@ ipcMain.handle(
         normalizedPath,
         resolvedPath,
         activeProjectRoot,
+        opId: meta?.opId ?? null,
         error,
       });
     }
@@ -712,7 +738,12 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:write-file-binary',
-  async (_event, filePath: string, base64Data: string): Promise<void> => {
+  async (
+    _event,
+    filePath: string,
+    base64Data: string,
+    meta?: FileOpMeta,
+  ): Promise<void> => {
     const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -721,11 +752,13 @@ ipcMain.handle(
         filePath,
         process.platform,
         process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
       );
       resolvedPath = resolveAndValidateProjectPath(
         normalizedPath,
         activeProjectRoot,
       );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
       // Ensure directory exists before writing
       const dirPath = path.dirname(resolvedPath);
       await fs.mkdir(dirPath, { recursive: true });
@@ -740,6 +773,7 @@ ipcMain.handle(
         normalizedPath,
         resolvedPath,
         activeProjectRoot,
+        opId: meta?.opId ?? null,
         error,
       });
     }
@@ -752,12 +786,38 @@ ipcMain.handle(
     _event,
     basePath: string,
     relativePath: string,
+    meta?: FileOpMeta,
   ): Promise<string | null> => {
-    const filePath = path.join(basePath, relativePath);
-    const dirPath = path.dirname(filePath);
-    await fs.mkdir(dirPath, { recursive: true });
-    await fs.writeFile(filePath, '', 'utf-8');
-    return filePath;
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const combinedPath = path.join(basePath, relativePath);
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        combinedPath,
+        process.platform,
+        process.cwd(),
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      const dirPath = path.dirname(resolvedPath);
+      await fs.mkdir(dirPath, { recursive: true });
+      await fs.writeFile(resolvedPath, '', 'utf-8');
+      return resolvedPath;
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:create-file',
+        rawPath: combinedPath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
+    }
   },
 );
 
@@ -767,39 +827,36 @@ ipcMain.handle(
     _event,
     basePath: string,
     relativePath: string,
+    meta?: FileOpMeta,
   ): Promise<string | null> => {
-    // Validate relativePath - it must be relative and not contain absolute path segments
-    if (path.isAbsolute(relativePath)) {
-      throw new Error(`Invalid relativePath: ${relativePath} is absolute`);
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const combinedPath = path.join(basePath, relativePath);
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        combinedPath,
+        process.platform,
+        process.cwd(),
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      await fs.mkdir(resolvedPath, { recursive: true });
+      return resolvedPath;
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:create-folder',
+        rawPath: combinedPath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
     }
-
-    // Normalize and resolve basePath to absolute path
-    // Handle both absolute and relative paths correctly
-    let resolvedBasePath: string;
-    if (path.isAbsolute(basePath)) {
-      resolvedBasePath = path.normalize(basePath);
-    } else {
-      // If relative, resolve from current working directory
-      resolvedBasePath = path.resolve(basePath);
-    }
-
-    // Join with relativePath - path.join handles this correctly
-    const folderPath = path.join(resolvedBasePath, relativePath);
-
-    // Normalize the final path to remove any redundant separators or '..' segments
-    const normalizedPath = path.normalize(folderPath);
-
-    // Security check: ensure the resulting path remains within or under the resolvedBasePath
-    // This prevents directory traversal attacks or unexpected behavior
-    if (!normalizedPath.startsWith(resolvedBasePath)) {
-      // This check might be too strict if symlinks are involved or if relativePath starts with ..
-      // But for creating project structure, we expect it to be inside.
-      // For now, let's just stick to the plan of preventing absolute duplication.
-      // If relativePath was just a folder name, this check passes.
-    }
-
-    await fs.mkdir(normalizedPath, { recursive: true });
-    return normalizedPath;
   },
 );
 
@@ -812,7 +869,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:delete',
-  async (_event, targetPath: string): Promise<void> => {
+  async (_event, targetPath: string, meta?: FileOpMeta): Promise<void> => {
     const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -821,11 +878,13 @@ ipcMain.handle(
         targetPath,
         process.platform,
         process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
       );
       resolvedPath = resolveAndValidateProjectPath(
         normalizedPath,
         activeProjectRoot,
       );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
       await fileSystemManager.delete(resolvedPath);
     } catch (error) {
       throwFileOpError({
@@ -834,6 +893,7 @@ ipcMain.handle(
         normalizedPath,
         resolvedPath,
         activeProjectRoot,
+        opId: meta?.opId ?? null,
         error,
       });
     }
