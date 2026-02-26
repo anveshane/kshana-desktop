@@ -267,7 +267,8 @@
     "publish": {
       "provider": "github",
       "owner": "anveshane",
-      "repo": "kshana-desktop"
+      "repo": "kshana-desktop",
+      "releaseType": "release"
     }
   },
   "devEngines": {

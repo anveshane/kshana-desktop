@@ -62,14 +62,6 @@ function formatDuration(ms: number): string {
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
 }
 
-const MAX_ARG_LENGTH = 80;
-const CONTENT_ARGS = new Set(['content', 'data', 'text', 'body', 'message']);
-
-function truncateString(str: string, maxLength: number): string {
-  if (str.length <= maxLength) return str;
-  return `${str.slice(0, maxLength)}...`;
-}
-
 function formatToolCall(name: string, args?: Record<string, unknown>): string {
   if (!args || Object.keys(args).length === 0) {
     return `${name}()`;
@@ -78,19 +70,13 @@ function formatToolCall(name: string, args?: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(args)) {
     if (typeof value === 'string') {
-      const maxLen = CONTENT_ARGS.has(key)
-        ? MAX_ARG_LENGTH
-        : MAX_ARG_LENGTH * 2;
-      const displayValue = truncateString(value.replace(/\n/g, '\\n'), maxLen);
-      parts.push(`${key}="${displayValue}"`);
+      parts.push(`${key}=${JSON.stringify(value)}`);
     } else if (typeof value === 'number' || typeof value === 'boolean') {
       parts.push(`${key}=${String(value)}`);
     } else if (Array.isArray(value)) {
-      const jsonStr = JSON.stringify(value);
-      parts.push(`${key}=${truncateString(jsonStr, MAX_ARG_LENGTH)}`);
+      parts.push(`${key}=${JSON.stringify(value, null, 2)}`);
     } else if (value !== null && typeof value === 'object') {
-      const jsonStr = JSON.stringify(value);
-      parts.push(`${key}=${truncateString(jsonStr, MAX_ARG_LENGTH)}`);
+      parts.push(`${key}=${JSON.stringify(value, null, 2)}`);
     }
   }
 
@@ -99,6 +85,186 @@ function formatToolCall(name: string, args?: Record<string, unknown>): string {
 
 function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+type CompactToolSummary = {
+  projectName?: string;
+  phase?: string;
+  phaseStatus?: string;
+  completedPhasesCount?: number;
+  activeBatches?: number;
+  activeImageBatches?: number;
+  activeVideoBatches?: number;
+  failedBatches?: number;
+  failedVideoBatches?: number;
+  assetsCount?: number;
+  warning?: string;
+  nextSteps: string[];
+};
+
+function getRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object'
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function toDisplayPhase(phase: string): string {
+  return phase
+    .split('_')
+    .filter(Boolean)
+    .map((part) => capitalize(part))
+    .join(' ');
+}
+
+function extractTopNextSteps(nextAction: string | undefined): string[] {
+  if (!nextAction) return [];
+  const lines = nextAction
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith('#'))
+    .map((line) => line.replace(/^\*\*(.+)\*\*$/, '$1'))
+    .map((line) => line.replace(/^[-*]\s+/, ''))
+    .map((line) => line.replace(/^\d+\.\s+/, ''))
+    .map((line) => line.replace(/\*\*/g, ''))
+    .filter((line) => !/^phase ready/i.test(line));
+
+  return lines.slice(0, 3);
+}
+
+function buildCompactSummary(
+  toolName: string,
+  resultObj: Record<string, unknown>,
+): CompactToolSummary | null {
+  if (toolName !== 'read_project' && toolName !== 'read_background_generation') {
+    return null;
+  }
+
+  const summary: CompactToolSummary = {
+    nextSteps: extractTopNextSteps(
+      typeof resultObj.next_action === 'string' ? resultObj.next_action : undefined,
+    ),
+  };
+
+  const errorText =
+    typeof resultObj.error === 'string'
+      ? resultObj.error
+      : typeof resultObj.message === 'string' && resultObj.status === 'error'
+        ? resultObj.message
+        : undefined;
+  if (errorText) {
+    summary.warning = errorText;
+  }
+
+  const project = getRecord(resultObj.project);
+  if (project) {
+    if (typeof project.title === 'string') {
+      summary.projectName = project.title;
+    }
+    if (typeof project.currentPhase === 'string') {
+      summary.phase = toDisplayPhase(project.currentPhase);
+    }
+
+    const phases = getRecord(project.phases);
+    if (phases) {
+      let completedCount = 0;
+      let currentPhaseStatus: string | undefined;
+      const currentPhaseKey =
+        typeof project.currentPhase === 'string' ? project.currentPhase : undefined;
+      for (const [phaseKey, phaseValue] of Object.entries(phases)) {
+        const phaseObj = getRecord(phaseValue);
+        const phaseStatus = typeof phaseObj?.status === 'string' ? phaseObj.status : '';
+        if (phaseStatus === 'completed') {
+          completedCount += 1;
+        }
+        if (currentPhaseKey && phaseKey === currentPhaseKey) {
+          currentPhaseStatus = phaseStatus;
+        }
+      }
+      summary.completedPhasesCount = completedCount;
+      if (currentPhaseStatus) {
+        summary.phaseStatus = currentPhaseStatus.replace(/_/g, ' ');
+      }
+    }
+
+    if (Array.isArray(project.assets)) {
+      summary.assetsCount = project.assets.length;
+    }
+
+    const backgroundGeneration = getRecord(project.backgroundGeneration);
+    if (backgroundGeneration) {
+      const batches = Array.isArray(backgroundGeneration.batches)
+        ? backgroundGeneration.batches
+        : [];
+      summary.activeBatches = batches.filter((batch) => {
+        const batchObj = getRecord(batch);
+        return batchObj?.status === 'running' || batchObj?.status === 'queued';
+      }).length;
+      summary.activeImageBatches = batches.filter((batch) => {
+        const batchObj = getRecord(batch);
+        return (
+          batchObj?.kind === 'image' &&
+          (batchObj?.status === 'running' || batchObj?.status === 'queued')
+        );
+      }).length;
+      summary.activeVideoBatches = batches.filter((batch) => {
+        const batchObj = getRecord(batch);
+        return (
+          batchObj?.kind === 'video' &&
+          (batchObj?.status === 'running' || batchObj?.status === 'queued')
+        );
+      }).length;
+      summary.failedBatches = batches.filter((batch) => {
+        const batchObj = getRecord(batch);
+        return (
+          batchObj?.status === 'failed' ||
+          (typeof batchObj?.failedItems === 'number' && batchObj.failedItems > 0)
+        );
+      }).length;
+    }
+  }
+
+  if (toolName === 'read_background_generation') {
+    if (Array.isArray(resultObj.active_batch_ids)) {
+      summary.activeBatches = resultObj.active_batch_ids.length;
+    }
+
+    const batches = Array.isArray(resultObj.batches) ? resultObj.batches : [];
+    summary.activeImageBatches = batches.filter((batch) => {
+      const batchObj = getRecord(batch);
+      return (
+        batchObj?.kind === 'image' &&
+        (batchObj?.status === 'running' || batchObj?.status === 'queued')
+      );
+    }).length;
+    summary.activeVideoBatches = batches.filter((batch) => {
+      const batchObj = getRecord(batch);
+      return (
+        batchObj?.kind === 'video' &&
+        (batchObj?.status === 'running' || batchObj?.status === 'queued')
+      );
+    }).length;
+    summary.failedVideoBatches = batches.filter((batch) => {
+      const batchObj = getRecord(batch);
+      return (
+        batchObj?.kind === 'video' &&
+        (batchObj?.status === 'failed' ||
+          (typeof batchObj?.failed_items === 'number' && batchObj.failed_items > 0))
+      );
+    }).length;
+  }
+
+  const hasSignal =
+    Boolean(summary.projectName) ||
+    Boolean(summary.phase) ||
+    Boolean(summary.phaseStatus) ||
+    summary.completedPhasesCount !== undefined ||
+    summary.activeBatches !== undefined ||
+    summary.assetsCount !== undefined ||
+    Boolean(summary.warning) ||
+    summary.nextSteps.length > 0;
+
+  return hasSignal ? summary : null;
 }
 
 function formatObjectAsText(obj: Record<string, unknown>): string {
@@ -351,10 +517,16 @@ export default function ToolCallCard({
   let filePath: string | undefined;
   let fileSize: string | undefined;
   let preview: string | undefined;
+  let summaryText: string | undefined;
+  let nextActionText: string | undefined;
+  let compactSummary: CompactToolSummary | null = null;
+  let rawDetails: string | undefined;
 
   if (result !== undefined) {
     if (typeof result === 'object' && result !== null) {
       const resultObj = result as Record<string, unknown>;
+      const isProjectSummaryTool =
+        toolName === 'read_project' || toolName === 'read_background_generation';
 
       // Extract file information (common in Task tool results)
       if ('file_path' in resultObj || 'filePath' in resultObj) {
@@ -371,6 +543,16 @@ export default function ToolCallCard({
       if ('preview' in resultObj) {
         preview = String(resultObj.preview);
       }
+      if ('summary' in resultObj && typeof resultObj.summary === 'string') {
+        summaryText = resultObj.summary;
+      }
+      if (
+        'next_action' in resultObj &&
+        typeof resultObj.next_action === 'string'
+      ) {
+        nextActionText = resultObj.next_action;
+      }
+      compactSummary = buildCompactSummary(toolName, resultObj);
 
       // Check if result has content field (like dispatch_content_agent results)
       if ('content' in resultObj && typeof resultObj.content === 'string') {
@@ -383,24 +565,25 @@ export default function ToolCallCard({
       } else if (filePath && !resultDisplay) {
         // If we have a file path but no content, show the file path
         resultDisplay = `File: ${filePath}`;
+      } else if (summaryText || nextActionText) {
+        // Structured guidance results are rendered in dedicated sections below.
+        resultDisplay = '';
+      } else if (isProjectSummaryTool) {
+        // Keep project/background payload behind details; default to summary-first UI.
+        resultDisplay = '';
       } else {
-        // For other objects, show a summary
-        const keys = Object.keys(resultObj);
-        if (keys.length <= 3) {
-          resultDisplay = JSON.stringify(result, null, 2);
-        } else {
-          resultDisplay = `{${keys.slice(0, 3).join(', ')}...}`;
-        }
+        // Show full object result in expanded view
+        resultDisplay = JSON.stringify(result, null, 2);
+      }
+
+      if (isProjectSummaryTool) {
+        summaryText = undefined;
+        nextActionText = undefined;
+        rawDetails = JSON.stringify(result, null, 2);
       }
     } else {
       resultDisplay = String(result);
     }
-  }
-
-  // Truncate long results for cleaner display
-  const MAX_RESULT_LENGTH = 500;
-  if (resultDisplay.length > MAX_RESULT_LENGTH) {
-    resultDisplay = `${resultDisplay.substring(0, MAX_RESULT_LENGTH)}...`;
   }
 
   const borderClass = isExecuting
@@ -448,8 +631,70 @@ export default function ToolCallCard({
             <span className={styles.toolCallCode}>{toolCallText}</span>
           </div>
 
-          {!isExecuting && (filePath || fileSize || resultDisplay) && (
+          {!isExecuting &&
+            (filePath ||
+              fileSize ||
+              resultDisplay ||
+              summaryText ||
+              nextActionText ||
+              compactSummary) && (
             <div className={styles.cliResult}>
+              {compactSummary && (
+                <div className={styles.summaryCard}>
+                  <div className={styles.resultLabel}>Summary</div>
+                  <ul className={styles.summaryList}>
+                    {compactSummary.projectName && (
+                      <li>Project: {compactSummary.projectName}</li>
+                    )}
+                    {compactSummary.phase && (
+                      <li>
+                        Phase: {compactSummary.phase}
+                        {compactSummary.phaseStatus
+                          ? ` (${compactSummary.phaseStatus})`
+                          : ''}
+                      </li>
+                    )}
+                    {compactSummary.completedPhasesCount !== undefined && (
+                      <li>Completed phases: {compactSummary.completedPhasesCount}</li>
+                    )}
+                    {compactSummary.activeBatches !== undefined && (
+                      <li>Background batches active: {compactSummary.activeBatches}</li>
+                    )}
+                    {(compactSummary.activeImageBatches !== undefined ||
+                      compactSummary.activeVideoBatches !== undefined) && (
+                      <li>
+                        Image batches: {compactSummary.activeImageBatches ?? 0} ·
+                        Video batches: {compactSummary.activeVideoBatches ?? 0}
+                      </li>
+                    )}
+                    {(compactSummary.failedBatches !== undefined ||
+                      compactSummary.failedVideoBatches !== undefined) && (
+                      <li>
+                        Failed batches: {compactSummary.failedBatches ?? 0}
+                        {compactSummary.failedVideoBatches !== undefined
+                          ? ` (video: ${compactSummary.failedVideoBatches})`
+                          : ''}
+                      </li>
+                    )}
+                    {compactSummary.assetsCount !== undefined && (
+                      <li>Assets generated: {compactSummary.assetsCount}</li>
+                    )}
+                  </ul>
+                  {compactSummary.warning && (
+                    <div className={styles.summaryWarning}>{compactSummary.warning}</div>
+                  )}
+                  {compactSummary.nextSteps.length > 0 && (
+                    <div className={styles.summaryNextSteps}>
+                      <div className={styles.resultLabel}>Next</div>
+                      <ul className={styles.summaryList}>
+                        {compactSummary.nextSteps.map((step) => (
+                          <li key={step}>{step}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
               {filePath && (
                 <button
                   type="button"
@@ -485,8 +730,30 @@ export default function ToolCallCard({
                   )}
                 </div>
               )}
+              {summaryText && (
+                <div className={styles.cliResultContent}>
+                  <div className={styles.resultLabel}>Summary</div>
+                  <pre className={styles.cliResultPre}>{summaryText}</pre>
+                </div>
+              )}
+              {nextActionText && (
+                <div className={styles.cliResultContent}>
+                  <div className={styles.resultLabel}>Next Action</div>
+                  <div className={styles.resultContentMarkdown}>
+                    <ReactMarkdown>{nextActionText}</ReactMarkdown>
+                  </div>
+                </div>
+              )}
+              {rawDetails && (
+                <div className={styles.cliPreview}>
+                  <details>
+                    <summary>Details</summary>
+                    <pre className={styles.cliResultPre}>{rawDetails}</pre>
+                  </details>
+                </div>
+              )}
             </div>
-          )}
+            )}
 
           {isError && !resultDisplay && (
             <div className={styles.errorResult}>

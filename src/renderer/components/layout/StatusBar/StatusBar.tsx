@@ -6,6 +6,7 @@ const APP_VERSION = 'v1.0.7';
 export default function StatusBar() {
   return (
     <footer className={styles.container}>
+      <div className={styles.left} />
       <div className={styles.right}>
         <span className={styles.version}>{APP_VERSION}</span>
         <button type="button" className={styles.iconButton} title="Help">

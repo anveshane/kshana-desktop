@@ -46,6 +46,24 @@ interface PromptOverlayCue {
   text: string;
 }
 
+type AppUpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface AppUpdateStatus {
+  phase: AppUpdatePhase;
+  version?: string;
+  progressPercent?: number;
+  message?: string;
+  manualCheckAvailable?: boolean;
+  checkedAt: number;
+}
+
 export type Channels = 'ipc-example';
 
 const backendBridge = {
@@ -421,6 +439,24 @@ const loggerBridge = {
   },
 };
 
+const updateBridge = {
+  getStatus(): Promise<AppUpdateStatus> {
+    return ipcRenderer.invoke('app-update:get-status');
+  },
+  checkNow(): Promise<AppUpdateStatus> {
+    return ipcRenderer.invoke('app-update:check-now');
+  },
+  onStatusChange(callback: (status: AppUpdateStatus) => void) {
+    const subscription = (_event: IpcRendererEvent, status: AppUpdateStatus) => {
+      callback(status);
+    };
+    ipcRenderer.on('app-update:status', subscription);
+    return () => {
+      ipcRenderer.removeListener('app-update:status', subscription);
+    };
+  },
+};
+
 const electronHandler = {
   ipcRenderer: {
     sendMessage(channel: Channels, ...args: unknown[]) {
@@ -444,6 +480,7 @@ const electronHandler = {
   project: projectBridge,
   remotion: remotionBridge,
   logger: loggerBridge,
+  updates: updateBridge,
 };
 
 contextBridge.exposeInMainWorld('electron', electronHandler);

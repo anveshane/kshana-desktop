@@ -12,6 +12,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import log from 'electron-log';
+import { autoUpdater } from 'electron-updater';
 import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
@@ -50,11 +51,48 @@ import {
   type PromptOverlayCue,
 } from './services/promptOverlayAss';
 
+type AppUpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+interface AppUpdateStatus {
+  phase: AppUpdatePhase;
+  version?: string;
+  progressPercent?: number;
+  message?: string;
+  manualCheckAvailable?: boolean;
+  checkedAt: number;
+}
+
 if (app.isPackaged) {
   process.env.KSHANA_PACKAGED = '1';
 }
 
 let mainWindow: BrowserWindow | null = null;
+let appUpdateStatus: AppUpdateStatus = {
+  phase: 'idle',
+  message: 'No update check yet',
+  manualCheckAvailable: app.isPackaged && process.platform !== 'linux',
+  checkedAt: Date.now(),
+};
+
+const broadcastAppUpdateStatus = (
+  status: Omit<AppUpdateStatus, 'checkedAt'>,
+) => {
+  appUpdateStatus = {
+    ...status,
+    checkedAt: Date.now(),
+  };
+
+  if (mainWindow) {
+    mainWindow.webContents.send('app-update:status', appUpdateStatus);
+  }
+};
 
 serverConnectionManager.on('state', (state: BackendState) => {
   if (mainWindow) {
@@ -1907,6 +1945,15 @@ ipcMain.handle('logger:get-paths', () => {
   return desktopLogger.getLogPaths();
 });
 
+ipcMain.handle('app-update:get-status', async () => {
+  return appUpdateStatus;
+});
+
+ipcMain.handle('app-update:check-now', async () => {
+  await checkForAppUpdates();
+  return appUpdateStatus;
+});
+
 if (process.env.NODE_ENV === 'production') {
   const sourceMapSupport = require('source-map-support');
   sourceMapSupport.install();
@@ -1930,6 +1977,124 @@ const installExtensions = async () => {
       forceDownload,
     )
     .catch(console.log);
+};
+
+const setupAutoUpdater = () => {
+  if (!app.isPackaged) {
+    log.info('[AutoUpdater] Skipping update checks in development mode');
+    broadcastAppUpdateStatus({
+      phase: 'idle',
+      manualCheckAvailable: false,
+    });
+    return;
+  }
+
+  if (process.platform === 'linux') {
+    log.info('[AutoUpdater] Skipping update checks on Linux');
+    broadcastAppUpdateStatus({
+      phase: 'idle',
+      message: 'Updates are not configured on Linux',
+      manualCheckAvailable: false,
+    });
+    return;
+  }
+
+  autoUpdater.logger = log;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    log.info('[AutoUpdater] Checking for updates...');
+    broadcastAppUpdateStatus({
+      phase: 'checking',
+      message: 'Checking for updates...',
+    });
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    log.info(`[AutoUpdater] Update available: ${info.version}`);
+    broadcastAppUpdateStatus({
+      phase: 'available',
+      version: info.version,
+      message: `Update ${info.version} is available`,
+    });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    log.info(`[AutoUpdater] No updates. Current latest: ${info.version}`);
+    broadcastAppUpdateStatus({
+      phase: 'not-available',
+      version: info.version,
+      message: `You're on the latest version (${info.version})`,
+    });
+  });
+
+  autoUpdater.on('error', (error) => {
+    log.error('[AutoUpdater] Update check failed:', error);
+    broadcastAppUpdateStatus({
+      phase: 'error',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Update check failed unexpectedly',
+    });
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    log.info(
+      `[AutoUpdater] Download progress: ${Math.round(progressObj.percent)}%`,
+    );
+    broadcastAppUpdateStatus({
+      phase: 'downloading',
+      progressPercent: Math.round(progressObj.percent),
+      message: 'Downloading update...',
+    });
+  });
+
+  autoUpdater.on('update-downloaded', async (info) => {
+    log.info(`[AutoUpdater] Update downloaded: ${info.version}`);
+    broadcastAppUpdateStatus({
+      phase: 'downloaded',
+      version: info.version,
+      progressPercent: 100,
+      message: `Update ${info.version} is ready to install`,
+    });
+
+    if (!mainWindow) return;
+
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Update ready',
+      message: 'A new version has been downloaded.',
+      detail: 'Restart the app now to install the update.',
+    });
+
+    if (result.response === 0) {
+      autoUpdater.quitAndInstall();
+    }
+  });
+};
+
+const checkForAppUpdates = async () => {
+  if (!app.isPackaged || process.platform === 'linux') {
+    return;
+  }
+
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    log.error('[AutoUpdater] checkForUpdates failed:', error);
+    broadcastAppUpdateStatus({
+      phase: 'error',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Unable to check for updates',
+    });
+  }
 };
 
 const createWindow = async () => {
@@ -2098,6 +2263,9 @@ app
 
     // Create window first so UI appears immediately
     await createWindow();
+
+    setupAutoUpdater();
+    checkForAppUpdates();
 
     // Start backend in background (non-blocking)
     // UI will show loading state while backend starts

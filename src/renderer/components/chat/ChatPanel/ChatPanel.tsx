@@ -2048,10 +2048,11 @@ export default function ChatPanel() {
             type="button"
             className={styles.exportButton}
             onClick={handleExportChat}
-            title="Export chat as JSON"
+            title="Export chat history as JSON"
+            aria-label="Export chat history as JSON"
           >
             <Download size={14} />
-            <span>Export</span>
+            <span>Export Chat</span>
           </button>
           <button
             type="button"
