@@ -1388,7 +1388,7 @@ export default function ChatPanel() {
             window.electron.project.writeFile(filePath, fileContent).catch((err) => {
               console.error('[ChatPanel] file_write failed:', filePath, err);
               appendSystemMessage(
-                `⚠️ Failed to save file: ${filePath.split('/').pop() || filePath}`,
+                `⚠️ Failed to save file: ${filePath.split(/[\/]/).pop() || filePath}`,
                 'error',
               );
             });
@@ -1402,7 +1402,7 @@ export default function ChatPanel() {
             window.electron.project.writeFileBinary(binPath, binContent).catch((err) => {
               console.error('[ChatPanel] file_write_binary failed:', binPath, err);
               appendSystemMessage(
-                `⚠️ Failed to save binary file: ${binPath.split('/').pop() || binPath}`,
+                `⚠️ Failed to save binary file: ${binPath.split(/[\/]/).pop() || binPath}`,
                 'error',
               );
             });
@@ -1415,7 +1415,7 @@ export default function ChatPanel() {
             window.electron.project.mkdir(mkdirPath).catch((err) => {
               console.error('[ChatPanel] file_mkdir failed:', mkdirPath, err);
               appendSystemMessage(
-                `⚠️ Failed to create directory: ${mkdirPath.split('/').pop() || mkdirPath}`,
+                `⚠️ Failed to create directory: ${mkdirPath.split(/[\/]/).pop() || mkdirPath}`,
                 'error',
               );
             });
