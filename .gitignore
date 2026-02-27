@@ -145,6 +145,7 @@ $RECYCLE.BIN/
 dist/
 build/
 assets/whisper-models/
+assets/runtime-config.json
 
 # IDE
 .idea/
