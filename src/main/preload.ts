@@ -14,6 +14,7 @@ import type {
   RemotionTimelineItem,
   ParsedInfographicPlacement,
 } from '../shared/remotionTypes';
+import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
 
 interface WordTimestamp {
   text: string;
@@ -36,6 +37,36 @@ interface TextOverlayCue {
   endTime: number;
   text: string;
   words: TextOverlayWord[];
+}
+
+interface PromptOverlayCue {
+  id: string;
+  startTime: number;
+  endTime: number;
+  text: string;
+}
+
+interface FileOpMeta {
+  opId?: string | null;
+  source?: 'agent_ws' | 'renderer';
+}
+
+type AppUpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface AppUpdateStatus {
+  phase: AppUpdatePhase;
+  version?: string;
+  progressPercent?: number;
+  message?: string;
+  manualCheckAvailable?: boolean;
+  checkedAt: number;
 }
 
 export type Channels = 'ipc-example';
@@ -123,33 +154,46 @@ const projectBridge = {
   readAllFiles(projectDir: string): Promise<Array<{ path: string; content: string; isBinary: boolean }>> {
     return ipcRenderer.invoke('project:read-all-files', projectDir);
   },
-  mkdir(dirPath: string): Promise<void> {
-    return ipcRenderer.invoke('project:mkdir', dirPath);
+  mkdir(dirPath: string, meta?: FileOpMeta): Promise<void> {
+    return ipcRenderer.invoke('project:mkdir', dirPath, meta);
   },
   readFileBase64(filePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:read-file-base64', filePath);
   },
-  writeFile(filePath: string, content: string): Promise<void> {
-    return ipcRenderer.invoke('project:write-file', filePath, content);
+  writeFile(filePath: string, content: string, meta?: FileOpMeta): Promise<void> {
+    return ipcRenderer.invoke('project:write-file', filePath, content, meta);
   },
-  writeFileBinary(filePath: string, base64Data: string): Promise<void> {
+  writeFileBinary(
+    filePath: string,
+    base64Data: string,
+    meta?: FileOpMeta,
+  ): Promise<void> {
     return ipcRenderer.invoke(
       'project:write-file-binary',
       filePath,
       base64Data,
+      meta,
     );
   },
-  createFile(basePath: string, relativePath: string): Promise<string | null> {
-    return ipcRenderer.invoke('project:create-file', basePath, relativePath);
+  createFile(
+    basePath: string,
+    relativePath: string,
+    meta?: FileOpMeta,
+  ): Promise<string | null> {
+    return ipcRenderer.invoke('project:create-file', basePath, relativePath, meta);
   },
-  createFolder(basePath: string, relativePath: string): Promise<string | null> {
-    return ipcRenderer.invoke('project:create-folder', basePath, relativePath);
+  createFolder(
+    basePath: string,
+    relativePath: string,
+    meta?: FileOpMeta,
+  ): Promise<string | null> {
+    return ipcRenderer.invoke('project:create-folder', basePath, relativePath, meta);
   },
   rename(oldPath: string, newName: string): Promise<string> {
     return ipcRenderer.invoke('project:rename', oldPath, newName);
   },
-  delete(targetPath: string): Promise<void> {
-    return ipcRenderer.invoke('project:delete', targetPath);
+  delete(targetPath: string, meta?: FileOpMeta): Promise<void> {
+    return ipcRenderer.invoke('project:delete', targetPath, meta);
   },
   move(sourcePath: string, destDir: string): Promise<string> {
     return ipcRenderer.invoke('project:move', sourcePath, destDir);
@@ -198,6 +242,9 @@ const projectBridge = {
   saveVideoFile(): Promise<string | null> {
     return ipcRenderer.invoke('project:save-video-file');
   },
+  exportChatJson(payload: ChatExportPayload): Promise<ChatExportResult> {
+    return ipcRenderer.invoke('project:export-chat-json', payload);
+  },
   composeTimelineVideo(
     timelineItems: Array<{
       type: 'image' | 'video' | 'placeholder';
@@ -206,6 +253,7 @@ const projectBridge = {
       startTime: number;
       endTime: number;
       sourceOffsetSeconds?: number;
+      label?: string;
     }>,
     projectDirectory: string,
     audioPath?: string,
@@ -216,6 +264,7 @@ const projectBridge = {
       endTime: number;
     }>,
     textOverlayCues?: TextOverlayCue[],
+    promptOverlayCues?: PromptOverlayCue[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
     return ipcRenderer.invoke(
       'project:compose-timeline-video',
@@ -224,6 +273,7 @@ const projectBridge = {
       audioPath,
       overlayItems,
       textOverlayCues,
+      promptOverlayCues,
     );
   },
   exportCapcut(
@@ -246,6 +296,7 @@ const projectBridge = {
       label?: string;
     }>,
     textOverlayCues?: TextOverlayCue[],
+    promptOverlayCues?: PromptOverlayCue[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
     return ipcRenderer.invoke(
       'project:export-capcut',
@@ -254,6 +305,7 @@ const projectBridge = {
       audioPath,
       overlayItems,
       textOverlayCues,
+      promptOverlayCues,
     );
   },
   onFileChange(callback: (event: FileChangeEvent) => void) {
@@ -405,6 +457,24 @@ const loggerBridge = {
   },
 };
 
+const updateBridge = {
+  getStatus(): Promise<AppUpdateStatus> {
+    return ipcRenderer.invoke('app-update:get-status');
+  },
+  checkNow(): Promise<AppUpdateStatus> {
+    return ipcRenderer.invoke('app-update:check-now');
+  },
+  onStatusChange(callback: (status: AppUpdateStatus) => void) {
+    const subscription = (_event: IpcRendererEvent, status: AppUpdateStatus) => {
+      callback(status);
+    };
+    ipcRenderer.on('app-update:status', subscription);
+    return () => {
+      ipcRenderer.removeListener('app-update:status', subscription);
+    };
+  },
+};
+
 const electronHandler = {
   ipcRenderer: {
     sendMessage(channel: Channels, ...args: unknown[]) {
@@ -428,6 +498,7 @@ const electronHandler = {
   project: projectBridge,
   remotion: remotionBridge,
   logger: loggerBridge,
+  updates: updateBridge,
 };
 
 contextBridge.exposeInMainWorld('electron', electronHandler);

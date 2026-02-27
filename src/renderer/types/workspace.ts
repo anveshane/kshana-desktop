@@ -28,8 +28,18 @@ export interface WorkspaceState {
   pendingFileNavigation: string | null;
 }
 
+export interface ProjectSwitchGuardContext {
+  fromProjectDirectory: string | null;
+  toProjectDirectory: string;
+}
+
+export type ProjectSwitchGuard = (
+  context: ProjectSwitchGuardContext,
+) => boolean | Promise<boolean>;
+
 export interface WorkspaceActions {
   openProject: (path: string) => Promise<void>;
+  registerProjectSwitchGuard: (guard: ProjectSwitchGuard) => () => void;
   closeProject: () => void;
   selectFile: (file: SelectedFile | null) => void;
   addToActiveContext: (file: SelectedFile) => void;

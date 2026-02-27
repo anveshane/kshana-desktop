@@ -5,6 +5,7 @@ import styles from './ChatInput.module.scss';
 interface ChatInputProps {
   disabled?: boolean;
   isRunning?: boolean;
+  isStopping?: boolean;
   placeholder?: string;
   onSend: (message: string) => void;
   onStop?: () => void;
@@ -17,6 +18,7 @@ const LINE_HEIGHT = 24; // Approximate line height in pixels
 export default function ChatInput({
   disabled = false,
   isRunning = false,
+  isStopping = false,
   placeholder = 'Describe your story, ask for a storyboard, or request assets…',
   onSend,
   onStop,
@@ -79,7 +81,7 @@ export default function ChatInput({
   };
 
   const canSend = value.trim().length > 0 && !disabled;
-  const canStop = !disabled && isRunning;
+  const canStop = !disabled && isRunning && !isStopping;
 
   return (
     <form className={styles.container} onSubmit={handleSubmit}>
@@ -102,7 +104,9 @@ export default function ChatInput({
           aria-label={isRunning ? 'Stop agent' : 'Send message'}
           title={
             isRunning
-              ? 'Stop current task'
+              ? isStopping
+                ? 'Stopping task...'
+                : 'Stop current task'
               : 'Send message (Shift+Enter or Cmd/Ctrl+Enter)'
           }
           onClick={isRunning ? onStop : undefined}
@@ -112,7 +116,11 @@ export default function ChatInput({
       </div>
       <div className={styles.hint}>
         {isRunning ? (
-          <>Agent is running. Use Stop to cancel this run.</>
+          isStopping ? (
+            <>Stopping task...</>
+          ) : (
+            <>Agent is running. Use Stop to cancel this run.</>
+          )
         ) : (
           <>
             Press <kbd>Enter</kbd> for new line, <kbd>Shift+Enter</kbd> or{' '}

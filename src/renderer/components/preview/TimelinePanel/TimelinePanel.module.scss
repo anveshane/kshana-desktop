@@ -601,6 +601,7 @@
   transform: translateY(-50%);
   height: 50px;
   min-height: 50px;
+  min-width: 8px;
   background-color: rgba($color-accent-cyan, 0.15);
   border: 1px solid rgba($color-accent-cyan, 0.4);
   border-radius: $radius-sm;

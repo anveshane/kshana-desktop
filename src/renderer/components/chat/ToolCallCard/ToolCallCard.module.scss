@@ -539,6 +539,38 @@
   line-height: 1.5;
 }
 
+.summaryCard {
+  border: 1px solid rgba($color-panel-border, 0.6);
+  background: rgba($color-panel-background, 0.35);
+  border-radius: $radius-sm;
+  padding: $spacing-sm;
+  margin-bottom: $spacing-sm;
+}
+
+.summaryList {
+  margin: $spacing-xs 0 0 0;
+  padding-left: $spacing-lg;
+  color: $color-text-primary;
+
+  li {
+    margin: $spacing-xs 0;
+  }
+}
+
+.summaryWarning {
+  margin-top: $spacing-sm;
+  padding: $spacing-xs $spacing-sm;
+  border-left: 2px solid $color-error;
+  background: rgba($color-error, 0.12);
+  color: $color-error;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+}
+
+.summaryNextSteps {
+  margin-top: $spacing-sm;
+}
+
 
 .cliResultContent {
   margin-top: $spacing-xs;

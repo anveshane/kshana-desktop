@@ -36,6 +36,82 @@
   color: $color-text-muted;
 }
 
+.updateBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba($color-text-primary, 0.15);
+  background-color: rgba($color-text-primary, 0.04);
+}
+
+.updateLabel {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.updateDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: $color-text-muted;
+}
+
+.checking .updateDot,
+.downloading .updateDot {
+  background-color: #7dd3fc;
+}
+
+.available .updateDot {
+  background-color: #facc15;
+}
+
+.downloaded .updateDot {
+  background-color: $color-accent-green;
+}
+
+.error .updateDot {
+  background-color: #ef4444;
+}
+
+.not-available .updateDot,
+.idle .updateDot {
+  background-color: $color-text-muted;
+}
+
+.checkButton {
+  @include flex-center;
+  gap: $spacing-xs;
+  background: none;
+  border: 1px solid rgba($color-text-primary, 0.14);
+  color: $color-text-muted;
+  padding: 3px 8px;
+  border-radius: $radius-sm;
+  font-size: $font-size-xs;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    color: $color-text-secondary;
+    border-color: rgba($color-accent-green, 0.55);
+    background-color: rgba($color-accent-green, 0.08);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+}
+
+.spinningIcon {
+  animation: rotate 0.9s linear infinite;
+}
+
 .version {
   font-size: $font-size-xs;
   color: $color-text-muted;
@@ -54,6 +130,16 @@
   &:hover {
     color: $color-text-secondary;
     background-color: rgba($color-text-primary, 0.05);
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
   }
 }
 

@@ -12,10 +12,17 @@ import path from 'path';
 import fs from 'fs/promises';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import log from 'electron-log';
+import { autoUpdater } from 'electron-updater';
 import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import { normalizePathForFFmpeg } from './utils/pathNormalizer';
+import {
+  assertCanonicalProjectContainment,
+  normalizeIncomingPath,
+  ProjectFileOpGuardError,
+  resolveAndValidateProjectPath,
+} from './utils/projectFileOpGuard';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import serverConnectionManager, {
@@ -35,19 +42,160 @@ import type {
   RemotionTimelineItem,
   ParsedInfographicPlacement,
 } from '../shared/remotionTypes';
+import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
 import * as desktopLogger from './services/DesktopLogger';
+import { exportChatJsonWithDialog } from './services/chatExportService';
 import {
   generateCapcutProject,
   type ExportTimelineItem,
   type ExportOverlayItem,
   type ExportTextOverlayCue,
+  type ExportPromptOverlayCue,
 } from './exporters/capcutGenerator';
+import {
+  buildAssFromPromptOverlayCues,
+  type PromptOverlayCue,
+} from './services/promptOverlayAss';
+
+type AppUpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+interface AppUpdateStatus {
+  phase: AppUpdatePhase;
+  version?: string;
+  progressPercent?: number;
+  message?: string;
+  manualCheckAvailable?: boolean;
+  checkedAt: number;
+}
 
 if (app.isPackaged) {
   process.env.KSHANA_PACKAGED = '1';
 }
 
 let mainWindow: BrowserWindow | null = null;
+let appUpdateStatus: AppUpdateStatus = {
+  phase: 'idle',
+  message: 'No update check yet',
+  manualCheckAvailable: app.isPackaged && process.platform !== 'linux',
+  checkedAt: Date.now(),
+};
+
+type GuardedFileOp =
+  | 'project:write-file'
+  | 'project:write-file-binary'
+  | 'project:mkdir'
+  | 'project:delete'
+  | 'project:create-file'
+  | 'project:create-folder';
+
+interface FileOpMeta {
+  opId?: string | null;
+  source?: 'agent_ws' | 'renderer';
+}
+
+interface FileOpErrorContext {
+  operation: GuardedFileOp;
+  rawPath: string;
+  normalizedPath?: string;
+  resolvedPath?: string;
+  activeProjectRoot?: string | null;
+  opId?: string | null;
+  error: unknown;
+}
+
+function getFileOpErrorCode(error: unknown): string {
+  if (error instanceof ProjectFileOpGuardError) {
+    return error.code;
+  }
+
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+  ) {
+    return (error as { code: string }).code;
+  }
+
+  return 'FILE_OP_FAILED';
+}
+
+function getFileOpErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as { message?: unknown }).message === 'string'
+  ) {
+    return (error as { message: string }).message;
+  }
+
+  return 'File operation failed.';
+}
+
+function createIpcFileOpError(code: string, message: string): Error {
+  const rendererError = new Error(`[${code}] ${message}`) as Error & {
+    code?: string;
+  };
+  rendererError.code = code;
+  return rendererError;
+}
+
+function throwFileOpError(context: FileOpErrorContext): never {
+  const errorCode = getFileOpErrorCode(context.error);
+  const errorMessage = getFileOpErrorMessage(context.error);
+  desktopLogger.logFileOpFailure({
+    operation: context.operation,
+    rawPath: context.rawPath,
+    normalizedPath: context.normalizedPath,
+    resolvedPath: context.resolvedPath,
+    activeProjectRoot: context.activeProjectRoot ?? undefined,
+    errorCode,
+    errorMessage,
+    opId: context.opId ?? null,
+    projectDirectory: context.activeProjectRoot ?? null,
+    sessionId: null,
+  });
+  log.error(`[${context.operation}] File operation failed`, {
+    operation: context.operation,
+    rawPath: context.rawPath,
+    normalizedPath: context.normalizedPath,
+    resolvedPath: context.resolvedPath,
+    activeProjectRoot: context.activeProjectRoot ?? undefined,
+    errorCode,
+    errorMessage,
+    opId: context.opId ?? null,
+  });
+  throw createIpcFileOpError(errorCode, errorMessage);
+}
+
+function isAgentWireSource(meta?: FileOpMeta): boolean {
+  return meta?.source === 'agent_ws';
+}
+
+const broadcastAppUpdateStatus = (
+  status: Omit<AppUpdateStatus, 'checkedAt'>,
+) => {
+  appUpdateStatus = {
+    ...status,
+    checkedAt: Date.now(),
+  };
+
+  if (mainWindow) {
+    mainWindow.webContents.send('app-update:status', appUpdateStatus);
+  }
+};
 
 serverConnectionManager.on('state', (state: BackendState) => {
   if (mainWindow) {
@@ -502,52 +650,133 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:mkdir',
-  async (_event, dirPath: string): Promise<void> => {
-    const normalizedPath = path.isAbsolute(dirPath)
-      ? path.normalize(dirPath)
-      : path.resolve(dirPath);
-    await fs.mkdir(normalizedPath, { recursive: true });
+  async (_event, dirPath: string, meta?: FileOpMeta): Promise<void> => {
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        dirPath,
+        process.platform,
+        process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      await fs.mkdir(resolvedPath, { recursive: true });
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:mkdir',
+        rawPath: dirPath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
+    }
   },
 );
 
 ipcMain.handle(
   'project:write-file',
-  async (_event, filePath: string, content: string): Promise<void> => {
-    // Normalize the file path to ensure it's resolved correctly
-    const normalizedPath = path.isAbsolute(filePath)
-      ? path.normalize(filePath)
-      : path.resolve(filePath);
-    // Ensure directory exists before writing
-    const dirPath = path.dirname(normalizedPath);
-    await fs.mkdir(dirPath, { recursive: true });
-    // Atomic write: write to temp file then rename to avoid corruption.
-    // Falls back to direct write if rename fails (e.g. OneDrive on Windows).
-    const tmpPath = `${normalizedPath}.tmp`;
+  async (
+    _event,
+    filePath: string,
+    content: string,
+    meta?: FileOpMeta,
+  ): Promise<void> => {
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+
     try {
-      await fs.writeFile(tmpPath, content, 'utf-8');
-      await fs.rename(tmpPath, normalizedPath);
-    } catch {
-      await fs.writeFile(normalizedPath, content, 'utf-8');
-      // Clean up orphaned tmp file if it exists
+      normalizedPath = normalizeIncomingPath(
+        filePath,
+        process.platform,
+        process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      const dirPath = path.dirname(resolvedPath);
+      await fs.mkdir(dirPath, { recursive: true });
+      // Atomic write: write to temp file then rename to avoid corruption.
+      // Falls back to direct write if rename fails (e.g. OneDrive on Windows).
+      const tmpPath = `${resolvedPath}.tmp`;
       try {
-        await fs.unlink(tmpPath);
+        await fs.writeFile(tmpPath, content, 'utf-8');
+        await fs.rename(tmpPath, resolvedPath);
       } catch {
-        // ignore
+        await fs.writeFile(resolvedPath, content, 'utf-8');
+        // Clean up orphaned tmp file if it exists
+        try {
+          await fs.unlink(tmpPath);
+        } catch {
+          // ignore
+        }
       }
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:write-file',
+        rawPath: filePath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
     }
   },
 );
 
 ipcMain.handle(
   'project:write-file-binary',
-  async (_event, filePath: string, base64Data: string): Promise<void> => {
-    // Ensure directory exists before writing
-    const dirPath = path.dirname(filePath);
-    await fs.mkdir(dirPath, { recursive: true });
+  async (
+    _event,
+    filePath: string,
+    base64Data: string,
+    meta?: FileOpMeta,
+  ): Promise<void> => {
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        filePath,
+        process.platform,
+        process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      // Ensure directory exists before writing
+      const dirPath = path.dirname(resolvedPath);
+      await fs.mkdir(dirPath, { recursive: true });
 
-    // Convert base64 string to buffer and write as binary
-    const buffer = Buffer.from(base64Data, 'base64');
-    return fs.writeFile(filePath, buffer);
+      // Convert base64 string to buffer and write as binary
+      const buffer = Buffer.from(base64Data, 'base64');
+      await fs.writeFile(resolvedPath, buffer);
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:write-file-binary',
+        rawPath: filePath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
+    }
   },
 );
 
@@ -557,12 +786,38 @@ ipcMain.handle(
     _event,
     basePath: string,
     relativePath: string,
+    meta?: FileOpMeta,
   ): Promise<string | null> => {
-    const filePath = path.join(basePath, relativePath);
-    const dirPath = path.dirname(filePath);
-    await fs.mkdir(dirPath, { recursive: true });
-    await fs.writeFile(filePath, '', 'utf-8');
-    return filePath;
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const combinedPath = path.join(basePath, relativePath);
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        combinedPath,
+        process.platform,
+        process.cwd(),
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      const dirPath = path.dirname(resolvedPath);
+      await fs.mkdir(dirPath, { recursive: true });
+      await fs.writeFile(resolvedPath, '', 'utf-8');
+      return resolvedPath;
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:create-file',
+        rawPath: combinedPath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
+    }
   },
 );
 
@@ -572,39 +827,36 @@ ipcMain.handle(
     _event,
     basePath: string,
     relativePath: string,
+    meta?: FileOpMeta,
   ): Promise<string | null> => {
-    // Validate relativePath - it must be relative and not contain absolute path segments
-    if (path.isAbsolute(relativePath)) {
-      throw new Error(`Invalid relativePath: ${relativePath} is absolute`);
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const combinedPath = path.join(basePath, relativePath);
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        combinedPath,
+        process.platform,
+        process.cwd(),
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      await fs.mkdir(resolvedPath, { recursive: true });
+      return resolvedPath;
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:create-folder',
+        rawPath: combinedPath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
     }
-
-    // Normalize and resolve basePath to absolute path
-    // Handle both absolute and relative paths correctly
-    let resolvedBasePath: string;
-    if (path.isAbsolute(basePath)) {
-      resolvedBasePath = path.normalize(basePath);
-    } else {
-      // If relative, resolve from current working directory
-      resolvedBasePath = path.resolve(basePath);
-    }
-
-    // Join with relativePath - path.join handles this correctly
-    const folderPath = path.join(resolvedBasePath, relativePath);
-
-    // Normalize the final path to remove any redundant separators or '..' segments
-    const normalizedPath = path.normalize(folderPath);
-
-    // Security check: ensure the resulting path remains within or under the resolvedBasePath
-    // This prevents directory traversal attacks or unexpected behavior
-    if (!normalizedPath.startsWith(resolvedBasePath)) {
-      // This check might be too strict if symlinks are involved or if relativePath starts with ..
-      // But for creating project structure, we expect it to be inside.
-      // For now, let's just stick to the plan of preventing absolute duplication.
-      // If relativePath was just a folder name, this check passes.
-    }
-
-    await fs.mkdir(normalizedPath, { recursive: true });
-    return normalizedPath;
   },
 );
 
@@ -617,8 +869,34 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:delete',
-  async (_event, targetPath: string): Promise<void> => {
-    return fileSystemManager.delete(targetPath);
+  async (_event, targetPath: string, meta?: FileOpMeta): Promise<void> => {
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        targetPath,
+        process.platform,
+        process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      await fileSystemManager.delete(resolvedPath);
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:delete',
+        rawPath: targetPath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
+    }
   },
 );
 
@@ -663,6 +941,25 @@ ipcMain.handle('project:save-video-file', async () => {
   return result.filePath;
 });
 
+ipcMain.handle(
+  'project:export-chat-json',
+  async (
+    _event,
+    payload: ChatExportPayload,
+  ): Promise<ChatExportResult> => {
+    const targetWindow = mainWindow;
+    if (!targetWindow) {
+      return { success: false, error: 'Main window is not available' };
+    }
+
+    return exportChatJsonWithDialog(payload, {
+      showSaveDialog: (options) => dialog.showSaveDialog(targetWindow, options),
+      writeFile: (filePath, content, encoding) =>
+        fs.writeFile(filePath, content, encoding),
+    });
+  },
+);
+
 // ── Export to CapCut ────────────────────────────────────────────────────────
 ipcMain.handle(
   'project:export-capcut',
@@ -673,6 +970,7 @@ ipcMain.handle(
     audioPath?: string,
     overlayItems?: ExportOverlayItem[],
     textOverlayCues?: ExportTextOverlayCue[],
+    promptOverlayCues?: ExportPromptOverlayCue[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
     console.log('[Export:CapCut] Starting CapCut export...');
     try {
@@ -684,6 +982,7 @@ ipcMain.handle(
         audioPath,
         overlayItems,
         textOverlayCues,
+        promptOverlayCues,
       );
 
       console.log('[Export:CapCut] Exported successfully to:', result.outputDir);
@@ -716,6 +1015,7 @@ interface TimelineItem {
   startTime: number;
   endTime: number;
   sourceOffsetSeconds?: number;
+  label?: string;
 }
 
 interface OverlayItem {
@@ -830,14 +1130,14 @@ async function burnWordCaptionsIntoVideo(
     // On Windows, FFmpeg subtitle filters require heavy escaping:
     // - Backslashes must be escaped as \\\\ (four backslashes)
     // - Colons must be escaped as \\: (two backslashes + colon)
-    
+
     // First, convert Windows backslashes to forward slashes
     const normalizedAssPath = assPath.replace(/\\/g, '/');
-    
+
     // Then escape for FFmpeg filter syntax:
     // Escape colons: C:/path -> C\\:/path
     const escapedAssPath = normalizedAssPath.replace(/:/g, '\\\\:');
-    
+
     // Verify fonts directory exists
     const fontsDir = 'C:/Windows/Fonts';
     let fontsDirExists = false;
@@ -869,7 +1169,7 @@ async function burnWordCaptionsIntoVideo(
       filter: `ass=${escapedAssPath}`,
       description: 'ass filter (default fonts)',
     });
-    
+
     // Strategy 4: Try with original Windows backslashes (heavily escaped)
     const heavyEscapedPath = assPath
       .replace(/\\/g, '\\\\\\\\')  // Each backslash becomes 4 backslashes
@@ -889,7 +1189,7 @@ async function burnWordCaptionsIntoVideo(
 
   // Try each strategy in order until one succeeds
   let lastError: Error | null = null;
-  
+
   for (let i = 0; i < strategies.length; i++) {
     const strategy = strategies[i];
     console.log(
@@ -968,6 +1268,7 @@ ipcMain.handle(
     audioPath?: string,
     overlayItems?: OverlayItem[],
     textOverlayCues?: TextOverlayCue[],
+    promptOverlayCues?: PromptOverlayCue[],
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
     console.log('[VideoComposition] Starting video composition...');
     console.log('[VideoComposition] Timeline items:', timelineItems.length);
@@ -984,21 +1285,124 @@ ipcMain.handle(
     const segmentFiles: string[] = [];
     const cleanupFiles: string[] = [];
     const normalizedOverlayItems: Array<OverlayItem & { absolutePath: string }> = [];
+    const fontCandidates =
+      process.platform === 'win32'
+        ? ['C:/Windows/Fonts/arial.ttf', 'C:/Windows/Fonts/segoeui.ttf']
+        : process.platform === 'darwin'
+          ? [
+              '/System/Library/Fonts/Supplemental/Arial.ttf',
+              '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+              '/System/Library/Fonts/Helvetica.ttc',
+            ]
+          : [
+              '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+              '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+            ];
+
+    let placeholderFontPath: string | null = null;
+    for (const candidate of fontCandidates) {
+      try {
+        await fs.access(candidate);
+        placeholderFontPath = candidate;
+        break;
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    if (!placeholderFontPath) {
+      console.warn(
+        '[VideoComposition] No system font found for placeholder labels; rendering plain placeholders.',
+      );
+    }
+
+    const createPlaceholderSegment = async (
+      segmentPath: string,
+      duration: number,
+      segmentNumber: number,
+      label?: string,
+    ): Promise<void> => {
+      const fallbackLabel = `placeholder-${segmentNumber}`;
+      const placementLabel =
+        typeof label === 'string' && label.trim().length > 0
+          ? label.trim()
+          : fallbackLabel;
+      const safePlacementLabel =
+        placementLabel.length > 64
+          ? `${placementLabel.slice(0, 61)}...`
+          : placementLabel;
+      const escapedPlacementLabel = safePlacementLabel
+        .replace(/\\/g, '\\\\')
+        .replace(/:/g, '\\:')
+        .replace(/'/g, "\\'")
+        .replace(/[\r\n]+/g, ' ');
+      const escapedFontPath = placeholderFontPath
+        ? placeholderFontPath
+            .replace(/\\/g, '/')
+            .replace(/:/g, '\\:')
+            .replace(/'/g, "\\'")
+        : null;
+      const drawTextFilter = escapedFontPath
+        ? `drawtext=` +
+          `fontfile='${escapedFontPath}':` +
+          `text='${escapedPlacementLabel}':` +
+          `fontcolor=white:` +
+          `fontsize=48:` +
+          `box=1:` +
+          `boxcolor=black@0.6:` +
+          `boxborderw=20:` +
+          `x=(w-text_w)/2:` +
+          `y=(h-text_h)/2`
+        : null;
+      const outputOptions = [
+        '-c:v libx264',
+        '-preset medium',
+        '-crf 23',
+        '-pix_fmt yuv420p',
+      ];
+      if (drawTextFilter) {
+        outputOptions.push('-vf', drawTextFilter);
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg()
+          .input(`color=c=black:s=1920x1080:d=${duration}`)
+          .inputOptions(['-f lavfi'])
+          .outputOptions(outputOptions)
+          .output(segmentPath)
+          .on('start', (commandLine) => {
+            console.log(
+              `[VideoComposition] Placeholder FFmpeg command (${segmentNumber}, ${placementLabel}): ${commandLine}`,
+            );
+          })
+          .on('end', () => {
+            console.log(
+              `[VideoComposition] Placeholder segment ${segmentNumber} completed`,
+            );
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error(
+              `[VideoComposition] Placeholder segment ${segmentNumber} error:`,
+              err,
+            );
+            reject(err);
+          })
+          .run();
+      });
+    };
 
     if (overlayItems && overlayItems.length > 0) {
       for (const overlay of overlayItems) {
-        let cleanPath = overlay.path.replace(/^file:\/\/\/?/, '');
-        if (/^\/[A-Za-z]:/.test(cleanPath)) {
-          cleanPath = cleanPath.slice(1);
-        }
-        if (!cleanPath || cleanPath.trim() === '') {
+        const absolutePath = await normalizePathForFFmpeg(
+          overlay.path,
+          projectDirectory,
+        );
+
+        if (!absolutePath) {
           console.warn('[VideoComposition] Skipping overlay: empty path');
           continue;
         }
-
-        const absolutePath = path.isAbsolute(cleanPath)
-          ? cleanPath
-          : path.join(projectDirectory, cleanPath);
 
         try {
           const stats = await fs.stat(absolutePath);
@@ -1032,23 +1436,26 @@ ipcMain.handle(
         if (item.type === 'video') {
           // For video segments, use the full video file
           // The timeline startTime/endTime are for positioning, not extraction
-          // Strip file:// protocol if present, handling Windows drive letters
-          let cleanPath = item.path.replace(/^file:\/\/\/?/, '');
-          if (/^\/[A-Za-z]:/.test(cleanPath)) {
-            cleanPath = cleanPath.slice(1);
-          }
+          const absolutePath = await normalizePathForFFmpeg(
+            item.path,
+            projectDirectory,
+          );
 
-          // Skip items with empty paths
-          if (!cleanPath || cleanPath.trim() === '') {
+          // Missing media should preserve timing, so emit a black placeholder.
+          if (!absolutePath) {
             console.warn(
-              `[VideoComposition] Skipping video segment ${i + 1}: empty path`,
+              `[VideoComposition] Missing video path for segment ${i + 1}, creating placeholder`,
             );
+            await createPlaceholderSegment(
+              segmentPath,
+              item.duration,
+              i + 1,
+              item.label,
+            );
+            segmentFiles.push(segmentPath);
+            cleanupFiles.push(segmentPath);
             continue;
           }
-
-          const absolutePath = path.isAbsolute(cleanPath)
-            ? cleanPath
-            : path.join(projectDirectory, cleanPath);
 
           console.log(
             `[VideoComposition] Video segment ${i + 1}: ${absolutePath}`,
@@ -1059,8 +1466,16 @@ ipcMain.handle(
             const stats = await fs.stat(absolutePath);
             if (stats.isDirectory()) {
               console.warn(
-                `[VideoComposition] Skipping video segment ${i + 1}: path is a directory: ${absolutePath}`,
+                `[VideoComposition] Video segment ${i + 1} path is a directory (${absolutePath}), creating placeholder`,
               );
+              await createPlaceholderSegment(
+                segmentPath,
+                item.duration,
+                i + 1,
+                item.label,
+              );
+              segmentFiles.push(segmentPath);
+              cleanupFiles.push(segmentPath);
               continue;
             }
             console.log(
@@ -1072,13 +1487,29 @@ ipcMain.handle(
               error.message.includes('is a directory')
             ) {
               console.warn(
-                `[VideoComposition] Skipping video segment ${i + 1}: path is a directory`,
+                `[VideoComposition] Video segment ${i + 1} path resolved as directory, creating placeholder`,
               );
+              await createPlaceholderSegment(
+                segmentPath,
+                item.duration,
+                i + 1,
+                item.label,
+              );
+              segmentFiles.push(segmentPath);
+              cleanupFiles.push(segmentPath);
               continue;
             }
             console.warn(
-              `[VideoComposition] Skipping video segment ${i + 1}: file not found: ${absolutePath}`,
+              `[VideoComposition] Video segment ${i + 1} missing file (${absolutePath}), creating placeholder`,
             );
+            await createPlaceholderSegment(
+              segmentPath,
+              item.duration,
+              i + 1,
+              item.label,
+            );
+            segmentFiles.push(segmentPath);
+            cleanupFiles.push(segmentPath);
             continue;
           }
 
@@ -1138,23 +1569,26 @@ ipcMain.handle(
           cleanupFiles.push(segmentPath);
         } else if (item.type === 'image') {
           // Convert image to video
-          // Strip file:// protocol if present, handling Windows drive letters
-          let cleanPath = item.path.replace(/^file:\/\/\/?/, '');
-          if (/^\/[A-Za-z]:/.test(cleanPath)) {
-            cleanPath = cleanPath.slice(1);
-          }
+          const absolutePath = await normalizePathForFFmpeg(
+            item.path,
+            projectDirectory,
+          );
 
-          // Skip items with empty paths
-          if (!cleanPath || cleanPath.trim() === '') {
+          // Missing media should preserve timing, so emit a black placeholder.
+          if (!absolutePath) {
             console.warn(
-              `[VideoComposition] Skipping image segment ${i + 1}: empty path`,
+              `[VideoComposition] Missing image path for segment ${i + 1}, creating placeholder`,
             );
+            await createPlaceholderSegment(
+              segmentPath,
+              item.duration,
+              i + 1,
+              item.label,
+            );
+            segmentFiles.push(segmentPath);
+            cleanupFiles.push(segmentPath);
             continue;
           }
-
-          const absolutePath = path.isAbsolute(cleanPath)
-            ? cleanPath
-            : path.join(projectDirectory, cleanPath);
 
           console.log(
             `[VideoComposition] Image segment ${i + 1}: ${absolutePath}`,
@@ -1168,8 +1602,16 @@ ipcMain.handle(
             );
           } catch {
             console.warn(
-              `[VideoComposition] Skipping image segment ${i + 1}: file not found: ${absolutePath}`,
+              `[VideoComposition] Image segment ${i + 1} missing file (${absolutePath}), creating placeholder`,
             );
+            await createPlaceholderSegment(
+              segmentPath,
+              item.duration,
+              i + 1,
+              item.label,
+            );
+            segmentFiles.push(segmentPath);
+            cleanupFiles.push(segmentPath);
             continue;
           }
 
@@ -1319,37 +1761,12 @@ ipcMain.handle(
           console.log(
             `[VideoComposition] Creating placeholder segment ${i + 1} (${item.duration}s)...`,
           );
-          await new Promise<void>((resolve, reject) => {
-            ffmpeg()
-              .input(`color=c=black:s=1920x1080:d=${item.duration}`)
-              .inputOptions(['-f lavfi'])
-              .outputOptions([
-                '-c:v libx264',
-                '-preset medium',
-                '-crf 23',
-                '-pix_fmt yuv420p',
-              ])
-              .output(segmentPath)
-              .on('start', (commandLine) => {
-                console.log(
-                  `[VideoComposition] FFmpeg command: ${commandLine}`,
-                );
-              })
-              .on('end', () => {
-                console.log(
-                  `[VideoComposition] Placeholder segment ${i + 1} completed`,
-                );
-                resolve();
-              })
-              .on('error', (err) => {
-                console.error(
-                  `[VideoComposition] Placeholder segment ${i + 1} error:`,
-                  err,
-                );
-                reject(err);
-              })
-              .run();
-          });
+          await createPlaceholderSegment(
+            segmentPath,
+            item.duration,
+            i + 1,
+            item.label,
+          );
 
           segmentFiles.push(segmentPath);
           cleanupFiles.push(segmentPath);
@@ -1509,7 +1926,35 @@ ipcMain.handle(
         await fs.copyFile(concatenatedVideoPath, baseOutputPath);
       }
 
-      let finalOutputPath = baseOutputPath;
+      let overlayedOutputPath = baseOutputPath;
+
+      if (promptOverlayCues && promptOverlayCues.length > 0) {
+        const promptAssPath = path.join(tempDir, 'prompt-overlays.ass');
+        const promptOverlayOutputPath = path.join(
+          tempDir,
+          'composed-video-prompts.mp4',
+        );
+        const assContent = buildAssFromPromptOverlayCues(promptOverlayCues);
+        await fs.writeFile(promptAssPath, assContent, 'utf-8');
+        cleanupFiles.push(promptAssPath);
+
+        try {
+          await burnWordCaptionsIntoVideo(
+            baseOutputPath,
+            promptAssPath,
+            promptOverlayOutputPath,
+          );
+          cleanupFiles.push(promptOverlayOutputPath);
+          overlayedOutputPath = promptOverlayOutputPath;
+        } catch (error) {
+          console.warn(
+            `[VideoComposition] Prompt overlay burn failed, proceeding without prompt overlays: ${error instanceof Error ? error.message : 'Unknown error'
+            }`,
+          );
+        }
+      }
+
+      let finalOutputPath = overlayedOutputPath;
 
       if (textOverlayCues && textOverlayCues.length > 0) {
         const assPath = path.join(tempDir, 'word-captions.ass');
@@ -1523,7 +1968,7 @@ ipcMain.handle(
 
         try {
           await burnWordCaptionsIntoVideo(
-            baseOutputPath,
+            overlayedOutputPath,
             assPath,
             captionedOutputPath,
           );
@@ -1531,8 +1976,7 @@ ipcMain.handle(
           finalOutputPath = captionedOutputPath;
         } catch (error) {
           console.warn(
-            `[VideoComposition] Word caption burn failed, proceeding without captions: ${
-              error instanceof Error ? error.message : 'Unknown error'
+            `[VideoComposition] Word caption burn failed, proceeding without captions: ${error instanceof Error ? error.message : 'Unknown error'
             }`,
           );
         }
@@ -1730,6 +2174,15 @@ ipcMain.handle('logger:get-paths', () => {
   return desktopLogger.getLogPaths();
 });
 
+ipcMain.handle('app-update:get-status', async () => {
+  return appUpdateStatus;
+});
+
+ipcMain.handle('app-update:check-now', async () => {
+  await checkForAppUpdates();
+  return appUpdateStatus;
+});
+
 if (process.env.NODE_ENV === 'production') {
   const sourceMapSupport = require('source-map-support');
   sourceMapSupport.install();
@@ -1753,6 +2206,124 @@ const installExtensions = async () => {
       forceDownload,
     )
     .catch(console.log);
+};
+
+const setupAutoUpdater = () => {
+  if (!app.isPackaged) {
+    log.info('[AutoUpdater] Skipping update checks in development mode');
+    broadcastAppUpdateStatus({
+      phase: 'idle',
+      manualCheckAvailable: false,
+    });
+    return;
+  }
+
+  if (process.platform === 'linux') {
+    log.info('[AutoUpdater] Skipping update checks on Linux');
+    broadcastAppUpdateStatus({
+      phase: 'idle',
+      message: 'Updates are not configured on Linux',
+      manualCheckAvailable: false,
+    });
+    return;
+  }
+
+  autoUpdater.logger = log;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    log.info('[AutoUpdater] Checking for updates...');
+    broadcastAppUpdateStatus({
+      phase: 'checking',
+      message: 'Checking for updates...',
+    });
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    log.info(`[AutoUpdater] Update available: ${info.version}`);
+    broadcastAppUpdateStatus({
+      phase: 'available',
+      version: info.version,
+      message: `Update ${info.version} is available`,
+    });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    log.info(`[AutoUpdater] No updates. Current latest: ${info.version}`);
+    broadcastAppUpdateStatus({
+      phase: 'not-available',
+      version: info.version,
+      message: `You're on the latest version (${info.version})`,
+    });
+  });
+
+  autoUpdater.on('error', (error) => {
+    log.error('[AutoUpdater] Update check failed:', error);
+    broadcastAppUpdateStatus({
+      phase: 'error',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Update check failed unexpectedly',
+    });
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    log.info(
+      `[AutoUpdater] Download progress: ${Math.round(progressObj.percent)}%`,
+    );
+    broadcastAppUpdateStatus({
+      phase: 'downloading',
+      progressPercent: Math.round(progressObj.percent),
+      message: 'Downloading update...',
+    });
+  });
+
+  autoUpdater.on('update-downloaded', async (info) => {
+    log.info(`[AutoUpdater] Update downloaded: ${info.version}`);
+    broadcastAppUpdateStatus({
+      phase: 'downloaded',
+      version: info.version,
+      progressPercent: 100,
+      message: `Update ${info.version} is ready to install`,
+    });
+
+    if (!mainWindow) return;
+
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Update ready',
+      message: 'A new version has been downloaded.',
+      detail: 'Restart the app now to install the update.',
+    });
+
+    if (result.response === 0) {
+      autoUpdater.quitAndInstall();
+    }
+  });
+};
+
+const checkForAppUpdates = async () => {
+  if (!app.isPackaged || process.platform === 'linux') {
+    return;
+  }
+
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    log.error('[AutoUpdater] checkForUpdates failed:', error);
+    broadcastAppUpdateStatus({
+      phase: 'error',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Unable to check for updates',
+    });
+  }
 };
 
 const createWindow = async () => {
@@ -1921,6 +2492,9 @@ app
 
     // Create window first so UI appears immediately
     await createWindow();
+
+    setupAutoUpdater();
+    checkForAppUpdates();
 
     // Start backend in background (non-blocking)
     // UI will show loading state while backend starts

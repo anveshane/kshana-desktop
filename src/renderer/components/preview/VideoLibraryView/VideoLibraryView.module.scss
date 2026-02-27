@@ -362,6 +362,19 @@
   z-index: 0;
 }
 
+.videoUnavailablePlaceholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  @include flex-center;
+  @include flex-column;
+  gap: $spacing-md;
+  background-color: #000;
+  color: $color-text-muted;
+  z-index: 0;
+}
+
 .videoPlaceholderIcon {
   opacity: 0.3;
 }
@@ -489,6 +502,38 @@
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   z-index: 2;
+}
+
+.expandedPromptOverlay {
+  position: absolute;
+  top: $spacing-md;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(80%, 960px);
+  width: fit-content;
+  z-index: 2;
+  background-color: rgba(0, 0, 0, 0.74);
+  border: 1px solid rgba($color-text-primary, 0.2);
+  border-radius: $radius-sm;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  padding: $spacing-xs $spacing-sm;
+  pointer-events: none;
+}
+
+.expandedPromptHeader {
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: $color-accent-green;
+  margin-bottom: 4px;
+}
+
+.expandedPromptText {
+  font-size: $font-size-xs;
+  color: $color-text-primary;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .importedBadge {

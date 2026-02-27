@@ -10,11 +10,13 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { usePlacementFiles } from './usePlacementFiles';
 import { useTranscript } from './useTranscript';
 import { useWordCaptions } from './useWordCaptions';
+import { useExpandedPlacementPrompts } from './useExpandedPlacementPrompts';
 import { timeStringToSeconds } from '../utils/placementParsers';
 import type { AssetInfo } from '../types/kshana/assetManifest';
 import type { SceneVersions } from '../types/kshana/timeline';
 import type { TextOverlayCue } from '../types/captions';
 import { PROJECT_PATHS } from '../types/kshana';
+import type { FileNode } from '../../shared/fileSystemTypes';
 import {
   createEmptyImageProjectionSnapshot,
   selectBestAssetForPlacement,
@@ -43,6 +45,7 @@ export interface TimelineItem {
   duration: number; // calculated: endTime - startTime
   label: string;
   prompt?: string;
+  expandedPrompt?: string;
   placementNumber?: number;
   imagePath?: string; // resolved if asset matched
   videoPath?: string; // resolved if asset matched (also used for infographic mp4)
@@ -66,7 +69,82 @@ export interface TimelineData {
 
 export interface TimelineDataWithRefresh extends TimelineData {
   refreshTimeline: () => Promise<void>;
-  refreshAudioFiles: () => void;
+  refreshAudioFiles: () => Promise<void>;
+}
+
+export interface TimelineAudioFile {
+  path: string;
+  duration: number;
+}
+
+interface LatestRequestRef {
+  current: number;
+}
+
+function isSupportedAudioFileName(fileName: string): boolean {
+  return /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(fileName);
+}
+
+export async function collectAudioFilesWithDuration({
+  files,
+  projectDirectory,
+  transcriptDuration,
+  getAudioDuration,
+}: {
+  files: FileNode;
+  projectDirectory: string;
+  transcriptDuration: number;
+  getAudioDuration: (audioPath: string) => Promise<number>;
+}): Promise<TimelineAudioFile[]> {
+  const audioEntries = (files.children ?? []).filter(
+    (file): file is FileNode & { type: 'file'; name: string } =>
+      file.type === 'file' && isSupportedAudioFileName(file.name),
+  );
+
+  const audioPaths = audioEntries.map(
+    (file) => `${PROJECT_PATHS.AGENT_AUDIO}/${file.name}`,
+  );
+
+  const durationResults = await Promise.allSettled(
+    audioPaths.map(async (audioPath) => {
+      const fullAudioPath = `${projectDirectory}/${audioPath}`;
+      const duration = await getAudioDuration(fullAudioPath);
+      return duration;
+    }),
+  );
+
+  return audioPaths.map((audioPath, index) => {
+    const durationResult = durationResults[index];
+    const duration =
+      durationResult?.status === 'fulfilled'
+        ? durationResult.value
+        : transcriptDuration || 0;
+    return {
+      path: audioPath,
+      duration,
+    };
+  });
+}
+
+export async function runLatestAsyncTask<T>({
+  requestRef,
+  task,
+  commit,
+}: {
+  requestRef: LatestRequestRef;
+  task: () => Promise<T>;
+  commit: (result: T) => void;
+}): Promise<boolean> {
+  const requestId = requestRef.current + 1;
+  requestRef.current = requestId;
+
+  const result = await task();
+  if (requestId !== requestRef.current) {
+    return false;
+  }
+
+  commit(result);
+  return true;
 }
 
 function arePlacementMapsEqual(
@@ -174,10 +252,11 @@ export function useTimelineData(
     usePlacementFiles();
   const { totalDuration: transcriptDuration } = useTranscript();
   const { cues: wordCaptionCues } = useWordCaptions();
-  const [audioFiles, setAudioFiles] = useState<
-    Array<{ path: string; duration: number }>
-  >([]);
-  const [audioRefreshTrigger, setAudioRefreshTrigger] = useState(0);
+  const {
+    image: expandedImagePromptEntries,
+    video: expandedVideoPromptEntries,
+  } = useExpandedPlacementPrompts();
+  const [audioFiles, setAudioFiles] = useState<TimelineAudioFile[]>([]);
   const [timelineRefreshTrigger, setTimelineRefreshTrigger] = useState(0);
   const [imagePlacementFiles, setImagePlacementFiles] = useState<
     Record<number, string>
@@ -199,6 +278,7 @@ export function useTimelineData(
   // Keep infographic fallback mapping in a ref so we don't introduce new hook state
   // (avoids React Fast Refresh hook order issues in dev).
   const infographicPlacementFilesRef = useRef<Record<number, string>>({});
+  const audioReloadRequestIdRef = useRef(0);
 
   useEffect(() => {
     if (!isImageSyncV2Enabled) {
@@ -243,39 +323,52 @@ export function useTimelineData(
     triggerImageProjectionReconcile,
   ]);
 
-  // Refresh audio files - invoked by import handler or file watcher
-  const refreshAudioFiles = useCallback(() => {
-    setAudioRefreshTrigger((prev) => prev + 1);
-  }, []);
+  const reloadAudioFiles = useCallback(
+    async (
+      source: 'initial_load' | 'manual_refresh' | 'file_watch' = 'manual_refresh',
+    ) => {
+      if (!projectDirectory || !isLoaded) {
+        // Invalidate older in-flight requests before clearing state.
+        audioReloadRequestIdRef.current += 1;
+        setAudioFiles((prev) => (prev.length === 0 ? prev : []));
+        return;
+      }
 
-  // Subscribe to file changes under .kshana/agent/audio so UI updates when audio is added by agent or elsewhere
-  useEffect(() => {
-    if (!projectDirectory) return;
-
-    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    const unsubscribe = window.electron.project.onFileChange((event) => {
-      const filePath = event.path.replace(/\\/g, '/');
-      if (!filePath.includes('.kshana/agent/audio')) return;
-
-      console.log('[useTimelineData][file_watch]', {
-        source: 'file_watch',
-        scope: 'audio',
-        path: filePath,
+      await runLatestAsyncTask({
+        requestRef: audioReloadRequestIdRef,
+        task: async () => {
+          try {
+            console.log('[useTimelineData] Reloading audio files', { source });
+            const audioDir = `${projectDirectory}/${PROJECT_PATHS.AGENT_AUDIO}`;
+            const files = await window.electron.project.readTree(audioDir, 1);
+            return await collectAudioFilesWithDuration({
+              files,
+              projectDirectory,
+              transcriptDuration,
+              getAudioDuration: (audioPath: string) =>
+                window.electron.project.getAudioDuration(audioPath),
+            });
+          } catch (error) {
+            // Directory might not exist yet, that's okay
+            console.debug(
+              '[useTimelineData] Audio directory not found or error loading:',
+              error,
+            );
+            return [];
+          }
+        },
+        commit: (nextAudioFiles) => {
+          setAudioFiles(nextAudioFiles);
+        },
       });
+    },
+    [projectDirectory, isLoaded, transcriptDuration],
+  );
 
-      if (debounceTimeout) clearTimeout(debounceTimeout);
-      debounceTimeout = setTimeout(() => {
-        setAudioRefreshTrigger((prev) => prev + 1);
-        debounceTimeout = null;
-      }, 250);
-    });
-
-    return () => {
-      unsubscribe();
-      if (debounceTimeout) clearTimeout(debounceTimeout);
-    };
-  }, [projectDirectory]);
+  // Refresh audio files - invoked by import handler
+  const refreshAudioFiles = useCallback(async () => {
+    await reloadAudioFiles('manual_refresh');
+  }, [reloadAudioFiles]);
 
   // Subscribe to file changes under .kshana/agent/image-placements for fallback image loading
   // Single consolidated file watcher (debounced) for audio/video/infographic fallback; image placements only when v2 is off.
@@ -295,7 +388,9 @@ export function useTimelineData(
 
       if (debounceTimeout) clearTimeout(debounceTimeout);
       debounceTimeout = setTimeout(() => {
-        if (isAudio) setAudioRefreshTrigger((prev) => prev + 1);
+        if (isAudio) {
+          void reloadAudioFiles('file_watch');
+        }
         if (isImagePlacement && !isImageSyncV2Enabled) {
           setImagePlacementRefreshTrigger((prev) => prev + 1);
         }
@@ -310,64 +405,12 @@ export function useTimelineData(
       unsubscribe();
       if (debounceTimeout) clearTimeout(debounceTimeout);
     };
-  }, [projectDirectory, isImageSyncV2Enabled]);
+  }, [projectDirectory, isImageSyncV2Enabled, reloadAudioFiles]);
 
   // Load audio files from .kshana/agent/audio directory
   useEffect(() => {
-    if (!projectDirectory || !isLoaded) return;
-
-    const loadAudioFiles = async () => {
-      try {
-        const audioDir = `${projectDirectory}/${PROJECT_PATHS.AGENT_AUDIO}`;
-        const files = await window.electron.project.readTree(audioDir, 1);
-
-        const audioFilesList: Array<{ path: string; duration: number }> = [];
-
-        if (files && files.children) {
-          for (const file of files.children) {
-            if (
-              file.type === 'file' &&
-              file.name.match(/\.(mp3|wav|m4a|aac|ogg|flac)$/i)
-            ) {
-              const audioPath = `${PROJECT_PATHS.AGENT_AUDIO}/${file.name}`;
-              // Get actual duration from audio file
-              const fullAudioPath = `${projectDirectory}/${audioPath}`;
-              let duration = 0;
-              try {
-                duration =
-                  await window.electron.project.getAudioDuration(fullAudioPath);
-                console.log(
-                  `[useTimelineData] Got audio duration for ${file.name}: ${duration}s`,
-                );
-              } catch (error) {
-                console.warn(
-                  `[useTimelineData] Failed to get duration for ${file.name}:`,
-                  error,
-                );
-                // Fallback to transcript duration if available
-                duration = transcriptDuration || 0;
-              }
-              audioFilesList.push({
-                path: audioPath,
-                duration,
-              });
-            }
-          }
-        }
-
-        setAudioFiles(audioFilesList);
-      } catch (error) {
-        // Directory might not exist yet, that's okay
-        console.debug(
-          '[useTimelineData] Audio directory not found or error loading:',
-          error,
-        );
-        setAudioFiles([]);
-      }
-    };
-
-    loadAudioFiles();
-  }, [projectDirectory, isLoaded, transcriptDuration, audioRefreshTrigger]);
+    void reloadAudioFiles('initial_load');
+  }, [reloadAudioFiles]);
 
   const loadImagePlacementFiles = useCallback(
     async (source: 'file_watch' | 'reconcile_tick' | 'initial_load') => {
@@ -569,6 +612,18 @@ export function useTimelineData(
   const basePlacementItems: TimelineItem[] = useMemo(() => {
     const items: TimelineItem[] = [];
     const assets = assetManifest?.assets ?? [];
+    const expandedImagePromptMap = new Map<number, string>();
+    expandedImagePromptEntries.forEach((entry) => {
+      if (entry.expandedPrompt?.trim()) {
+        expandedImagePromptMap.set(entry.placementNumber, entry.expandedPrompt);
+      }
+    });
+    const expandedVideoPromptMap = new Map<number, string>();
+    expandedVideoPromptEntries.forEach((entry) => {
+      if (entry.expandedPrompt?.trim()) {
+        expandedVideoPromptMap.set(entry.placementNumber, entry.expandedPrompt);
+      }
+    });
 
     // Convert image placements to timeline items
     imagePlacements.forEach((placement) => {
@@ -668,6 +723,9 @@ export function useTimelineData(
         duration: endSeconds - startSeconds,
         label: `PLM-${placement.placementNumber}`,
         prompt: placement.prompt,
+        expandedPrompt:
+          expandedImagePromptMap.get(placement.placementNumber) ||
+          placement.prompt,
         placementNumber: placement.placementNumber,
         imagePath: selectedImagePath ?? undefined,
         sourceStartTime: startSeconds,
@@ -698,6 +756,9 @@ export function useTimelineData(
         duration: endSeconds - startSeconds,
         label: `vd-placement-${placement.placementNumber}`,
         prompt: placement.prompt,
+        expandedPrompt:
+          expandedVideoPromptMap.get(placement.placementNumber) ||
+          placement.prompt,
         placementNumber: placement.placementNumber,
         videoPath: resolvedVideoPath,
         sourceStartTime: startSeconds,
@@ -724,6 +785,8 @@ export function useTimelineData(
     videoPlacements,
     assetManifest,
     activeVersions,
+    expandedImagePromptEntries,
+    expandedVideoPromptEntries,
     imagePlacementFiles,
     videoPlacementFiles,
     imageProjectionSnapshot,

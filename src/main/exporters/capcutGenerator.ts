@@ -67,6 +67,13 @@ export interface ExportTextOverlayCue {
   words: ExportTextOverlayWord[];
 }
 
+export interface ExportPromptOverlayCue {
+  id: string;
+  startTime: number;
+  endTime: number;
+  text: string;
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────
 
 const MICRO = 1_000_000;
@@ -97,10 +104,42 @@ function nowSeconds(): number {
 }
 
 function cleanPath(filePath: string): string {
-  let cleaned = filePath.replace(/^file:\/\/\/?/, '');
+  if (!filePath.startsWith('file://')) {
+    return filePath;
+  }
+
+  const decodePath = (value: string): string => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+
+  // Remove protocol while preserving leading slash for Unix absolute paths.
+  let cleaned = filePath.replace(/^file:\/\//i, '');
+
+  if (cleaned.startsWith('localhost/')) {
+    cleaned = cleaned.slice('localhost'.length);
+  }
+
+  const queryIndex = cleaned.indexOf('?');
+  const hashIndex = cleaned.indexOf('#');
+  const cutIndexCandidates = [queryIndex, hashIndex].filter((i) => i >= 0);
+  if (cutIndexCandidates.length > 0) {
+    cleaned = cleaned.slice(0, Math.min(...cutIndexCandidates));
+  }
+
+  cleaned = decodePath(cleaned);
+
+  if (!cleaned.startsWith('/') && !/^[A-Za-z]:/.test(cleaned)) {
+    cleaned = `//${cleaned}`;
+  }
+
   if (/^\/[A-Za-z]:/.test(cleaned)) {
     cleaned = cleaned.slice(1);
   }
+
   return cleaned;
 }
 
@@ -837,6 +876,7 @@ export async function generateCapcutProject(
   audioPath?: string,
   overlayItems?: ExportOverlayItem[],
   textOverlayCues?: ExportTextOverlayCue[],
+  promptOverlayCues?: ExportPromptOverlayCue[],
 ): Promise<{ outputDir: string; projectId: string }> {
   const projectId = uid();
   const projectsRoot = getCapcutProjectsDir();
@@ -966,10 +1006,12 @@ export async function generateCapcutProject(
 
   // ── Text track segments ────────────────────────────────────────────────
   const textSegments: TextSegment[] = [];
+  const promptTextSegments: TextSegment[] = [];
 
   if (textOverlayCues && textOverlayCues.length > 0) {
     for (const cue of textOverlayCues) {
-      if (!cue.text || cue.endTime <= cue.startTime) continue;
+      const text = cue.text.replace(/\s+/g, ' ').trim();
+      if (!text || cue.endTime <= cue.startTime) continue;
       textSegments.push({
         id: uid(),
         material_id: uid(),
@@ -977,7 +1019,23 @@ export async function generateCapcutProject(
           start: toMicro(cue.startTime),
           duration: toMicro(cue.endTime - cue.startTime),
         },
-        content: cue.text,
+        content: text,
+      });
+    }
+  }
+
+  if (promptOverlayCues && promptOverlayCues.length > 0) {
+    for (const cue of promptOverlayCues) {
+      const text = cue.text.replace(/\s+/g, ' ').trim();
+      if (!text || cue.endTime <= cue.startTime) continue;
+      promptTextSegments.push({
+        id: uid(),
+        material_id: uid(),
+        target_timerange: {
+          start: toMicro(cue.startTime),
+          duration: toMicro(cue.endTime - cue.startTime),
+        },
+        content: text,
       });
     }
   }
@@ -1035,7 +1093,24 @@ export async function generateCapcutProject(
     });
   }
 
-  // Text track (render_index = 15000, above all video tracks)
+  // Prompt text track (render_index = 14000, above video/overlay tracks)
+  if (promptTextSegments.length > 0) {
+    tracks.push({
+      attribute: 0,
+      flag: 0,
+      id: uid(),
+      is_default_name: true,
+      name: '',
+      segments: promptTextSegments.map((seg) => {
+        const spd = createSpeedMaterial();
+        speedMaterials.push(spd);
+        return buildTextSegmentObject(seg, 14000, spd);
+      }),
+      type: 'text',
+    });
+  }
+
+  // Caption text track (render_index = 15000, above prompt track)
   if (textSegments.length > 0) {
     tracks.push({
       attribute: 0,
@@ -1166,7 +1241,7 @@ export async function generateCapcutProject(
     }));
 
   // ── Build text materials ─────────────────────────────────────────────
-  const textMaterials = textSegments.map((seg) => ({
+  const textMaterials = [...promptTextSegments, ...textSegments].map((seg) => ({
     id: seg.material_id,
     content: JSON.stringify({
       styles: [{

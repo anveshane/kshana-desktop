@@ -144,6 +144,7 @@ $RECYCLE.BIN/
 .erb/dll
 dist/
 build/
+assets/whisper-models/
 
 # IDE
 .idea/
