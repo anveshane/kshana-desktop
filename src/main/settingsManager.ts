@@ -1,19 +1,11 @@
 import Store from 'electron-store';
 import type { AppSettings } from '../shared/settingsTypes';
 
+const FIXED_COMFYUI_TIMEOUT_SECONDS = 1800;
+
 const defaults: AppSettings = {
-  serverUrl: 'http://localhost:8001',
   comfyuiUrl: 'http://localhost:8000',
-  lmStudioUrl: 'http://127.0.0.1:1234',
-  lmStudioModel: 'qwen3',
-  llmProvider: 'lmstudio',
-  googleApiKey: '',
-  geminiModel: 'gemini-2.5-flash',
-  openaiApiKey: '',
-  openaiBaseUrl: 'https://api.openai.com/v1',
-  openaiModel: 'gpt-4o',
-  openRouterApiKey: '',
-  openRouterModel: 'z-ai/glm-4.7-flash',
+  comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
 };
 
 const store = new Store<AppSettings>({
@@ -23,12 +15,33 @@ const store = new Store<AppSettings>({
 });
 
 export const getSettings = (): AppSettings => {
-  return store.store;
+  return {
+    ...store.store,
+    comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
+  };
 };
 
 export const updateSettings = (patch: Partial<AppSettings>): AppSettings => {
-  store.set(patch);
-  return store.store;
+  store.set({
+    ...patch,
+    comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
+  });
+  return {
+    ...store.store,
+    comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
+  };
+};
+
+/**
+ * Legacy fallback for backend URL migration.
+ * We no longer expose serverUrl in settings UI, but existing installs may
+ * still have it persisted in electron-store.
+ */
+export const getStoredServerUrl = (): string | undefined => {
+  const value = store.get('serverUrl');
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 };
 
 export type { AppSettings } from '../shared/settingsTypes';

@@ -7,7 +7,7 @@ import fs from 'fs';
 import { app } from 'electron';
 import log from 'electron-log';
 
-const REMOTION_VERSION = '1.0.0';
+const REMOTION_VERSION = '2.0.0';
 
 export function getRemotionInfographicsDir(): string {
   if (app.isPackaged) {
@@ -45,6 +45,8 @@ function getProductionRemotionDir(): string {
   if (needsInit) {
     initializeRemotionInUserData(userRemotionDir);
   }
+
+  ensureRuntimeNodeModulesLink(userRemotionDir);
 
   return userRemotionDir;
 }
@@ -99,12 +101,18 @@ function getBundledRemotionTemplate(): string {
   const paths = [
     path.join(
       process.resourcesPath,
+      'assets',
+      'remotion-infographics-template',
+    ),
+    path.join(
+      process.resourcesPath,
       'app.asar.unpacked',
       'node_modules',
       'kshana-ink',
       'remotion-infographics',
     ),
     path.join(process.resourcesPath, 'remotion-infographics'),
+    path.join(process.resourcesPath, 'assets', 'remotion-infographics'),
   ];
 
   for (const templatePath of paths) {
@@ -117,6 +125,59 @@ function getBundledRemotionTemplate(): string {
     'Remotion template not found in app bundle. Paths checked:\n' +
       paths.map((p) => `  - ${p}`).join('\n'),
   );
+}
+
+function resolveRuntimeNodeModulesDir(): string | null {
+  if (app.isPackaged) {
+    const packagedCandidates = [
+      path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules'),
+      path.join(process.resourcesPath, 'node_modules'),
+      path.join(process.resourcesPath, 'app.asar', 'node_modules'),
+    ];
+    for (const candidate of packagedCandidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  const devCandidates = [
+    path.resolve(process.cwd(), 'node_modules'),
+    path.resolve(process.cwd(), '..', 'kshana-desktop', 'node_modules'),
+  ];
+  for (const candidate of devCandidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function ensureRuntimeNodeModulesLink(remotionDir: string): void {
+  const targetNodeModules = path.join(remotionDir, 'node_modules');
+  if (fs.existsSync(targetNodeModules)) {
+    return;
+  }
+
+  const runtimeNodeModules = resolveRuntimeNodeModulesDir();
+  if (!runtimeNodeModules) {
+    log.warn('[RemotionPath] Could not find runtime node_modules to link');
+    return;
+  }
+
+  try {
+    fs.symlinkSync(
+      runtimeNodeModules,
+      targetNodeModules,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    log.info(
+      `[RemotionPath] Linked remotion node_modules -> ${runtimeNodeModules}`,
+    );
+  } catch (error) {
+    log.warn('[RemotionPath] Failed to create node_modules link:', error);
+  }
 }
 
 function copyRemotionTemplate(src: string, dest: string): void {

@@ -49,6 +49,18 @@ jobs:
           npx ts-node .erb/scripts/check-native-dep.js
           npm run build:dll
 
+      - name: Inject server config
+        run: |
+          node << 'EOF'
+          const fs = require('fs');
+          const url = process.env.KSHANA_SERVER_URL;
+          if (!url) throw new Error('KSHANA_SERVER_URL is missing');
+          fs.writeFileSync('assets/runtime-config.json', JSON.stringify({ serverUrl: url }, null, 2));
+          console.log('Wrote assets/runtime-config.json');
+          EOF
+        env:
+          KSHANA_SERVER_URL: ${{ secrets.KSHANA_SERVER_URL }}
+
       - name: Build and Publish Electron app
         run: npm run release
         env:
@@ -100,6 +112,14 @@ jobs:
           npm ci --ignore-scripts
           npx ts-node .erb/scripts/check-native-dep.js
           npm run build:dll
+
+      - name: Inject server config
+        run: |
+          $url = "${{ secrets.KSHANA_SERVER_URL }}"
+          if (-not $url) { throw "KSHANA_SERVER_URL is missing" }
+          $json = @{ serverUrl = $url } | ConvertTo-Json
+          Set-Content -Path "assets/runtime-config.json" -Value $json -Encoding UTF8
+          Write-Host "Wrote assets/runtime-config.json"
 
       - name: Build and Publish Electron app
         run: npm run release

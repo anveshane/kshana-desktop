@@ -2,8 +2,13 @@ import type { ServerConnectionConfig } from './backendTypes';
 import type { AppSettings } from './settingsTypes';
 
 /**
- * Extract server connection config from app settings.
+ * Build server connection config from a concrete backend URL.
  */
-export const toServerConfig = (settings: AppSettings): ServerConnectionConfig => ({
-  serverUrl: settings.serverUrl || 'http://localhost:8001',
+const toServerConfig = (
+  _settings: AppSettings,
+  serverUrl: string,
+): ServerConnectionConfig => ({
+  serverUrl: serverUrl || 'http://localhost:8001',
 });
+
+export default toServerConfig;

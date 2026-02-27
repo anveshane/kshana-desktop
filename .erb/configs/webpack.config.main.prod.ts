@@ -3,7 +3,7 @@
  */
 
 import path from 'path';
-import webpack from 'webpack';
+import webpack from './webpack.instance';
 import { merge } from 'webpack-merge';
 import TerserPlugin from 'terser-webpack-plugin';
 import { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer';

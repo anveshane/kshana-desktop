@@ -13,6 +13,9 @@ import type {
   RemotionProgress,
   RemotionTimelineItem,
   ParsedInfographicPlacement,
+  RemotionServerRenderRequest,
+  RemotionServerRenderResult,
+  RemotionServerRenderProgress,
 } from '../shared/remotionTypes';
 import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
 
@@ -352,6 +355,39 @@ const remotionBridge = {
   },
   getJob(jobId: string): Promise<RemotionJob | null> {
     return ipcRenderer.invoke('remotion:get-job', jobId);
+  },
+  renderFromServerRequest(
+    projectDirectory: string,
+    request: RemotionServerRenderRequest,
+    onProgress?: (progress: RemotionServerRenderProgress) => void,
+  ): Promise<RemotionServerRenderResult> {
+    const subscription = (
+      _event: IpcRendererEvent,
+      progress: RemotionServerRenderProgress,
+    ) => {
+      if (!onProgress) {
+        return;
+      }
+      if (progress.requestId !== request.requestId) {
+        return;
+      }
+      onProgress(progress);
+    };
+    if (onProgress) {
+      ipcRenderer.on('remotion:server-progress', subscription);
+    }
+
+    return ipcRenderer
+      .invoke(
+        'remotion:render-from-server-request',
+        projectDirectory,
+        request,
+      )
+      .finally(() => {
+        if (onProgress) {
+          ipcRenderer.removeListener('remotion:server-progress', subscription);
+        }
+      });
   },
   onProgress(callback: (progress: RemotionProgress) => void) {
     const subscription = (_event: IpcRendererEvent, progress: RemotionProgress) =>

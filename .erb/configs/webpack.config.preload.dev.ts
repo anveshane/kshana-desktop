@@ -1,5 +1,5 @@
 import path from 'path';
-import webpack from 'webpack';
+import webpack from './webpack.instance';
 import { merge } from 'webpack-merge';
 import { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer';
 import baseConfig from './webpack.config.base';

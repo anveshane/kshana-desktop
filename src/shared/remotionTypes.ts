@@ -65,3 +65,34 @@ export interface ParsedInfographicPlacement {
   prompt: string;
   data?: Record<string, unknown>;
 }
+
+export interface RemotionGeneratedComponent {
+  placementNumber: number;
+  componentName: string;
+  componentCode: string;
+}
+
+export interface RemotionServerRenderRequest {
+  requestId: string;
+  projectDir?: string;
+  placements: RemotionPlacement[];
+  components: RemotionGeneratedComponent[];
+  indexContent: string;
+}
+
+export interface RemotionServerRenderResult {
+  requestId: string;
+  status: 'completed' | 'failed';
+  outputs?: string[];
+  error?: string;
+  details?: unknown;
+}
+
+export interface RemotionServerRenderProgress {
+  requestId: string;
+  progress: number;
+  stage?: 'bundling' | 'rendering' | 'finalizing';
+  placementIndex?: number;
+  totalPlacements?: number;
+  message?: string;
+}

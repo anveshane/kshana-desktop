@@ -6,6 +6,11 @@ import type {
   ChatSnapshotUiState,
   PersistedChatMessage,
 } from '../../../../shared/chatTypes';
+import type {
+  RemotionServerRenderRequest,
+  RemotionServerRenderResult,
+  RemotionServerRenderProgress,
+} from '../../../../shared/remotionTypes';
 import type { ChatMessage } from '../../../types/chat';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useAgent } from '../../../contexts/AgentContext';
@@ -22,7 +27,6 @@ import {
   failExecutingToolCalls,
   isCancelAckStatus,
 } from './chatPanelStopUtils';
-<<<<<<< HEAD
 import {
   extractFilePathTransport,
   extractFilePathProtocolVersion,
@@ -34,8 +38,6 @@ import {
   shouldShowFilePathProtocolWarning,
 } from './chatPanelPathProtocolUtils';
 import { pathBasename } from '../../../utils/pathNormalizer';
-=======
->>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
 import styles from './ChatPanel.module.scss';
 
 // Message types that shouldn't create new messages if same type already exists
@@ -51,12 +53,9 @@ const RECONNECT_MAX_DELAY_MS = 30000;
 const OUTBOUND_ACTION_QUEUE_CAP = 200;
 const CONNECTION_BANNER_DEDUPE_MS = 5000;
 const STOP_ACK_TIMEOUT_MS = 12000;
-<<<<<<< HEAD
 const FILE_PATH_PROTOCOL_WARNING =
   `Server file-op protocol is outdated (requires v${REQUIRED_FILE_PATH_PROTOCOL_VERSION}). ` +
   `Required transport: "${REQUIRED_FILE_PATH_TRANSPORT}". Upgrade kshana-ink server to avoid path compatibility failures.`;
-=======
->>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
 
 const VALID_AGENT_STATUS: AgentStatus[] = [
   'idle',
@@ -69,6 +68,19 @@ const VALID_AGENT_STATUS: AgentStatus[] = [
 
 const makeId = () => {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+
+const normalizeHttpUrl = (value?: string): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return null;
+  }
 };
 
 export default function ChatPanel() {
@@ -118,11 +130,8 @@ export default function ChatPanel() {
     null,
   );
   const connectionBannerRef = useRef<{ key: string; at: number } | null>(null);
-<<<<<<< HEAD
   const filePathProtocolWarnedSessionIdsRef = useRef<Set<string>>(new Set());
   const filePathProtocolWarnedWithoutSessionRef = useRef(false);
-=======
->>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
   const currentProjectDirectoryRef = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -155,11 +164,8 @@ export default function ChatPanel() {
     lastTodoMessageIdRef.current = null;
     lastQuestionMessageIdRef.current = null;
     backgroundGenerationEventDedupe.clear();
-<<<<<<< HEAD
     filePathProtocolWarnedSessionIdsRef.current.clear();
     filePathProtocolWarnedWithoutSessionRef.current = false;
-=======
->>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
   }, []);
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
@@ -299,7 +305,6 @@ export default function ChatPanel() {
     lastAssistantIdRef.current = null;
   }, []);
 
-<<<<<<< HEAD
   const getRendererErrorMessage = useCallback(
     (error: unknown, fallback: string): string => {
       if (
@@ -317,9 +322,6 @@ export default function ChatPanel() {
     },
     [],
   );
-
-=======
->>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
   const buildSnapshotUiState = useCallback((): ChatSnapshotUiState => {
     return {
       agentStatus: agentStatusRef.current,
@@ -1161,7 +1163,6 @@ export default function ChatPanel() {
               agentName,
               'Task cancelled',
             );
-<<<<<<< HEAD
           } else if (responseStatus === 'max_iterations') {
             setAgentStatus('error');
             setStatusMessage('Agent reached maximum iterations');
@@ -1178,8 +1179,6 @@ export default function ChatPanel() {
               'Agent reached maximum iterations before finishing. Try a narrower request or continue from current output.',
               'error',
             );
-=======
->>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
           } else if (responseStatus === 'error') {
             setAgentStatus('error');
             setStatusMessage('Error');
@@ -1385,21 +1384,17 @@ export default function ChatPanel() {
         case 'error': {
           const errorMsg = (data.message as string) ?? 'An error occurred';
           const errorCode = (data.code as string) ?? '';
-<<<<<<< HEAD
           const isTransientNetworkError =
             errorCode === 'transient_network_error' ||
             /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|connection reset|network error|fetch failed/i.test(
               errorMsg,
             );
-=======
->>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
 
           if (errorCode === 'cancel_failed' && isStopPendingRef.current) {
             resolveStopRequest(false, errorMsg);
             break;
           }
 
-<<<<<<< HEAD
           if (isTransientNetworkError) {
             const retryMessage =
               `Transient network issue while contacting the model: ${errorMsg}. ` +
@@ -1419,9 +1414,6 @@ export default function ChatPanel() {
             );
             break;
           }
-
-=======
->>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
           appendSystemMessage(errorMsg, 'error');
           setAgentStatus('error');
           setStatusMessage(errorMsg);
@@ -1431,6 +1423,121 @@ export default function ChatPanel() {
             data as Record<string, unknown>,
           );
           window.electron.logger.logStatusChange('error', agentName, errorMsg);
+          break;
+        }
+        case 'remotion_render_request': {
+          const request = data as Partial<RemotionServerRenderRequest>;
+          const requestId =
+            typeof request.requestId === 'string'
+              ? request.requestId.trim()
+              : '';
+          if (!requestId) {
+            console.warn(
+              '[ChatPanel] remotion_render_request missing requestId',
+              payload,
+            );
+            break;
+          }
+
+          const sendResult = (result: RemotionServerRenderResult) => {
+            const ws = wsRef.current;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+              return;
+            }
+            ws.send(
+              JSON.stringify({
+                type: 'remotion_render_result',
+                data: result,
+              }),
+            );
+          };
+
+          if (!projectDirectory) {
+            sendResult({
+              requestId,
+              status: 'failed',
+              error:
+                'No active project selected on desktop for Remotion rendering.',
+            });
+            break;
+          }
+
+          const requestedProjectDir =
+            typeof request.projectDir === 'string'
+              ? request.projectDir.trim()
+              : '';
+          const normalizeProjectPath = (value: string) =>
+            value.replace(/\\/g, '/').replace(/\/+$/, '');
+          if (
+            requestedProjectDir &&
+            normalizeProjectPath(requestedProjectDir) !==
+              normalizeProjectPath(projectDirectory)
+          ) {
+            sendResult({
+              requestId,
+              status: 'failed',
+              error:
+                'Requested project directory does not match the active desktop project.',
+            });
+            break;
+          }
+
+          const requestPayload: RemotionServerRenderRequest = {
+            requestId,
+            projectDir: projectDirectory,
+            placements: Array.isArray(request.placements)
+              ? request.placements
+              : [],
+            components: Array.isArray(request.components)
+              ? request.components
+              : [],
+            indexContent:
+              typeof request.indexContent === 'string'
+                ? request.indexContent
+                : '',
+          };
+
+          void window.electron.remotion
+            .renderFromServerRequest(
+              projectDirectory,
+              requestPayload,
+              (progress: RemotionServerRenderProgress) => {
+                const ws = wsRef.current;
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                  return;
+                }
+                ws.send(
+                  JSON.stringify({
+                    type: 'remotion_render_progress',
+                    data: progress,
+                  }),
+                );
+              },
+            )
+            .then((result) => {
+              sendResult(result);
+              if (result.status !== 'completed') {
+                appendSystemMessage(
+                  `Desktop Remotion render failed: ${result.error || 'Unknown error'}`,
+                  'error',
+                );
+              }
+            })
+            .catch((error: unknown) => {
+              const errorMessage = getRendererErrorMessage(
+                error,
+                'Desktop Remotion render failed.',
+              );
+              sendResult({
+                requestId,
+                status: 'failed',
+                error: errorMessage,
+              });
+              appendSystemMessage(
+                `Desktop Remotion render failed: ${errorMessage}`,
+                'error',
+              );
+            });
           break;
         }
         case 'file_sync_request': {
@@ -1627,10 +1734,8 @@ export default function ChatPanel() {
       appendMessage,
       appendSystemMessage,
       debouncedSetStatus,
-<<<<<<< HEAD
       getRendererErrorMessage,
-=======
->>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
+      projectDirectory,
       resolveStopRequest,
     ],
   );
@@ -1715,11 +1820,18 @@ export default function ChatPanel() {
       const wsBase = baseUrl.replace(/^http/, 'ws');
       const url = new URL(DEFAULT_WS_PATH, wsBase);
       url.searchParams.set('channel', 'chat');
+      url.searchParams.set('desktop_remotion', '1');
+      const appSettings = await window.electron.settings.get().catch(() => null);
+      const comfyUIUrl = normalizeHttpUrl(appSettings?.comfyuiUrl);
+      if (comfyUIUrl) {
+        url.searchParams.set('comfyui_url', comfyUIUrl);
+      }
 
       console.log('[ChatPanel] Connecting to WebSocket:', {
         projectDirectory,
         hasProjectDir: !!projectDirectory,
         serverUrl: baseUrl,
+        hasComfyUIUrl: !!comfyUIUrl,
       });
 
       if (projectDirectory) {
@@ -2234,18 +2346,11 @@ export default function ChatPanel() {
             type="button"
             className={styles.exportButton}
             onClick={handleExportChat}
-<<<<<<< HEAD
             title="Export chat history as JSON"
             aria-label="Export chat history as JSON"
           >
             <Download size={14} />
             <span>Export Chat</span>
-=======
-            title="Export chat as JSON"
-          >
-            <Download size={14} />
-            <span>Export</span>
->>>>>>> 1739b55 (  feat(chat): add chat persistence and export support with stop-flow guards)
           </button>
           <button
             type="button"

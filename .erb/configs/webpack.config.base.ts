@@ -2,7 +2,7 @@
  * Base webpack config used across other specific configs
  */
 
-import webpack from 'webpack';
+import webpack from './webpack.instance';
 import TsconfigPathsPlugins from 'tsconfig-paths-webpack-plugin';
 import webpackPaths from './webpack.paths';
 import { dependencies as externals } from '../../release/app/package.json';

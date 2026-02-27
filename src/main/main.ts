@@ -32,6 +32,7 @@ import serverConnectionManager, {
 import {
   AppSettings,
   getSettings,
+  getStoredServerUrl,
   updateSettings,
 } from './settingsManager';
 import fileSystemManager from './fileSystemManager';
@@ -41,6 +42,9 @@ import type { FileChangeEvent } from '../shared/fileSystemTypes';
 import type {
   RemotionTimelineItem,
   ParsedInfographicPlacement,
+  RemotionServerRenderRequest,
+  RemotionServerRenderResult,
+  RemotionServerRenderProgress,
 } from '../shared/remotionTypes';
 import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
 import * as desktopLogger from './services/DesktopLogger';
@@ -80,12 +84,68 @@ if (app.isPackaged) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+const DEFAULT_BACKEND_SERVER_URL = 'http://localhost:8001';
 let appUpdateStatus: AppUpdateStatus = {
   phase: 'idle',
   message: 'No update check yet',
   manualCheckAvailable: app.isPackaged && process.platform !== 'linux',
   checkedAt: Date.now(),
 };
+
+interface RuntimeConfig {
+  serverUrl?: string;
+}
+
+function normalizeServerUrl(value?: string): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return undefined;
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return undefined;
+  }
+}
+
+async function getRuntimeConfigServerUrl(): Promise<string | undefined> {
+  const candidatePaths = app.isPackaged
+    ? [path.join(process.resourcesPath, 'assets', 'runtime-config.json')]
+    : [path.join(__dirname, '../../assets/runtime-config.json')];
+
+  for (const configPath of candidatePaths) {
+    try {
+      const raw = await fs.readFile(configPath, 'utf-8');
+      const parsed = JSON.parse(raw) as RuntimeConfig;
+      const normalized = normalizeServerUrl(parsed.serverUrl);
+      if (normalized) {
+        return normalized;
+      }
+    } catch {
+      // Ignore missing/invalid config and continue to fallback candidates.
+    }
+  }
+
+  return undefined;
+}
+
+async function resolveBackendServerUrl(): Promise<string> {
+  const runtimeConfigUrl = await getRuntimeConfigServerUrl();
+  if (runtimeConfigUrl) {
+    return runtimeConfigUrl;
+  }
+
+  const legacyStoredUrl = normalizeServerUrl(getStoredServerUrl());
+  if (legacyStoredUrl) {
+    return legacyStoredUrl;
+  }
+
+  return DEFAULT_BACKEND_SERVER_URL;
+}
 
 type GuardedFileOp =
   | 'project:write-file'
@@ -217,10 +277,14 @@ ipcMain.handle(
   'backend:start',
   async (
     _event,
-    config: ServerConnectionConfig = { serverUrl: getSettings().serverUrl },
+    config?: ServerConnectionConfig,
   ): Promise<BackendState> => {
     try {
-      return await serverConnectionManager.connect(config);
+      const resolvedServerUrl = await resolveBackendServerUrl();
+      return await serverConnectionManager.connect({
+        serverUrl: config?.serverUrl || resolvedServerUrl,
+        autoReconnect: config?.autoReconnect,
+      });
     } catch (error) {
       log.error(`Failed to connect to server: ${(error as Error).message}`);
       return {
@@ -235,10 +299,10 @@ ipcMain.handle(
   'backend:restart',
   async (_event, _config?: ServerConnectionConfig) => {
     try {
-      const settings = getSettings();
+      const resolvedServerUrl = await resolveBackendServerUrl();
       await serverConnectionManager.disconnect();
       return await serverConnectionManager.connect({
-        serverUrl: settings.serverUrl || 'http://localhost:8001',
+        serverUrl: resolvedServerUrl,
       });
     } catch (error) {
       log.error(`Failed to reconnect to server: ${(error as Error).message}`);
@@ -2066,6 +2130,25 @@ ipcMain.handle('remotion:get-job', async (_event, jobId: string) => {
   return remotionManager.getJob(jobId);
 });
 
+ipcMain.handle(
+  'remotion:render-from-server-request',
+  async (
+    _event,
+    projectDirectory: string,
+    request: RemotionServerRenderRequest,
+  ): Promise<RemotionServerRenderResult> => {
+    return remotionManager.renderFromServerRequest(
+      projectDirectory,
+      request,
+      (progress: RemotionServerRenderProgress) => {
+        if (mainWindow) {
+          mainWindow.webContents.send('remotion:server-progress', progress);
+        }
+      },
+    );
+  },
+);
+
 remotionManager.on('progress', (progress) => {
   if (mainWindow) {
     mainWindow.webContents.send('remotion:progress', progress);
@@ -2461,9 +2544,9 @@ app.on('before-quit', () => {
 
 const bootstrapBackend = async () => {
   try {
-    const settings = getSettings();
+    const resolvedServerUrl = await resolveBackendServerUrl();
     await serverConnectionManager.connect({
-      serverUrl: settings.serverUrl || 'http://localhost:8001',
+      serverUrl: resolvedServerUrl,
     });
   } catch (error) {
     log.error(`Failed to connect to server: ${(error as Error).message}`);

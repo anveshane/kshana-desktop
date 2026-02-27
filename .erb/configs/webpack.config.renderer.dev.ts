@@ -1,7 +1,7 @@
 import 'webpack-dev-server';
 import path from 'path';
 import fs from 'fs';
-import webpack from 'webpack';
+import webpack from './webpack.instance';
 import HtmlWebpackPlugin from 'html-webpack-plugin';
 import chalk from 'chalk';
 import { mergeWithCustomize } from 'webpack-merge';

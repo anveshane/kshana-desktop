@@ -9,6 +9,7 @@ import fs from 'fs/promises';
 import { createWriteStream } from 'fs';
 import log from 'electron-log';
 import { app } from 'electron';
+import { bundle } from '@remotion/bundler';
 import { selectComposition, renderMedia } from '@remotion/renderer';
 import { getRemotionInfographicsDir } from './utils/remotionPath';
 import {
@@ -20,6 +21,9 @@ import type {
   RemotionProgress,
   RemotionTimelineItem,
   ParsedInfographicPlacement,
+  RemotionServerRenderRequest,
+  RemotionServerRenderResult,
+  RemotionServerRenderProgress,
 } from '../shared/remotionTypes';
 
 const JOB_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -44,6 +48,10 @@ function timeToSeconds(timeStr: string): number {
   return parseInt(timeStr, 10) || 5;
 }
 
+function toManifestInfographicPath(fileName: string): string {
+  return `agent/infographic-placements/${fileName}`.replace(/\\/g, '/');
+}
+
 class RemotionManager extends EventEmitter {
   private jobs = new Map<string, RemotionJob>();
   private processes = new Map<string, ChildProcess>();
@@ -63,11 +71,28 @@ class RemotionManager extends EventEmitter {
     try {
       await fs.access(buildIndex);
     } catch {
-      return {
-        jobId: '',
-        error:
-          'Remotion bundle not found. Run "pnpm run build" in kshana-ink/remotion-infographics first.',
-      };
+      if (app.isPackaged) {
+        try {
+          const entryPoint = path.join(remotionDir, 'src', 'index.tsx');
+          await bundle({
+            entryPoint,
+            outDir: buildDir,
+            enableCaching: true,
+            publicPath: '/',
+          });
+        } catch (error) {
+          return {
+            jobId: '',
+            error: `Remotion bundle not found and auto-bundle failed: ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
+      } else {
+        return {
+          jobId: '',
+          error:
+            'Remotion bundle not found. Run "pnpm run build" in kshana-ink/remotion-infographics first.',
+        };
+      }
     }
 
     const placements = buildRemotionPlacements(
@@ -249,6 +274,192 @@ class RemotionManager extends EventEmitter {
     });
 
     return { jobId };
+  }
+
+  async renderFromServerRequest(
+    projectDirectory: string,
+    request: RemotionServerRenderRequest,
+    onProgress?: (progress: RemotionServerRenderProgress) => void,
+  ): Promise<RemotionServerRenderResult> {
+    const requestId = request.requestId?.trim();
+    if (!requestId) {
+      return {
+        requestId: '',
+        status: 'failed',
+        error: 'Missing requestId for server Remotion render.',
+      };
+    }
+
+    const placements = request.placements ?? [];
+    if (placements.length === 0) {
+      return {
+        requestId,
+        status: 'failed',
+        error: 'No placements provided for server Remotion render.',
+      };
+    }
+
+    const remotionDir = getRemotionInfographicsDir();
+    const componentsDir = path.join(remotionDir, 'src', 'components');
+    const indexPath = path.join(remotionDir, 'src', 'index.tsx');
+    const buildDir = path.join(remotionDir, 'build');
+    const entryPoint = path.join(remotionDir, 'src', 'index.tsx');
+
+    const tempDir = path.join(
+      projectDirectory,
+      '.kshana',
+      'temp',
+      'remotion',
+      `server-${requestId}`,
+    );
+    const outDir = path.join(tempDir, 'output');
+    const destDir = path.join(
+      projectDirectory,
+      '.kshana',
+      'agent',
+      'infographic-placements',
+    );
+
+    const emitProgress = (
+      progress: number,
+      stage: RemotionServerRenderProgress['stage'],
+      placementIndex?: number,
+      totalPlacements?: number,
+      message?: string,
+    ) => {
+      if (!onProgress) return;
+      onProgress({
+        requestId,
+        progress,
+        stage,
+        placementIndex,
+        totalPlacements,
+        message,
+      });
+    };
+
+    try {
+      await fs.mkdir(componentsDir, { recursive: true });
+      await fs.mkdir(buildDir, { recursive: true });
+      await fs.mkdir(outDir, { recursive: true });
+      await fs.mkdir(destDir, { recursive: true });
+
+      const existingComponentFiles = await fs.readdir(componentsDir).catch(
+        () => [],
+      );
+      for (const fileName of existingComponentFiles) {
+        if (/^Infographic\d+\.tsx$/i.test(fileName)) {
+          await fs.rm(path.join(componentsDir, fileName), {
+            force: true,
+          });
+        }
+      }
+
+      for (const component of request.components ?? []) {
+        const componentName = component.componentName?.trim();
+        if (!componentName) {
+          continue;
+        }
+        const componentPath = path.join(componentsDir, `${componentName}.tsx`);
+        await fs.writeFile(componentPath, component.componentCode ?? '', 'utf-8');
+      }
+
+      await fs.writeFile(indexPath, request.indexContent ?? '', 'utf-8');
+
+      emitProgress(5, 'bundling', undefined, placements.length, 'Bundling components');
+      await bundle({
+        entryPoint,
+        outDir: buildDir,
+        enableCaching: true,
+        publicPath: '/',
+        onProgress: (progress) => {
+          const pct = Math.round(Math.max(0, Math.min(1, progress)) * 30);
+          emitProgress(
+            Math.min(35, 5 + pct),
+            'bundling',
+            undefined,
+            placements.length,
+            `Bundling ${pct}%`,
+          );
+        },
+      });
+
+      const outputs: string[] = [];
+      const fps = 24;
+      const total = placements.length;
+
+      for (let i = 0; i < placements.length; i++) {
+        const placement = placements[i]!;
+        emitProgress(
+          Math.round(35 + (i / Math.max(1, total)) * 60),
+          'rendering',
+          i,
+          total,
+          `Rendering placement ${i + 1}/${total}`,
+        );
+
+        const durationSeconds = Math.max(
+          1,
+          timeToSeconds(placement.endTime) - timeToSeconds(placement.startTime),
+        );
+        const durationInFrames = Math.round(durationSeconds * fps);
+        const inputProps = {
+          prompt: placement.prompt,
+          infographicType: placement.infographicType,
+          data: placement.data ?? {},
+        };
+
+        const composition = await selectComposition({
+          serveUrl: buildDir,
+          id: placement.componentName,
+          inputProps,
+        });
+        composition.durationInFrames = durationInFrames;
+
+        const baseName = `info${placement.placementNumber}_${Date.now().toString(36)}_${i}`;
+        const outputFile = path.join(outDir, `${baseName}.webm`);
+
+        await renderMedia({
+          composition,
+          serveUrl: buildDir,
+          codec: 'vp9',
+          outputLocation: outputFile,
+          inputProps,
+          logLevel: 'error',
+          pixelFormat: 'yuva420p',
+          imageFormat: 'png',
+        });
+
+        const destPath = path.join(destDir, `${baseName}.webm`);
+        await fs.copyFile(outputFile, destPath);
+        outputs.push(toManifestInfographicPath(path.basename(destPath)));
+      }
+
+      emitProgress(100, 'finalizing', total, total, 'Render completed');
+
+      try {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        log.warn('[RemotionManager] Failed to cleanup server render temp dir:', cleanupError);
+      }
+
+      return {
+        requestId,
+        status: 'completed',
+        outputs,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log.error('[RemotionManager] Server render request failed:', {
+        requestId,
+        error: errorMessage,
+      });
+      return {
+        requestId,
+        status: 'failed',
+        error: errorMessage,
+      };
+    }
   }
 
   private async executeRenderProgrammatic(

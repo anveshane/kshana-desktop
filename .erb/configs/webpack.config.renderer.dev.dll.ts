@@ -2,7 +2,7 @@
  * Builds the DLL for development electron renderer process
  */
 
-import webpack from 'webpack';
+import webpack from './webpack.instance';
 import path from 'path';
 import { merge } from 'webpack-merge';
 import baseConfig from './webpack.config.base';

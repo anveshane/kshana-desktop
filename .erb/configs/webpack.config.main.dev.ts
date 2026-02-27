@@ -3,9 +3,10 @@
  */
 
 import path from 'path';
-import webpack from 'webpack';
+import webpack from './webpack.instance';
 import { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer';
 import { merge } from 'webpack-merge';
+import type { Configuration } from 'webpack';
 import checkNodeEnv from '../scripts/check-node-env';
 import baseConfig from './webpack.config.base';
 import webpackPaths from './webpack.paths';
@@ -16,7 +17,7 @@ if (process.env.NODE_ENV === 'production') {
   checkNodeEnv('development');
 }
 
-const configuration: webpack.Configuration = {
+const configuration: Configuration = {
   devtool: 'inline-source-map',
 
   mode: 'development',
