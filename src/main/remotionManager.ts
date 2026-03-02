@@ -9,7 +9,6 @@ import fs from 'fs/promises';
 import { createWriteStream } from 'fs';
 import log from 'electron-log';
 import { app } from 'electron';
-import { selectComposition, renderMedia } from '@remotion/renderer';
 import { getRemotionInfographicsDir } from './utils/remotionPath';
 import { bootstrapPackagedEsbuildBinaryPath } from './utils/esbuildBinaryPath';
 import { classifyRemotionFailure } from './utils/remotionErrorDiagnostics';
@@ -38,12 +37,20 @@ const esbuildBootstrapResult = bootstrapPackagedEsbuildBinaryPath({
 });
 
 let remotionBundlerModulePromise: Promise<typeof import('@remotion/bundler')> | null = null;
+let remotionRendererModulePromise: Promise<typeof import('@remotion/renderer')> | null = null;
 
 async function getRemotionBundlerModule(): Promise<typeof import('@remotion/bundler')> {
   if (!remotionBundlerModulePromise) {
     remotionBundlerModulePromise = import('@remotion/bundler');
   }
   return remotionBundlerModulePromise;
+}
+
+async function getRemotionRendererModule(): Promise<typeof import('@remotion/renderer')> {
+  if (!remotionRendererModulePromise) {
+    remotionRendererModulePromise = import('@remotion/renderer');
+  }
+  return remotionRendererModulePromise;
 }
 
 function generateJobId(): string {
@@ -408,6 +415,7 @@ class RemotionManager extends EventEmitter {
       const outputs: string[] = [];
       const fps = 24;
       const total = placements.length;
+      const { selectComposition, renderMedia } = await getRemotionRendererModule();
 
       for (let i = 0; i < placements.length; i++) {
         const placement = placements[i]!;
@@ -527,6 +535,7 @@ class RemotionManager extends EventEmitter {
     const fps = 24;
     const outputs: string[] = [];
     const total = placements.length;
+    const { selectComposition, renderMedia } = await getRemotionRendererModule();
 
     try {
       for (let i = 0; i < placements.length; i++) {
