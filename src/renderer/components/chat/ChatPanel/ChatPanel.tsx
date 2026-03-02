@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Download, Trash2 } from 'lucide-react';
 import type { BackendState } from '../../../../shared/backendTypes';
+import type { AppSettings } from '../../../../shared/settingsTypes';
 import type {
   ChatExportPayload,
   ChatSnapshotUiState,
@@ -53,6 +54,7 @@ const RECONNECT_MAX_DELAY_MS = 30000;
 const OUTBOUND_ACTION_QUEUE_CAP = 200;
 const CONNECTION_BANNER_DEDUPE_MS = 5000;
 const STOP_ACK_TIMEOUT_MS = 12000;
+const SETTINGS_RECONNECT_DEBOUNCE_MS = 400;
 const FILE_PATH_PROTOCOL_WARNING =
   `Server file-op protocol is outdated (requires v${REQUIRED_FILE_PATH_PROTOCOL_VERSION}). ` +
   `Required transport: "${REQUIRED_FILE_PATH_TRANSPORT}". Upgrade kshana-ink server to avoid path compatibility failures.`;
@@ -81,6 +83,21 @@ const normalizeHttpUrl = (value?: string): string | null => {
   } catch {
     return null;
   }
+};
+
+const resolveComfyUIOverride = (settings: AppSettings | null): string | null => {
+  const mode = settings?.comfyuiMode ?? 'inherit';
+  if (mode !== 'custom') {
+    return null;
+  }
+  return normalizeHttpUrl(settings?.comfyuiUrl);
+};
+
+const getComfyUISettingsKey = (settings: AppSettings | null): string => {
+  const mode = settings?.comfyuiMode ?? 'inherit';
+  const override =
+    mode === 'custom' ? resolveComfyUIOverride(settings) ?? '__invalid__' : '__inherit__';
+  return `${mode}:${override}`;
 };
 
 export default function ChatPanel() {
@@ -125,6 +142,9 @@ export default function ChatPanel() {
   // Track the last question message ID to avoid duplicates
   const lastQuestionMessageIdRef = useRef<string | null>(null);
   const reconnectAttemptRef = useRef(0);
+  const settingsReconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const comfyUISettingsKeyRef = useRef<string>('');
+  const appSettingsRef = useRef<AppSettings | null>(null);
   const pendingOutboundActionsRef = useRef<string[]>([]);
   const snapshotSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -589,7 +609,11 @@ export default function ChatPanel() {
 
   const disconnectWebSocket = useCallback(() => {
     if (wsRef.current) {
-      wsRef.current.close();
+      try {
+        wsRef.current.close(1000, 'client_disconnect');
+      } catch {
+        wsRef.current.close();
+      }
       wsRef.current = null;
     }
     if (reconnectTimeoutRef.current) {
@@ -1821,8 +1845,12 @@ export default function ChatPanel() {
       const url = new URL(DEFAULT_WS_PATH, wsBase);
       url.searchParams.set('channel', 'chat');
       url.searchParams.set('desktop_remotion', '1');
-      const appSettings = await window.electron.settings.get().catch(() => null);
-      const comfyUIUrl = normalizeHttpUrl(appSettings?.comfyuiUrl);
+      const effectiveSettings =
+        appSettingsRef.current ?? (await window.electron.settings.get().catch(() => null));
+      if (!appSettingsRef.current && effectiveSettings) {
+        appSettingsRef.current = effectiveSettings;
+      }
+      const comfyUIUrl = resolveComfyUIOverride(effectiveSettings);
       if (comfyUIUrl) {
         url.searchParams.set('comfyui_url', comfyUIUrl);
       }
@@ -1831,6 +1859,7 @@ export default function ChatPanel() {
         projectDirectory,
         hasProjectDir: !!projectDirectory,
         serverUrl: baseUrl,
+        comfyuiMode: effectiveSettings?.comfyuiMode ?? 'inherit',
         hasComfyUIUrl: !!comfyUIUrl,
       });
 
@@ -1935,6 +1964,83 @@ export default function ChatPanel() {
     projectDirectory,
     showProjectDialog,
     projectDialogResolved,
+  ]);
+
+  useEffect(() => {
+    let active = true;
+
+    const syncSettings = (next: AppSettings | null, allowReconnect: boolean) => {
+      if (!active) {
+        return;
+      }
+
+      appSettingsRef.current = next;
+
+      const nextKey = getComfyUISettingsKey(next);
+      const previousKey = comfyUISettingsKeyRef.current;
+      comfyUISettingsKeyRef.current = nextKey;
+
+      if (!allowReconnect || !previousKey || previousKey === nextKey) {
+        return;
+      }
+
+      if (!projectDialogResolved || showProjectDialog) {
+        return;
+      }
+
+      const hasActiveConnection = Boolean(
+        wsRef.current && wsRef.current.readyState === WebSocket.OPEN,
+      );
+      if (!hasActiveConnection) {
+        return;
+      }
+
+      if (settingsReconnectTimeoutRef.current) {
+        clearTimeout(settingsReconnectTimeoutRef.current);
+      }
+      settingsReconnectTimeoutRef.current = setTimeout(() => {
+        settingsReconnectTimeoutRef.current = null;
+        appendSystemMessage(
+          'ComfyUI settings changed. Reconnecting chat session to apply update...',
+          'status',
+        );
+        disconnectWebSocket();
+        connectWebSocket().catch((error) => {
+          appendConnectionBanner(
+            'comfyui_settings_reconnect_failed',
+            `Failed to reconnect after ComfyUI settings update: ${(error as Error).message}`,
+          );
+        });
+      }, SETTINGS_RECONNECT_DEBOUNCE_MS);
+    };
+
+    window.electron.settings
+      .get()
+      .then((stored) => {
+        syncSettings(stored, false);
+      })
+      .catch(() => {
+        syncSettings(null, false);
+      });
+
+    const unsubscribe = window.electron.settings.onChange((next) => {
+      syncSettings(next, true);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+      if (settingsReconnectTimeoutRef.current) {
+        clearTimeout(settingsReconnectTimeoutRef.current);
+      }
+    };
+  }, [
+    appendConnectionBanner,
+    appendSystemMessage,
+    connectWebSocket,
+    disconnectWebSocket,
+    projectDialogResolved,
+    showProjectDialog,
   ]);
 
   const sendClientAction = useCallback(
@@ -2180,6 +2286,9 @@ export default function ChatPanel() {
       }
       flushSnapshotSave(currentProjectDirectoryRef.current);
       disconnectWebSocket();
+      if (settingsReconnectTimeoutRef.current) {
+        clearTimeout(settingsReconnectTimeoutRef.current);
+      }
       if (statusUpdateTimeoutRef.current) {
         clearTimeout(statusUpdateTimeoutRef.current);
       }

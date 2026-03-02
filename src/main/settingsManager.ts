@@ -1,10 +1,12 @@
 import Store from 'electron-store';
-import type { AppSettings } from '../shared/settingsTypes';
+import type { AppSettings, ComfyUIMode } from '../shared/settingsTypes';
 
 const FIXED_COMFYUI_TIMEOUT_SECONDS = 1800;
+const LEGACY_LOCAL_COMFYUI_URL = 'http://localhost:8000';
 
 const defaults: AppSettings = {
-  comfyuiUrl: 'http://localhost:8000',
+  comfyuiMode: 'inherit',
+  comfyuiUrl: '',
   comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
 };
 
@@ -14,22 +16,67 @@ const store = new Store<AppSettings>({
   clearInvalidConfig: true,
 });
 
-export const getSettings = (): AppSettings => {
-  return {
-    ...store.store,
+function normalizeComfyUIMode(value: unknown): ComfyUIMode | null {
+  if (value === 'inherit' || value === 'custom') {
+    return value;
+  }
+  return null;
+}
+
+function normalizeComfyUIUrl(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
+}
+
+function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings {
+  const comfyuiUrl = normalizeComfyUIUrl(value?.comfyuiUrl);
+  const explicitMode = normalizeComfyUIMode(value?.comfyuiMode);
+  const projectDir = typeof value?.projectDir === 'string' && value.projectDir.trim().length > 0
+    ? value.projectDir
+    : undefined;
+
+  // Backward compatibility:
+  // - Missing mode + empty URL => inherit
+  // - Missing mode + legacy localhost default => inherit
+  // - Missing mode + non-empty URL => custom
+  const derivedMode: ComfyUIMode = explicitMode ?? (
+    !comfyuiUrl || comfyuiUrl === LEGACY_LOCAL_COMFYUI_URL ? 'inherit' : 'custom'
+  );
+
+  const normalizedMode: ComfyUIMode = derivedMode === 'custom' && !comfyuiUrl
+    ? 'inherit'
+    : derivedMode;
+
+  const normalized: AppSettings = {
+    comfyuiMode: normalizedMode,
+    comfyuiUrl: normalizedMode === 'custom' ? comfyuiUrl : '',
     comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
   };
+
+  if (projectDir) {
+    normalized.projectDir = projectDir;
+  }
+
+  return normalized;
+}
+
+export const getSettings = (): AppSettings => {
+  const normalized = normalizeSettings(store.store as Partial<AppSettings>);
+  store.set(normalized);
+  return normalized;
 };
 
 export const updateSettings = (patch: Partial<AppSettings>): AppSettings => {
-  store.set({
+  const current = store.store as Partial<AppSettings>;
+  const merged = {
+    ...current,
     ...patch,
-    comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
-  });
-  return {
-    ...store.store,
-    comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
   };
+  const normalized = normalizeSettings(merged);
+  store.set(normalized);
+  return normalized;
 };
 
 /**

@@ -254,7 +254,7 @@ export default function PreviewPanel() {
                 }`}
               />
               <span className={styles.statusLabel}>
-                ComfyUI:{' '}
+                Backend:{' '}
                 {connectionState.server === 'connected'
                   ? 'Connected'
                   : connectionState.server === 'connecting'

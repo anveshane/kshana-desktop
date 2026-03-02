@@ -12,9 +12,33 @@ type Props = {
 };
 
 const emptySettings: AppSettings = {
-  comfyuiUrl: 'http://localhost:8000',
+  comfyuiMode: 'inherit',
+  comfyuiUrl: '',
   comfyuiTimeout: 1800,
 };
+
+const LEGACY_LOCAL_COMFYUI_URL = 'http://localhost:8000';
+
+function normalizeSettings(input: AppSettings | null): AppSettings {
+  const next = input ?? emptySettings;
+  const normalizedUrl = (next.comfyuiUrl || '').trim();
+  const explicitMode = next.comfyuiMode;
+  const derivedMode =
+    explicitMode === 'custom' || explicitMode === 'inherit'
+      ? explicitMode
+      : !normalizedUrl || normalizedUrl === LEGACY_LOCAL_COMFYUI_URL
+        ? 'inherit'
+        : 'custom';
+
+  const mode = derivedMode === 'custom' && !normalizedUrl ? 'inherit' : derivedMode;
+
+  return {
+    ...next,
+    comfyuiMode: mode,
+    comfyuiUrl: mode === 'custom' ? normalizedUrl : '',
+    comfyuiTimeout: 1800,
+  };
+}
 
 export default function SettingsPanel({
   isOpen,
@@ -24,12 +48,10 @@ export default function SettingsPanel({
   isRestarting,
   error,
 }: Props) {
-  const [form, setForm] = useState<AppSettings>(settings ?? emptySettings);
+  const [form, setForm] = useState<AppSettings>(normalizeSettings(settings));
 
   useEffect(() => {
-    if (settings) {
-      setForm(settings);
-    }
+    setForm(normalizeSettings(settings));
   }, [settings, isOpen]);
 
   useEffect(() => {
@@ -61,7 +83,8 @@ export default function SettingsPanel({
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    await onSave(form);
+    const normalized = normalizeSettings(form);
+    await onSave(normalized);
   };
 
   const handleOverlayClick = (event: React.MouseEvent) => {
@@ -88,6 +111,34 @@ export default function SettingsPanel({
           </button>
         </div>
         <form className={styles.form} onSubmit={handleSubmit}>
+          <fieldset className={styles.fieldset}>
+            <legend>ComfyUI Source</legend>
+            <div className={styles.radios}>
+              <label className={styles.radioLabel}>
+                <input
+                  type="radio"
+                  className={styles.radioInput}
+                  name="comfyui-mode"
+                  value="inherit"
+                  checked={form.comfyuiMode === 'inherit'}
+                  onChange={() => handleInput('comfyuiMode', 'inherit')}
+                />
+                Use backend default (`COMFYUI_BASE_URL`)
+              </label>
+              <label className={styles.radioLabel}>
+                <input
+                  type="radio"
+                  className={styles.radioInput}
+                  name="comfyui-mode"
+                  value="custom"
+                  checked={form.comfyuiMode === 'custom'}
+                  onChange={() => handleInput('comfyuiMode', 'custom')}
+                />
+                Use custom URL override
+              </label>
+            </div>
+          </fieldset>
+
           <label className={styles.label}>
             ComfyUI URL
             <input
@@ -97,8 +148,9 @@ export default function SettingsPanel({
               onChange={(event) =>
                 handleInput('comfyuiUrl', event.target.value)
               }
-              placeholder="http://localhost:8188"
-              required
+              placeholder="https://comfyui.share.zrok.io"
+              disabled={form.comfyuiMode !== 'custom'}
+              required={form.comfyuiMode === 'custom'}
             />
           </label>
 
