@@ -80,12 +80,21 @@ export interface RemotionServerRenderRequest {
   indexContent: string;
 }
 
+export interface RemotionFailureDetails {
+  code: 'esbuild_spawn_enotdir' | 'remotion_render_failed';
+  stage: 'bundling' | 'rendering' | 'finalizing' | 'unknown';
+  packaged: boolean;
+  remotionDir: string;
+  esbuildBinaryPath?: string;
+  hint?: string;
+}
+
 export interface RemotionServerRenderResult {
   requestId: string;
   status: 'completed' | 'failed';
   outputs?: string[];
   error?: string;
-  details?: unknown;
+  details?: RemotionFailureDetails | Record<string, unknown>;
 }
 
 export interface RemotionServerRenderProgress {

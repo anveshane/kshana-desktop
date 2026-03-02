@@ -9,14 +9,16 @@ import fs from 'fs/promises';
 import { createWriteStream } from 'fs';
 import log from 'electron-log';
 import { app } from 'electron';
-import { bundle } from '@remotion/bundler';
 import { selectComposition, renderMedia } from '@remotion/renderer';
 import { getRemotionInfographicsDir } from './utils/remotionPath';
+import { bootstrapPackagedEsbuildBinaryPath } from './utils/esbuildBinaryPath';
+import { classifyRemotionFailure } from './utils/remotionErrorDiagnostics';
 import {
   buildRemotionPlacements,
   writeRenderConfig,
 } from './remotionConfigGenerator';
 import type {
+  RemotionFailureDetails,
   RemotionJob,
   RemotionProgress,
   RemotionTimelineItem,
@@ -28,6 +30,21 @@ import type {
 
 const JOB_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const RENDER_TIMEOUT_MS = 600_000; // 10 minutes
+
+const esbuildBootstrapResult = bootstrapPackagedEsbuildBinaryPath({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  logger: log,
+});
+
+let remotionBundlerModulePromise: Promise<typeof import('@remotion/bundler')> | null = null;
+
+async function getRemotionBundlerModule(): Promise<typeof import('@remotion/bundler')> {
+  if (!remotionBundlerModulePromise) {
+    remotionBundlerModulePromise = import('@remotion/bundler');
+  }
+  return remotionBundlerModulePromise;
+}
 
 function generateJobId(): string {
   return `remotion-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -74,6 +91,7 @@ class RemotionManager extends EventEmitter {
       if (app.isPackaged) {
         try {
           const entryPoint = path.join(remotionDir, 'src', 'index.tsx');
+          const { bundle } = await getRemotionBundlerModule();
           await bundle({
             entryPoint,
             outDir: buildDir,
@@ -319,6 +337,7 @@ class RemotionManager extends EventEmitter {
       'agent',
       'infographic-placements',
     );
+    let failureStage: RemotionFailureDetails['stage'] = 'unknown';
 
     const emitProgress = (
       progress: number,
@@ -366,7 +385,9 @@ class RemotionManager extends EventEmitter {
 
       await fs.writeFile(indexPath, request.indexContent ?? '', 'utf-8');
 
+      failureStage = 'bundling';
       emitProgress(5, 'bundling', undefined, placements.length, 'Bundling components');
+      const { bundle } = await getRemotionBundlerModule();
       await bundle({
         entryPoint,
         outDir: buildDir,
@@ -390,6 +411,7 @@ class RemotionManager extends EventEmitter {
 
       for (let i = 0; i < placements.length; i++) {
         const placement = placements[i]!;
+        failureStage = 'rendering';
         emitProgress(
           Math.round(35 + (i / Math.max(1, total)) * 60),
           'rendering',
@@ -435,6 +457,7 @@ class RemotionManager extends EventEmitter {
         outputs.push(toManifestInfographicPath(path.basename(destPath)));
       }
 
+      failureStage = 'finalizing';
       emitProgress(100, 'finalizing', total, total, 'Render completed');
 
       try {
@@ -450,14 +473,28 @@ class RemotionManager extends EventEmitter {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorDiagnosticText =
+        error instanceof Error
+          ? [error.message, error.stack].filter(Boolean).join('\n')
+          : String(error);
+      const details = classifyRemotionFailure({
+        errorMessage: errorDiagnosticText,
+        stage: failureStage,
+        packaged: app.isPackaged,
+        remotionDir,
+        esbuildBinaryPath:
+          esbuildBootstrapResult.binaryPath ?? process.env['ESBUILD_BINARY_PATH'],
+      });
       log.error('[RemotionManager] Server render request failed:', {
         requestId,
         error: errorMessage,
+        details,
       });
       return {
         requestId,
         status: 'failed',
         error: errorMessage,
+        details,
       };
     }
   }
