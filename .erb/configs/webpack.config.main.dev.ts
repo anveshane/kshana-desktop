@@ -33,7 +33,7 @@ const configuration: Configuration = {
     path: webpackPaths.dllPath,
     filename: '[name].bundle.dev.js',
     library: {
-      type: 'umd',
+      type: 'commonjs2',
     },
   },
 
