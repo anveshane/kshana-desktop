@@ -1520,6 +1520,11 @@ export default function ChatPanel() {
               typeof request.indexContent === 'string'
                 ? request.indexContent
                 : '',
+            componentSource:
+              request.componentSource &&
+              typeof request.componentSource === 'object'
+                ? request.componentSource
+                : undefined,
           };
 
           void window.electron.remotion

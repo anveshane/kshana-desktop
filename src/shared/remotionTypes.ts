@@ -72,18 +72,29 @@ export interface RemotionGeneratedComponent {
   componentCode: string;
 }
 
+export interface RemotionComponentSource {
+  mode: 'user_space' | 'legacy_runtime';
+  /** Path relative to project `.kshana/` root. */
+  componentsDir: string;
+  /** Path relative to project `.kshana/` root. */
+  indexPath: string;
+}
+
 export interface RemotionServerRenderRequest {
   requestId: string;
   projectDir?: string;
   placements: RemotionPlacement[];
   components: RemotionGeneratedComponent[];
   indexContent: string;
+  componentSource?: RemotionComponentSource;
 }
 
 export interface RemotionFailureDetails {
   code:
     | 'esbuild_spawn_enotdir'
     | 'asar_runtime_module_resolution_failed'
+    | 'infographic_component_missing'
+    | 'desktop_remotion_user_space_render_failed'
     | 'remotion_render_failed';
   stage: 'bundling' | 'rendering' | 'finalizing' | 'unknown';
   packaged: boolean;

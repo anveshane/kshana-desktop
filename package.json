@@ -135,6 +135,7 @@
     "react-router-dom": "^7.3.0",
     "react-syntax-highlighter": "^16.1.0",
     "remotion": "4.0.409",
+    "three": "^0.183.1",
     "remark-gfm": "^1.0.0",
     "zod": "3.22.3"
   },

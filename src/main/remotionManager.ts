@@ -91,11 +91,41 @@ async function getRemotionRuntimeModules(
 
   const modulePromise = (async () => {
     const runtimeRequire = createRequire(path.join(runtimeRoot, 'package.json'));
+    const appRootRequire = createRequire(
+      path.join(app.getAppPath(), 'package.json'),
+    );
+    const resolvedViaFallback = new Set<string>();
+
+    const resolveModulePath = (specifier: string): string => {
+      try {
+        return runtimeRequire.resolve(specifier);
+      } catch (runtimeError) {
+        if (app.isPackaged) {
+          throw runtimeError;
+        }
+        const fallbackResolved = appRootRequire.resolve(specifier);
+        resolvedViaFallback.add(specifier);
+        return fallbackResolved;
+      }
+    };
+
+    const requireModule = <T>(specifier: string): T => {
+      try {
+        return runtimeRequire(specifier) as T;
+      } catch (runtimeError) {
+        if (app.isPackaged) {
+          throw runtimeError;
+        }
+        resolvedViaFallback.add(specifier);
+        return appRootRequire(specifier) as T;
+      }
+    };
+
     const resolvedPaths: RemotionResolvedModulePaths = {
-      bundler: runtimeRequire.resolve('@remotion/bundler'),
-      renderer: runtimeRequire.resolve('@remotion/renderer'),
-      react: runtimeRequire.resolve('react/package.json'),
-      esbuild: runtimeRequire.resolve('esbuild/package.json'),
+      bundler: resolveModulePath('@remotion/bundler'),
+      renderer: resolveModulePath('@remotion/renderer'),
+      react: resolveModulePath('react/package.json'),
+      esbuild: resolveModulePath('esbuild/package.json'),
     };
 
     log.info(
@@ -118,12 +148,19 @@ async function getRemotionRuntimeModules(
       }
     }
 
-    const bundler = runtimeRequire(
+    if (resolvedViaFallback.size > 0) {
+      log.info(
+        '[RemotionRuntime] Development fallback resolution via app root for: %s',
+        Array.from(resolvedViaFallback).join(', '),
+      );
+    }
+
+    const bundler = requireModule<typeof import('@remotion/bundler')>(
       '@remotion/bundler',
-    ) as typeof import('@remotion/bundler');
-    const renderer = runtimeRequire(
+    );
+    const renderer = requireModule<typeof import('@remotion/renderer')>(
       '@remotion/renderer',
-    ) as typeof import('@remotion/renderer');
+    );
     return { bundler, renderer, resolvedPaths };
   })().catch((error) => {
     remotionRuntimeModulesByRoot.delete(runtimeRoot);
@@ -414,10 +451,6 @@ class RemotionManager extends EventEmitter {
     }
 
     const remotionDir = getRemotionInfographicsDir();
-    const componentsDir = path.join(remotionDir, 'src', 'components');
-    const indexPath = path.join(remotionDir, 'src', 'index.tsx');
-    const buildDir = path.join(remotionDir, 'build');
-    const entryPoint = path.join(remotionDir, 'src', 'index.tsx');
     const debugComponentsDir = path.join(
       projectDirectory,
       '.kshana',
@@ -434,6 +467,12 @@ class RemotionManager extends EventEmitter {
       'remotion',
       `server-${requestId}`,
     );
+    const workspaceDir = path.join(tempDir, 'workspace');
+    const workspaceSrcDir = path.join(workspaceDir, 'src');
+    const workspaceComponentsDir = path.join(workspaceSrcDir, 'components');
+    const workspaceIndexPath = path.join(workspaceSrcDir, 'index.tsx');
+    const workspaceBuildDir = path.join(workspaceDir, 'build');
+    const workspaceEntryPoint = workspaceIndexPath;
     const outDir = path.join(tempDir, 'output');
     const destDir = path.join(
       projectDirectory,
@@ -443,6 +482,9 @@ class RemotionManager extends EventEmitter {
     );
     let failureStage: RemotionFailureDetails['stage'] = 'unknown';
     let resolvedModulePaths: RemotionFailureDetails['resolvedModulePaths'];
+    let renderSource: 'user_space' | 'legacy_runtime' = 'legacy_runtime';
+    let selectedComponentsDir = workspaceComponentsDir;
+    let selectedIndexPath = workspaceIndexPath;
 
     const emitProgress = (
       progress: number,
@@ -462,64 +504,167 @@ class RemotionManager extends EventEmitter {
       });
     };
 
+    const resolveProjectKshanaPath = (relativePath: string): string => {
+      const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+      const withoutPrefix = normalized.startsWith('.kshana/')
+        ? normalized.slice('.kshana/'.length)
+        : normalized;
+      return path.join(projectDirectory, '.kshana', withoutPrefix);
+    };
+
     try {
-      await fs.mkdir(componentsDir, { recursive: true });
-      await fs.mkdir(buildDir, { recursive: true });
+      await fs.mkdir(tempDir, { recursive: true });
+      await fs.mkdir(workspaceDir, { recursive: true });
       await fs.mkdir(outDir, { recursive: true });
       await fs.mkdir(destDir, { recursive: true });
       await fs.mkdir(debugComponentsDir, { recursive: true });
+      await fs.mkdir(workspaceBuildDir, { recursive: true });
 
-      const existingComponentFiles = await fs.readdir(componentsDir).catch(
-        () => [],
-      );
-      for (const fileName of existingComponentFiles) {
-        if (/^Infographic\d+\.tsx$/i.test(fileName)) {
-          await fs.rm(path.join(componentsDir, fileName), {
-            force: true,
-          });
-        }
-      }
-      const existingDebugComponentFiles = await fs.readdir(debugComponentsDir).catch(
-        () => [],
-      );
-      for (const fileName of existingDebugComponentFiles) {
-        if (/^Infographic\d+\.tsx$/i.test(fileName)) {
-          await fs.rm(path.join(debugComponentsDir, fileName), {
-            force: true,
-          });
-        }
-      }
+      const templateSrcDir = path.join(remotionDir, 'src');
+      await fs.cp(templateSrcDir, workspaceSrcDir, { recursive: true });
 
-      for (const component of request.components ?? []) {
-        const componentName = component.componentName?.trim();
-        if (!componentName) {
-          continue;
-        }
-        const componentPath = path.join(componentsDir, `${componentName}.tsx`);
-        const debugComponentPath = path.join(
-          debugComponentsDir,
-          `${componentName}.tsx`,
+      const runtimeNodeModules = path.join(remotionDir, 'node_modules');
+      const workspaceNodeModules = path.join(workspaceDir, 'node_modules');
+      try {
+        await fs.symlink(
+          runtimeNodeModules,
+          workspaceNodeModules,
+          process.platform === 'win32' ? 'junction' : 'dir',
         );
-        const componentCode = component.componentCode ?? '';
-        await fs.writeFile(componentPath, componentCode, 'utf-8');
-        await fs.writeFile(debugComponentPath, componentCode, 'utf-8');
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code !== 'EEXIST') {
+          throw error;
+        }
       }
 
-      const indexContent = request.indexContent ?? '';
-      await fs.writeFile(indexPath, indexContent, 'utf-8');
-      await fs.writeFile(debugIndexPath, indexContent, 'utf-8');
-      await fs.writeFile(
-        debugRequestPath,
-        JSON.stringify(
-          {
+      const requestedSource = request.componentSource;
+      const hasRequestedUserSpaceSource =
+        requestedSource?.mode === 'user_space' &&
+        typeof requestedSource.componentsDir === 'string' &&
+        requestedSource.componentsDir.trim().length > 0 &&
+        typeof requestedSource.indexPath === 'string' &&
+        requestedSource.indexPath.trim().length > 0;
+
+      let userSpaceComponentsDir = '';
+      let userSpaceIndexPath = '';
+      if (hasRequestedUserSpaceSource) {
+        userSpaceComponentsDir = resolveProjectKshanaPath(
+          requestedSource.componentsDir,
+        );
+        userSpaceIndexPath = resolveProjectKshanaPath(requestedSource.indexPath);
+        const hasComponentsDir = await fs
+          .access(userSpaceComponentsDir)
+          .then(() => true)
+          .catch(() => false);
+        const hasIndexFile = await fs
+          .access(userSpaceIndexPath)
+          .then(() => true)
+          .catch(() => false);
+
+        if (hasComponentsDir && hasIndexFile) {
+          renderSource = 'user_space';
+          selectedComponentsDir = userSpaceComponentsDir;
+          selectedIndexPath = userSpaceIndexPath;
+        } else {
+          log.warn(
+            '[RemotionManager] Requested user-space component source is missing, falling back to legacy runtime payload. componentsDir=%s exists=%s indexPath=%s exists=%s',
+            userSpaceComponentsDir,
+            hasComponentsDir,
+            userSpaceIndexPath,
+            hasIndexFile,
+          );
+        }
+      }
+
+      if (renderSource === 'user_space') {
+        await fs.rm(workspaceComponentsDir, { recursive: true, force: true });
+        await fs.mkdir(workspaceComponentsDir, { recursive: true });
+        await fs.cp(selectedComponentsDir, workspaceComponentsDir, {
+          recursive: true,
+        });
+        await fs.copyFile(selectedIndexPath, workspaceIndexPath);
+      } else {
+        const fallbackComponents = request.components ?? [];
+        const fallbackIndexContent = request.indexContent ?? '';
+        if (
+          fallbackComponents.length === 0 ||
+          fallbackIndexContent.trim().length === 0
+        ) {
+          return {
             requestId,
-            placements: request.placements ?? [],
-            componentCount: (request.components ?? []).length,
-          },
-          null,
-          2,
-        ),
-        'utf-8',
+            status: 'failed',
+            error:
+              'User-space infographic component source is missing and no legacy fallback payload was provided.',
+            details: {
+              code: 'infographic_component_missing',
+              stage: 'bundling',
+              packaged: app.isPackaged,
+              remotionDir,
+              hint:
+                'Expected .kshana/agent/infographic-components/{Infographic*.tsx,index.tsx} to exist before desktop render.',
+            },
+          };
+        }
+
+        await fs.rm(workspaceComponentsDir, { recursive: true, force: true });
+        await fs.mkdir(workspaceComponentsDir, { recursive: true });
+        for (const component of fallbackComponents) {
+          const componentName = component.componentName?.trim();
+          if (!componentName) continue;
+          await fs.writeFile(
+            path.join(workspaceComponentsDir, `${componentName}.tsx`),
+            component.componentCode ?? '',
+            'utf-8',
+          );
+          await fs.writeFile(
+            path.join(debugComponentsDir, `${componentName}.tsx`),
+            component.componentCode ?? '',
+            'utf-8',
+          );
+        }
+        await fs.writeFile(workspaceIndexPath, fallbackIndexContent, 'utf-8');
+        await fs.writeFile(debugIndexPath, fallbackIndexContent, 'utf-8');
+      }
+
+      if (renderSource === 'user_space') {
+        await fs.writeFile(
+          debugRequestPath,
+          JSON.stringify(
+            {
+              requestId,
+              placements: request.placements ?? [],
+              componentCount: (request.components ?? []).length,
+              renderSource,
+              componentSource: request.componentSource,
+            },
+            null,
+            2,
+          ),
+          'utf-8',
+        );
+      } else if (!hasRequestedUserSpaceSource) {
+        await fs.writeFile(
+          debugRequestPath,
+          JSON.stringify(
+            {
+              requestId,
+              placements: request.placements ?? [],
+              componentCount: (request.components ?? []).length,
+              renderSource,
+            },
+            null,
+            2,
+          ),
+          'utf-8',
+        );
+      }
+
+      log.info(
+        '[RemotionManager] render_source=%s component_dir=%s entry_point=%s',
+        renderSource,
+        selectedComponentsDir,
+        workspaceEntryPoint,
       );
 
       failureStage = 'bundling';
@@ -528,8 +673,8 @@ class RemotionManager extends EventEmitter {
       resolvedModulePaths = runtimeModules.resolvedPaths;
       const { bundle } = runtimeModules.bundler;
       await bundle({
-        entryPoint,
-        outDir: buildDir,
+        entryPoint: workspaceEntryPoint,
+        outDir: workspaceBuildDir,
         enableCaching: true,
         publicPath: '/',
         onProgress: (progress) => {
@@ -572,7 +717,7 @@ class RemotionManager extends EventEmitter {
         };
 
         const composition = await selectComposition({
-          serveUrl: buildDir,
+          serveUrl: workspaceBuildDir,
           id: placement.componentName,
           inputProps,
         });
@@ -583,7 +728,7 @@ class RemotionManager extends EventEmitter {
 
         await renderMedia({
           composition,
-          serveUrl: buildDir,
+          serveUrl: workspaceBuildDir,
           codec: 'vp9',
           outputLocation: outputFile,
           inputProps,
@@ -630,10 +775,22 @@ class RemotionManager extends EventEmitter {
           esbuildBootstrapResult.binaryPath ?? process.env['ESBUILD_BINARY_PATH'],
         resolvedModulePaths: resolvedPathsFromError,
       });
+      if (
+        renderSource === 'user_space' &&
+        details.code === 'remotion_render_failed'
+      ) {
+        details.code = 'desktop_remotion_user_space_render_failed';
+        details.hint =
+          `${details.hint ? `${details.hint} ` : ''}` +
+          'Render source was project user-space infographic components.';
+      }
       log.error('[RemotionManager] Server render request failed:', {
         requestId,
         error: errorMessage,
         details,
+        renderSource,
+        componentDir: selectedComponentsDir,
+        entryPoint: workspaceEntryPoint,
       });
       return {
         requestId,
