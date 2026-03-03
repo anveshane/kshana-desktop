@@ -1,6 +1,19 @@
 export const REQUIRED_FILE_PATH_PROTOCOL_VERSION = 3;
 export const REQUIRED_FILE_PATH_TRANSPORT = 'relative_posix';
 
+export function applyDesktopRemotionQueryParams(
+  url: URL,
+  desktopVersion?: string | null,
+): void {
+  url.searchParams.set('desktop_remotion', '1');
+
+  const normalizedVersion = desktopVersion?.trim();
+  if (!normalizedVersion) {
+    return;
+  }
+  url.searchParams.set('desktop_version', normalizedVersion);
+}
+
 export function extractFilePathProtocolVersion(
   statusData: Record<string, unknown>,
 ): number | null {

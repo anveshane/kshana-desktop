@@ -4,10 +4,30 @@
  */
 import path from 'path';
 import fs from 'fs';
+import { createRequire } from 'module';
 import { app } from 'electron';
 import log from 'electron-log';
 
-const REMOTION_VERSION = '2.0.0';
+const REMOTION_VERSION = '2.0.1';
+const REQUIRED_REMOTION_PACKAGES = [
+  'react/package.json',
+  'react-dom/package.json',
+  'remotion/package.json',
+  '@remotion/bundler/package.json',
+];
+
+interface ResolvedModulePaths {
+  bundler: string;
+  renderer: string;
+  react: string;
+  esbuild: string;
+}
+
+export interface RemotionRuntimePreflightResult {
+  ok: boolean;
+  resolvedModulePaths: ResolvedModulePaths;
+  error?: string;
+}
 
 export function getRemotionInfographicsDir(): string {
   if (app.isPackaged) {
@@ -47,6 +67,27 @@ function getProductionRemotionDir(): string {
   }
 
   ensureRuntimeNodeModulesLink(userRemotionDir);
+  const nodeModulesDir = path.join(userRemotionDir, 'node_modules');
+  const packageCheck = checkRequiredRemotionPackages(nodeModulesDir);
+  if (!packageCheck.ok) {
+    throw new Error(
+      `Remotion runtime dependencies are unavailable in packaged app. Missing: ${packageCheck.missing.join(', ')}. Install a freshly packaged desktop build and retry.`,
+    );
+  }
+  const preflightResult = verifyPackagedRemotionRuntimeResolution(
+    userRemotionDir,
+  );
+  if (!preflightResult.ok) {
+    throw new Error(
+      `Remotion runtime preflight failed: ${preflightResult.error}. Resolved paths: ${formatResolvedPaths(
+        preflightResult.resolvedModulePaths,
+      )}`,
+    );
+  }
+  log.info(
+    '[RemotionPath] Runtime preflight passed: %s',
+    formatResolvedPaths(preflightResult.resolvedModulePaths),
+  );
 
   return userRemotionDir;
 }
@@ -127,17 +168,113 @@ function getBundledRemotionTemplate(): string {
   );
 }
 
+function normalizeAbsolutePath(candidate: string): string {
+  if (path.isAbsolute(candidate)) {
+    return candidate;
+  }
+
+  const cwdRoot = path.parse(process.cwd()).root || path.sep;
+  return path.resolve(cwdRoot, candidate);
+}
+
+function checkRequiredRemotionPackages(
+  nodeModulesDir: string,
+): { ok: boolean; missing: string[] } {
+  const missing = REQUIRED_REMOTION_PACKAGES.filter(
+    (relativePath) => !fs.existsSync(path.join(nodeModulesDir, relativePath)),
+  );
+  return {
+    ok: missing.length === 0,
+    missing,
+  };
+}
+
+function isAsarNodeModulesPath(nodeModulesDir: string): boolean {
+  return nodeModulesDir.includes(`${path.sep}app.asar${path.sep}`);
+}
+
+function isReadOnlyAsarPath(filePath: string): boolean {
+  return (
+    /[\\/]+app\.asar([\\/]|$)/.test(filePath) &&
+    !/[\\/]+app\.asar\.unpacked([\\/]|$)/.test(filePath)
+  );
+}
+
+function formatResolvedPaths(resolvedModulePaths: ResolvedModulePaths): string {
+  return [
+    `bundler=${resolvedModulePaths.bundler}`,
+    `renderer=${resolvedModulePaths.renderer}`,
+    `react=${resolvedModulePaths.react}`,
+    `esbuild=${resolvedModulePaths.esbuild}`,
+  ].join(' ');
+}
+
+export function verifyPackagedRemotionRuntimeResolution(
+  remotionDir: string,
+): RemotionRuntimePreflightResult {
+  const resolvedModulePaths: ResolvedModulePaths = {
+    bundler: '',
+    renderer: '',
+    react: '',
+    esbuild: '',
+  };
+  try {
+    const runtimeRequire = createRequire(path.join(remotionDir, 'package.json'));
+    resolvedModulePaths.bundler = runtimeRequire.resolve('@remotion/bundler');
+    resolvedModulePaths.renderer = runtimeRequire.resolve('@remotion/renderer');
+    resolvedModulePaths.react = runtimeRequire.resolve('react/package.json');
+    resolvedModulePaths.esbuild = runtimeRequire.resolve('esbuild/package.json');
+  } catch (error) {
+    return {
+      ok: false,
+      resolvedModulePaths,
+      error: `Unable to resolve runtime Remotion dependencies: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  const hasReadOnlyAsarResolution = Object.values(resolvedModulePaths).some(
+    (value) => isReadOnlyAsarPath(value),
+  );
+  if (hasReadOnlyAsarResolution) {
+    return {
+      ok: false,
+      resolvedModulePaths,
+      error:
+        'Resolved module paths still point to read-only app.asar. Expected app.asar.unpacked runtime dependencies.',
+    };
+  }
+
+  return { ok: true, resolvedModulePaths };
+}
+
 function resolveRuntimeNodeModulesDir(): string | null {
   if (app.isPackaged) {
     const packagedCandidates = [
       path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules'),
       path.join(process.resourcesPath, 'node_modules'),
-      path.join(process.resourcesPath, 'app.asar', 'node_modules'),
     ];
-    for (const candidate of packagedCandidates) {
-      if (fs.existsSync(candidate)) {
+    for (const rawCandidate of packagedCandidates) {
+      const candidate = normalizeAbsolutePath(rawCandidate);
+      if (!fs.existsSync(candidate)) {
+        continue;
+      }
+
+      if (isAsarNodeModulesPath(candidate)) {
+        continue;
+      }
+
+      const packageCheck = checkRequiredRemotionPackages(candidate);
+      if (packageCheck.ok) {
         return candidate;
       }
+
+      log.warn(
+        '[RemotionPath] Runtime node_modules candidate missing required packages (%s): %s',
+        candidate,
+        packageCheck.missing.join(', '),
+      );
     }
     return null;
   }
@@ -157,12 +294,52 @@ function resolveRuntimeNodeModulesDir(): string | null {
 function ensureRuntimeNodeModulesLink(remotionDir: string): void {
   const targetNodeModules = path.join(remotionDir, 'node_modules');
   if (fs.existsSync(targetNodeModules)) {
-    return;
+    try {
+      const stat = fs.lstatSync(targetNodeModules);
+      if (stat.isSymbolicLink()) {
+        const rawLinkTarget = fs.readlinkSync(targetNodeModules);
+        const resolvedLinkTarget = path.isAbsolute(rawLinkTarget)
+          ? rawLinkTarget
+          : path.resolve(path.dirname(targetNodeModules), rawLinkTarget);
+        const packageCheck = checkRequiredRemotionPackages(resolvedLinkTarget);
+        if (
+          !packageCheck.ok ||
+          isAsarNodeModulesPath(resolvedLinkTarget)
+        ) {
+          log.warn(
+            '[RemotionPath] Replacing stale node_modules symlink (%s). Missing: %s',
+            resolvedLinkTarget,
+            packageCheck.missing.join(', '),
+          );
+          fs.rmSync(targetNodeModules, { recursive: true, force: true });
+        } else {
+          return;
+        }
+      } else {
+        const packageCheck = checkRequiredRemotionPackages(targetNodeModules);
+        if (packageCheck.ok) {
+          return;
+        }
+        log.warn(
+          '[RemotionPath] Replacing stale node_modules directory. Missing: %s',
+          packageCheck.missing.join(', '),
+        );
+        fs.rmSync(targetNodeModules, { recursive: true, force: true });
+      }
+    } catch (error) {
+      log.warn(
+        '[RemotionPath] Failed validating existing node_modules. Recreating: %s',
+        error instanceof Error ? error.message : String(error),
+      );
+      fs.rmSync(targetNodeModules, { recursive: true, force: true });
+    }
   }
 
   const runtimeNodeModules = resolveRuntimeNodeModulesDir();
   if (!runtimeNodeModules) {
-    log.warn('[RemotionPath] Could not find runtime node_modules to link');
+    log.error(
+      '[RemotionPath] Could not find runtime node_modules with remotion dependencies in packaged app',
+    );
     return;
   }
 

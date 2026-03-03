@@ -2258,6 +2258,10 @@ ipcMain.handle('logger:get-paths', () => {
   return desktopLogger.getLogPaths();
 });
 
+ipcMain.handle('app:get-version', () => {
+  return app.getVersion();
+});
+
 ipcMain.handle('app-update:get-status', async () => {
   return appUpdateStatus;
 });

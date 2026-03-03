@@ -1,6 +1,6 @@
 {
   "name": "kshana-desktop",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Desktop application for Kshana video generation platform",
   "keywords": [
     "kshana",
@@ -212,7 +212,15 @@
     "asarUnpack": [
       "**\\*.{node,dll}",
       "**/node_modules/@ffmpeg-installer/**",
-      "**/node_modules/@esbuild/**"
+      "**/node_modules/@esbuild/**",
+      "**/node_modules/react/**",
+      "**/node_modules/react-dom/**",
+      "**/node_modules/scheduler/**",
+      "**/node_modules/remotion/**",
+      "**/node_modules/zod/**",
+      "**/node_modules/@remotion/**",
+      "**/node_modules/@turf/**",
+      "**/node_modules/mapbox-gl/**"
     ],
     "files": [
       "dist",

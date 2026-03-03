@@ -1,14 +1,39 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Play, FolderOpen } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import RecentProjects from '../RecentProjects/RecentProjects';
 import styles from './LandingScreen.module.scss';
 
-const APP_VERSION = 'v1.0.8';
+const FALLBACK_APP_VERSION = 'v?.?.?';
 
 export default function LandingScreen() {
   const { recentProjects, openProject, isLoading } = useWorkspace();
   const [error, setError] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string>(FALLBACK_APP_VERSION);
+
+  useEffect(() => {
+    let isMounted = true;
+    const getVersion = window.electron?.app?.getVersion;
+    if (!getVersion) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    getVersion()
+      .then((version) => {
+        if (!isMounted) return;
+        setAppVersion(version ? `v${version}` : FALLBACK_APP_VERSION);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setAppVersion(FALLBACK_APP_VERSION);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleOpenDirectory = useCallback(async () => {
     setError(null);
@@ -66,7 +91,7 @@ export default function LandingScreen() {
         </div>
 
         <footer className={styles.footer}>
-          <span>{APP_VERSION}</span>
+          <span>{appVersion}</span>
           <span className={styles.footerDivider}>·</span>
           <button type="button" className={styles.footerLink}>
             Help

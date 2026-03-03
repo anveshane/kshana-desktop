@@ -29,6 +29,7 @@ import {
   isCancelAckStatus,
 } from './chatPanelStopUtils';
 import {
+  applyDesktopRemotionQueryParams,
   extractFilePathTransport,
   extractFilePathProtocolVersion,
   extractIncomingFileOpPath,
@@ -1844,7 +1845,11 @@ export default function ChatPanel() {
       const wsBase = baseUrl.replace(/^http/, 'ws');
       const url = new URL(DEFAULT_WS_PATH, wsBase);
       url.searchParams.set('channel', 'chat');
-      url.searchParams.set('desktop_remotion', '1');
+      const getDesktopVersion = window.electron.app?.getVersion;
+      const desktopVersion = getDesktopVersion
+        ? await getDesktopVersion().catch(() => null)
+        : null;
+      applyDesktopRemotionQueryParams(url, desktopVersion);
       const effectiveSettings =
         appSettingsRef.current ?? (await window.electron.settings.get().catch(() => null));
       if (!appSettingsRef.current && effectiveSettings) {
@@ -1859,6 +1864,7 @@ export default function ChatPanel() {
         projectDirectory,
         hasProjectDir: !!projectDirectory,
         serverUrl: baseUrl,
+        desktopVersion,
         comfyuiMode: effectiveSettings?.comfyuiMode ?? 'inherit',
         hasComfyUIUrl: !!comfyUIUrl,
       });

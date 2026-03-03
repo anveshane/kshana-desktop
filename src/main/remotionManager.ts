@@ -7,6 +7,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
 import { createWriteStream } from 'fs';
+import { createRequire } from 'module';
 import log from 'electron-log';
 import { app } from 'electron';
 import { getRemotionInfographicsDir } from './utils/remotionPath';
@@ -36,21 +37,101 @@ const esbuildBootstrapResult = bootstrapPackagedEsbuildBinaryPath({
   logger: log,
 });
 
-let remotionBundlerModulePromise: Promise<typeof import('@remotion/bundler')> | null = null;
-let remotionRendererModulePromise: Promise<typeof import('@remotion/renderer')> | null = null;
+type RemotionResolvedModulePaths = NonNullable<
+  RemotionFailureDetails['resolvedModulePaths']
+>;
 
-async function getRemotionBundlerModule(): Promise<typeof import('@remotion/bundler')> {
-  if (!remotionBundlerModulePromise) {
-    remotionBundlerModulePromise = import('@remotion/bundler');
-  }
-  return remotionBundlerModulePromise;
+interface RemotionRuntimeModules {
+  bundler: typeof import('@remotion/bundler');
+  renderer: typeof import('@remotion/renderer');
+  resolvedPaths: RemotionResolvedModulePaths;
 }
 
-async function getRemotionRendererModule(): Promise<typeof import('@remotion/renderer')> {
-  if (!remotionRendererModulePromise) {
-    remotionRendererModulePromise = import('@remotion/renderer');
+class RemotionRuntimeResolutionError extends Error {
+  readonly resolvedPaths: RemotionResolvedModulePaths;
+
+  constructor(message: string, resolvedPaths: RemotionResolvedModulePaths) {
+    super(message);
+    this.name = 'RemotionRuntimeResolutionError';
+    this.resolvedPaths = resolvedPaths;
   }
-  return remotionRendererModulePromise;
+}
+
+const remotionRuntimeModulesByRoot = new Map<
+  string,
+  Promise<RemotionRuntimeModules>
+>();
+
+function isReadOnlyAsarPath(filePath: string): boolean {
+  return (
+    /[\\/]+app\.asar([\\/]|$)/.test(filePath) &&
+    !/[\\/]+app\.asar\.unpacked([\\/]|$)/.test(filePath)
+  );
+}
+
+function formatResolvedModulePaths(
+  resolvedPaths: RemotionResolvedModulePaths,
+): string {
+  return [
+    `bundler=${resolvedPaths.bundler}`,
+    `renderer=${resolvedPaths.renderer}`,
+    `react=${resolvedPaths.react}`,
+    `esbuild=${resolvedPaths.esbuild}`,
+  ].join(' ');
+}
+
+async function getRemotionRuntimeModules(
+  remotionDir: string,
+): Promise<RemotionRuntimeModules> {
+  const runtimeRoot = await fs.realpath(remotionDir).catch(() => remotionDir);
+  const cached = remotionRuntimeModulesByRoot.get(runtimeRoot);
+  if (cached) {
+    return cached;
+  }
+
+  const modulePromise = (async () => {
+    const runtimeRequire = createRequire(path.join(runtimeRoot, 'package.json'));
+    const resolvedPaths: RemotionResolvedModulePaths = {
+      bundler: runtimeRequire.resolve('@remotion/bundler'),
+      renderer: runtimeRequire.resolve('@remotion/renderer'),
+      react: runtimeRequire.resolve('react/package.json'),
+      esbuild: runtimeRequire.resolve('esbuild/package.json'),
+    };
+
+    log.info(
+      '[RemotionRuntime] Resolved modules for %s %s',
+      runtimeRoot,
+      formatResolvedModulePaths(resolvedPaths),
+    );
+
+    if (app.isPackaged) {
+      const hasReadOnlyAsarResolution = Object.values(resolvedPaths).some(
+        (value) => isReadOnlyAsarPath(value),
+      );
+      if (hasReadOnlyAsarResolution) {
+        throw new RemotionRuntimeResolutionError(
+          `Packaged runtime preflight failed: Remotion modules resolved to read-only app.asar. ${formatResolvedModulePaths(
+            resolvedPaths,
+          )}`,
+          resolvedPaths,
+        );
+      }
+    }
+
+    const bundler = runtimeRequire(
+      '@remotion/bundler',
+    ) as typeof import('@remotion/bundler');
+    const renderer = runtimeRequire(
+      '@remotion/renderer',
+    ) as typeof import('@remotion/renderer');
+    return { bundler, renderer, resolvedPaths };
+  })().catch((error) => {
+    remotionRuntimeModulesByRoot.delete(runtimeRoot);
+    throw error;
+  });
+
+  remotionRuntimeModulesByRoot.set(runtimeRoot, modulePromise);
+  return modulePromise;
 }
 
 function generateJobId(): string {
@@ -98,7 +179,8 @@ class RemotionManager extends EventEmitter {
       if (app.isPackaged) {
         try {
           const entryPoint = path.join(remotionDir, 'src', 'index.tsx');
-          const { bundle } = await getRemotionBundlerModule();
+          const runtimeModules = await getRemotionRuntimeModules(remotionDir);
+          const { bundle } = runtimeModules.bundler;
           await bundle({
             entryPoint,
             outDir: buildDir,
@@ -157,7 +239,14 @@ class RemotionManager extends EventEmitter {
     this.jobs.set(jobId, job);
 
     if (app.isPackaged) {
-      this.executeRenderProgrammatic(jobId, buildDir, placements, outDir, tempDir).catch((error) => {
+      this.executeRenderProgrammatic(
+        jobId,
+        remotionDir,
+        buildDir,
+        placements,
+        outDir,
+        tempDir,
+      ).catch((error) => {
         log.error(`[RemotionManager] Job ${jobId} failed:`, error);
         const job = this.jobs.get(jobId);
         if (job) {
@@ -329,6 +418,14 @@ class RemotionManager extends EventEmitter {
     const indexPath = path.join(remotionDir, 'src', 'index.tsx');
     const buildDir = path.join(remotionDir, 'build');
     const entryPoint = path.join(remotionDir, 'src', 'index.tsx');
+    const debugComponentsDir = path.join(
+      projectDirectory,
+      '.kshana',
+      'agent',
+      'infographic-components',
+    );
+    const debugIndexPath = path.join(debugComponentsDir, 'index.tsx');
+    const debugRequestPath = path.join(debugComponentsDir, 'render-request.json');
 
     const tempDir = path.join(
       projectDirectory,
@@ -345,6 +442,7 @@ class RemotionManager extends EventEmitter {
       'infographic-placements',
     );
     let failureStage: RemotionFailureDetails['stage'] = 'unknown';
+    let resolvedModulePaths: RemotionFailureDetails['resolvedModulePaths'];
 
     const emitProgress = (
       progress: number,
@@ -369,6 +467,7 @@ class RemotionManager extends EventEmitter {
       await fs.mkdir(buildDir, { recursive: true });
       await fs.mkdir(outDir, { recursive: true });
       await fs.mkdir(destDir, { recursive: true });
+      await fs.mkdir(debugComponentsDir, { recursive: true });
 
       const existingComponentFiles = await fs.readdir(componentsDir).catch(
         () => [],
@@ -380,6 +479,16 @@ class RemotionManager extends EventEmitter {
           });
         }
       }
+      const existingDebugComponentFiles = await fs.readdir(debugComponentsDir).catch(
+        () => [],
+      );
+      for (const fileName of existingDebugComponentFiles) {
+        if (/^Infographic\d+\.tsx$/i.test(fileName)) {
+          await fs.rm(path.join(debugComponentsDir, fileName), {
+            force: true,
+          });
+        }
+      }
 
       for (const component of request.components ?? []) {
         const componentName = component.componentName?.trim();
@@ -387,14 +496,37 @@ class RemotionManager extends EventEmitter {
           continue;
         }
         const componentPath = path.join(componentsDir, `${componentName}.tsx`);
-        await fs.writeFile(componentPath, component.componentCode ?? '', 'utf-8');
+        const debugComponentPath = path.join(
+          debugComponentsDir,
+          `${componentName}.tsx`,
+        );
+        const componentCode = component.componentCode ?? '';
+        await fs.writeFile(componentPath, componentCode, 'utf-8');
+        await fs.writeFile(debugComponentPath, componentCode, 'utf-8');
       }
 
-      await fs.writeFile(indexPath, request.indexContent ?? '', 'utf-8');
+      const indexContent = request.indexContent ?? '';
+      await fs.writeFile(indexPath, indexContent, 'utf-8');
+      await fs.writeFile(debugIndexPath, indexContent, 'utf-8');
+      await fs.writeFile(
+        debugRequestPath,
+        JSON.stringify(
+          {
+            requestId,
+            placements: request.placements ?? [],
+            componentCount: (request.components ?? []).length,
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      );
 
       failureStage = 'bundling';
       emitProgress(5, 'bundling', undefined, placements.length, 'Bundling components');
-      const { bundle } = await getRemotionBundlerModule();
+      const runtimeModules = await getRemotionRuntimeModules(remotionDir);
+      resolvedModulePaths = runtimeModules.resolvedPaths;
+      const { bundle } = runtimeModules.bundler;
       await bundle({
         entryPoint,
         outDir: buildDir,
@@ -415,7 +547,7 @@ class RemotionManager extends EventEmitter {
       const outputs: string[] = [];
       const fps = 24;
       const total = placements.length;
-      const { selectComposition, renderMedia } = await getRemotionRendererModule();
+      const { selectComposition, renderMedia } = runtimeModules.renderer;
 
       for (let i = 0; i < placements.length; i++) {
         const placement = placements[i]!;
@@ -485,6 +617,10 @@ class RemotionManager extends EventEmitter {
         error instanceof Error
           ? [error.message, error.stack].filter(Boolean).join('\n')
           : String(error);
+      const resolvedPathsFromError =
+        error instanceof RemotionRuntimeResolutionError
+          ? error.resolvedPaths
+          : resolvedModulePaths;
       const details = classifyRemotionFailure({
         errorMessage: errorDiagnosticText,
         stage: failureStage,
@@ -492,6 +628,7 @@ class RemotionManager extends EventEmitter {
         remotionDir,
         esbuildBinaryPath:
           esbuildBootstrapResult.binaryPath ?? process.env['ESBUILD_BINARY_PATH'],
+        resolvedModulePaths: resolvedPathsFromError,
       });
       log.error('[RemotionManager] Server render request failed:', {
         requestId,
@@ -509,6 +646,7 @@ class RemotionManager extends EventEmitter {
 
   private async executeRenderProgrammatic(
     jobId: string,
+    remotionDir: string,
     buildDir: string,
     placements: Array<{
       placementNumber: number;
@@ -535,7 +673,8 @@ class RemotionManager extends EventEmitter {
     const fps = 24;
     const outputs: string[] = [];
     const total = placements.length;
-    const { selectComposition, renderMedia } = await getRemotionRendererModule();
+    const runtimeModules = await getRemotionRuntimeModules(remotionDir);
+    const { selectComposition, renderMedia } = runtimeModules.renderer;
 
     try {
       for (let i = 0; i < placements.length; i++) {

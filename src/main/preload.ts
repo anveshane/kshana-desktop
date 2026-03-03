@@ -511,6 +511,12 @@ const updateBridge = {
   },
 };
 
+const appBridge = {
+  getVersion(): Promise<string> {
+    return ipcRenderer.invoke('app:get-version');
+  },
+};
+
 const electronHandler = {
   ipcRenderer: {
     sendMessage(channel: Channels, ...args: unknown[]) {
@@ -535,6 +541,7 @@ const electronHandler = {
   remotion: remotionBridge,
   logger: loggerBridge,
   updates: updateBridge,
+  app: appBridge,
 };
 
 contextBridge.exposeInMainWorld('electron', electronHandler);

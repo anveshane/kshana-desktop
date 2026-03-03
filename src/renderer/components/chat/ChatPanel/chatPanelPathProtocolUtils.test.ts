@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import {
+  applyDesktopRemotionQueryParams,
   extractFilePathTransport,
   extractIncomingFileOpPath,
   extractFilePathProtocolVersion,
@@ -122,5 +123,17 @@ describe('chatPanelPathProtocolUtils', () => {
     expect(isAbsoluteWirePath('/tmp/file.md')).toBe(true);
     expect(isAbsoluteWirePath('C:\\tmp\\file.md')).toBe(true);
     expect(isAbsoluteWirePath('agent/plans/content-plan.md')).toBe(false);
+  });
+
+  it('applies desktop remotion websocket query params with optional version', () => {
+    const withVersion = new URL('ws://localhost:8001/api/v1/ws/chat');
+    applyDesktopRemotionQueryParams(withVersion, '1.0.9');
+    expect(withVersion.searchParams.get('desktop_remotion')).toBe('1');
+    expect(withVersion.searchParams.get('desktop_version')).toBe('1.0.9');
+
+    const withoutVersion = new URL('ws://localhost:8001/api/v1/ws/chat');
+    applyDesktopRemotionQueryParams(withoutVersion, '');
+    expect(withoutVersion.searchParams.get('desktop_remotion')).toBe('1');
+    expect(withoutVersion.searchParams.get('desktop_version')).toBeNull();
   });
 });

@@ -81,12 +81,21 @@ export interface RemotionServerRenderRequest {
 }
 
 export interface RemotionFailureDetails {
-  code: 'esbuild_spawn_enotdir' | 'remotion_render_failed';
+  code:
+    | 'esbuild_spawn_enotdir'
+    | 'asar_runtime_module_resolution_failed'
+    | 'remotion_render_failed';
   stage: 'bundling' | 'rendering' | 'finalizing' | 'unknown';
   packaged: boolean;
   remotionDir: string;
   esbuildBinaryPath?: string;
   hint?: string;
+  resolvedModulePaths?: {
+    bundler: string;
+    renderer: string;
+    react: string;
+    esbuild: string;
+  };
 }
 
 export interface RemotionServerRenderResult {
