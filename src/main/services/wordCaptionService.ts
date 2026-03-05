@@ -56,6 +56,7 @@ const DEFAULT_WHISPER_CPP_VERSION = '1.5.5';
 const WORD_CAPTIONS_PATH = '.kshana/agent/content/word-captions.json';
 const DEFAULT_MODEL_FILENAME = `ggml-${DEFAULT_MODEL}.bin`;
 const BUNDLED_MODEL_DIR = 'whisper-models';
+const BUNDLED_RUNTIME_DIR = 'whisper-runtime';
 
 // In packaged builds, binaries are in app.asar.unpacked (not inside the read-only app.asar)
 let ffmpegBinaryPath = ffmpegInstaller.path;
@@ -162,17 +163,31 @@ async function ensureWhisperFolderIsUsable(whisperPath: string): Promise<void> {
 async function setupWhisperRuntime(
   whisper: WhisperInstallerModule,
   whisperPath: string,
-  options?: { skipModelDownload?: boolean },
+  options?: {
+    skipModelDownload?: boolean;
+    skipInstall?: boolean;
+    modelDownloadFolder?: string;
+  },
 ): Promise<void> {
-  await ensureWhisperFolderIsUsable(whisperPath);
-  await whisper.installWhisperCpp({
-    to: whisperPath,
-    version: DEFAULT_WHISPER_CPP_VERSION,
-    printOutput: true,
-  });
+  if (options?.skipInstall) {
+    const executableExists = await hasWhisperExecutable(whisperPath);
+    if (!executableExists) {
+      throw new Error(
+        `Bundled whisper runtime was selected, but no executable was found in ${whisperPath}.`,
+      );
+    }
+  } else {
+    await ensureWhisperFolderIsUsable(whisperPath);
+    await whisper.installWhisperCpp({
+      to: whisperPath,
+      version: DEFAULT_WHISPER_CPP_VERSION,
+      printOutput: true,
+    });
+  }
+
   if (!options?.skipModelDownload) {
     await whisper.downloadWhisperModel({
-      folder: whisperPath,
+      folder: options?.modelDownloadFolder ?? whisperPath,
       model: DEFAULT_MODEL,
       printOutput: true,
     });
@@ -222,6 +237,18 @@ function isMissingWhisperModelError(error: unknown): boolean {
   return normalized.includes('does not exist at') && normalized.includes('model');
 }
 
+function isLikelyWhisperProcessCrashError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const normalized = error.message.toLowerCase();
+  return (
+    normalized.includes('sigsegv') ||
+    normalized.includes('segmentation fault') ||
+    normalized.includes('signal 11') ||
+    normalized.includes('exit code: 139') ||
+    normalized.includes('exit code 139')
+  );
+}
+
 async function getBundledWhisperModelFolder(): Promise<string | null> {
   if (!app.isPackaged) {
     return null;
@@ -238,6 +265,37 @@ async function getBundledWhisperModelFolder(): Promise<string | null> {
       return folder;
     } catch {
       // Continue checking candidates.
+    }
+  }
+
+  return null;
+}
+
+async function getBundledWhisperRuntimePath(): Promise<string | null> {
+  if (!app.isPackaged) {
+    return null;
+  }
+
+  const runtimeTarget = `${process.platform}-${process.arch}`;
+  const candidates = [
+    path.join(
+      process.resourcesPath,
+      'assets',
+      BUNDLED_RUNTIME_DIR,
+      runtimeTarget,
+      'whisper-cpp',
+    ),
+    path.join(
+      process.resourcesPath,
+      BUNDLED_RUNTIME_DIR,
+      runtimeTarget,
+      'whisper-cpp',
+    ),
+  ];
+
+  for (const folder of candidates) {
+    if (await hasWhisperExecutable(folder)) {
+      return folder;
     }
   }
 
@@ -464,7 +522,7 @@ export async function generateWordCaptions(
 
     await fs.access(selectedAudioPath);
 
-    const whisperPath = path.join(app.getPath('userData'), 'whisper-cpp');
+    const userWhisperPath = path.join(app.getPath('userData'), 'whisper-cpp');
 
     const tempDir = path.join(projectDirectory, '.kshana', 'temp', 'captions');
     await fs.mkdir(tempDir, { recursive: true });
@@ -478,22 +536,35 @@ export async function generateWordCaptions(
     const whisper = await loadWhisperInstallerModule();
     let transcription: Awaited<ReturnType<typeof whisper.transcribe>> | null = null;
     let modelFolder = await getBundledWhisperModelFolder();
+    const bundledWhisperPath = await getBundledWhisperRuntimePath();
+    let whisperPath = bundledWhisperPath ?? userWhisperPath;
+    let retryWithFreshUserRuntime = false;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        if (attempt === 1) {
-          await fs.rm(whisperPath, { recursive: true, force: true });
+        if (attempt === 1 && retryWithFreshUserRuntime) {
+          whisperPath = userWhisperPath;
+          await fs.rm(userWhisperPath, { recursive: true, force: true });
+        } else if (attempt === 1 && whisperPath === userWhisperPath) {
+          await fs.rm(userWhisperPath, { recursive: true, force: true });
         }
 
         await setupWhisperRuntime(whisper, whisperPath, {
           skipModelDownload: Boolean(modelFolder),
+          skipInstall: Boolean(bundledWhisperPath && whisperPath === bundledWhisperPath),
+          modelDownloadFolder: userWhisperPath,
         });
 
+        const fallbackModelFolder =
+          modelFolder ??
+          (bundledWhisperPath && whisperPath === bundledWhisperPath
+            ? userWhisperPath
+            : null);
         transcription = await whisper.transcribe({
           inputPath: normalizedAudioPath,
           whisperPath,
           model: DEFAULT_MODEL,
-          modelFolder: modelFolder ?? undefined,
+          modelFolder: fallbackModelFolder ?? undefined,
           tokenLevelTimestamps: true,
           printOutput: true,
           whisperCppVersion: DEFAULT_WHISPER_CPP_VERSION,
@@ -510,11 +581,24 @@ export async function generateWordCaptions(
           continue;
         }
 
+        const bundledModelCrashed =
+          attempt === 0 &&
+          Boolean(modelFolder) &&
+          isLikelyWhisperProcessCrashError(error);
+        if (bundledModelCrashed) {
+          modelFolder = null;
+          continue;
+        }
+
         const shouldRetry =
           attempt === 0 &&
           isLikelyBrokenWhisperInstallError(error, whisperPath);
         if (!shouldRetry) {
           throw error;
+        }
+
+        if (whisperPath !== userWhisperPath) {
+          retryWithFreshUserRuntime = true;
         }
       }
     }
