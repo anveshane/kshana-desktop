@@ -224,6 +224,13 @@ function mapCaptionGenerationError(error: unknown): string {
     return 'Failed while preparing whisper.cpp sources (git checkout failed). Verify Git access to github.com and retry.';
   }
 
+  if (
+    normalized.includes('output_json: failed to open') ||
+    normalized.includes('/tmp.json')
+  ) {
+    return 'Whisper could not write temporary transcription output in production. Update the app to use a writable output path and retry.';
+  }
+
   if (normalized.includes('does not exist at') && normalized.includes('model')) {
     return 'Whisper model is missing or incomplete. Retry caption generation to re-download the model.';
   }
@@ -530,6 +537,10 @@ export async function generateWordCaptions(
       tempDir,
       `caption-input-${Date.now()}.wav`,
     );
+    const whisperOutputBasePath = path.join(
+      tempDir,
+      `whisper-output-${Date.now()}`,
+    );
 
     await normalizeAudioForWhisper(selectedAudioPath, normalizedAudioPath);
 
@@ -566,9 +577,12 @@ export async function generateWordCaptions(
           model: DEFAULT_MODEL,
           modelFolder: fallbackModelFolder ?? undefined,
           tokenLevelTimestamps: true,
+          splitOnWord: true,
           printOutput: true,
           whisperCppVersion: DEFAULT_WHISPER_CPP_VERSION,
-          additionalArgs: ['--split-on-word'],
+          // Force whisper-cli JSON output into a writable project temp directory.
+          // In packaged macOS runs, process cwd can be "/" and relative output paths fail.
+          additionalArgs: ['--output-file', whisperOutputBasePath],
         });
         break;
       } catch (error) {
