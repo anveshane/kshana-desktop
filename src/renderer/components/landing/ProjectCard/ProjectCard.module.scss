@@ -1,0 +1,98 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.card {
+  display: block;
+  width: 100%;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-lg;
+  overflow: hidden;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform $transition-fast,
+    border-color $transition-fast,
+    box-shadow $transition-fast;
+
+  &:hover {
+    transform: translateY(-2px);
+    border-color: rgba($color-accent-cyan, 0.35);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
+  }
+}
+
+.media {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(140deg, #24323f 0%, #111724 46%, #0b1018 100%);
+}
+
+.thumbnail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: $font-size-sm;
+  letter-spacing: 0.2px;
+}
+
+.overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: $spacing-md;
+  background: linear-gradient(
+    to top,
+    rgba(8, 12, 19, 0.93) 0%,
+    rgba(8, 12, 19, 0.82) 42%,
+    rgba(8, 12, 19, 0) 100%
+  );
+}
+
+.title {
+  margin: 0;
+  color: $color-text-primary;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  @include truncate;
+}
+
+.description {
+  margin: 0;
+  font-size: $font-size-sm;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stats {
+  margin: 0;
+  font-size: $font-size-sm;
+  color: rgba($color-accent-cyan, 0.95);
+}
+
+.meta {
+  margin: 0;
+  font-size: $font-size-xs;
+  color: rgba(255, 255, 255, 0.7);
+  @include truncate;
+}

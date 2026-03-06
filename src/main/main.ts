@@ -338,8 +338,9 @@ ipcMain.handle(
 ipcMain.handle('project:select-directory', async () => {
   if (!mainWindow) return null;
   const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openDirectory'],
-    title: 'Select Project Directory',
+    // Enable native "New Folder" / folder-creation affordances in picker.
+    properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+    title: 'Select or Create Project Directory',
   });
   if (result.canceled || result.filePaths.length === 0) {
     return null;
@@ -547,7 +548,7 @@ ipcMain.handle('project:unwatch-directory', async () => {
 });
 
 ipcMain.handle('project:get-recent', async () => {
-  return fileSystemManager.getRecentProjects();
+  return fileSystemManager.getRecentProjectsValidated();
 });
 
 ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {

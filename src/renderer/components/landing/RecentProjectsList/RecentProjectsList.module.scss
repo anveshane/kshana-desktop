@@ -1,0 +1,65 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.empty {
+  margin: 0;
+  font-size: $font-size-sm;
+  color: $color-text-muted;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: $radius-md;
+  color: $color-text-secondary;
+  padding: 7px $spacing-sm;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    color $transition-fast;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: $color-panel-border;
+    color: $color-text-primary;
+  }
+}
+
+.icon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.textBlock {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: $spacing-sm;
+  width: 100%;
+}
+
+.name {
+  @include truncate;
+  font-size: $font-size-sm;
+}
+
+.time {
+  flex-shrink: 0;
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+}

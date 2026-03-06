@@ -30,14 +30,8 @@ import {
 } from './chatPanelStopUtils';
 import {
   applyDesktopRemotionQueryParams,
-  extractFilePathTransport,
-  extractFilePathProtocolVersion,
   extractIncomingFileOpPath,
   isAbsoluteWirePath,
-  isFilePathProtocolCompatible,
-  REQUIRED_FILE_PATH_PROTOCOL_VERSION,
-  REQUIRED_FILE_PATH_TRANSPORT,
-  shouldShowFilePathProtocolWarning,
 } from './chatPanelPathProtocolUtils';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
@@ -56,10 +50,6 @@ const OUTBOUND_ACTION_QUEUE_CAP = 200;
 const CONNECTION_BANNER_DEDUPE_MS = 5000;
 const STOP_ACK_TIMEOUT_MS = 12000;
 const SETTINGS_RECONNECT_DEBOUNCE_MS = 400;
-const FILE_PATH_PROTOCOL_WARNING =
-  `Server file-op protocol is outdated (requires v${REQUIRED_FILE_PATH_PROTOCOL_VERSION}). ` +
-  `Required transport: "${REQUIRED_FILE_PATH_TRANSPORT}". Upgrade kshana-ink server to avoid path compatibility failures.`;
-
 const VALID_AGENT_STATUS: AgentStatus[] = [
   'idle',
   'thinking',
@@ -71,6 +61,66 @@ const VALID_AGENT_STATUS: AgentStatus[] = [
 
 const makeId = () => {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+
+const normalizeProjectDirectory = (value: string): string => {
+  return value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+};
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+};
+
+const hasExistingProjectWork = (projectFileContent: string): boolean => {
+  try {
+    const parsed: unknown = JSON.parse(projectFileContent);
+    if (!isPlainRecord(parsed)) {
+      return true;
+    }
+
+    const hasIndexedData = ['characters', 'settings', 'scenes', 'assets'].some(
+      (key) => Array.isArray(parsed[key]) && parsed[key].length > 0,
+    );
+    if (hasIndexedData) {
+      return true;
+    }
+
+    const currentPhase =
+      typeof parsed.current_phase === 'string' ? parsed.current_phase : null;
+    if (
+      currentPhase &&
+      currentPhase !== 'plot' &&
+      currentPhase !== 'transcript_input'
+    ) {
+      return true;
+    }
+
+    const phases = parsed.phases;
+    if (isPlainRecord(phases)) {
+      const progressedPhase = Object.values(phases).some(
+        (phase) =>
+          isPlainRecord(phase) &&
+          typeof phase.status === 'string' &&
+          phase.status !== 'pending',
+      );
+      if (progressedPhase) {
+        return true;
+      }
+    }
+
+    if (
+      typeof parsed.created_at === 'number' &&
+      typeof parsed.updated_at === 'number' &&
+      parsed.updated_at - parsed.created_at > 5000
+    ) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    // If we cannot parse existing project metadata, be conservative and show dialog.
+    return true;
+  }
 };
 
 const normalizeHttpUrl = (value?: string): string | null => {
@@ -151,8 +201,6 @@ export default function ChatPanel() {
     null,
   );
   const connectionBannerRef = useRef<{ key: string; at: number } | null>(null);
-  const filePathProtocolWarnedSessionIdsRef = useRef<Set<string>>(new Set());
-  const filePathProtocolWarnedWithoutSessionRef = useRef(false);
   const currentProjectDirectoryRef = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -185,8 +233,6 @@ export default function ChatPanel() {
     lastTodoMessageIdRef.current = null;
     lastQuestionMessageIdRef.current = null;
     backgroundGenerationEventDedupe.clear();
-    filePathProtocolWarnedSessionIdsRef.current.clear();
-    filePathProtocolWarnedWithoutSessionRef.current = false;
   }, []);
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
@@ -357,6 +403,19 @@ export default function ChatPanel() {
 
   const persistSnapshot = useCallback(
     async (targetProjectDirectory: string): Promise<void> => {
+      const currentProjectDirectory = currentProjectDirectoryRef.current;
+      if (!currentProjectDirectory) {
+        return;
+      }
+
+      if (
+        normalizeProjectDirectory(targetProjectDirectory) !==
+        normalizeProjectDirectory(currentProjectDirectory)
+      ) {
+        // Skip stale snapshot writes scheduled before project root switched.
+        return;
+      }
+
       const snapshot = createChatSnapshot({
         projectDirectory: targetProjectDirectory,
         sessionId: sessionIdRef.current,
@@ -703,31 +762,6 @@ export default function ChatPanel() {
           // Update agent name if it changed
           if (agentNameFromStatus !== agentName) {
             setAgentName(agentNameFromStatus);
-          }
-
-          const protocolVersion = extractFilePathProtocolVersion(data);
-          const protocolTransport = extractFilePathTransport(data);
-          const protocolCompatible = isFilePathProtocolCompatible(
-            protocolVersion,
-            protocolTransport,
-          );
-          const warningDecision = shouldShowFilePathProtocolWarning(
-            protocolCompatible,
-            payloadSessionId ?? sessionIdRef.current,
-            filePathProtocolWarnedSessionIdsRef.current,
-            filePathProtocolWarnedWithoutSessionRef.current,
-          );
-          filePathProtocolWarnedWithoutSessionRef.current =
-            warningDecision.warnedWithoutSession;
-
-          if (warningDecision.shouldWarn) {
-            const reportedVersion =
-              protocolVersion === null ? 'missing' : String(protocolVersion);
-            const reportedTransport = protocolTransport ?? 'missing';
-            appendSystemMessage(
-              `⚠️ ${FILE_PATH_PROTOCOL_WARNING} (server reported version=${reportedVersion}, transport=${reportedTransport}).`,
-              'error',
-            );
           }
 
           // Map status to agent status with debouncing
@@ -1496,7 +1530,7 @@ export default function ChatPanel() {
           if (
             requestedProjectDir &&
             normalizeProjectPath(requestedProjectDir) !==
-              normalizeProjectPath(projectDirectory)
+            normalizeProjectPath(projectDirectory)
           ) {
             sendResult({
               requestId,
@@ -1522,7 +1556,7 @@ export default function ChatPanel() {
                 : '',
             componentSource:
               request.componentSource &&
-              typeof request.componentSource === 'object'
+                typeof request.componentSource === 'object'
                 ? request.componentSource
                 : undefined,
           };
@@ -2363,10 +2397,18 @@ export default function ChatPanel() {
         if (state.status === 'ready') {
           try {
             const projectFilePath = `${projectDirectory}/.kshana/agent/project.json`;
-            const exists = await window.electron.project.checkFileExists(projectFilePath);
+            const exists =
+              await window.electron.project.checkFileExists(projectFilePath);
             if (exists) {
-              setShowProjectDialog(true);
-              return; // Don't connect yet, wait for user decision
+              const projectFileContent =
+                await window.electron.project.readFile(projectFilePath);
+              if (
+                projectFileContent &&
+                hasExistingProjectWork(projectFileContent)
+              ) {
+                setShowProjectDialog(true);
+                return; // Don't connect yet, wait for user decision
+              }
             }
           } catch (error) {
             console.error('[ChatPanel] Error checking project:', error);
