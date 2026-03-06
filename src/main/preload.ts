@@ -151,8 +151,30 @@ const projectBridge = {
   readFile(filePath: string): Promise<string | null> {
     return ipcRenderer.invoke('project:read-file', filePath);
   },
+  readFileGuarded(filePath: string, meta?: FileOpMeta): Promise<string> {
+    return ipcRenderer.invoke('project:read-file-guarded', filePath, meta);
+  },
+  readFileBufferGuarded(
+    filePath: string,
+    meta?: FileOpMeta,
+  ): Promise<string> {
+    return ipcRenderer.invoke(
+      'project:read-file-buffer-guarded',
+      filePath,
+      meta,
+    );
+  },
   checkFileExists(filePath: string): Promise<boolean> {
     return ipcRenderer.invoke('project:check-file-exists', filePath);
+  },
+  listDirectory(dirPath: string, meta?: FileOpMeta): Promise<string[]> {
+    return ipcRenderer.invoke('project:list-directory', dirPath, meta);
+  },
+  statPath(
+    targetPath: string,
+    meta?: FileOpMeta,
+  ): Promise<{ isFile: boolean; isDirectory: boolean; size: number }> {
+    return ipcRenderer.invoke('project:stat-path', targetPath, meta);
   },
   readAllFiles(projectDir: string): Promise<Array<{ path: string; content: string; isBinary: boolean }>> {
     return ipcRenderer.invoke('project:read-all-files', projectDir);
@@ -203,6 +225,18 @@ const projectBridge = {
   },
   copy(sourcePath: string, destDir: string): Promise<string> {
     return ipcRenderer.invoke('project:copy', sourcePath, destDir);
+  },
+  copyFileExact(
+    sourcePath: string,
+    destinationPath: string,
+    meta?: FileOpMeta,
+  ): Promise<void> {
+    return ipcRenderer.invoke(
+      'project:copy-file-exact',
+      sourcePath,
+      destinationPath,
+      meta,
+    );
   },
   revealInFinder(targetPath: string): Promise<void> {
     return ipcRenderer.invoke('project:reveal-in-finder', targetPath);

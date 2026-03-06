@@ -153,6 +153,11 @@ type GuardedFileOp =
   | 'project:write-file-binary'
   | 'project:mkdir'
   | 'project:delete'
+  | 'project:read-file-guarded'
+  | 'project:read-file-buffer-guarded'
+  | 'project:list-directory'
+  | 'project:stat-path'
+  | 'project:copy-file-exact'
   | 'project:create-file'
   | 'project:create-folder';
 
@@ -589,6 +594,81 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'project:read-file-guarded',
+  async (
+    _event,
+    filePath: string,
+    meta?: FileOpMeta,
+  ): Promise<string> => {
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        filePath,
+        process.platform,
+        process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      return await fs.readFile(resolvedPath, 'utf-8');
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:read-file-guarded',
+        rawPath: filePath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
+    }
+  },
+);
+
+ipcMain.handle(
+  'project:read-file-buffer-guarded',
+  async (
+    _event,
+    filePath: string,
+    meta?: FileOpMeta,
+  ): Promise<string> => {
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        filePath,
+        process.platform,
+        process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      const buffer = await fs.readFile(resolvedPath);
+      return buffer.toString('base64');
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:read-file-buffer-guarded',
+        rawPath: filePath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
+    }
+  },
+);
+
+ipcMain.handle(
   'project:check-file-exists',
   async (_event, filePath: string): Promise<boolean> => {
     const normalizedPath = path.isAbsolute(filePath)
@@ -711,6 +791,85 @@ ipcMain.handle(
       `(skipped non-text: ${skippedNonText}, skipped oversized: ${skippedOversized})`,
     );
     return results;
+  },
+);
+
+ipcMain.handle(
+  'project:list-directory',
+  async (
+    _event,
+    dirPath: string,
+    meta?: FileOpMeta,
+  ): Promise<string[]> => {
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        dirPath,
+        process.platform,
+        process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      return await fs.readdir(resolvedPath);
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:list-directory',
+        rawPath: dirPath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
+    }
+  },
+);
+
+ipcMain.handle(
+  'project:stat-path',
+  async (
+    _event,
+    targetPath: string,
+    meta?: FileOpMeta,
+  ): Promise<{ isFile: boolean; isDirectory: boolean; size: number }> => {
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedPath: string | undefined;
+    let resolvedPath: string | undefined;
+    try {
+      normalizedPath = normalizeIncomingPath(
+        targetPath,
+        process.platform,
+        process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
+      );
+      resolvedPath = resolveAndValidateProjectPath(
+        normalizedPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(resolvedPath, activeProjectRoot);
+      const stats = await fs.stat(resolvedPath);
+      return {
+        isFile: stats.isFile(),
+        isDirectory: stats.isDirectory(),
+        size: stats.size,
+      };
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:stat-path',
+        rawPath: targetPath,
+        normalizedPath,
+        resolvedPath,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
+    }
   },
 );
 
@@ -977,6 +1136,72 @@ ipcMain.handle(
   'project:copy',
   async (_event, sourcePath: string, destDir: string): Promise<string> => {
     return fileSystemManager.copy(sourcePath, destDir);
+  },
+);
+
+ipcMain.handle(
+  'project:copy-file-exact',
+  async (
+    _event,
+    sourcePath: string,
+    destinationPath: string,
+    meta?: FileOpMeta,
+  ): Promise<void> => {
+    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    let normalizedSourcePath: string | undefined;
+    let resolvedSourcePath: string | undefined;
+    let normalizedDestinationPath: string | undefined;
+    let resolvedDestinationPath: string | undefined;
+    try {
+      normalizedSourcePath = normalizeIncomingPath(
+        sourcePath,
+        process.platform,
+        process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
+      );
+      resolvedSourcePath = resolveAndValidateProjectPath(
+        normalizedSourcePath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(
+        resolvedSourcePath,
+        activeProjectRoot,
+      );
+
+      normalizedDestinationPath = normalizeIncomingPath(
+        destinationPath,
+        process.platform,
+        process.cwd(),
+        { allowAbsolute: !isAgentWireSource(meta) },
+      );
+      resolvedDestinationPath = resolveAndValidateProjectPath(
+        normalizedDestinationPath,
+        activeProjectRoot,
+      );
+      await assertCanonicalProjectContainment(
+        resolvedDestinationPath,
+        activeProjectRoot,
+      );
+
+      await fs.mkdir(path.dirname(resolvedDestinationPath), { recursive: true });
+      await fs.copyFile(resolvedSourcePath, resolvedDestinationPath);
+    } catch (error) {
+      throwFileOpError({
+        operation: 'project:copy-file-exact',
+        rawPath: `${sourcePath} -> ${destinationPath}`,
+        normalizedPath:
+          normalizedSourcePath && normalizedDestinationPath
+            ? `${normalizedSourcePath} -> ${normalizedDestinationPath}`
+            : undefined,
+        resolvedPath:
+          resolvedSourcePath && resolvedDestinationPath
+            ? `${resolvedSourcePath} -> ${resolvedDestinationPath}`
+            : undefined,
+        activeProjectRoot,
+        opId: meta?.opId ?? null,
+        error,
+      });
+    }
   },
 );
 

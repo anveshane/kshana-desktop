@@ -19,6 +19,7 @@ const THUMBNAIL_CANDIDATES = [
   'thumbnail.png',
   'thumbnail.webp',
 ];
+const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
 
 interface ProjectMetadata {
   manifestName?: string;
@@ -195,6 +196,12 @@ export default function LandingScreen() {
       const created = await createProject(selectedPath, projectName);
       if (!created) {
         throw new Error('Failed to initialize project in selected folder.');
+      }
+
+      try {
+        window.localStorage.setItem(PROJECT_SETUP_STORAGE_KEY, selectedPath);
+      } catch {
+        // Ignore localStorage availability issues.
       }
 
       await openProject(selectedPath);

@@ -23,7 +23,12 @@ import {
 import MessageList from '../MessageList';
 import ChatInput from '../ChatInput';
 import StatusBar, { AgentStatus } from '../StatusBar';
-import ProjectSelectionDialog from '../ProjectSelectionDialog';
+import ProjectSetupPanel, {
+  type SetupDurationOption,
+  type SetupPanelMode,
+  type SetupStep,
+  type SetupTemplateOption,
+} from '../ProjectSetupPanel';
 import {
   failExecutingToolCalls,
   isCancelAckStatus,
@@ -50,6 +55,57 @@ const OUTBOUND_ACTION_QUEUE_CAP = 200;
 const CONNECTION_BANNER_DEDUPE_MS = 5000;
 const STOP_ACK_TIMEOUT_MS = 12000;
 const SETTINGS_RECONNECT_DEBOUNCE_MS = 400;
+const PROJECT_SETUP_FILE = '.kshana/ui/project-setup.json';
+const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
+const DEFAULT_SETUP_TEMPLATE_ID = 'narrative';
+const DEFAULT_SETUP_STYLE_ID = 'cinematic_realism';
+const DEFAULT_SETUP_DURATION_SECONDS = 120;
+
+interface ProjectSetupPersisted {
+  version: 1;
+  templateId: string;
+  style: string;
+  duration: number;
+}
+
+interface TemplateCatalogResponse {
+  templates?: SetupTemplateOption[];
+  durationPresets?: Record<string, SetupDurationOption[]>;
+}
+
+interface ConfigureProjectPayload {
+  templateId: string;
+  style: string;
+  duration: number;
+  projectDir: string;
+}
+
+const FALLBACK_TEMPLATE_CATALOG: TemplateCatalogResponse = {
+  templates: [
+    {
+      id: 'narrative',
+      displayName: 'Narrative Story Video',
+      description: 'Create a video from a story idea or complete narrative.',
+      defaultStyle: DEFAULT_SETUP_STYLE_ID,
+      styles: [
+        {
+          id: 'cinematic_realism',
+          displayName: 'Cinematic Realism',
+          description: 'Photorealistic cinematic style with dramatic lighting.',
+        },
+      ],
+    },
+  ],
+  durationPresets: {
+    narrative: [
+      { label: '1 minute', seconds: 60 },
+      { label: '2 minutes', seconds: 120 },
+      { label: '3 minutes', seconds: 180 },
+      { label: '5 minutes', seconds: 300 },
+    ],
+  },
+};
+
 const VALID_AGENT_STATUS: AgentStatus[] = [
   'idle',
   'thinking',
@@ -63,64 +119,23 @@ const makeId = () => {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 };
 
+const resolvePreferredDuration = (
+  templateId: string,
+  durationPresets: Record<string, SetupDurationOption[]>,
+): number => {
+  const presets = durationPresets[templateId] || [];
+  const explicitDefault = presets.find(
+    (candidate) => candidate.seconds === DEFAULT_SETUP_DURATION_SECONDS,
+  );
+  return (
+    explicitDefault?.seconds ??
+    presets[0]?.seconds ??
+    DEFAULT_SETUP_DURATION_SECONDS
+  );
+};
+
 const normalizeProjectDirectory = (value: string): string => {
   return value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
-};
-
-const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-};
-
-const hasExistingProjectWork = (projectFileContent: string): boolean => {
-  try {
-    const parsed: unknown = JSON.parse(projectFileContent);
-    if (!isPlainRecord(parsed)) {
-      return true;
-    }
-
-    const hasIndexedData = ['characters', 'settings', 'scenes', 'assets'].some(
-      (key) => Array.isArray(parsed[key]) && parsed[key].length > 0,
-    );
-    if (hasIndexedData) {
-      return true;
-    }
-
-    const currentPhase =
-      typeof parsed.current_phase === 'string' ? parsed.current_phase : null;
-    if (
-      currentPhase &&
-      currentPhase !== 'plot' &&
-      currentPhase !== 'transcript_input'
-    ) {
-      return true;
-    }
-
-    const phases = parsed.phases;
-    if (isPlainRecord(phases)) {
-      const progressedPhase = Object.values(phases).some(
-        (phase) =>
-          isPlainRecord(phase) &&
-          typeof phase.status === 'string' &&
-          phase.status !== 'pending',
-      );
-      if (progressedPhase) {
-        return true;
-      }
-    }
-
-    if (
-      typeof parsed.created_at === 'number' &&
-      typeof parsed.updated_at === 'number' &&
-      parsed.updated_at - parsed.created_at > 5000
-    ) {
-      return true;
-    }
-
-    return false;
-  } catch {
-    // If we cannot parse existing project metadata, be conservative and show dialog.
-    return true;
-  }
 };
 
 const normalizeHttpUrl = (value?: string): string | null => {
@@ -165,12 +180,27 @@ export default function ChatPanel() {
   const [phaseDisplayName, setPhaseDisplayName] = useState<
     string | undefined
   >();
-  const [showProjectDialog, setShowProjectDialog] = useState(false);
-  const [projectDialogResolved, setProjectDialogResolved] = useState(false);
   const [hasUserSentMessage, setHasUserSentMessage] = useState(false);
   const [isTaskRunning, setIsTaskRunning] = useState(false);
   const [isStopPending, setIsStopPending] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [setupPanelMode, setSetupPanelMode] = useState<SetupPanelMode>('hidden');
+  const [setupStep, setSetupStep] = useState<SetupStep>('template');
+  const [setupTemplates, setSetupTemplates] = useState<SetupTemplateOption[]>([]);
+  const [setupDurationPresets, setSetupDurationPresets] = useState<
+    Record<string, SetupDurationOption[]>
+  >({});
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    null,
+  );
+  const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
+  const [selectedDuration, setSelectedDuration] = useState<number | null>(null);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [isLoadingSetupCatalog, setIsLoadingSetupCatalog] = useState(false);
+  const [isConfiguringProjectSetup, setIsConfiguringProjectSetup] =
+    useState(false);
+  const [isProjectSetupConfigured, setIsProjectSetupConfigured] =
+    useState(false);
 
   const { setConnectionStatus, projectDirectory, registerProjectSwitchGuard } =
     useWorkspace();
@@ -217,6 +247,10 @@ export default function ChatPanel() {
     resolve: (success: boolean) => void;
     timeoutId: ReturnType<typeof setTimeout>;
   } | null>(null);
+  const isConfiguringProjectSetupRef = useRef(false);
+  const sendClientActionRef = useRef<
+    (message: Record<string, unknown>) => Promise<void>
+  >(async () => {});
 
   const resolveAgentStatus = useCallback((value?: string): AgentStatus => {
     if (value && VALID_AGENT_STATUS.includes(value as AgentStatus)) {
@@ -312,6 +346,10 @@ export default function ChatPanel() {
     sessionId,
   ]);
 
+  useEffect(() => {
+    isConfiguringProjectSetupRef.current = isConfiguringProjectSetup;
+  }, [isConfiguringProjectSetup]);
+
   const appendConnectionBanner = useCallback(
     (key: string, content: string) => {
       const now = Date.now();
@@ -328,6 +366,260 @@ export default function ChatPanel() {
     },
     [appendSystemMessage],
   );
+
+  const fetchTemplateCatalog = useCallback(async (): Promise<TemplateCatalogResponse> => {
+    const backendState = await window.electron.backend.getState();
+    const baseUrl =
+      backendState.serverUrl || `http://localhost:${backendState.port ?? 8001}`;
+    const response = await fetch(`${baseUrl}/api/v1/templates`, {
+      method: 'GET',
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Template request failed with status ${response.status}`);
+    }
+
+    const parsed = (await response.json()) as TemplateCatalogResponse;
+    return {
+      templates: parsed.templates || [],
+      durationPresets: parsed.durationPresets || {},
+    };
+  }, []);
+
+  const ensureTemplateCatalogLoaded = useCallback(async (): Promise<{
+    templates: SetupTemplateOption[];
+    durationPresets: Record<string, SetupDurationOption[]>;
+  }> => {
+    if (setupTemplates.length > 0 && Object.keys(setupDurationPresets).length > 0) {
+      return {
+        templates: setupTemplates,
+        durationPresets: setupDurationPresets,
+      };
+    }
+
+    setIsLoadingSetupCatalog(true);
+    try {
+      const catalog = await fetchTemplateCatalog();
+      const templates =
+        catalog.templates && catalog.templates.length > 0
+          ? catalog.templates
+          : FALLBACK_TEMPLATE_CATALOG.templates || [];
+      const durationPresets =
+        catalog.durationPresets && Object.keys(catalog.durationPresets).length > 0
+          ? catalog.durationPresets
+          : FALLBACK_TEMPLATE_CATALOG.durationPresets || {};
+
+      setSetupTemplates(templates);
+      setSetupDurationPresets(durationPresets);
+      setSetupError(null);
+      return { templates, durationPresets };
+    } catch (error) {
+      const templates = FALLBACK_TEMPLATE_CATALOG.templates || [];
+      const durationPresets = FALLBACK_TEMPLATE_CATALOG.durationPresets || {};
+      setSetupTemplates(templates);
+      setSetupDurationPresets(durationPresets);
+      setSetupError(
+        `Could not load setup options from backend. Using defaults. ${
+          error instanceof Error ? error.message : ''
+        }`.trim(),
+      );
+      return { templates, durationPresets };
+    } finally {
+      setIsLoadingSetupCatalog(false);
+    }
+  }, [
+    fetchTemplateCatalog,
+    setupDurationPresets,
+    setupTemplates,
+  ]);
+
+  const persistProjectSetup = useCallback(
+    async (config: ConfigureProjectPayload): Promise<void> => {
+      if (!projectDirectory) return;
+
+      const payload: ProjectSetupPersisted = {
+        version: 1,
+        templateId: config.templateId,
+        style: config.style,
+        duration: config.duration,
+      };
+
+      try {
+        await window.electron.project.writeFile(
+          PROJECT_SETUP_FILE,
+          JSON.stringify(payload, null, 2),
+        );
+      } catch (error) {
+        console.warn('[ChatPanel] Failed to persist project setup:', error);
+      }
+    },
+    [projectDirectory],
+  );
+
+  const configureProjectSetup = useCallback(
+    async (config: ConfigureProjectPayload): Promise<void> => {
+      if (!projectDirectory) return;
+
+      setSetupError(null);
+      setIsConfiguringProjectSetup(true);
+      setIsProjectSetupConfigured(false);
+      try {
+        await sendClientActionRef.current({
+          type: 'configure_project',
+          data: config,
+        });
+        await persistProjectSetup(config);
+      } catch (error) {
+        setSetupError(
+          `Failed to configure project setup: ${
+            error instanceof Error ? error.message : 'Unknown error'
+          }`,
+        );
+        setIsConfiguringProjectSetup(false);
+      }
+    },
+    [persistProjectSetup, projectDirectory],
+  );
+
+  const openSetupWizard = useCallback(async () => {
+    await ensureTemplateCatalogLoaded();
+    setSetupError(null);
+    setSetupPanelMode('wizard');
+    setSetupStep('template');
+  }, [ensureTemplateCatalogLoaded]);
+
+  const loadPersistedSetup = useCallback(async (): Promise<ProjectSetupPersisted | null> => {
+    try {
+      const setupFilePath = projectDirectory
+        ? `${projectDirectory}/${PROJECT_SETUP_FILE}`
+        : PROJECT_SETUP_FILE;
+      const content = await window.electron.project.readFile(setupFilePath);
+      if (!content) return null;
+      const parsed = JSON.parse(content) as ProjectSetupPersisted;
+      if (
+        parsed &&
+        parsed.version === 1 &&
+        typeof parsed.templateId === 'string' &&
+        typeof parsed.style === 'string' &&
+        typeof parsed.duration === 'number'
+      ) {
+        return parsed;
+      }
+    } catch {
+      // Ignore malformed/missing setup file.
+    }
+    return null;
+  }, [projectDirectory]);
+
+  const deriveDefaultSetup = useCallback(
+    (
+      templates: SetupTemplateOption[],
+      durationPresets: Record<string, SetupDurationOption[]>,
+    ): ConfigureProjectPayload | null => {
+      const template =
+        templates.find((candidate) => candidate.id === DEFAULT_SETUP_TEMPLATE_ID) ||
+        templates[0];
+      if (!template) return null;
+
+      const style =
+        template.styles.find((candidate) => candidate.id === template.defaultStyle)
+          ?.id ||
+        template.styles.find((candidate) => candidate.id === DEFAULT_SETUP_STYLE_ID)
+          ?.id ||
+        template.styles[0]?.id ||
+        DEFAULT_SETUP_STYLE_ID;
+
+      const duration =
+        resolvePreferredDuration(template.id, durationPresets);
+
+      if (!projectDirectory) return null;
+
+      return {
+        templateId: template.id,
+        style,
+        duration,
+        projectDir: projectDirectory,
+      };
+    },
+    [projectDirectory],
+  );
+
+  const applySetupSelection = useCallback(
+    (config: ConfigureProjectPayload) => {
+      setSelectedTemplateId(config.templateId);
+      setSelectedStyleId(config.style);
+      setSelectedDuration(config.duration);
+    },
+    [],
+  );
+
+  const handleSelectTemplate = useCallback(
+    (templateId: string) => {
+      const template =
+        setupTemplates.find((candidate) => candidate.id === templateId) || null;
+      if (!template || !projectDirectory) return;
+
+      const style =
+        template.styles.find((candidate) => candidate.id === template.defaultStyle)
+          ?.id ||
+        template.styles[0]?.id ||
+        DEFAULT_SETUP_STYLE_ID;
+      const duration =
+        resolvePreferredDuration(templateId, setupDurationPresets);
+
+      setSelectedTemplateId(templateId);
+      setSelectedStyleId(style);
+      setSelectedDuration(duration);
+      setSetupStep('style');
+    },
+    [projectDirectory, setupDurationPresets, setupTemplates],
+  );
+
+  const handleSelectStyle = useCallback((styleId: string) => {
+    setSelectedStyleId(styleId);
+    setSetupStep('duration');
+  }, []);
+
+  const handleSelectDuration = useCallback(
+    (duration: number) => {
+      if (!projectDirectory || !selectedTemplateId || !selectedStyleId) {
+        return;
+      }
+
+      const payload: ConfigureProjectPayload = {
+        templateId: selectedTemplateId,
+        style: selectedStyleId,
+        duration,
+        projectDir: projectDirectory,
+      };
+
+      setSelectedDuration(duration);
+      setSetupPanelMode('summary');
+      setSetupStep('duration');
+      void configureProjectSetup(payload);
+    },
+    [
+      configureProjectSetup,
+      projectDirectory,
+      selectedStyleId,
+      selectedTemplateId,
+    ],
+  );
+
+  const handleSetupBack = useCallback(() => {
+    if (setupStep === 'style') {
+      setSetupStep('template');
+      return;
+    }
+    if (setupStep === 'duration') {
+      setSetupStep('style');
+    }
+  }, [setupStep]);
+
+  const handleSetupEdit = useCallback(async () => {
+    await openSetupWizard();
+  }, [openSetupWizard]);
 
   const resolveStopRequest = useCallback(
     (success: boolean, errorMessage?: string): boolean => {
@@ -486,7 +778,11 @@ export default function ChatPanel() {
         return;
       }
 
-      setMessages(snapshot.messages as ChatMessage[]);
+      setMessages(
+        (snapshot.messages as ChatMessage[]).filter(
+          (msg) => !(msg.type === 'greeting' && msg.role === 'system'),
+        ),
+      );
       setSessionId(snapshot.sessionId);
       setAgentStatus(resolveAgentStatus(snapshot.uiState.agentStatus));
       setAgentName(snapshot.uiState.agentName || 'Kshana');
@@ -520,7 +816,6 @@ export default function ChatPanel() {
     setIsTaskRunning(false);
     setIsStopPending(false);
     scheduleSnapshotSave(projectDirectory);
-    // Backend will send greeting via WebSocket when connection is re-established
   }, [projectDirectory, resetConversationRefs, scheduleSnapshotSave]);
 
   const deleteMessage = useCallback((messageId: string) => {
@@ -748,6 +1043,67 @@ export default function ChatPanel() {
         return currentAgentName;
       });
 
+      const requestId =
+        typeof payload.requestId === 'string' ? payload.requestId : '';
+      const opId =
+        typeof data.opId === 'string' && data.opId.trim()
+          ? data.opId
+          : (requestId || undefined);
+
+      const sendRequestResponse = (
+        responseType: string,
+        responseRequestId: string,
+        responseData: Record<string, unknown>,
+        errorMessage?: string,
+      ) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN || !responseRequestId) {
+          return;
+        }
+        ws.send(
+          JSON.stringify(
+            errorMessage
+              ? {
+                type: responseType,
+                requestId: responseRequestId,
+                error: errorMessage,
+                data: responseData,
+              }
+              : {
+                type: responseType,
+                requestId: responseRequestId,
+                data: responseData,
+              },
+          ),
+        );
+      };
+
+      const getWirePath = (pathValue: unknown): string | null => {
+        if (typeof pathValue !== 'string') return null;
+        const trimmed = pathValue.trim();
+        if (!trimmed) return null;
+        if (isAbsoluteWirePath(trimmed)) return null;
+        return trimmed;
+      };
+
+      const formatFileOpError = (error: unknown, fallback: string): string =>
+        getRendererErrorMessage(error, fallback);
+
+      const isNoEntryError = (error: unknown, errorMessage: string): boolean => {
+        if (errorMessage.includes('[ENOENT]')) {
+          return true;
+        }
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          (error as { code?: string }).code === 'ENOENT'
+        ) {
+          return true;
+        }
+        return false;
+      };
+
       switch (messageType) {
         case 'status': {
           // kshana-ink status: { status: 'connected' | 'ready' | 'busy' | 'completed' | 'error', message?: string, agentName?: string }
@@ -774,22 +1130,6 @@ export default function ChatPanel() {
                 agentNameFromStatus,
                 'Connected',
               );
-              // Initial greeting logic with example prompts
-              setMessages((prev) => {
-                const hasGreeting = prev.some((msg) => msg.type === 'greeting');
-                if (hasGreeting) return prev;
-                return [
-                  ...prev,
-                  {
-                    id: makeId(),
-                    role: 'system',
-                    type: 'greeting',
-                    content:
-                      'Welcome to Kshana!\n\nPaste an SRT transcript or enter a documentary script.\nThe system will detect SRT format automatically.\n\n**Style:** Cinematic Realism\n\n**Example prompts:**\n\n* Paste a full SRT transcript to begin\n* A 10-minute documentary script about coral reefs',
-                    timestamp: Date.now(),
-                  },
-                ];
-              });
               break;
             case 'busy':
               // Update status only - don't create placeholder messages
@@ -808,6 +1148,10 @@ export default function ChatPanel() {
                 statusMsg || 'Waiting for input...',
               );
               setIsTaskRunning(false);
+              if (isConfiguringProjectSetupRef.current) {
+                setIsConfiguringProjectSetup(false);
+                setIsProjectSetupConfigured(true);
+              }
               if (isCancelAck) {
                 resolveStopRequest(true);
               }
@@ -832,6 +1176,10 @@ export default function ChatPanel() {
             case 'error':
               debouncedSetStatus('error', statusMsg);
               setIsTaskRunning(false);
+              if (isConfiguringProjectSetupRef.current) {
+                setIsConfiguringProjectSetup(false);
+                setSetupError(statusMsg || 'Failed to configure project setup.');
+              }
               if (isStopPendingRef.current) {
                 resolveStopRequest(false, statusMsg || 'Failed to stop task.');
               }
@@ -1630,18 +1978,187 @@ export default function ChatPanel() {
           }
           break;
         }
+        case 'file_read_request': {
+          const requestedPath = getWirePath(data.path);
+          if (!requestedPath) {
+            const reason = 'Invalid or unsafe file path for file_read_request.';
+            sendRequestResponse('file_read_response', requestId, {}, reason);
+            appendSystemMessage(`⚠️ ${reason}`, 'error');
+            break;
+          }
+          void window.electron.project
+            .readFileGuarded(requestedPath, {
+              opId,
+              source: 'agent_ws',
+            })
+            .then((content) => {
+              sendRequestResponse(
+                'file_read_response',
+                requestId,
+                { content },
+              );
+            })
+            .catch((error) => {
+              const reason = formatFileOpError(
+                error,
+                'Failed to read file from desktop workspace.',
+              );
+              sendRequestResponse('file_read_response', requestId, {}, reason);
+              appendSystemMessage(
+                `⚠️ Failed to read file: ${pathBasename(requestedPath)}. ${reason}`,
+                'error',
+              );
+            });
+          break;
+        }
+        case 'file_list_request': {
+          const requestedPath = getWirePath(data.path);
+          if (!requestedPath) {
+            const reason = 'Invalid or unsafe directory path for file_list_request.';
+            sendRequestResponse('file_list_response', requestId, {}, reason);
+            appendSystemMessage(`⚠️ ${reason}`, 'error');
+            break;
+          }
+          void window.electron.project
+            .listDirectory(requestedPath, {
+              opId,
+              source: 'agent_ws',
+            })
+            .then((entries) => {
+              sendRequestResponse('file_list_response', requestId, { entries });
+            })
+            .catch((error) => {
+              const reason = formatFileOpError(
+                error,
+                'Failed to list directory from desktop workspace.',
+              );
+              sendRequestResponse('file_list_response', requestId, {}, reason);
+              appendSystemMessage(
+                `⚠️ Failed to list directory: ${pathBasename(requestedPath)}. ${reason}`,
+                'error',
+              );
+            });
+          break;
+        }
+        case 'file_exists_request': {
+          const requestedPath = getWirePath(data.path);
+          if (!requestedPath) {
+            sendRequestResponse('file_exists_response', requestId, { exists: false });
+            break;
+          }
+          void window.electron.project
+            .statPath(requestedPath, {
+              opId,
+              source: 'agent_ws',
+            })
+            .then(() => {
+              sendRequestResponse(
+                'file_exists_response',
+                requestId,
+                { exists: true },
+              );
+            })
+            .catch((error) => {
+              const reason = formatFileOpError(
+                error,
+                'Failed to check file existence.',
+              );
+              if (isNoEntryError(error, reason)) {
+                sendRequestResponse(
+                  'file_exists_response',
+                  requestId,
+                  { exists: false },
+                );
+                return;
+              }
+              sendRequestResponse('file_exists_response', requestId, {}, reason);
+              appendSystemMessage(
+                `⚠️ Failed to check path existence: ${pathBasename(requestedPath)}. ${reason}`,
+                'error',
+              );
+            });
+          break;
+        }
+        case 'file_stat_request': {
+          const requestedPath = getWirePath(data.path);
+          if (!requestedPath) {
+            const reason = 'Invalid or unsafe path for file_stat_request.';
+            sendRequestResponse('file_stat_response', requestId, {}, reason);
+            appendSystemMessage(`⚠️ ${reason}`, 'error');
+            break;
+          }
+          void window.electron.project
+            .statPath(requestedPath, {
+              opId,
+              source: 'agent_ws',
+            })
+            .then((stat) => {
+              sendRequestResponse('file_stat_response', requestId, stat);
+            })
+            .catch((error) => {
+              const reason = formatFileOpError(
+                error,
+                'Failed to stat path in desktop workspace.',
+              );
+              sendRequestResponse('file_stat_response', requestId, {}, reason);
+              appendSystemMessage(
+                `⚠️ Failed to stat path: ${pathBasename(requestedPath)}. ${reason}`,
+                'error',
+              );
+            });
+          break;
+        }
+        case 'file_read_buffer_request': {
+          const requestedPath = getWirePath(data.path);
+          if (!requestedPath) {
+            const reason =
+              'Invalid or unsafe file path for file_read_buffer_request.';
+            sendRequestResponse('file_buffer_response', requestId, {}, reason);
+            appendSystemMessage(`⚠️ ${reason}`, 'error');
+            break;
+          }
+          void window.electron.project
+            .readFileBufferGuarded(requestedPath, {
+              opId,
+              source: 'agent_ws',
+            })
+            .then((base64Data) => {
+              sendRequestResponse(
+                'file_buffer_response',
+                requestId,
+                { data: base64Data },
+              );
+            })
+            .catch((error) => {
+              const reason = formatFileOpError(
+                error,
+                'Failed to read binary file from desktop workspace.',
+              );
+              sendRequestResponse('file_buffer_response', requestId, {}, reason);
+              appendSystemMessage(
+                `⚠️ Failed to read binary file: ${pathBasename(requestedPath)}. ${reason}`,
+                'error',
+              );
+            });
+          break;
+        }
         case 'file_write': {
           const filePath = extractIncomingFileOpPath(data);
-          const opId =
-            typeof data.opId === 'string' && data.opId.trim()
-              ? data.opId
-              : undefined;
+          const fileWriteRequestId = requestId;
           const fileContent = data.content as string;
           if (!filePath) {
             appendSystemMessage(
               '⚠️ Failed to save file: missing file path in server payload.',
               'error',
             );
+            if (fileWriteRequestId) {
+              sendRequestResponse(
+                'file_write_ack',
+                fileWriteRequestId,
+                { success: false },
+                'Missing file path in file write payload.',
+              );
+            }
             break;
           }
           if (isAbsoluteWirePath(filePath)) {
@@ -1649,18 +2166,40 @@ export default function ChatPanel() {
               `⚠️ Rejected unsafe absolute file path from server: ${filePath}`,
               'error',
             );
+            if (fileWriteRequestId) {
+              sendRequestResponse(
+                'file_write_ack',
+                fileWriteRequestId,
+                { success: false },
+                `Unsafe absolute file path rejected: ${filePath}`,
+              );
+            }
             break;
           }
           if (filePath && fileContent !== undefined) {
             window.electron.project.writeFile(filePath, fileContent, {
               opId,
               source: 'agent_ws',
+            }).then(() => {
+              if (fileWriteRequestId) {
+                sendRequestResponse('file_write_ack', fileWriteRequestId, {
+                  success: true,
+                });
+              }
             }).catch((err) => {
               console.error('[ChatPanel] file_write failed:', filePath, err);
-              const reason = getRendererErrorMessage(
+              const reason = formatFileOpError(
                 err,
                 'Unknown file write error.',
               );
+              if (fileWriteRequestId) {
+                sendRequestResponse(
+                  'file_write_ack',
+                  fileWriteRequestId,
+                  { success: false },
+                  reason,
+                );
+              }
               appendSystemMessage(
                 `⚠️ Failed to save file: ${pathBasename(filePath)}. ${reason}`,
                 'error',
@@ -1669,18 +2208,37 @@ export default function ChatPanel() {
           }
           break;
         }
+        case 'file_write_command': {
+          const commandPayload = {
+            ...data,
+            relativePath: data.path,
+            content: data.content,
+          };
+          const syntheticPayload = {
+            ...payload,
+            type: 'file_write',
+            data: commandPayload,
+          };
+          handleServerPayload(syntheticPayload as Record<string, unknown>);
+          break;
+        }
         case 'file_write_binary': {
           const binPath = extractIncomingFileOpPath(data);
-          const opId =
-            typeof data.opId === 'string' && data.opId.trim()
-              ? data.opId
-              : undefined;
+          const fileWriteRequestId = requestId;
           const binContent = data.content as string;
           if (!binPath) {
             appendSystemMessage(
               '⚠️ Failed to save binary file: missing file path in server payload.',
               'error',
             );
+            if (fileWriteRequestId) {
+              sendRequestResponse(
+                'file_write_ack',
+                fileWriteRequestId,
+                { success: false },
+                'Missing file path in binary write payload.',
+              );
+            }
             break;
           }
           if (isAbsoluteWirePath(binPath)) {
@@ -1688,18 +2246,40 @@ export default function ChatPanel() {
               `⚠️ Rejected unsafe absolute file path from server: ${binPath}`,
               'error',
             );
+            if (fileWriteRequestId) {
+              sendRequestResponse(
+                'file_write_ack',
+                fileWriteRequestId,
+                { success: false },
+                `Unsafe absolute file path rejected: ${binPath}`,
+              );
+            }
             break;
           }
           if (binPath && binContent) {
             window.electron.project.writeFileBinary(binPath, binContent, {
               opId,
               source: 'agent_ws',
+            }).then(() => {
+              if (fileWriteRequestId) {
+                sendRequestResponse('file_write_ack', fileWriteRequestId, {
+                  success: true,
+                });
+              }
             }).catch((err) => {
               console.error('[ChatPanel] file_write_binary failed:', binPath, err);
-              const reason = getRendererErrorMessage(
+              const reason = formatFileOpError(
                 err,
                 'Unknown binary write error.',
               );
+              if (fileWriteRequestId) {
+                sendRequestResponse(
+                  'file_write_ack',
+                  fileWriteRequestId,
+                  { success: false },
+                  reason,
+                );
+              }
               appendSystemMessage(
                 `⚠️ Failed to save binary file: ${pathBasename(binPath)}. ${reason}`,
                 'error',
@@ -1708,17 +2288,36 @@ export default function ChatPanel() {
           }
           break;
         }
+        case 'file_write_buffer_command': {
+          const commandPayload = {
+            ...data,
+            relativePath: data.path,
+            content: data.data,
+          };
+          const syntheticPayload = {
+            ...payload,
+            type: 'file_write_binary',
+            data: commandPayload,
+          };
+          handleServerPayload(syntheticPayload as Record<string, unknown>);
+          break;
+        }
         case 'file_mkdir': {
           const mkdirPath = extractIncomingFileOpPath(data);
-          const opId =
-            typeof data.opId === 'string' && data.opId.trim()
-              ? data.opId
-              : undefined;
+          const mkdirRequestId = requestId;
           if (!mkdirPath) {
             appendSystemMessage(
               '⚠️ Failed to create directory: missing path in server payload.',
               'error',
             );
+            if (mkdirRequestId) {
+              sendRequestResponse(
+                'file_write_ack',
+                mkdirRequestId,
+                { success: false },
+                'Missing directory path in mkdir payload.',
+              );
+            }
             break;
           }
           if (isAbsoluteWirePath(mkdirPath)) {
@@ -1726,18 +2325,40 @@ export default function ChatPanel() {
               `⚠️ Rejected unsafe absolute directory path from server: ${mkdirPath}`,
               'error',
             );
+            if (mkdirRequestId) {
+              sendRequestResponse(
+                'file_write_ack',
+                mkdirRequestId,
+                { success: false },
+                `Unsafe absolute directory path rejected: ${mkdirPath}`,
+              );
+            }
             break;
           }
           if (mkdirPath) {
             window.electron.project.mkdir(mkdirPath, {
               opId,
               source: 'agent_ws',
+            }).then(() => {
+              if (mkdirRequestId) {
+                sendRequestResponse('file_write_ack', mkdirRequestId, {
+                  success: true,
+                });
+              }
             }).catch((err) => {
               console.error('[ChatPanel] file_mkdir failed:', mkdirPath, err);
-              const reason = getRendererErrorMessage(
+              const reason = formatFileOpError(
                 err,
                 'Unknown mkdir error.',
               );
+              if (mkdirRequestId) {
+                sendRequestResponse(
+                  'file_write_ack',
+                  mkdirRequestId,
+                  { success: false },
+                  reason,
+                );
+              }
               appendSystemMessage(
                 `⚠️ Failed to create directory: ${pathBasename(mkdirPath)}. ${reason}`,
                 'error',
@@ -1746,17 +2367,35 @@ export default function ChatPanel() {
           }
           break;
         }
+        case 'file_mkdir_command': {
+          const commandPayload = {
+            ...data,
+            relativePath: data.path,
+          };
+          const syntheticPayload = {
+            ...payload,
+            type: 'file_mkdir',
+            data: commandPayload,
+          };
+          handleServerPayload(syntheticPayload as Record<string, unknown>);
+          break;
+        }
         case 'file_rm': {
           const rmPath = extractIncomingFileOpPath(data);
-          const opId =
-            typeof data.opId === 'string' && data.opId.trim()
-              ? data.opId
-              : undefined;
+          const rmRequestId = requestId;
           if (!rmPath) {
             appendSystemMessage(
               '⚠️ Failed to delete path: missing path in server payload.',
               'error',
             );
+            if (rmRequestId) {
+              sendRequestResponse(
+                'file_write_ack',
+                rmRequestId,
+                { success: false },
+                'Missing path in delete payload.',
+              );
+            }
             break;
           }
           if (isAbsoluteWirePath(rmPath)) {
@@ -1764,24 +2403,136 @@ export default function ChatPanel() {
               `⚠️ Rejected unsafe absolute delete path from server: ${rmPath}`,
               'error',
             );
+            if (rmRequestId) {
+              sendRequestResponse(
+                'file_write_ack',
+                rmRequestId,
+                { success: false },
+                `Unsafe absolute delete path rejected: ${rmPath}`,
+              );
+            }
             break;
           }
           if (rmPath) {
             window.electron.project.delete(rmPath, {
               opId,
               source: 'agent_ws',
+            }).then(() => {
+              if (rmRequestId) {
+                sendRequestResponse('file_write_ack', rmRequestId, {
+                  success: true,
+                });
+              }
             }).catch((err) => {
               console.error('[ChatPanel] file_rm failed:', rmPath, err);
-              const reason = getRendererErrorMessage(
+              const reason = formatFileOpError(
                 err,
                 'Unknown delete error.',
               );
+              if (rmRequestId) {
+                sendRequestResponse(
+                  'file_write_ack',
+                  rmRequestId,
+                  { success: false },
+                  reason,
+                );
+              }
               appendSystemMessage(
                 `⚠️ Failed to delete path: ${pathBasename(rmPath)}. ${reason}`,
                 'error',
               );
             });
           }
+          break;
+        }
+        case 'file_delete_command':
+        case 'file_delete_dir_command': {
+          const commandPayload = {
+            ...data,
+            relativePath: data.path,
+          };
+          const syntheticPayload = {
+            ...payload,
+            type: 'file_rm',
+            data: commandPayload,
+          };
+          handleServerPayload(syntheticPayload as Record<string, unknown>);
+          break;
+        }
+        case 'file_copy_command': {
+          const sourcePath = getWirePath(data.src);
+          const destinationPath = getWirePath(data.dest);
+          if (!sourcePath || !destinationPath) {
+            const reason = 'Invalid source or destination path for file copy.';
+            sendRequestResponse('file_write_ack', requestId, { success: false }, reason);
+            appendSystemMessage(`⚠️ ${reason}`, 'error');
+            break;
+          }
+          void window.electron.project
+            .copyFileExact(sourcePath, destinationPath, {
+              opId,
+              source: 'agent_ws',
+            })
+            .then(() => {
+              sendRequestResponse('file_write_ack', requestId, { success: true });
+            })
+            .catch((error) => {
+              const reason = formatFileOpError(
+                error,
+                'Failed to copy file in desktop workspace.',
+              );
+              sendRequestResponse(
+                'file_write_ack',
+                requestId,
+                { success: false },
+                reason,
+              );
+              appendSystemMessage(
+                `⚠️ Failed to copy file: ${pathBasename(sourcePath)}. ${reason}`,
+                'error',
+              );
+            });
+          break;
+        }
+        case 'batch_write_command': {
+          const operations = Array.isArray(data.operations)
+            ? data.operations
+            : [];
+          if (operations.length === 0) {
+            sendRequestResponse('file_write_ack', requestId, { success: true });
+            break;
+          }
+          void (async () => {
+            try {
+              for (const operation of operations) {
+                const op = operation as Record<string, unknown>;
+                const opPath = getWirePath(op.path);
+                const opContent =
+                  typeof op.content === 'string' ? op.content : '';
+                if (!opPath) {
+                  throw new Error('Invalid path in batch_write_command operation.');
+                }
+                // eslint-disable-next-line no-await-in-loop
+                await window.electron.project.writeFile(opPath, opContent, {
+                  opId,
+                  source: 'agent_ws',
+                });
+              }
+              sendRequestResponse('file_write_ack', requestId, { success: true });
+            } catch (error) {
+              const reason = formatFileOpError(
+                error,
+                'Failed to apply batch file writes in desktop workspace.',
+              );
+              sendRequestResponse(
+                'file_write_ack',
+                requestId,
+                { success: false },
+                reason,
+              );
+              appendSystemMessage(`⚠️ ${reason}`, 'error');
+            }
+          })();
           break;
         }
         default:
@@ -1805,13 +2556,6 @@ export default function ChatPanel() {
   );
 
   const connectWebSocket = useCallback(async (): Promise<WebSocket> => {
-    // Block connection if project dialog is showing
-    if (showProjectDialog && !projectDialogResolved) {
-      throw new Error(
-        'Project selection dialog is open. Please choose an option first.',
-      );
-    }
-
     // Prevent duplicate connections
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       return wsRef.current;
@@ -1884,6 +2628,7 @@ export default function ChatPanel() {
       const wsBase = baseUrl.replace(/^http/, 'ws');
       const url = new URL(DEFAULT_WS_PATH, wsBase);
       url.searchParams.set('channel', 'chat');
+      url.searchParams.set('mode', 'remote');
       const getDesktopVersion = window.electron.app?.getVersion;
       const desktopVersion = getDesktopVersion
         ? await getDesktopVersion().catch(() => null)
@@ -2007,8 +2752,6 @@ export default function ChatPanel() {
     flushPendingOutboundActions,
     handleServerPayload,
     projectDirectory,
-    showProjectDialog,
-    projectDialogResolved,
   ]);
 
   useEffect(() => {
@@ -2026,10 +2769,6 @@ export default function ChatPanel() {
       comfyUISettingsKeyRef.current = nextKey;
 
       if (!allowReconnect || !previousKey || previousKey === nextKey) {
-        return;
-      }
-
-      if (!projectDialogResolved || showProjectDialog) {
         return;
       }
 
@@ -2084,8 +2823,6 @@ export default function ChatPanel() {
     appendSystemMessage,
     connectWebSocket,
     disconnectWebSocket,
-    projectDialogResolved,
-    showProjectDialog,
   ]);
 
   const sendClientAction = useCallback(
@@ -2111,6 +2848,10 @@ export default function ChatPanel() {
     },
     [connectWebSocket, flushPendingOutboundActions, queueOutboundAction],
   );
+
+  useEffect(() => {
+    sendClientActionRef.current = sendClientAction;
+  }, [sendClientAction]);
 
   const sendResponse = useCallback(
     async (content: string) => {
@@ -2143,6 +2884,30 @@ export default function ChatPanel() {
 
   const sendMessage = useCallback(
     async (content: string) => {
+      if (!awaitingResponseRef.current) {
+        if (isConfiguringProjectSetupRef.current) {
+          appendSystemMessage(
+            'Project setup is still being configured. Please wait a moment.',
+            'status',
+          );
+          return;
+        }
+        if (projectDirectory && !isProjectSetupConfigured) {
+          if (setupPanelMode !== 'wizard') {
+            appendSystemMessage(
+              'Applying default project setup. Please retry in a moment.',
+              'status',
+            );
+            return;
+          }
+          appendSystemMessage(
+            'Complete Project Setup before sending your first prompt.',
+            'status',
+          );
+          return;
+        }
+      }
+
       // Log user input
       window.electron.logger.logUserInput(content);
 
@@ -2177,7 +2942,16 @@ export default function ChatPanel() {
         });
       }
     },
-    [appendMessage, sendClientAction, agentName],
+    [
+      appendMessage,
+      sendClientAction,
+      agentName,
+      appendSystemMessage,
+      isProjectSetupConfigured,
+      openSetupWizard,
+      projectDirectory,
+      setupPanelMode,
+    ],
   );
 
   const requestStop = useCallback(
@@ -2289,7 +3063,7 @@ export default function ChatPanel() {
         state.status === 'ready' &&
         !wsRef.current &&
         !connectingRef.current &&
-        (projectDialogResolved || !projectDirectory)
+        !!projectDirectory
       ) {
         connectWebSocket().catch(() => undefined);
       }
@@ -2304,7 +3078,7 @@ export default function ChatPanel() {
           state.status === 'ready' &&
           !connectingRef.current &&
           (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) &&
-          projectDialogResolved // Only auto-connect if dialog is resolved
+          !!projectDirectory
         ) {
           connectWebSocket().catch(() => undefined);
         }
@@ -2318,7 +3092,6 @@ export default function ChatPanel() {
     connectWebSocket,
     appendSystemMessage,
     projectDirectory,
-    projectDialogResolved,
   ]);
 
   useEffect(() => {
@@ -2371,8 +3144,14 @@ export default function ChatPanel() {
     reconnectAttemptRef.current = 0;
     connectionBannerRef.current = null;
     pendingOutboundActionsRef.current = [];
-    setProjectDialogResolved(false);
-    setShowProjectDialog(false);
+    setSetupPanelMode('hidden');
+    setSetupStep('template');
+    setSetupError(null);
+    setIsProjectSetupConfigured(false);
+    setIsConfiguringProjectSetup(false);
+    setSelectedTemplateId(null);
+    setSelectedStyleId(null);
+    setSelectedDuration(null);
 
     if (!projectDirectory) {
       resetConversationRefs();
@@ -2392,28 +3171,50 @@ export default function ChatPanel() {
     const reconnect = async () => {
       try {
         await restoreSnapshot(projectDirectory);
+        const catalog = await ensureTemplateCatalogLoaded();
+        const defaultSetup = deriveDefaultSetup(
+          catalog.templates,
+          catalog.durationPresets,
+        );
+
+        if (defaultSetup) {
+          applySetupSelection(defaultSetup);
+        }
+
+        const persistedSetup = await loadPersistedSetup();
+        if (persistedSetup && projectDirectory) {
+          const persistedPayload: ConfigureProjectPayload = {
+            templateId: persistedSetup.templateId,
+            style: persistedSetup.style,
+            duration: persistedSetup.duration,
+            projectDir: projectDirectory,
+          };
+          applySetupSelection(persistedPayload);
+          setSetupPanelMode('summary');
+          void configureProjectSetup(persistedPayload);
+        } else {
+          const pendingSetupDir = window.localStorage.getItem(
+            PROJECT_SETUP_STORAGE_KEY,
+          );
+          const isPendingForCurrentProject =
+            pendingSetupDir &&
+            normalizeProjectDirectory(pendingSetupDir) ===
+              normalizeProjectDirectory(projectDirectory);
+
+          if (isPendingForCurrentProject) {
+            window.localStorage.removeItem(PROJECT_SETUP_STORAGE_KEY);
+            setSetupPanelMode('wizard');
+            setSetupStep('template');
+          } else {
+            setSetupPanelMode('summary');
+            if (defaultSetup) {
+              void configureProjectSetup(defaultSetup);
+            }
+          }
+        }
 
         const state = await window.electron.backend.getState();
         if (state.status === 'ready') {
-          try {
-            const projectFilePath = `${projectDirectory}/.kshana/agent/project.json`;
-            const exists =
-              await window.electron.project.checkFileExists(projectFilePath);
-            if (exists) {
-              const projectFileContent =
-                await window.electron.project.readFile(projectFilePath);
-              if (
-                projectFileContent &&
-                hasExistingProjectWork(projectFileContent)
-              ) {
-                setShowProjectDialog(true);
-                return; // Don't connect yet, wait for user decision
-              }
-            }
-          } catch (error) {
-            console.error('[ChatPanel] Error checking project:', error);
-          }
-          setProjectDialogResolved(true);
           await connectWebSocket();
         }
       } catch (error) {
@@ -2424,29 +3225,16 @@ export default function ChatPanel() {
   }, [
     connectWebSocket,
     disconnectWebSocket,
+    ensureTemplateCatalogLoaded,
+    deriveDefaultSetup,
     flushSnapshotSave,
     projectDirectory,
     resetConversationRefs,
     restoreSnapshot,
+    applySetupSelection,
+    loadPersistedSetup,
+    configureProjectSetup,
   ]);
-
-  const handleProjectContinue = useCallback(() => {
-    setShowProjectDialog(false);
-    setProjectDialogResolved(true);
-    // Now connect WebSocket
-    connectWebSocket().catch(() => undefined);
-  }, [connectWebSocket]);
-
-  const handleProjectStartNew = useCallback(() => {
-    setShowProjectDialog(false);
-    setProjectDialogResolved(true);
-    clearChat();
-    pendingOutboundActionsRef.current = [];
-    reconnectAttemptRef.current = 0;
-    // Project deletion is handled by ProjectSelectionDialog
-    // Now connect WebSocket
-    connectWebSocket().catch(() => undefined);
-  }, [clearChat, connectWebSocket]);
 
   const handleExportChat = useCallback(async () => {
     if (!projectDirectory) {
@@ -2481,76 +3269,86 @@ export default function ChatPanel() {
     }
   }, [appendSystemMessage, projectDirectory]);
 
-  // Filter out greeting messages if user has sent a message
+  // Never show legacy greeting messages.
   const filteredMessages = useMemo(() => {
-    if (hasUserSentMessage) {
-      return messages.filter(
-        (msg) => !(msg.type === 'greeting' && msg.role === 'system'),
-      );
-    }
-    return messages;
-  }, [messages, hasUserSentMessage]);
+    return messages.filter(
+      (msg) => !(msg.type === 'greeting' && msg.role === 'system'),
+    );
+  }, [messages]);
 
   return (
-    <>
-      {showProjectDialog && projectDirectory && (
-        <ProjectSelectionDialog
-          projectDirectory={projectDirectory}
-          onContinue={handleProjectContinue}
-          onStartNew={handleProjectStartNew}
-        />
-      )}
-      <div className={styles.container}>
-        <div className={styles.header}>
-          <Bot size={18} className={styles.headerIcon} />
-          <span className={styles.headerTitle}>Kshana Assistant</span>
-          <button
-            type="button"
-            className={styles.exportButton}
-            onClick={handleExportChat}
-            title="Export chat history as JSON"
-            aria-label="Export chat history as JSON"
-          >
-            <Download size={14} />
-            <span>Export Chat</span>
-          </button>
-          <button
-            type="button"
-            className={styles.clearButton}
-            onClick={clearChat}
-            title="Clear chat"
-          >
-            <Trash2 size={14} />
-            <span>Clear</span>
-          </button>
-        </div>
+    <div className={styles.container}>
+      <div className={styles.header}>
+        <Bot size={18} className={styles.headerIcon} />
+        <span className={styles.headerTitle}>Kshana Assistant</span>
+        <button
+          type="button"
+          className={styles.exportButton}
+          onClick={handleExportChat}
+          title="Export chat history as JSON"
+          aria-label="Export chat history as JSON"
+        >
+          <Download size={14} />
+          <span>Export Chat</span>
+        </button>
+        <button
+          type="button"
+          className={styles.clearButton}
+          onClick={clearChat}
+          title="Clear chat"
+        >
+          <Trash2 size={14} />
+          <span>Clear</span>
+        </button>
+      </div>
 
-        {/* New Status Bar */}
-        <StatusBar
-          agentName={agentName}
-          status={agentStatus}
-          message={statusMessage}
-          currentPhase={currentPhase}
-          phaseDisplayName={phaseDisplayName}
-        />
+      <StatusBar
+        agentName={agentName}
+        status={agentStatus}
+        message={statusMessage}
+        currentPhase={currentPhase}
+        phaseDisplayName={phaseDisplayName}
+      />
 
-        <div className={styles.messages}>
-          <MessageList
-            messages={filteredMessages}
-            isStreaming={isStreaming}
-            onDelete={deleteMessage}
-            onResponse={sendResponse} // Pass down to MessageBubble
-          />
-        </div>
-
-        <ChatInput
-          disabled={connectionState === 'connecting'}
-          isRunning={isTaskRunning}
-          isStopping={isStopPending}
-          onSend={sendMessage}
-          onStop={stopTask}
+      <div className={styles.messages}>
+        <MessageList
+          messages={filteredMessages}
+          isStreaming={isStreaming}
+          onDelete={deleteMessage}
+          onResponse={sendResponse}
         />
       </div>
-    </>
+
+      <ProjectSetupPanel
+        mode={setupPanelMode}
+        step={setupStep}
+        templates={setupTemplates}
+        durationPresets={setupDurationPresets}
+        selectedTemplateId={selectedTemplateId}
+        selectedStyleId={selectedStyleId}
+        selectedDuration={selectedDuration}
+        loading={isLoadingSetupCatalog}
+        configuring={isConfiguringProjectSetup}
+        error={setupError}
+        onOpenWizard={openSetupWizard}
+        onEditSetup={handleSetupEdit}
+        onSelectTemplate={handleSelectTemplate}
+        onSelectStyle={handleSelectStyle}
+        onSelectDuration={handleSelectDuration}
+        onBack={handleSetupBack}
+      />
+
+      <ChatInput
+        disabled={
+          connectionState === 'connecting' ||
+          isConfiguringProjectSetup ||
+          setupPanelMode === 'wizard'
+        }
+        isRunning={isTaskRunning}
+        isStopping={isStopPending}
+        onSend={sendMessage}
+        onStop={stopTask}
+      />
+    </div>
   );
 }
