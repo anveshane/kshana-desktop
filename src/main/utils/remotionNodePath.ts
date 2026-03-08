@@ -36,11 +36,20 @@ export function buildPackagedNodePath(
         cwd,
       )
     : '';
+  const packagedNodeModulesPath = resourcesPath
+    ? path.join(resourcesPath, 'app.asar', 'node_modules')
+    : '';
   if (
     unpackedNodeModulesPath &&
     !normalizedEntries.includes(unpackedNodeModulesPath)
   ) {
     normalizedEntries.push(unpackedNodeModulesPath);
+  }
+  if (
+    packagedNodeModulesPath &&
+    !normalizedEntries.includes(packagedNodeModulesPath)
+  ) {
+    normalizedEntries.push(packagedNodeModulesPath);
   }
   return [...new Set(normalizedEntries)].join(path.delimiter);
 }

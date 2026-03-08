@@ -146,6 +146,7 @@ dist/
 build/
 assets/whisper-models/
 assets/whisper-runtime/
+assets/remotion-browser/
 assets/runtime-config.json
 
 # IDE

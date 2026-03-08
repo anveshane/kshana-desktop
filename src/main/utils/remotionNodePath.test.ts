@@ -16,7 +16,7 @@ describe('remotionNodePath', () => {
     );
   });
 
-  it('builds deterministic NODE_PATH and appends unpacked node_modules', () => {
+  it('builds deterministic NODE_PATH, preferring unpacked and keeping packaged fallback', () => {
     const resourcesPath = '/Applications/Kshana.app/Contents/Resources';
     const rawNodePath = [
       '/Applications/Kshana.app/Contents/Resources/app.asar/node_modules',
@@ -26,6 +26,6 @@ describe('remotionNodePath', () => {
     const built = buildPackagedNodePath(rawNodePath, resourcesPath, '/');
     expect(built).toContain('app.asar.unpacked/node_modules');
     expect(built).toContain('/tmp/custom-node-modules');
-    expect(built).not.toContain('/app.asar/node_modules');
+    expect(built).toContain('/app.asar/node_modules');
   });
 });

@@ -1,4 +1,6 @@
 import path from 'path';
+import { spawn } from 'child_process';
+import { existsSync } from 'fs';
 import fs from 'fs/promises';
 import { app } from 'electron';
 import ffmpeg from '@ts-ffmpeg/fluent-ffmpeg';
@@ -7,7 +9,6 @@ import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import type {
   downloadWhisperModel as downloadWhisperModelType,
   installWhisperCpp as installWhisperCppType,
-  transcribe as transcribeType,
 } from '@remotion/install-whisper-cpp';
 
 export interface WordTimestamp {
@@ -63,7 +64,10 @@ let ffmpegBinaryPath = ffmpegInstaller.path;
 let ffprobeBinaryPath = ffprobeInstaller.path;
 if (app.isPackaged) {
   ffmpegBinaryPath = ffmpegBinaryPath.replace('app.asar', 'app.asar.unpacked');
-  ffprobeBinaryPath = ffprobeBinaryPath.replace('app.asar', 'app.asar.unpacked');
+  ffprobeBinaryPath = ffprobeBinaryPath.replace(
+    'app.asar',
+    'app.asar.unpacked',
+  );
 }
 ffmpeg.setFfmpegPath(ffmpegBinaryPath);
 ffmpeg.setFfprobePath(ffprobeBinaryPath);
@@ -71,7 +75,15 @@ ffmpeg.setFfprobePath(ffprobeBinaryPath);
 interface WhisperInstallerModule {
   installWhisperCpp: typeof installWhisperCppType;
   downloadWhisperModel: typeof downloadWhisperModelType;
-  transcribe: typeof transcribeType;
+}
+
+interface WhisperTranscriptionJson {
+  transcription?: TranscriptionItemLike[];
+}
+
+interface WhisperTempLocation {
+  directoryPath: string;
+  outputBasePath: string;
 }
 
 const dynamicImport = new Function(
@@ -81,12 +93,10 @@ const dynamicImport = new Function(
 
 async function loadWhisperInstallerModule(): Promise<WhisperInstallerModule> {
   const modulePath = '@remotion/install-whisper-cpp';
-  const loaded = (await dynamicImport(modulePath)) as Partial<WhisperInstallerModule>;
-  if (
-    !loaded.installWhisperCpp ||
-    !loaded.downloadWhisperModel ||
-    !loaded.transcribe
-  ) {
+  const loaded = (await dynamicImport(
+    modulePath,
+  )) as Partial<WhisperInstallerModule>;
+  if (!loaded.installWhisperCpp || !loaded.downloadWhisperModel) {
     throw new Error(
       'Whisper installer module is missing required exports. Reinstall dependencies and retry.',
     );
@@ -226,12 +236,18 @@ function mapCaptionGenerationError(error: unknown): string {
 
   if (
     normalized.includes('output_json: failed to open') ||
-    normalized.includes('/tmp.json')
+    normalized.includes('/tmp.json') ||
+    normalized.includes(
+      'no writable temporary directory is available for whisper output',
+    )
   ) {
-    return 'Whisper could not write temporary transcription output in production. Update the app to use a writable output path and retry.';
+    return 'Whisper could not write temporary transcription output, even after retrying fallback writable paths. Check temp directory permissions and retry.';
   }
 
-  if (normalized.includes('does not exist at') && normalized.includes('model')) {
+  if (
+    normalized.includes('does not exist at') &&
+    normalized.includes('model')
+  ) {
     return 'Whisper model is missing or incomplete. Retry caption generation to re-download the model.';
   }
 
@@ -241,7 +257,9 @@ function mapCaptionGenerationError(error: unknown): string {
 function isMissingWhisperModelError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const normalized = error.message.toLowerCase();
-  return normalized.includes('does not exist at') && normalized.includes('model');
+  return (
+    normalized.includes('does not exist at') && normalized.includes('model')
+  );
 }
 
 function isLikelyWhisperProcessCrashError(error: unknown): boolean {
@@ -254,6 +272,264 @@ function isLikelyWhisperProcessCrashError(error: unknown): boolean {
     normalized.includes('exit code: 139') ||
     normalized.includes('exit code 139')
   );
+}
+
+function isWhisperOutputPathWriteError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const normalized = error.message.toLowerCase();
+  return (
+    normalized.includes('output_json: failed to open') ||
+    normalized.includes('/tmp.json')
+  );
+}
+
+async function canWriteToDirectory(directoryPath: string): Promise<boolean> {
+  try {
+    await fs.mkdir(directoryPath, { recursive: true });
+    const probeFilePath = path.join(
+      directoryPath,
+      `.write-probe-${process.pid}-${Date.now()}.tmp`,
+    );
+    await fs.writeFile(probeFilePath, 'ok', 'utf-8');
+    await fs.unlink(probeFilePath).catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getWhisperOutputBaseCandidates(
+  projectDirectory: string,
+): Promise<WhisperTempLocation[]> {
+  const projectTempDir = path.join(
+    projectDirectory,
+    '.kshana',
+    'temp',
+    'captions',
+  );
+  const systemTempDir = path.join(app.getPath('temp'), 'kshana', 'captions');
+  const userDataTempDir = path.join(
+    app.getPath('userData'),
+    'temp',
+    'captions',
+  );
+  const candidateDirectories = [projectTempDir, systemTempDir, userDataTempDir];
+  const writableLocations: WhisperTempLocation[] = [];
+  const token = `${Date.now()}-${process.pid}`;
+
+  for (const candidateDirectoryPath of candidateDirectories) {
+    if (
+      writableLocations.some(
+        ({ directoryPath }) => directoryPath === candidateDirectoryPath,
+      )
+    ) {
+      continue;
+    }
+    if (await canWriteToDirectory(candidateDirectoryPath)) {
+      writableLocations.push({
+        directoryPath: candidateDirectoryPath,
+        outputBasePath: path.join(
+          candidateDirectoryPath,
+          `whisper-output-${token}-${writableLocations.length}`,
+        ),
+      });
+    }
+  }
+
+  return writableLocations;
+}
+
+async function getWhisperExecutablePath(whisperPath: string): Promise<string> {
+  const candidates = getWhisperExecutableCandidates(whisperPath);
+  for (const executablePath of candidates) {
+    try {
+      await fs.access(executablePath);
+      return executablePath;
+    } catch {
+      // Continue checking candidates.
+    }
+  }
+
+  throw new Error(
+    `Whisper install completed but no executable was found in ${whisperPath}.`,
+  );
+}
+
+function getWhisperModelPath(modelFolder: string, model: string): string {
+  return path.join(modelFolder, `ggml-${model}.bin`);
+}
+
+function getWhisperModelDtw(model: string): string {
+  if (model === 'large-v3-turbo') {
+    return 'large.v3.turbo';
+  }
+  if (model === 'large-v3') {
+    return 'large.v3';
+  }
+  if (model === 'large-v2') {
+    return 'large.v2';
+  }
+  if (model === 'large-v1') {
+    return 'large.v1';
+  }
+  return model;
+}
+
+async function runWhisperTranscription(options: {
+  inputPath: string;
+  whisperPath: string;
+  model: string;
+  modelFolder?: string;
+  tokenLevelTimestamps: boolean;
+  splitOnWord: boolean;
+  printOutput: boolean;
+  outputBasePath: string;
+}): Promise<WhisperTranscriptionJson> {
+  const executablePath = await getWhisperExecutablePath(options.whisperPath);
+  const resolvedModelFolder = options.modelFolder ?? options.whisperPath;
+  const modelPath = getWhisperModelPath(resolvedModelFolder, options.model);
+
+  try {
+    await fs.access(modelPath);
+  } catch {
+    throw new Error(
+      `Error: Model ${options.model} does not exist at ${options.modelFolder ?? modelPath}. Check out the downloadWhisperModel() API at https://www.remotion.dev/docs/install-whisper-cpp/download-whisper-model to see how to install whisper models`,
+    );
+  }
+
+  const outputJsonPath = `${options.outputBasePath}.json`;
+  const args = [
+    '-f',
+    options.inputPath,
+    '--output-file',
+    options.outputBasePath,
+    '--output-json',
+    '-ojf',
+    ...(options.tokenLevelTimestamps
+      ? ['--dtw', getWhisperModelDtw(options.model)]
+      : []),
+    '-m',
+    modelPath,
+    '-pp',
+    ...(options.splitOnWord ? ['--split-on-word', 'true'] : []),
+  ];
+
+  await new Promise<void>((resolve, reject) => {
+    const task = spawn(executablePath, args, {
+      cwd: options.whisperPath,
+    });
+    let combinedOutput = '';
+    let stderrOutput = '';
+
+    const onData = (data: Buffer) => {
+      const output = data.toString('utf-8');
+      combinedOutput += output;
+
+      // Whisper occasionally hangs after shutdown logging on macOS Metal.
+      if (output.includes('ggml_metal_free: deallocating')) {
+        task.kill();
+      }
+    };
+
+    task.stdout?.on('data', (data: Buffer) => {
+      onData(data);
+      if (options.printOutput) {
+        process.stdout.write(data.toString('utf-8'));
+      }
+    });
+
+    task.stderr?.on('data', (data: Buffer) => {
+      onData(data);
+      const output = data.toString('utf-8');
+      stderrOutput += output;
+      if (options.printOutput) {
+        process.stderr.write(output);
+      }
+    });
+
+    task.on('error', (error) => {
+      reject(error);
+    });
+
+    task.on('exit', (code, exitSignal) => {
+      if (existsSync(outputJsonPath)) {
+        resolve();
+        return;
+      }
+
+      if (exitSignal) {
+        reject(
+          new Error(
+            `Process was killed with signal ${exitSignal}: ${combinedOutput}`,
+          ),
+        );
+        return;
+      }
+
+      if (stderrOutput.includes('must be 16 kHz')) {
+        reject(
+          new Error(
+            'wav file must be 16 kHz - See https://www.remotion.dev/docs/webcodecs/resample-audio-16khz#on-the-server on how to convert your audio to a 16-bit, 16KHz, WAVE file',
+          ),
+        );
+        return;
+      }
+
+      reject(
+        new Error(
+          `No transcription was created (process exited with code ${code}): ${combinedOutput}`,
+        ),
+      );
+    });
+  });
+
+  try {
+    return JSON.parse(
+      await fs.readFile(outputJsonPath, 'utf-8'),
+    ) as WhisperTranscriptionJson;
+  } finally {
+    await fs.unlink(outputJsonPath).catch(() => undefined);
+  }
+}
+
+async function transcribeWithOutputPathRetry(
+  options: {
+    inputPath: string;
+    whisperPath: string;
+    model: string;
+    modelFolder?: string;
+    tokenLevelTimestamps: boolean;
+    splitOnWord: boolean;
+    printOutput: boolean;
+  },
+  outputBaseCandidates: string[],
+): Promise<WhisperTranscriptionJson> {
+  if (outputBaseCandidates.length === 0) {
+    throw new Error(
+      'No writable temporary directory is available for whisper output.',
+    );
+  }
+
+  let lastError: unknown = null;
+  for (let index = 0; index < outputBaseCandidates.length; index += 1) {
+    const outputBasePath = outputBaseCandidates[index];
+    try {
+      return await runWhisperTranscription({
+        ...options,
+        outputBasePath,
+      });
+    } catch (error) {
+      lastError = error;
+      const shouldRetryWithFallbackPath =
+        index < outputBaseCandidates.length - 1 &&
+        isWhisperOutputPathWriteError(error);
+      if (!shouldRetryWithFallbackPath) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Whisper transcription failed.');
 }
 
 async function getBundledWhisperModelFolder(): Promise<string | null> {
@@ -397,7 +673,9 @@ async function getAudioDurationSeconds(audioPath: string): Promise<number> {
   });
 }
 
-async function pickLongestAudio(projectDirectory: string): Promise<string | null> {
+async function pickLongestAudio(
+  projectDirectory: string,
+): Promise<string | null> {
   const audioDir = path.join(projectDirectory, '.kshana', 'agent', 'audio');
   let entries: string[] = [];
   try {
@@ -440,7 +718,9 @@ async function normalizeAudioForWhisper(
   });
 }
 
-function extractWordsFromItems(items: TranscriptionItemLike[]): WordTimestamp[] {
+function extractWordsFromItems(
+  items: TranscriptionItemLike[],
+): WordTimestamp[] {
   const result: WordTimestamp[] = [];
 
   items.forEach((item) => {
@@ -476,7 +756,10 @@ function extractWordsFromItems(items: TranscriptionItemLike[]): WordTimestamp[] 
     if (words.length === 0) return;
 
     const itemStartSec = millisecondsToSeconds(itemStartMs);
-    const itemEndSec = Math.max(itemStartSec + 0.05, millisecondsToSeconds(itemEndMs));
+    const itemEndSec = Math.max(
+      itemStartSec + 0.05,
+      millisecondsToSeconds(itemEndMs),
+    );
     const chunkDuration = (itemEndSec - itemStartSec) / words.length;
 
     words.forEach((word, index) => {
@@ -530,22 +813,25 @@ export async function generateWordCaptions(
     await fs.access(selectedAudioPath);
 
     const userWhisperPath = path.join(app.getPath('userData'), 'whisper-cpp');
-
-    const tempDir = path.join(projectDirectory, '.kshana', 'temp', 'captions');
-    await fs.mkdir(tempDir, { recursive: true });
+    const whisperTempLocations =
+      await getWhisperOutputBaseCandidates(projectDirectory);
+    if (whisperTempLocations.length === 0) {
+      throw new Error(
+        'No writable temporary directory is available for whisper output.',
+      );
+    }
     normalizedAudioPath = path.join(
-      tempDir,
+      whisperTempLocations[0].directoryPath,
       `caption-input-${Date.now()}.wav`,
     );
-    const whisperOutputBasePath = path.join(
-      tempDir,
-      `whisper-output-${Date.now()}`,
+    const whisperOutputBaseCandidates = whisperTempLocations.map(
+      ({ outputBasePath }) => outputBasePath,
     );
 
     await normalizeAudioForWhisper(selectedAudioPath, normalizedAudioPath);
 
     const whisper = await loadWhisperInstallerModule();
-    let transcription: Awaited<ReturnType<typeof whisper.transcribe>> | null = null;
+    let transcription: WhisperTranscriptionJson | null = null;
     let modelFolder = await getBundledWhisperModelFolder();
     const bundledWhisperPath = await getBundledWhisperRuntimePath();
     let whisperPath = bundledWhisperPath ?? userWhisperPath;
@@ -562,7 +848,9 @@ export async function generateWordCaptions(
 
         await setupWhisperRuntime(whisper, whisperPath, {
           skipModelDownload: Boolean(modelFolder),
-          skipInstall: Boolean(bundledWhisperPath && whisperPath === bundledWhisperPath),
+          skipInstall: Boolean(
+            bundledWhisperPath && whisperPath === bundledWhisperPath,
+          ),
           modelDownloadFolder: userWhisperPath,
         });
 
@@ -571,19 +859,18 @@ export async function generateWordCaptions(
           (bundledWhisperPath && whisperPath === bundledWhisperPath
             ? userWhisperPath
             : null);
-        transcription = await whisper.transcribe({
-          inputPath: normalizedAudioPath,
-          whisperPath,
-          model: DEFAULT_MODEL,
-          modelFolder: fallbackModelFolder ?? undefined,
-          tokenLevelTimestamps: true,
-          splitOnWord: true,
-          printOutput: true,
-          whisperCppVersion: DEFAULT_WHISPER_CPP_VERSION,
-          // Force whisper-cli JSON output into a writable project temp directory.
-          // In packaged macOS runs, process cwd can be "/" and relative output paths fail.
-          additionalArgs: ['--output-file', whisperOutputBasePath],
-        });
+        transcription = await transcribeWithOutputPathRetry(
+          {
+            inputPath: normalizedAudioPath,
+            whisperPath,
+            model: DEFAULT_MODEL,
+            modelFolder: fallbackModelFolder ?? undefined,
+            tokenLevelTimestamps: true,
+            splitOnWord: true,
+            printOutput: true,
+          },
+          whisperOutputBaseCandidates,
+        );
         break;
       } catch (error) {
         const bundledModelFailed =
@@ -666,3 +953,8 @@ export async function generateWordCaptions(
     }
   }
 }
+
+export const __private__ = {
+  mapCaptionGenerationError,
+  runWhisperTranscription,
+};

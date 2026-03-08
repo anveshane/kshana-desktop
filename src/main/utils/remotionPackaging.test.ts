@@ -1,0 +1,26 @@
+import fs from 'fs';
+import path from 'path';
+import { describe, expect, it } from '@jest/globals';
+
+describe('remotion packaging config', () => {
+  it('includes key Remotion runtime dependencies in asarUnpack', () => {
+    const packageJsonPath = path.join(__dirname, '../../../package.json');
+    const packageJson = JSON.parse(
+      fs.readFileSync(packageJsonPath, 'utf-8'),
+    ) as {
+      build?: { asarUnpack?: string[] };
+    };
+
+    const asarUnpack = packageJson.build?.asarUnpack ?? [];
+    expect(asarUnpack).toEqual(
+      expect.arrayContaining([
+        '**/node_modules/@remotion/**',
+        '**/node_modules/mediabunny/**',
+        '**/node_modules/execa/**',
+        '**/node_modules/extract-zip/**',
+        '**/node_modules/source-map/**',
+        '**/node_modules/ws/**',
+      ]),
+    );
+  });
+});

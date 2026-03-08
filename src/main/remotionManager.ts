@@ -11,6 +11,7 @@ import { createRequire } from 'module';
 import log from 'electron-log';
 import { app } from 'electron';
 import { getRemotionInfographicsDir } from './utils/remotionPath';
+import { getBundledRemotionBrowserExecutable } from './utils/remotionBrowserPath';
 import { bootstrapPackagedEsbuildBinaryPath } from './utils/esbuildBinaryPath';
 import { classifyRemotionFailure } from './utils/remotionErrorDiagnostics';
 import {
@@ -45,6 +46,7 @@ interface RemotionRuntimeModules {
   bundler: typeof import('@remotion/bundler');
   renderer: typeof import('@remotion/renderer');
   resolvedPaths: RemotionResolvedModulePaths;
+  browserExecutable: string | null;
 }
 
 class RemotionRuntimeResolutionError extends Error {
@@ -80,6 +82,26 @@ function formatResolvedModulePaths(
   ].join(' ');
 }
 
+async function ensureRemotionBrowser(
+  renderer: typeof import('@remotion/renderer'),
+): Promise<string | null> {
+  const bundledBrowserPath = getBundledRemotionBrowserExecutable();
+  if (bundledBrowserPath) {
+    return bundledBrowserPath;
+  }
+
+  const browserStatus = await renderer.ensureBrowser({
+    logLevel: 'info',
+    chromeMode: 'headless-shell',
+  });
+
+  if (browserStatus.type === 'no-browser') {
+    return null;
+  }
+
+  return browserStatus.path;
+}
+
 async function getRemotionRuntimeModules(
   remotionDir: string,
 ): Promise<RemotionRuntimeModules> {
@@ -90,7 +112,9 @@ async function getRemotionRuntimeModules(
   }
 
   const modulePromise = (async () => {
-    const runtimeRequire = createRequire(path.join(runtimeRoot, 'package.json'));
+    const runtimeRequire = createRequire(
+      path.join(runtimeRoot, 'package.json'),
+    );
     const appRootRequire = createRequire(
       path.join(app.getAppPath(), 'package.json'),
     );
@@ -155,13 +179,25 @@ async function getRemotionRuntimeModules(
       );
     }
 
-    const bundler = requireModule<typeof import('@remotion/bundler')>(
-      '@remotion/bundler',
-    );
-    const renderer = requireModule<typeof import('@remotion/renderer')>(
-      '@remotion/renderer',
-    );
-    return { bundler, renderer, resolvedPaths };
+    const bundler =
+      requireModule<typeof import('@remotion/bundler')>('@remotion/bundler');
+    const renderer =
+      requireModule<typeof import('@remotion/renderer')>('@remotion/renderer');
+    const browserExecutable = await ensureRemotionBrowser(renderer);
+    if (browserExecutable) {
+      log.info(
+        '[RemotionRuntime] Using browser executable for %s at %s',
+        runtimeRoot,
+        browserExecutable,
+      );
+    }
+
+    return {
+      bundler,
+      renderer,
+      resolvedPaths,
+      browserExecutable,
+    };
   })().catch((error) => {
     remotionRuntimeModulesByRoot.delete(runtimeRoot);
     throw error;
@@ -192,6 +228,35 @@ function timeToSeconds(timeStr: string): number {
 
 function toManifestInfographicPath(fileName: string): string {
   return `agent/infographic-placements/${fileName}`.replace(/\\/g, '/');
+}
+
+async function copyRemotionWorkspaceTemplate(
+  remotionDir: string,
+  workspaceDir: string,
+): Promise<void> {
+  const entriesToCopy = ['package.json', 'tsconfig.json', 'src', 'public'];
+
+  for (const entry of entriesToCopy) {
+    const sourcePath = path.join(remotionDir, entry);
+    const destinationPath = path.join(workspaceDir, entry);
+    const sourceExists = await fs
+      .access(sourcePath)
+      .then(() => true)
+      .catch(() => false);
+
+    if (!sourceExists) {
+      continue;
+    }
+
+    const sourceStat = await fs.stat(sourcePath);
+    if (sourceStat.isDirectory()) {
+      await fs.cp(sourcePath, destinationPath, { recursive: true });
+      continue;
+    }
+
+    await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+    await fs.copyFile(sourcePath, destinationPath);
+  }
 }
 
 class RemotionManager extends EventEmitter {
@@ -302,7 +367,11 @@ class RemotionManager extends EventEmitter {
     const logStream = createWriteStream(logPath);
 
     // Clear NODE_OPTIONS to avoid inheriting ts-node/register from Electron dev env
-    const remotionEnv = { ...process.env, NODE_ENV: 'production', NODE_OPTIONS: '' };
+    const remotionEnv = {
+      ...process.env,
+      NODE_ENV: 'production',
+      NODE_OPTIONS: '',
+    };
     const proc = spawn(
       'pnpm',
       [
@@ -358,7 +427,9 @@ class RemotionManager extends EventEmitter {
 
     const timeout = setTimeout(() => {
       if (proc.kill('SIGTERM')) {
-        log.warn(`[RemotionManager] Job ${jobId} timed out after ${RENDER_TIMEOUT_MS / 1000}s`);
+        log.warn(
+          `[RemotionManager] Job ${jobId} timed out after ${RENDER_TIMEOUT_MS / 1000}s`,
+        );
       }
     }, RENDER_TIMEOUT_MS);
 
@@ -398,7 +469,10 @@ class RemotionManager extends EventEmitter {
 
           await this.cleanupJobTempDir(jobId);
         } catch (err) {
-          log.error('[RemotionManager] Failed to read or copy render output:', err);
+          log.error(
+            '[RemotionManager] Failed to read or copy render output:',
+            err,
+          );
           updatedJob.status = 'failed';
           updatedJob.error = 'Render completed but failed to copy output';
         }
@@ -458,7 +532,10 @@ class RemotionManager extends EventEmitter {
       'infographic-components',
     );
     const debugIndexPath = path.join(debugComponentsDir, 'index.tsx');
-    const debugRequestPath = path.join(debugComponentsDir, 'render-request.json');
+    const debugRequestPath = path.join(
+      debugComponentsDir,
+      'render-request.json',
+    );
 
     const tempDir = path.join(
       projectDirectory,
@@ -520,8 +597,7 @@ class RemotionManager extends EventEmitter {
       await fs.mkdir(debugComponentsDir, { recursive: true });
       await fs.mkdir(workspaceBuildDir, { recursive: true });
 
-      const templateSrcDir = path.join(remotionDir, 'src');
-      await fs.cp(templateSrcDir, workspaceSrcDir, { recursive: true });
+      await copyRemotionWorkspaceTemplate(remotionDir, workspaceDir);
 
       const runtimeNodeModules = path.join(remotionDir, 'node_modules');
       const workspaceNodeModules = path.join(workspaceDir, 'node_modules');
@@ -552,7 +628,9 @@ class RemotionManager extends EventEmitter {
         userSpaceComponentsDir = resolveProjectKshanaPath(
           requestedSource.componentsDir,
         );
-        userSpaceIndexPath = resolveProjectKshanaPath(requestedSource.indexPath);
+        userSpaceIndexPath = resolveProjectKshanaPath(
+          requestedSource.indexPath,
+        );
         const hasComponentsDir = await fs
           .access(userSpaceComponentsDir)
           .then(() => true)
@@ -601,8 +679,7 @@ class RemotionManager extends EventEmitter {
               stage: 'bundling',
               packaged: app.isPackaged,
               remotionDir,
-              hint:
-                'Expected .kshana/agent/infographic-components/{Infographic*.tsx,index.tsx} to exist before desktop render.',
+              hint: 'Expected .kshana/agent/infographic-components/{Infographic*.tsx,index.tsx} to exist before desktop render.',
             },
           };
         }
@@ -668,7 +745,13 @@ class RemotionManager extends EventEmitter {
       );
 
       failureStage = 'bundling';
-      emitProgress(5, 'bundling', undefined, placements.length, 'Bundling components');
+      emitProgress(
+        5,
+        'bundling',
+        undefined,
+        placements.length,
+        'Bundling components',
+      );
       const runtimeModules = await getRemotionRuntimeModules(remotionDir);
       resolvedModulePaths = runtimeModules.resolvedPaths;
       const { bundle } = runtimeModules.bundler;
@@ -720,6 +803,7 @@ class RemotionManager extends EventEmitter {
           serveUrl: workspaceBuildDir,
           id: placement.componentName,
           inputProps,
+          browserExecutable: runtimeModules.browserExecutable,
         });
         composition.durationInFrames = durationInFrames;
 
@@ -735,6 +819,7 @@ class RemotionManager extends EventEmitter {
           logLevel: 'error',
           pixelFormat: 'yuva420p',
           imageFormat: 'png',
+          browserExecutable: runtimeModules.browserExecutable,
         });
 
         const destPath = path.join(destDir, `${baseName}.webm`);
@@ -748,7 +833,10 @@ class RemotionManager extends EventEmitter {
       try {
         await fs.rm(tempDir, { recursive: true, force: true });
       } catch (cleanupError) {
-        log.warn('[RemotionManager] Failed to cleanup server render temp dir:', cleanupError);
+        log.warn(
+          '[RemotionManager] Failed to cleanup server render temp dir:',
+          cleanupError,
+        );
       }
 
       return {
@@ -757,7 +845,8 @@ class RemotionManager extends EventEmitter {
         outputs,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       const errorDiagnosticText =
         error instanceof Error
           ? [error.message, error.stack].filter(Boolean).join('\n')
@@ -772,7 +861,8 @@ class RemotionManager extends EventEmitter {
         packaged: app.isPackaged,
         remotionDir,
         esbuildBinaryPath:
-          esbuildBootstrapResult.binaryPath ?? process.env['ESBUILD_BINARY_PATH'],
+          esbuildBootstrapResult.binaryPath ??
+          process.env['ESBUILD_BINARY_PATH'],
         resolvedModulePaths: resolvedPathsFromError,
       });
       if (
@@ -824,7 +914,9 @@ class RemotionManager extends EventEmitter {
     try {
       await fs.access(buildIndex);
     } catch {
-      throw new Error('Remotion bundle not found. Run "generate_all_infographics" to build components first.');
+      throw new Error(
+        'Remotion bundle not found. Run "generate_all_infographics" to build components first.',
+      );
     }
 
     const fps = 24;
@@ -845,7 +937,10 @@ class RemotionManager extends EventEmitter {
           stage: 'rendering',
         });
 
-        const durationSeconds = Math.max(1, timeToSeconds(p.endTime) - timeToSeconds(p.startTime));
+        const durationSeconds = Math.max(
+          1,
+          timeToSeconds(p.endTime) - timeToSeconds(p.startTime),
+        );
         const durationInFrames = Math.round(durationSeconds * fps);
         const inputProps = {
           prompt: p.prompt,
@@ -857,6 +952,7 @@ class RemotionManager extends EventEmitter {
           serveUrl: buildDir,
           id: p.componentName,
           inputProps,
+          browserExecutable: runtimeModules.browserExecutable,
         });
         composition.durationInFrames = durationInFrames;
 
@@ -872,6 +968,7 @@ class RemotionManager extends EventEmitter {
           logLevel: 'error',
           pixelFormat: 'yuva420p',
           imageFormat: 'png',
+          browserExecutable: runtimeModules.browserExecutable,
         });
 
         outputs.push(outFilePath);
@@ -916,7 +1013,11 @@ class RemotionManager extends EventEmitter {
       try {
         await fs.writeFile(
           path.join(tempDir, 'logs', 'error.json'),
-          JSON.stringify({ jobId, error: job.error, timestamp: Date.now() }, null, 2),
+          JSON.stringify(
+            { jobId, error: job.error, timestamp: Date.now() },
+            null,
+            2,
+          ),
         );
       } catch {
         // ignore
@@ -951,7 +1052,10 @@ class RemotionManager extends EventEmitter {
     try {
       await fs.rm(job.tempDir, { recursive: true, force: true });
     } catch (err) {
-      log.error(`[RemotionManager] Failed to cleanup temp for job ${jobId}:`, err);
+      log.error(
+        `[RemotionManager] Failed to cleanup temp for job ${jobId}:`,
+        err,
+      );
     }
   }
 
@@ -998,3 +1102,7 @@ class RemotionManager extends EventEmitter {
 }
 
 export const remotionManager = new RemotionManager();
+export const __private__ = {
+  copyRemotionWorkspaceTemplate,
+  ensureRemotionBrowser,
+};
