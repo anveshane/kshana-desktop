@@ -141,4 +141,10 @@ describe('remotionManager workspace template copy', () => {
     expect(browserExecutable).toBe('/tmp/bundled-headless-shell');
     expect(ensureBrowser).not.toHaveBeenCalled();
   });
+
+  it('uses a software-backed Chromium GL renderer for Remotion renders', () => {
+    expect(__private__.REMOTION_CHROMIUM_OPTIONS).toEqual({
+      gl: 'swangle',
+    });
+  });
 });

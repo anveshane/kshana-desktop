@@ -31,6 +31,11 @@ import type {
 
 const JOB_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const RENDER_TIMEOUT_MS = 600_000; // 10 minutes
+const REMOTION_CHROMIUM_OPTIONS = {
+  // Force a software-backed GL renderer for headless-shell to avoid
+  // intermittent WebGL context creation failures with @remotion/three.
+  gl: 'swangle' as const,
+};
 
 const esbuildBootstrapResult = bootstrapPackagedEsbuildBinaryPath({
   isPackaged: app.isPackaged,
@@ -804,6 +809,7 @@ class RemotionManager extends EventEmitter {
           id: placement.componentName,
           inputProps,
           browserExecutable: runtimeModules.browserExecutable,
+          chromiumOptions: REMOTION_CHROMIUM_OPTIONS,
         });
         composition.durationInFrames = durationInFrames;
 
@@ -820,6 +826,7 @@ class RemotionManager extends EventEmitter {
           pixelFormat: 'yuva420p',
           imageFormat: 'png',
           browserExecutable: runtimeModules.browserExecutable,
+          chromiumOptions: REMOTION_CHROMIUM_OPTIONS,
         });
 
         const destPath = path.join(destDir, `${baseName}.webm`);
@@ -953,6 +960,7 @@ class RemotionManager extends EventEmitter {
           id: p.componentName,
           inputProps,
           browserExecutable: runtimeModules.browserExecutable,
+          chromiumOptions: REMOTION_CHROMIUM_OPTIONS,
         });
         composition.durationInFrames = durationInFrames;
 
@@ -969,6 +977,7 @@ class RemotionManager extends EventEmitter {
           pixelFormat: 'yuva420p',
           imageFormat: 'png',
           browserExecutable: runtimeModules.browserExecutable,
+          chromiumOptions: REMOTION_CHROMIUM_OPTIONS,
         });
 
         outputs.push(outFilePath);
@@ -1105,4 +1114,5 @@ export const remotionManager = new RemotionManager();
 export const __private__ = {
   copyRemotionWorkspaceTemplate,
   ensureRemotionBrowser,
+  REMOTION_CHROMIUM_OPTIONS,
 };

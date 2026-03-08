@@ -15,7 +15,10 @@ describe('remotion packaging config', () => {
     expect(asarUnpack).toEqual(
       expect.arrayContaining([
         '**/node_modules/@remotion/**',
+        '**/node_modules/@react-three/**',
         '**/node_modules/mediabunny/**',
+        '**/node_modules/its-fine/**',
+        '**/node_modules/suspend-react/**',
         '**/node_modules/execa/**',
         '**/node_modules/extract-zip/**',
         '**/node_modules/source-map/**',
