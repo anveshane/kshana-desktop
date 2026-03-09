@@ -17,12 +17,19 @@ import type {
 import {
   PROJECT_PATHS,
   DEFAULT_TIMELINE_STATE,
-  createDefaultManifest,
-  createDefaultAgentProject,
-  createDefaultAssetManifest,
   createDefaultContextIndex,
 } from '../../types/kshana';
 import { safeJsonParse } from '../../utils/safeJsonParse';
+import {
+  backendAssetManifestToDesktop,
+  backendProjectToDesktopAgentState,
+  backendProjectToDesktopManifest,
+  createDefaultBackendProject,
+  desktopAgentStateToBackendProject,
+  desktopAssetManifestToBackend,
+  type BackendAssetManifest,
+  type BackendProjectFile,
+} from './backendProjectAdapter';
 
 /**
  * Result type for async operations
@@ -65,6 +72,8 @@ export class ProjectService {
   private projectDirectory: string | null = null;
 
   private currentProject: KshanaProject | null = null;
+
+  private currentBackendProject: BackendProjectFile | null = null;
 
   private lastOpenTimestamp = 0;
 
@@ -119,16 +128,12 @@ export class ProjectService {
   async validateProject(directory: string): Promise<ProjectValidation> {
     const errors: string[] = [];
 
-    // Check for agent state (required - this is the primary project file)
+    // Check for backend project state (required)
     const agentStatePath = ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_PROJECT);
     const hasAgentState = await this.fileExists(agentStatePath);
     if (!hasAgentState) {
-      errors.push('Missing .kshana/agent/project.json file');
+      errors.push('Missing project.json file');
     }
-
-    // Check for root manifest (optional - CLI doesn't create this)
-    const manifestPath = ProjectService.buildPath(directory, PROJECT_PATHS.ROOT_MANIFEST);
-    const hasManifest = await this.fileExists(manifestPath);
 
     // Check for asset manifest
     const assetManifestPath = ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST);
@@ -141,7 +146,7 @@ export class ProjectService {
     // Project is valid if it has agent state (CLI structure)
     return {
       isValid: hasAgentState,
-      hasManifest,
+      hasManifest: hasAgentState,
       hasAgentState,
       hasAssetManifest,
       hasTimelineState,
@@ -183,17 +188,7 @@ export class ProjectService {
 
         const agentState = await this.readAgentState(directory);
         if (!agentState) {
-          return { success: false, error: 'Failed to read agent project file' };
-        }
-
-        let manifest = await this.readManifest(directory);
-        if (!manifest) {
-          manifest = createDefaultManifest(
-            agentState.id,
-            agentState.title || 'Untitled Project',
-            '1.0.0',
-          );
-          await this.writeManifest(directory, manifest);
+          return { success: false, error: 'Failed to read project.json file' };
         }
 
         const sameLoadedProject = this.projectDirectory === directory;
@@ -220,7 +215,7 @@ export class ProjectService {
             source: 'open_project',
             path: ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
           });
-          assetManifest = createDefaultAssetManifest();
+          assetManifest = backendAssetManifestToDesktop({ assets: [] });
           await this.writeAssetManifest(directory, assetManifest);
         } else {
           console.warn('[ProjectService] Asset manifest invalid; preserving in-memory state when available', {
@@ -230,8 +225,14 @@ export class ProjectService {
             error: assetManifestResult.error,
           });
           assetManifest =
-            inMemoryAssetManifest ?? createDefaultAssetManifest();
+            inMemoryAssetManifest ?? backendAssetManifestToDesktop({ assets: [] });
         }
+
+        const manifest = backendProjectToDesktopManifest(agentState);
+        const desktopAgentState = backendProjectToDesktopAgentState(
+          agentState,
+          assetManifest,
+        );
 
         let timelineState = await this.readTimelineState(directory);
         if (!timelineState) {
@@ -244,9 +245,10 @@ export class ProjectService {
         }
 
         this.projectDirectory = directory;
+        this.currentBackendProject = agentState;
         this.currentProject = {
           manifest,
-          agentState,
+          agentState: desktopAgentState,
           assetManifest,
           timelineState,
           contextIndex,
@@ -287,23 +289,26 @@ export class ProjectService {
 
       // Create agent state first (primary source)
       const projectId = `proj_${Date.now()}`;
-      const agentState = createDefaultAgentProject(projectId, name);
+      const backendProject = createDefaultBackendProject({
+        id: projectId,
+        title: name,
+      });
+      const agentState = backendProjectToDesktopAgentState(backendProject);
       await this.writeAgentState(directory, agentState);
 
-      // Create manifest (optional, for backward compatibility)
-      const manifest = createDefaultManifest(projectId, name, '1.0.0');
-      if (description) {
-        manifest.description = description;
-      }
-      await this.writeManifest(directory, manifest);
+      const manifest = backendProjectToDesktopManifest(backendProject);
 
       // Create asset manifest
-      const assetManifest = createDefaultAssetManifest();
+      const assetManifest = backendAssetManifestToDesktop({ assets: [] });
       await this.writeAssetManifest(directory, assetManifest);
 
-      // Timeline state will be created on first use
+      await window.electron.project.writeFile(
+        ProjectService.buildPath(directory, backendProject.originalInputFile),
+        description?.trim() || '',
+      );
 
       this.projectDirectory = directory;
+      this.currentBackendProject = backendProject;
       this.currentProject = {
         manifest,
         agentState,
@@ -327,6 +332,7 @@ export class ProjectService {
   closeProject(): void {
     this.projectDirectory = null;
     this.currentProject = null;
+    this.currentBackendProject = null;
   }
 
   /**
@@ -536,38 +542,49 @@ export class ProjectService {
   private async readManifest(
     directory: string,
   ): Promise<KshanaManifest | null> {
-    return this.readJSON<KshanaManifest>(
-      ProjectService.buildPath(directory, PROJECT_PATHS.ROOT_MANIFEST),
-    );
+    const project = await this.readBackendProject(directory);
+    return project ? backendProjectToDesktopManifest(project) : null;
   }
 
   private async writeManifest(
     directory: string,
     manifest: KshanaManifest,
   ): Promise<void> {
-    manifest.updated_at = new Date().toISOString();
+    if (!this.currentBackendProject) {
+      return;
+    }
+    this.currentBackendProject.title = manifest.name;
+    this.currentBackendProject.updatedAt = Date.now();
     await this.writeJSON(
       ProjectService.buildPath(directory, PROJECT_PATHS.ROOT_MANIFEST),
-      manifest,
+      this.currentBackendProject,
     );
   }
 
   private async readAgentState(
     directory: string,
-  ): Promise<AgentProjectFile | null> {
-    return this.readJSON<AgentProjectFile>(
-      ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_PROJECT),
-    );
+  ): Promise<BackendProjectFile | null> {
+    return this.readBackendProject(directory);
   }
 
   private async writeAgentState(
     directory: string,
     state: AgentProjectFile,
   ): Promise<void> {
-    state.updated_at = Date.now();
+    if (!this.currentBackendProject) {
+      this.currentBackendProject = createDefaultBackendProject({
+        id: state.id,
+        title: state.title,
+      });
+    }
+    const nextProject = desktopAgentStateToBackendProject(
+      state,
+      this.currentBackendProject,
+    );
+    this.currentBackendProject = nextProject;
     await this.writeJSON(
       ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_PROJECT),
-      state,
+      nextProject,
     );
   }
 
@@ -577,20 +594,8 @@ export class ProjectService {
     const manifestPath = ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST);
     console.log('[ProjectService] Reading asset manifest from:', manifestPath);
 
-    const manifestResult = await this.readJSONWithStatus<{
-      schema_version?: string;
-      assets: Array<{
-        id: string;
-        type: string;
-        path: string;
-        createdAt?: number;
-        created_at?: number;
-        version?: number;
-        scene_number?: number;
-        entity_slug?: string;
-        metadata?: Record<string, unknown>;
-      }>;
-    }>(manifestPath);
+    const manifestResult =
+      await this.readJSONWithStatus<BackendAssetManifest>(manifestPath);
 
     if (manifestResult.status === 'missing') {
       console.warn('[ProjectService] Asset manifest file missing:', manifestPath);
@@ -611,25 +616,9 @@ export class ProjectService {
       assetCount: manifest.assets?.length || 0,
     });
 
-    // Normalize createdAt to created_at for compatibility
-    const normalizedAssets = manifest.assets.map((asset) => ({
-      ...asset,
-      created_at: asset.created_at ?? asset.createdAt ?? Date.now(),
-    }));
-
-    // Remove createdAt if it exists (keep only created_at)
-    const cleanedAssets = normalizedAssets.map(
-      ({ createdAt, ...rest }) => rest,
-    );
-
-    const normalizedManifest: AssetManifest = {
-      schema_version: (manifest.schema_version as '1') || '1',
-      assets: cleanedAssets as AssetManifest['assets'],
-    };
-
     return {
       status: 'ok',
-      manifest: normalizedManifest,
+      manifest: backendAssetManifestToDesktop(manifest),
     };
   }
 
@@ -639,7 +628,7 @@ export class ProjectService {
   ): Promise<void> {
     await this.writeJSON(
       ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
-      manifest,
+      desktopAssetManifestToBackend(manifest),
     );
   }
 
@@ -690,17 +679,22 @@ export class ProjectService {
     const dirs = [
       PROJECT_PATHS.VIDEOS_IMPORTED,
       PROJECT_PATHS.EXPORTS,
-      PROJECT_PATHS.AGENT_DIR,
       PROJECT_PATHS.AGENT_PLANS,
       PROJECT_PATHS.AGENT_CHARACTERS,
       PROJECT_PATHS.AGENT_SETTINGS,
       PROJECT_PATHS.AGENT_SCENES,
-      PROJECT_PATHS.AGENT_MUSIC,
+      'assets',
+      'assets/images',
+      'assets/videos',
+      'assets/infographics',
+      'prompts',
+      'prompts/images',
+      'prompts/images/characters',
+      'prompts/images/settings',
+      'prompts/images/scenes',
+      'prompts/videos',
+      'prompts/videos/scenes',
       PROJECT_PATHS.AGENT_AUDIO,
-      PROJECT_PATHS.AGENT_FINAL,
-      PROJECT_PATHS.UI_DIR,
-      PROJECT_PATHS.CONTEXT_DIR,
-      PROJECT_PATHS.CONTEXT_CHUNKS,
     ];
 
     const normalizedDirectory = directory.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -721,6 +715,14 @@ export class ProjectService {
         }
       }
     }
+  }
+
+  private async readBackendProject(
+    directory: string,
+  ): Promise<BackendProjectFile | null> {
+    return this.readJSON<BackendProjectFile>(
+      ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_PROJECT),
+    );
   }
 }
 

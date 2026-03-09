@@ -7,6 +7,11 @@
   padding: $spacing-md $spacing-lg;
 }
 
+.questionMode {
+  border-top: none;
+  padding-top: 0;
+}
+
 .inputWrapper {
   display: flex;
   align-items: flex-end;
@@ -23,6 +28,20 @@
     background: rgba($color-background-dark, 0.8);
     box-shadow: 0 0 0 1px rgba($color-accent-green, 0.2);
   }
+}
+
+.inputWrapperQuestionMode {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: 1px solid rgba($color-accent-cyan, 0.18);
+  background:
+    linear-gradient(
+      180deg,
+      rgba($color-accent-cyan, 0.05),
+      rgba($color-background-dark, 0.96) 42%
+    ),
+    $color-background-dark;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
 }
 
 .textarea {

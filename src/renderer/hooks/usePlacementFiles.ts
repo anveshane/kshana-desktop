@@ -73,9 +73,9 @@ export function usePlacementFiles(
     }
 
     try {
-      const imagePlacementsPath = `${projectDirectory}/.kshana/agent/content/image-placements.md`;
-      const videoPlacementsPath = `${projectDirectory}/.kshana/agent/content/video-placements.md`;
-      const infographicPlacementsPath = `${projectDirectory}/.kshana/agent/content/infographic-placements.md`;
+      const imagePlacementsPath = `${projectDirectory}/plans/image-placements.md`;
+      const videoPlacementsPath = `${projectDirectory}/plans/video-placements.md`;
+      const infographicPlacementsPath = `${projectDirectory}/plans/infographic-placements.md`;
 
       const [imageContent, videoContent, infographicContent] =
         await Promise.all([

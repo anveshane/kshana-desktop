@@ -219,11 +219,9 @@ function normalizeProjectDirectoryPath(
 function getImageSyncV2Flag(): boolean {
   try {
     const stored = window.localStorage.getItem('renderer.image_sync_v2');
-    if (stored === 'false') return false;
-    // Default ON unless explicitly disabled
-    return true;
+    return stored === 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -280,7 +278,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   const scanImagePlacementFiles = useCallback(
     async (directory: string): Promise<Record<number, string>> => {
       try {
-        const imageDir = `${directory}/.kshana/agent/image-placements`;
+        const imageDir = `${directory}/assets/images`;
         const files = await window.electron.project.readTree(imageDir, 1);
         const placementMap: Record<number, string> = {};
 
@@ -299,8 +297,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
               Number.isFinite(placementNumber) &&
               !placementMap[placementNumber]
             ) {
-              placementMap[placementNumber] =
-                `agent/image-placements/${filename}`;
+              placementMap[placementNumber] = `assets/images/${filename}`;
             }
           }
         }
@@ -398,9 +395,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
         // Set up explicit watches for manifest and placements
         try {
-          const manifestPath = `${normalizedDir}/.kshana/agent/manifest.json`;
-          const imagePlacementsDir = `${normalizedDir}/.kshana/agent/image-placements`;
-          const infographicPlacementsDir = `${normalizedDir}/.kshana/agent/infographic-placements`;
+          const manifestPath = `${normalizedDir}/assets/manifest.json`;
+          const imagePlacementsDir = `${normalizedDir}/assets/images`;
+          const infographicPlacementsDir = `${normalizedDir}/assets/infographics`;
 
           await window.electron.project.watchManifest(manifestPath);
           await window.electron.project.watchImagePlacements(
@@ -472,7 +469,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       normalizeProjectDirectoryPath(projectDirectory) ?? projectDirectory;
 
     const unsubscribe = window.electron.project.onManifestWritten(async (event) => {
-      if (!event.path.replace(/\\/g, '/').includes('.kshana/agent/manifest.json')) return;
+      if (!event.path.replace(/\\/g, '/').includes('assets/manifest.json')) return;
       projectService.invalidateCache();
       imageSyncEngineRef.current?.triggerReconcile('manifest_written', event.path);
 
@@ -504,13 +501,11 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
     const unsubscribe = window.electron.project.onFileChange((event) => {
       const filePath = event.path.replace(/\\/g, '/');
-      const isManifestFile = filePath.includes('.kshana/agent/manifest.json');
+      const isManifestFile = filePath.includes('assets/manifest.json');
       const isProjectStateFile =
-        filePath.includes('.kshana/agent/project.json') ||
-        filePath.includes('.kshana/context/index.json');
-      const isImagePlacementFile = filePath.includes(
-        '.kshana/agent/image-placements',
-      );
+        filePath.endsWith('/project.json') ||
+        filePath.endsWith('/context-index.json');
+      const isImagePlacementFile = filePath.includes('assets/images/');
 
       if (isImageSyncV2Enabled && (isManifestFile || isImagePlacementFile)) {
         projectService.invalidateCache();

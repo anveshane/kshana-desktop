@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { HelpCircle, Clock, Check } from 'lucide-react';
+import { Check, Clock, HelpCircle } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import styles from './QuestionPrompt.module.scss';
 
 export interface QuestionPromptProps {
@@ -24,9 +25,20 @@ export default function QuestionPrompt({
   const [timeLeft, setTimeLeft] = useState<number | null>(
     timeoutSeconds ?? null,
   );
+  const [remarkGfm, setRemarkGfm] = useState<any>(null);
 
-  // Normalize options based on type
   const displayOptions = options || (type === 'confirm' ? ['Yes', 'No'] : []);
+
+  useEffect(() => {
+    import('remark-gfm')
+      .then((mod) => {
+        setRemarkGfm(() => mod.default);
+        return null;
+      })
+      .catch((err) => {
+        console.error('Failed to load remark-gfm for question prompt', err);
+      });
+  }, []);
 
   useEffect(() => {
     if (selectedResponse || !timeoutSeconds) return;
@@ -47,6 +59,29 @@ export default function QuestionPrompt({
     return () => clearInterval(timer);
   }, [timeLeft, timeoutSeconds, defaultOption, onSelect, selectedResponse]);
 
+  useEffect(() => {
+    if (selectedResponse || displayOptions.length === 0) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      if (event.key < '1' || event.key > '9') return;
+
+      const index = Number(event.key) - 1;
+      const option = displayOptions[index];
+      if (!option) return;
+
+      event.preventDefault();
+      onSelect(option);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [displayOptions, onSelect, selectedResponse]);
+
   const handleSelect = (option: string) => {
     if (selectedResponse) return;
     onSelect(option);
@@ -55,12 +90,25 @@ export default function QuestionPrompt({
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <HelpCircle className={styles.icon} />
-        <span>Question</span>
+        <div className={styles.headerTitle}>
+          <HelpCircle className={styles.icon} />
+          <span>Question</span>
+        </div>
+        {timeLeft !== null && timeLeft > 0 && !selectedResponse && (
+          <div className={styles.headerTimer}>
+            <Clock size={12} className={styles.timerIcon} />
+            <span>{timeLeft}s</span>
+          </div>
+        )}
       </div>
 
       <div className={styles.content}>
-        <div className={styles.questionText}>{question}</div>
+        <span className={styles.stepLabel}>Waiting for your input</span>
+        <div className={styles.questionText}>
+          <ReactMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []}>
+            {question}
+          </ReactMarkdown>
+        </div>
 
         {displayOptions.length > 0 && (
           <div className={styles.optionsList}>
@@ -72,25 +120,29 @@ export default function QuestionPrompt({
               return (
                 <button
                   key={index}
+                  type="button"
                   className={`${styles.optionButton} ${isSelected ? styles.confirmed : ''} ${isRejected ? styles.rejected : ''}`}
                   onClick={() => handleSelect(option)}
                   disabled={!!selectedResponse}
                 >
                   <span className={styles.optionIndex}>{index + 1}</span>
-                  {option}
-                  {isSelected && <Check size={14} className="ml-auto" />}
+                  <span className={styles.optionLabel}>{option}</span>
+                  {isSelected && <Check size={14} className={styles.checkIcon} />}
                 </button>
               );
             })}
           </div>
         )}
 
-        {timeLeft !== null && timeLeft > 0 && !selectedResponse && (
+        {displayOptions.length === 0 && (
+          <div className={styles.textHint}>
+            Type your response in the chat input below and send when ready.
+          </div>
+        )}
+
+        {timeLeft !== null && timeLeft > 0 && defaultOption && !selectedResponse && (
           <div className={styles.timer}>
-            <Clock size={12} className={styles.timerIcon} />
-            <span>
-              Auto-approving in {timeLeft}s (Default: {defaultOption})
-            </span>
+            Auto-approving in {timeLeft}s. Default: {defaultOption}
           </div>
         )}
       </div>

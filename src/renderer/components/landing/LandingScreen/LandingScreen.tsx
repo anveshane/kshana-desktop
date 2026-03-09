@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FolderOpen, Plus, Play, Sparkles } from 'lucide-react';
-import type { KshanaManifest, AgentProjectFile } from '../../../types/kshana';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { safeJsonParse } from '../../../utils/safeJsonParse';
 import { useProject } from '../../../contexts/ProjectContext';
@@ -9,6 +8,7 @@ import ProjectCard from '../ProjectCard/ProjectCard';
 import RecentProjectsList from '../RecentProjectsList/RecentProjectsList';
 import { getProjectNameFromPath, sortRecentProjects } from '../projectDisplay';
 import styles from './LandingScreen.module.scss';
+import type { BackendProjectFile } from '../../../services/project/backendProjectAdapter';
 
 const FALLBACK_APP_VERSION = 'v?.?.?';
 const THUMBNAIL_CANDIDATES = [
@@ -62,23 +62,22 @@ async function loadSingleProjectMetadata(
   const metadata: ProjectMetadata = {};
   try {
     const manifestContent = await window.electron.project.readFile(
-      joinPath(projectPath, 'kshana.json'),
+      joinPath(projectPath, 'project.json'),
     );
     if (manifestContent) {
-      const manifest = safeJsonParse<KshanaManifest>(manifestContent);
-      metadata.manifestName = manifest.name;
-      metadata.description = manifest.description || null;
+      const project = safeJsonParse<BackendProjectFile>(manifestContent);
+      metadata.manifestName = project.title;
     }
   } catch {
-    // Ignore malformed or missing manifest for older/non-standard folders.
+    // Ignore malformed or missing project metadata.
   }
 
   try {
-    const agentProjectContent = await window.electron.project.readFile(
-      joinPath(projectPath, '.kshana/agent/project.json'),
+    const projectContent = await window.electron.project.readFile(
+      joinPath(projectPath, 'project.json'),
     );
-    if (agentProjectContent) {
-      const agentProject = safeJsonParse<AgentProjectFile>(agentProjectContent);
+    if (projectContent) {
+      const agentProject = safeJsonParse<BackendProjectFile>(projectContent);
       metadata.sceneCount = agentProject.scenes.length;
       metadata.characterCount = agentProject.characters.length;
     }
@@ -185,26 +184,27 @@ export default function LandingScreen() {
   const handleCreateNewProject = useCallback(async () => {
     setError(null);
     try {
-      // Use native folder picker so users can click "New Folder" directly in macOS/Windows dialog.
       const selectedPath = await window.electron.project.selectDirectory();
       if (!selectedPath) return;
 
-      // Ensure guarded IPC writes use this folder as active project root.
-      await window.electron.project.watchDirectory(selectedPath);
-
       const projectName = getProjectNameFromPath(selectedPath);
-      const created = await createProject(selectedPath, projectName);
+      const projectDirectory =
+        (await window.electron.project.createFolder(
+          selectedPath,
+          `${projectName}.kshana`,
+        )) || `${selectedPath}/${projectName}.kshana`;
+      const created = await createProject(projectDirectory, projectName);
       if (!created) {
         throw new Error('Failed to initialize project in selected folder.');
       }
 
       try {
-        window.localStorage.setItem(PROJECT_SETUP_STORAGE_KEY, selectedPath);
+        window.localStorage.setItem(PROJECT_SETUP_STORAGE_KEY, projectDirectory);
       } catch {
         // Ignore localStorage availability issues.
       }
 
-      await openProject(selectedPath);
+      await openProject(projectDirectory);
     } catch (err) {
       setError(`Failed to create project: ${(err as Error).message}`);
     }

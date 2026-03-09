@@ -179,6 +179,13 @@ const projectBridge = {
   readAllFiles(projectDir: string): Promise<Array<{ path: string; content: string; isBinary: boolean }>> {
     return ipcRenderer.invoke('project:read-all-files', projectDir);
   },
+  readProjectSnapshot(projectDir: string): Promise<{
+    files: Record<string, string>;
+    directories: string[];
+    projectRoot: string;
+  }> {
+    return ipcRenderer.invoke('project:read-project-snapshot', projectDir);
+  },
   mkdir(dirPath: string, meta?: FileOpMeta): Promise<void> {
     return ipcRenderer.invoke('project:mkdir', dirPath, meta);
   },

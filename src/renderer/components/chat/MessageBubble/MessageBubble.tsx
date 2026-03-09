@@ -6,7 +6,6 @@ import CodeBlock from '../CodeBlock';
 import MessageActions from '../MessageActions';
 import ToolCallCard from '../ToolCallCard';
 import TodoDisplay from '../TodoDisplay';
-import QuestionPrompt from '../QuestionPrompt';
 import type { TodoItem } from '../TodoDisplay';
 import styles from './MessageBubble.module.scss';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
@@ -16,7 +15,6 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
   onRegenerate?: () => void;
   onDelete?: () => void;
-  onResponse?: (response: string) => void;
 }
 
 const roleLabels: Record<ChatMessage['role'], string> = {
@@ -76,7 +74,6 @@ export default function MessageBubble({
   isStreaming = false,
   onRegenerate,
   onDelete,
-  onResponse,
 }: MessageBubbleProps) {
   const [remarkGfm, setRemarkGfm] = useState<any>(null);
 
@@ -98,7 +95,6 @@ export default function MessageBubble({
   const isSystem = message.role === 'system';
   const isToolCall = message.type === 'tool_call';
   const isTodoUpdate = message.type === 'todo_update';
-  const isQuestion = message.type === 'agent_question';
   const isGreeting = message.type === 'greeting';
 
   // Get navigateToFile from context
@@ -140,32 +136,6 @@ export default function MessageBubble({
     return (
       <div className={`${styles.container} ${styles.system}`}>
         <TodoDisplay todos={todos} />
-      </div>
-    );
-  }
-
-  // Render question prompt
-  if (isQuestion) {
-    const options = (message.meta?.options as string[]) || [];
-    const questionType =
-      (message.meta?.questionType as 'text' | 'confirm' | 'select') || 'text';
-    const timeout = message.meta?.timeout as number | undefined;
-    const defaultOption = message.meta?.defaultOption as string | undefined;
-    const selectedResponse = message.meta?.selectedResponse as
-      | string
-      | undefined;
-
-    return (
-      <div className={`${styles.container} ${styles.assistant}`}>
-        <QuestionPrompt
-          question={message.content}
-          options={options}
-          type={questionType}
-          timeoutSeconds={timeout}
-          defaultOption={defaultOption}
-          onSelect={onResponse || (() => {})}
-          selectedResponse={selectedResponse}
-        />
       </div>
     );
   }

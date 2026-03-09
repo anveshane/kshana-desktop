@@ -150,9 +150,22 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           throw new Error('Selected project folder does not exist anymore.');
         }
 
+        const normalizedProjectPath = normalizedPath.toLowerCase();
+        if (!normalizedProjectPath.endsWith('.kshana')) {
+          throw new Error('Select an existing .kshana project folder.');
+        }
+
+        const hasProjectFile = await window.electron.project.checkFileExists(
+          `${normalizedPath}/project.json`,
+        );
+        if (!hasProjectFile) {
+          throw new Error('Selected folder is missing project.json.');
+        }
+
         // Read only first level to prevent freeze
         const tree = await window.electron.project.readTree(path, 1);
-        const projectName = normalizedPath.split('/').pop() || path;
+        const projectName =
+          (normalizedPath.split('/').pop() || path).replace(/\.kshana$/i, '');
 
         if (
           previousProjectDirectory &&

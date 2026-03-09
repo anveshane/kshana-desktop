@@ -370,8 +370,7 @@ export function useTimelineData(
     await reloadAudioFiles('manual_refresh');
   }, [reloadAudioFiles]);
 
-  // Subscribe to file changes under .kshana/agent/image-placements for fallback image loading
-  // Single consolidated file watcher (debounced) for audio/video/infographic fallback; image placements only when v2 is off.
+  // Single consolidated file watcher (debounced) for fallback media updates.
   useEffect(() => {
     if (!projectDirectory) return;
 
@@ -379,10 +378,10 @@ export function useTimelineData(
 
     const unsubscribe = window.electron.project.onFileChange((event) => {
       const filePath = event.path.replace(/\\/g, '/');
-      const isAudio = filePath.includes('.kshana/agent/audio');
-      const isImagePlacement = filePath.includes('.kshana/agent/image-placements');
-      const isInfographic = filePath.includes('.kshana/agent/infographic-placements');
-      const isVideoPlacement = filePath.includes('.kshana/agent/video-placements');
+      const isAudio = filePath.includes(PROJECT_PATHS.AGENT_AUDIO);
+      const isImagePlacement = filePath.includes('assets/images/');
+      const isInfographic = filePath.includes('assets/infographics/');
+      const isVideoPlacement = filePath.includes('assets/videos/');
 
       if (!isAudio && !isImagePlacement && !isInfographic && !isVideoPlacement) return;
 
@@ -428,7 +427,7 @@ export function useTimelineData(
       }
 
       try {
-        const imageDir = `${projectDirectory}/.kshana/agent/image-placements`;
+        const imageDir = `${projectDirectory}/assets/images`;
         const files = await window.electron.project.readTree(imageDir, 1);
 
         const placementMap: Record<number, string> = {};
@@ -443,7 +442,7 @@ export function useTimelineData(
             if (!match) continue;
             const placementNumber = parseInt(match[1], 10);
             if (!Number.isNaN(placementNumber) && !placementMap[placementNumber]) {
-              placementMap[placementNumber] = `agent/image-placements/${name}`;
+              placementMap[placementNumber] = `assets/images/${name}`;
             }
           }
         }
@@ -486,7 +485,7 @@ export function useTimelineData(
 
     const loadInfographicPlacementFiles = async () => {
       try {
-        const infoDir = `${projectDirectory}/.kshana/agent/infographic-placements`;
+        const infoDir = `${projectDirectory}/assets/infographics`;
         const files = await window.electron.project.readTree(infoDir, 1);
 
         const placementMap: Record<number, string> = {};
@@ -500,7 +499,7 @@ export function useTimelineData(
               if (!placementMap[placementNumber]) {
                 placementMap[
                   placementNumber
-                ] = `agent/infographic-placements/${file.name}`;
+                ] = `assets/infographics/${file.name}`;
               }
             }
           }
@@ -525,7 +524,7 @@ export function useTimelineData(
 
     const loadVideoPlacementFiles = async () => {
       try {
-        const videoDir = `${projectDirectory}/.kshana/agent/video-placements`;
+        const videoDir = `${projectDirectory}/assets/videos`;
         const files = await window.electron.project.readTree(videoDir, 1);
 
         const placementMap: Record<number, string> = {};
@@ -540,7 +539,7 @@ export function useTimelineData(
             if (!match) continue;
             const placementNumber = parseInt(match[1], 10);
             if (!Number.isNaN(placementNumber) && !placementMap[placementNumber]) {
-              placementMap[placementNumber] = `agent/video-placements/${name}`;
+              placementMap[placementNumber] = `assets/videos/${name}`;
             }
           }
         }
