@@ -7,12 +7,19 @@ export interface VideoSplitOverride {
   split_offsets_seconds: number[];
 }
 
+export interface SegmentTimingOverride {
+  start_time_seconds: number;
+  end_time_seconds: number;
+}
+
 export interface ImageTimelineItemLike {
   id: string;
   type: string;
   startTime: number;
   endTime: number;
   duration: number;
+  segmentId?: string;
+  sourceType?: string;
   placementNumber?: number;
   sourceStartTime?: number;
   sourceEndTime?: number;
@@ -51,7 +58,10 @@ export function snapToSecond(value: number): number {
   return Math.round(value);
 }
 
-export function isValidTimingRange(startTime: number, endTime: number): boolean {
+export function isValidTimingRange(
+  startTime: number,
+  endTime: number,
+): boolean {
   return (
     Number.isFinite(startTime) &&
     Number.isFinite(endTime) &&
@@ -74,10 +84,7 @@ export function resolveImageTimingRange(
 
   if (
     !override ||
-    !isValidTimingRange(
-      override.start_time_seconds,
-      override.end_time_seconds,
-    )
+    !isValidTimingRange(override.start_time_seconds, override.end_time_seconds)
   ) {
     return {
       startTime: sourceStartTime,
@@ -241,10 +248,56 @@ export function buildUpdatedInfographicOverride(
   };
 }
 
-export function applyImageTimingOverridesToItems<T extends ImageTimelineItemLike>(
-  items: T[],
-  overrides: Record<string, ImageTimingOverride>,
-): T[] {
+export function buildUpdatedSegmentTimingOverride(
+  currentOverrides: Record<string, SegmentTimingOverride>,
+  segmentId: string | undefined,
+  sourceStartTime: number,
+  sourceEndTime: number,
+  editedStartTime: number,
+  editedEndTime: number,
+): Record<string, SegmentTimingOverride> {
+  if (!segmentId) {
+    return currentOverrides;
+  }
+
+  if (!isValidTimingRange(editedStartTime, editedEndTime)) {
+    return currentOverrides;
+  }
+
+  const isSameAsSource =
+    Math.abs(editedStartTime - sourceStartTime) < EPSILON &&
+    Math.abs(editedEndTime - sourceEndTime) < EPSILON;
+
+  if (isSameAsSource) {
+    if (!(segmentId in currentOverrides)) {
+      return currentOverrides;
+    }
+    const nextOverrides = { ...currentOverrides };
+    delete nextOverrides[segmentId];
+    return nextOverrides;
+  }
+
+  const existing = currentOverrides[segmentId];
+  if (
+    existing &&
+    Math.abs(existing.start_time_seconds - editedStartTime) < EPSILON &&
+    Math.abs(existing.end_time_seconds - editedEndTime) < EPSILON
+  ) {
+    return currentOverrides;
+  }
+
+  return {
+    ...currentOverrides,
+    [segmentId]: {
+      start_time_seconds: editedStartTime,
+      end_time_seconds: editedEndTime,
+    },
+  };
+}
+
+export function applyImageTimingOverridesToItems<
+  T extends ImageTimelineItemLike,
+>(items: T[], overrides: Record<string, ImageTimingOverride>): T[] {
   return items.map((item) => {
     if (item.type !== 'image' || item.placementNumber === undefined) {
       return item;
@@ -253,7 +306,11 @@ export function applyImageTimingOverridesToItems<T extends ImageTimelineItemLike
     const sourceStartTime = item.sourceStartTime ?? item.startTime;
     const sourceEndTime = item.sourceEndTime ?? item.endTime;
     const override = overrides[String(item.placementNumber)];
-    const resolved = resolveImageTimingRange(sourceStartTime, sourceEndTime, override);
+    const resolved = resolveImageTimingRange(
+      sourceStartTime,
+      sourceEndTime,
+      override,
+    );
 
     return {
       ...item,
@@ -268,10 +325,7 @@ export function applyImageTimingOverridesToItems<T extends ImageTimelineItemLike
 
 export function applyInfographicTimingOverridesToItems<
   T extends ImageTimelineItemLike,
->(
-  items: T[],
-  overrides: Record<string, ImageTimingOverride>,
-): T[] {
+>(items: T[], overrides: Record<string, ImageTimingOverride>): T[] {
   return items.map((item) => {
     if (item.type !== 'infographic' || item.placementNumber === undefined) {
       return item;
@@ -280,7 +334,43 @@ export function applyInfographicTimingOverridesToItems<
     const sourceStartTime = item.sourceStartTime ?? item.startTime;
     const sourceEndTime = item.sourceEndTime ?? item.endTime;
     const override = overrides[String(item.placementNumber)];
-    const resolved = resolveImageTimingRange(sourceStartTime, sourceEndTime, override);
+    const resolved = resolveImageTimingRange(
+      sourceStartTime,
+      sourceEndTime,
+      override,
+    );
+
+    return {
+      ...item,
+      sourceStartTime,
+      sourceEndTime,
+      startTime: resolved.startTime,
+      endTime: resolved.endTime,
+      duration: resolved.duration,
+    };
+  });
+}
+
+export function applySegmentTimingOverridesToItems<
+  T extends ImageTimelineItemLike,
+>(items: T[], overrides: Record<string, SegmentTimingOverride>): T[] {
+  return items.map((item) => {
+    if (
+      item.sourceType !== 'server_timeline' ||
+      (item.type !== 'image' && item.type !== 'video') ||
+      !item.segmentId
+    ) {
+      return item;
+    }
+
+    const sourceStartTime = item.sourceStartTime ?? item.startTime;
+    const sourceEndTime = item.sourceEndTime ?? item.endTime;
+    const override = overrides[item.segmentId];
+    const resolved = resolveImageTimingRange(
+      sourceStartTime,
+      sourceEndTime,
+      override,
+    );
 
     return {
       ...item,
@@ -351,10 +441,9 @@ export function buildUpdatedVideoSplitOverride(
   };
 }
 
-export function applyVideoSplitOverridesToItems<T extends ImageTimelineItemLike>(
-  items: T[],
-  overrides: Record<string, VideoSplitOverride>,
-): T[] {
+export function applyVideoSplitOverridesToItems<
+  T extends ImageTimelineItemLike,
+>(items: T[], overrides: Record<string, VideoSplitOverride>): T[] {
   const expanded: T[] = [];
 
   items.forEach((item) => {

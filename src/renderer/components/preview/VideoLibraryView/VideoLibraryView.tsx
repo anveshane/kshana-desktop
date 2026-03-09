@@ -5,7 +5,14 @@ import React, {
   useRef,
   useMemo,
 } from 'react';
-import { Film, Play, Calendar, Pause, Download, ChevronDown } from 'lucide-react';
+import {
+  Film,
+  Play,
+  Calendar,
+  Pause,
+  Download,
+  ChevronDown,
+} from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
@@ -15,7 +22,10 @@ import {
   resolveAssetPathForDisplay,
   resolveAssetPathWithRetry,
 } from '../../../utils/pathResolver';
-import { normalizePathForExport, stripFileProtocol } from '../../../utils/pathNormalizer';
+import {
+  normalizePathForExport,
+  stripFileProtocol,
+} from '../../../utils/pathNormalizer';
 import {
   buildPromptOverlayCues,
   buildTimelineExportItem,
@@ -25,7 +35,10 @@ import type { Artifact } from '../../../types/projectState';
 import type { SceneRef } from '../../../types/kshana/entities';
 import type { SceneVersions } from '../../../types/kshana/timeline';
 import type { PromptOverlayCue, TextOverlayCue } from '../../../types/captions';
-import { getActiveCue, getActiveWordIndex } from '../../../utils/captionGrouping';
+import {
+  getActiveCue,
+  getActiveWordIndex,
+} from '../../../utils/captionGrouping';
 import styles from './VideoLibraryView.module.scss';
 
 function normalizeVideoSourcePath(path: string): string {
@@ -39,7 +52,10 @@ function normalizeVideoSourcePath(path: string): string {
   return trimmed.replace(/\\/g, '/');
 }
 
-function doesVideoSourceMatch(currentSrc: string, expectedSrc: string): boolean {
+function doesVideoSourceMatch(
+  currentSrc: string,
+  expectedSrc: string,
+): boolean {
   if (!currentSrc || !expectedSrc) return false;
   if (currentSrc === expectedSrc) return true;
 
@@ -138,6 +154,7 @@ export default function VideoLibraryView({
     overlayItems,
     textOverlayCues,
     totalDuration,
+    error: timelineError,
   } = useTimelineDataContext();
 
   // Notify parent when totalDuration changes (for playback bounds checking)
@@ -301,14 +318,12 @@ export default function VideoLibraryView({
     if (overlayItems.length === 0) return null;
     return (
       overlayItems.find(
-        (item) =>
-          playbackTime >= item.startTime && playbackTime < item.endTime,
+        (item) => playbackTime >= item.startTime && playbackTime < item.endTime,
       ) || null
     );
   }, [overlayItems, playbackTime]);
 
-  const activeOverlay =
-    currentItem?.type === 'image' ? currentOverlay : null;
+  const activeOverlay = currentItem?.type === 'image' ? currentOverlay : null;
 
   const activeTextCue = useMemo(
     () => getActiveCue(textOverlayCues, playbackTime),
@@ -795,7 +810,10 @@ export default function VideoLibraryView({
 
     const clipChanged = appliedClipIdentityRef.current !== clipIdentity;
     const pathChanged = currentVideoPathRef.current !== currentVideoPath;
-    const srcMismatch = !doesVideoSourceMatch(videoElement.src, currentVideoPath);
+    const srcMismatch = !doesVideoSourceMatch(
+      videoElement.src,
+      currentVideoPath,
+    );
     const shouldApplySource = clipChanged || pathChanged || srcMismatch;
     if (!shouldApplySource) {
       return undefined;
@@ -819,21 +837,30 @@ export default function VideoLibraryView({
       isVideoLoadingRef.current = false;
       const { error } = videoElement;
       if (error) {
-        console.error(`[VideoLibraryView] Video error for ${currentVideo.label}:`, {
-          code: error.code,
-          message: error.message,
-          path: currentVideoPath,
-          effectiveVersionPath,
-          videoPath: currentVideo.videoPath,
-        });
+        console.error(
+          `[VideoLibraryView] Video error for ${currentVideo.label}:`,
+          {
+            code: error.code,
+            message: error.message,
+            path: currentVideoPath,
+            effectiveVersionPath,
+            videoPath: currentVideo.videoPath,
+          },
+        );
 
         // Try fallback: use videoPath directly if versionPath failed
-        if (currentVideo.videoPath && currentVideoPath !== currentVideo.videoPath) {
+        if (
+          currentVideo.videoPath &&
+          currentVideoPath !== currentVideo.videoPath
+        ) {
           console.log(
             '[VideoLibraryView] Video load error, trying fallback path:',
             currentVideo.videoPath,
           );
-          resolveAssetPathForDisplay(currentVideo.videoPath, projectDirectory || null)
+          resolveAssetPathForDisplay(
+            currentVideo.videoPath,
+            projectDirectory || null,
+          )
             .then((resolved) => {
               if (
                 resolved &&
@@ -936,7 +963,7 @@ export default function VideoLibraryView({
     appliedClipIdentityRef.current = clipIdentity;
     isVideoLoadingRef.current = true;
     videoElement.src = currentVideoPath;
-    videoElement.muted = true; // Mute video audio so only imported audio track plays
+    videoElement.muted = false;
     // Don't reset currentTime to 0 - let it be set by the loaded event handlers based on playbackTime
     videoElement.load();
     console.log('[VideoLibraryView] Video element src set and load() called:', {
@@ -1003,9 +1030,9 @@ export default function VideoLibraryView({
 
     const videoElement = videoRef.current;
 
-    // Ensure video is muted so only imported audio plays
-    if (!videoElement.muted) {
-      videoElement.muted = true;
+    // Keep main preview video audio enabled.
+    if (videoElement.muted) {
+      videoElement.muted = false;
     }
 
     // Sync play/pause state
@@ -1038,7 +1065,8 @@ export default function VideoLibraryView({
     }
 
     const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
-    const expectedVideoTime = sourceOffset + (playbackTime - currentVideo.startTime);
+    const expectedVideoTime =
+      sourceOffset + (playbackTime - currentVideo.startTime);
 
     // Only update if there's a significant difference to avoid jitter
     // Also ensure we're within valid bounds
@@ -1218,9 +1246,7 @@ export default function VideoLibraryView({
 
     const promptOverlayCues = buildPromptOverlayCues(
       exportItemResults
-        .filter(
-          ({ item }) => item.type === 'image' || item.type === 'video',
-        )
+        .filter(({ item }) => item.type === 'image' || item.type === 'video')
         .map(({ item, exportItem }) => ({
           id: item.id,
           type: item.type,
@@ -1336,12 +1362,7 @@ export default function VideoLibraryView({
     } finally {
       setIsDownloading(false);
     }
-  }, [
-    projectDirectory,
-    timelineItems,
-    isDownloading,
-    resolveExportData,
-  ]);
+  }, [projectDirectory, timelineItems, isDownloading, resolveExportData]);
 
   // Close export menu when clicking outside
   useEffect(() => {
@@ -1408,10 +1429,14 @@ export default function VideoLibraryView({
 
       if (result.error === 'cancelled') return;
       if (!result.success) {
-        alert(`Failed to export CapCut project: ${result.error || 'Unknown error'}`);
+        alert(
+          `Failed to export CapCut project: ${result.error || 'Unknown error'}`,
+        );
         return;
       }
-      alert('CapCut project exported successfully! You can now open it in CapCut.');
+      alert(
+        'CapCut project exported successfully! You can now open it in CapCut.',
+      );
     } catch (error) {
       console.error('[Export:CapCut] Error:', error);
       alert(
@@ -1459,17 +1484,25 @@ export default function VideoLibraryView({
               type="button"
               className={styles.downloadButton}
               onClick={handleDownloadVideo}
-              disabled={isDownloading || isExporting || timelineItems.length === 0}
+              disabled={
+                isDownloading || isExporting || timelineItems.length === 0
+              }
               title="Download complete timeline video as MP4"
             >
               <Download size={16} />
-              {isDownloading ? 'Composing...' : isExporting ? 'Exporting...' : 'Download'}
+              {isDownloading
+                ? 'Composing...'
+                : isExporting
+                  ? 'Exporting...'
+                  : 'Download'}
             </button>
             <button
               type="button"
               className={styles.exportDropdownToggle}
               onClick={() => setShowExportMenu((prev) => !prev)}
-              disabled={isDownloading || isExporting || timelineItems.length === 0}
+              disabled={
+                isDownloading || isExporting || timelineItems.length === 0
+              }
               title="Export options"
             >
               <ChevronDown size={14} />
@@ -1561,7 +1594,6 @@ export default function VideoLibraryView({
                 }}
                 preload="auto"
                 playsInline
-                muted
               />
 
               {!shouldShowVideo && shouldShowLoadingVideo && (
@@ -1626,7 +1658,9 @@ export default function VideoLibraryView({
               )}
 
               {currentVideo && (
-                <div className={styles.currentVideoLabel}>{currentVideo.label}</div>
+                <div className={styles.currentVideoLabel}>
+                  {currentVideo.label}
+                </div>
               )}
               {shouldShowExpandedPrompt && (
                 <div className={styles.expandedPromptOverlay}>
@@ -1703,9 +1737,10 @@ export default function VideoLibraryView({
             /* Empty state - only show if no scene and no items in timeline */
             <div className={styles.emptyPlayer}>
               <Film size={48} className={styles.emptyPlayerIcon} />
-              <p>No items in timeline</p>
+              <p>{timelineError || 'No items in timeline'}</p>
               <p className={styles.emptySubtext}>
-                Add videos or scenes to the timeline to preview them here
+                {timelineError ||
+                  'Add videos or scenes to the timeline to preview them here'}
               </p>
             </div>
           ) : null}

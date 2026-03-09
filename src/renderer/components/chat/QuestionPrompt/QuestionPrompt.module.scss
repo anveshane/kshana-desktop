@@ -3,7 +3,7 @@
 
 .container {
   margin: $spacing-md $spacing-md 0;
-  padding: $spacing-md;
+  padding: 12px;
   border: 1px solid $color-panel-border;
   border-bottom: none;
   border-radius: $radius-lg $radius-lg 0 0;
@@ -52,7 +52,7 @@
 .content {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .stepLabel {
@@ -65,8 +65,13 @@
 
 .questionText {
   color: $color-text-primary;
-  font-size: $font-size-base;
-  line-height: $line-height-relaxed;
+  font-size: $font-size-sm;
+  line-height: 1.55;
+  max-height: min(220px, 30vh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+  @include custom-scrollbar;
 
   p,
   ul,
@@ -89,6 +94,11 @@
   ul,
   ol {
     padding-left: $spacing-lg;
+  }
+
+  pre {
+    overflow-x: auto;
+    @include custom-scrollbar;
   }
 
   li + li {

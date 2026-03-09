@@ -77,8 +77,8 @@ describe('useTimelineData audio refresh helpers', () => {
     });
 
     expect(result).toEqual([
-      { path: '.kshana/agent/audio/ok.mp3', duration: 12 },
-      { path: '.kshana/agent/audio/broken.wav', duration: 7 },
+      { path: 'assets/audio/ok.mp3', duration: 12 },
+      { path: 'assets/audio/broken.wav', duration: 7 },
     ]);
     expect(getAudioDuration).toHaveBeenCalledTimes(2);
   });

@@ -129,18 +129,27 @@ export class ProjectService {
     const errors: string[] = [];
 
     // Check for backend project state (required)
-    const agentStatePath = ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_PROJECT);
+    const agentStatePath = ProjectService.buildPath(
+      directory,
+      PROJECT_PATHS.AGENT_PROJECT,
+    );
     const hasAgentState = await this.fileExists(agentStatePath);
     if (!hasAgentState) {
       errors.push('Missing project.json file');
     }
 
     // Check for asset manifest
-    const assetManifestPath = ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST);
+    const assetManifestPath = ProjectService.buildPath(
+      directory,
+      PROJECT_PATHS.AGENT_MANIFEST,
+    );
     const hasAssetManifest = await this.fileExists(assetManifestPath);
 
     // Check for timeline state
-    const timelinePath = ProjectService.buildPath(directory, PROJECT_PATHS.UI_TIMELINE);
+    const timelinePath = ProjectService.buildPath(
+      directory,
+      PROJECT_PATHS.UI_TIMELINE,
+    );
     const hasTimelineState = await this.fileExists(timelinePath);
 
     // Project is valid if it has agent state (CLI structure)
@@ -193,15 +202,17 @@ export class ProjectService {
 
         const sameLoadedProject = this.projectDirectory === directory;
         const inMemoryAssetManifest = sameLoadedProject
-          ? this.currentProject?.assetManifest ?? null
+          ? (this.currentProject?.assetManifest ?? null)
           : null;
 
-        const assetManifestResult = await this.readAssetManifestWithStatus(
-          directory,
-        );
+        const assetManifestResult =
+          await this.readAssetManifestWithStatus(directory);
         let assetManifest: AssetManifest;
 
-        if (assetManifestResult.status === 'ok' && assetManifestResult.manifest) {
+        if (
+          assetManifestResult.status === 'ok' &&
+          assetManifestResult.manifest
+        ) {
           assetManifest = assetManifestResult.manifest;
           console.log('[ProjectService] Asset manifest loaded:', {
             source: 'disk',
@@ -211,21 +222,34 @@ export class ProjectService {
             ).length,
           });
         } else if (assetManifestResult.status === 'missing') {
-          console.log('[ProjectService] Asset manifest missing, creating default', {
-            source: 'open_project',
-            path: ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
-          });
+          console.log(
+            '[ProjectService] Asset manifest missing, creating default',
+            {
+              source: 'open_project',
+              path: ProjectService.buildPath(
+                directory,
+                PROJECT_PATHS.AGENT_MANIFEST,
+              ),
+            },
+          );
           assetManifest = backendAssetManifestToDesktop({ assets: [] });
           await this.writeAssetManifest(directory, assetManifest);
         } else {
-          console.warn('[ProjectService] Asset manifest invalid; preserving in-memory state when available', {
-            source: 'open_project',
-            path: ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
-            hasInMemoryManifest: !!inMemoryAssetManifest,
-            error: assetManifestResult.error,
-          });
+          console.warn(
+            '[ProjectService] Asset manifest invalid; preserving in-memory state when available',
+            {
+              source: 'open_project',
+              path: ProjectService.buildPath(
+                directory,
+                PROJECT_PATHS.AGENT_MANIFEST,
+              ),
+              hasInMemoryManifest: !!inMemoryAssetManifest,
+              error: assetManifestResult.error,
+            },
+          );
           assetManifest =
-            inMemoryAssetManifest ?? backendAssetManifestToDesktop({ assets: [] });
+            inMemoryAssetManifest ??
+            backendAssetManifestToDesktop({ assets: [] });
         }
 
         const manifest = backendProjectToDesktopManifest(agentState);
@@ -472,7 +496,9 @@ export class ProjectService {
     }
   }
 
-  private async readJSONWithStatus<T>(path: string): Promise<JSONReadResult<T>> {
+  private async readJSONWithStatus<T>(
+    path: string,
+  ): Promise<JSONReadResult<T>> {
     try {
       const content = await window.electron.project.readFile(path);
       if (content === null) {
@@ -483,7 +509,9 @@ export class ProjectService {
       } catch (parseError) {
         // Primary file is corrupt -- try the atomic-write temp file as fallback
         try {
-          const tmpContent = await window.electron.project.readFile(`${path}.tmp`);
+          const tmpContent = await window.electron.project.readFile(
+            `${path}.tmp`,
+          );
           if (tmpContent) {
             const tmpData = safeJsonParse<T>(tmpContent);
             console.warn(
@@ -591,14 +619,20 @@ export class ProjectService {
   private async readAssetManifestWithStatus(
     directory: string,
   ): Promise<AssetManifestReadResult> {
-    const manifestPath = ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST);
+    const manifestPath = ProjectService.buildPath(
+      directory,
+      PROJECT_PATHS.AGENT_MANIFEST,
+    );
     console.log('[ProjectService] Reading asset manifest from:', manifestPath);
 
     const manifestResult =
       await this.readJSONWithStatus<BackendAssetManifest>(manifestPath);
 
     if (manifestResult.status === 'missing') {
-      console.warn('[ProjectService] Asset manifest file missing:', manifestPath);
+      console.warn(
+        '[ProjectService] Asset manifest file missing:',
+        manifestPath,
+      );
       return { status: 'missing' };
     }
 
@@ -664,6 +698,7 @@ export class ProjectService {
       image_timing_overrides: state.image_timing_overrides ?? {},
       infographic_timing_overrides: state.infographic_timing_overrides ?? {},
       video_split_overrides: state.video_split_overrides ?? {},
+      segment_timing_overrides: state.segment_timing_overrides ?? {},
     };
   }
 
@@ -697,7 +732,9 @@ export class ProjectService {
       PROJECT_PATHS.AGENT_AUDIO,
     ];
 
-    const normalizedDirectory = directory.replace(/\\/g, '/').replace(/\/+$/, '');
+    const normalizedDirectory = directory
+      .replace(/\\/g, '/')
+      .replace(/\/+$/, '');
     for (const dir of dirs) {
       const parts = dir.split('/');
       let basePath = normalizedDirectory;

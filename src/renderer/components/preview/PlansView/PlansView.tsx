@@ -95,7 +95,10 @@ const comparePlanFiles = (left: PlanFile, right: PlanFile): number => {
   return left.path.localeCompare(right.path);
 };
 
-export default function PlansView({ fileToOpen, onFileOpened }: PlansViewProps) {
+export default function PlansView({
+  fileToOpen,
+  onFileOpened,
+}: PlansViewProps) {
   const { projectDirectory } = useWorkspace();
   const [availablePlans, setAvailablePlans] = useState<PlanFile[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<PlanFile | null>(null);
@@ -104,50 +107,83 @@ export default function PlansView({ fileToOpen, onFileOpened }: PlansViewProps) 
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasAutoLoaded, setHasAutoLoaded] = useState(false);
+  const [isEditorDirty, setIsEditorDirty] = useState(false);
   const selectedPlanRef = useRef<PlanFile | null>(null);
+  const isEditorDirtyRef = useRef(false);
 
   useEffect(() => {
     selectedPlanRef.current = selectedPlan;
   }, [selectedPlan]);
 
+  useEffect(() => {
+    isEditorDirtyRef.current = isEditorDirty;
+  }, [isEditorDirty]);
+
+  const readPlanContent = useCallback(
+    async (plan: PlanFile): Promise<string> => {
+      if (!projectDirectory) {
+        throw new Error('Project directory is not available');
+      }
+
+      const content = await window.electron.project.readFile(
+        `${projectDirectory}/${plan.path}`,
+      );
+
+      if (content !== null) {
+        return content;
+      }
+
+      return `# ${plan.displayName}\n\nContent not available.`;
+    },
+    [projectDirectory],
+  );
+
   const loadPlanFile = useCallback(
-    async (plan: PlanFile) => {
+    async (
+      plan: PlanFile,
+      options?: { preserveSelection?: boolean; showLoading?: boolean },
+    ) => {
       if (!projectDirectory) {
         return;
       }
 
-      setSelectedPlan(plan);
-      setIsLoadingPlan(true);
+      const preserveSelection = options?.preserveSelection ?? false;
+      const showLoading = options?.showLoading ?? true;
+
+      if (!preserveSelection) {
+        setSelectedPlan(plan);
+      }
+      if (showLoading) {
+        setIsLoadingPlan(true);
+      }
       setError(null);
 
       try {
-        const content = await window.electron.project.readFile(
-          `${projectDirectory}/${plan.path}`,
-        );
-        if (content !== null) {
-          setPlanContent(content);
-        } else {
-          setPlanContent(`# ${plan.displayName}\n\nContent not available.`);
-        }
+        const content = await readPlanContent(plan);
+        setPlanContent(content);
+        setIsEditorDirty(false);
       } catch (err) {
         console.error('Failed to load markdown file:', err);
         setError('Failed to load markdown file');
         setPlanContent(`# ${plan.displayName}\n\nFailed to load content.`);
       } finally {
-        setIsLoadingPlan(false);
+        if (showLoading) {
+          setIsLoadingPlan(false);
+        }
       }
     },
-    [projectDirectory],
+    [projectDirectory, readPlanContent],
   );
 
-  const reloadPlanList = useCallback(async () => {
+  const reloadPlanList = useCallback(async (): Promise<PlanFile[]> => {
     if (!projectDirectory) {
       setAvailablePlans([]);
       setSelectedPlan(null);
       setPlanContent('');
       setError(null);
       setHasAutoLoaded(false);
-      return;
+      setIsEditorDirty(false);
+      return [];
     }
 
     setIsLoadingPlans(true);
@@ -171,17 +207,23 @@ export default function PlansView({ fileToOpen, onFileOpened }: PlansViewProps) 
       setAvailablePlans(plans);
       if (
         selectedPlanRef.current &&
-        !plans.some((candidate) => candidate.path === selectedPlanRef.current?.path)
+        !plans.some(
+          (candidate) => candidate.path === selectedPlanRef.current?.path,
+        )
       ) {
         setPlanContent('');
         setSelectedPlan(null);
+        setIsEditorDirty(false);
       }
+      return plans;
     } catch (err) {
       console.error('Failed to discover markdown files:', err);
       setAvailablePlans([]);
       setSelectedPlan(null);
       setPlanContent('');
       setError('Failed to discover markdown files');
+      setIsEditorDirty(false);
+      return [];
     } finally {
       setIsLoadingPlans(false);
     }
@@ -193,7 +235,91 @@ export default function PlansView({ fileToOpen, onFileOpened }: PlansViewProps) 
 
   useEffect(() => {
     setHasAutoLoaded(false);
+    setIsEditorDirty(false);
   }, [projectDirectory]);
+
+  useEffect(() => {
+    if (!projectDirectory) {
+      return undefined;
+    }
+
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+    let shouldRefreshSelected = false;
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const normalizedProjectDirectory = projectDirectory
+        .replace(/\\/g, '/')
+        .replace(/\/+$/, '');
+      const normalizedPath = event.path.replace(/\\/g, '/');
+
+      if (
+        normalizedPath !== normalizedProjectDirectory &&
+        !normalizedPath.startsWith(`${normalizedProjectDirectory}/`)
+      ) {
+        return;
+      }
+
+      const isMarkdownFile = normalizedPath
+        .toLowerCase()
+        .endsWith(MARKDOWN_EXTENSION);
+      const isDirectoryChange =
+        event.type === 'addDir' || event.type === 'unlinkDir';
+
+      if (!isMarkdownFile && !isDirectoryChange) {
+        return;
+      }
+
+      const relativePath = getRelativeProjectPath(
+        projectDirectory,
+        normalizedPath,
+      );
+      if (
+        isMarkdownFile &&
+        selectedPlanRef.current &&
+        selectedPlanRef.current.path === relativePath &&
+        event.type !== 'unlink'
+      ) {
+        shouldRefreshSelected = true;
+      }
+
+      if (debounceTimeout) {
+        clearTimeout(debounceTimeout);
+      }
+
+      debounceTimeout = setTimeout(async () => {
+        const selectedPath = selectedPlanRef.current?.path ?? null;
+        const plans = await reloadPlanList();
+
+        if (
+          !shouldRefreshSelected ||
+          !selectedPath ||
+          isEditorDirtyRef.current
+        ) {
+          shouldRefreshSelected = false;
+          return;
+        }
+
+        const updatedSelection = plans.find(
+          (plan) => plan.path === selectedPath,
+        );
+        shouldRefreshSelected = false;
+
+        if (updatedSelection) {
+          await loadPlanFile(updatedSelection, {
+            preserveSelection: true,
+            showLoading: false,
+          });
+        }
+      }, 250);
+    });
+
+    return () => {
+      unsubscribe();
+      if (debounceTimeout) {
+        clearTimeout(debounceTimeout);
+      }
+    };
+  }, [loadPlanFile, projectDirectory, reloadPlanList]);
 
   useEffect(() => {
     if (!fileToOpen || !projectDirectory || availablePlans.length === 0) {
@@ -225,7 +351,12 @@ export default function PlansView({ fileToOpen, onFileOpened }: PlansViewProps) 
   ]);
 
   useEffect(() => {
-    if (!projectDirectory || selectedPlan || hasAutoLoaded || availablePlans.length === 0) {
+    if (
+      !projectDirectory ||
+      selectedPlan ||
+      hasAutoLoaded ||
+      availablePlans.length === 0
+    ) {
       return;
     }
 
@@ -330,6 +461,7 @@ export default function PlansView({ fileToOpen, onFileOpened }: PlansViewProps) 
             content={planContent || ''}
             fileName={selectedPlan.name}
             filePath={getFilePath(selectedPlan)}
+            onDirtyChange={setIsEditorDirty}
           />
         ) : (
           <div className={styles.placeholder}>

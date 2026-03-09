@@ -17,8 +17,31 @@ interface MediaAsset {
 const MEDIA_SCAN_ROOTS = ['assets', 'characters', 'settings', 'scenes'];
 const MAX_SCAN_DEPTH = 5;
 
-const assetKey = (asset: Pick<MediaAsset, 'path' | 'category'>): string =>
-  `${asset.category}:${asset.path.replace(/\\/g, '/')}`;
+const normalizeMediaPath = (
+  filePath: string,
+  projectDirectory: string | null,
+): string => {
+  const normalizedPath = filePath.replace(/\\/g, '/').replace(/^\.\//, '');
+  const normalizedProjectDirectory = projectDirectory
+    ?.trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+
+  if (
+    normalizedProjectDirectory &&
+    (normalizedPath === normalizedProjectDirectory ||
+      normalizedPath.startsWith(`${normalizedProjectDirectory}/`))
+  ) {
+    return normalizedPath.slice(normalizedProjectDirectory.length + 1);
+  }
+
+  return normalizedPath;
+};
+
+const assetKey = (
+  asset: Pick<MediaAsset, 'path' | 'category'>,
+  projectDirectory: string | null,
+): string => `${asset.category}:${normalizeMediaPath(asset.path, projectDirectory)}`;
 
 const mediaNameFromPath = (filePath: string): string => {
   return filePath.replace(/\\/g, '/').split('/').pop() || filePath;
@@ -66,6 +89,7 @@ const inferCategoryFromManifest = (
 
 const classifyScannedMedia = (
   node: FileNode,
+  projectDirectory: string | null,
 ): Pick<MediaAsset, 'name' | 'path' | 'type' | 'category'> | null => {
   if (node.type !== 'file') {
     return null;
@@ -90,7 +114,7 @@ const classifyScannedMedia = (
 
   return {
     name: node.name,
-    path: normalizedPath,
+    path: normalizeMediaPath(normalizedPath, projectDirectory),
     type: fileType,
     category,
   };
@@ -99,16 +123,19 @@ const classifyScannedMedia = (
 const collectScannedMedia = (
   node: FileNode,
   map: Map<string, MediaAsset>,
+  projectDirectory: string | null,
 ): void => {
-  const media = classifyScannedMedia(node);
+  const media = classifyScannedMedia(node, projectDirectory);
   if (media) {
-    const key = assetKey(media);
+    const key = assetKey(media, projectDirectory);
     if (!map.has(key)) {
       map.set(key, media);
     }
   }
 
-  node.children?.forEach((child) => collectScannedMedia(child, map));
+  node.children?.forEach((child) =>
+    collectScannedMedia(child, map, projectDirectory),
+  );
 };
 
 export default function AssetsView() {
@@ -151,11 +178,11 @@ export default function AssetsView() {
 
         const media: MediaAsset = {
           name: mediaNameFromPath(asset.path),
-          path: asset.path,
+          path: normalizeMediaPath(asset.path, projectDirectory),
           type: category === 'images' ? 'image' : 'video',
           category,
         };
-        discoveredMedia.set(assetKey(media), media);
+        discoveredMedia.set(assetKey(media, projectDirectory), media);
       }
 
       try {
@@ -163,7 +190,7 @@ export default function AssetsView() {
           projectDirectory,
           MAX_SCAN_DEPTH,
         );
-        collectScannedMedia(projectTree, discoveredMedia);
+        collectScannedMedia(projectTree, discoveredMedia, projectDirectory);
       } catch (error) {
         console.error('[AssetsView] Failed to scan project tree for media:', error);
       }
