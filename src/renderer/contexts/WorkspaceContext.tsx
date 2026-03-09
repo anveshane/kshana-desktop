@@ -64,22 +64,23 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const projectSwitchGuardsRef = useRef<Set<ProjectSwitchGuard>>(new Set());
   const currentProjectDirectoryRef = useRef<string | null>(null);
 
+  const refreshRecentProjects = useCallback(async () => {
+    try {
+      const recent = await window.electron.project.getRecent();
+      setState((prev) => ({ ...prev, recentProjects: recent }));
+    } catch {
+      // Failed to load recent projects
+    }
+  }, []);
+
   useEffect(() => {
     currentProjectDirectoryRef.current = state.projectDirectory;
   }, [state.projectDirectory]);
 
   // Load recent projects on mount
   useEffect(() => {
-    const loadRecentProjects = async () => {
-      try {
-        const recent = await window.electron.project.getRecent();
-        setState((prev) => ({ ...prev, recentProjects: recent }));
-      } catch {
-        // Failed to load recent projects
-      }
-    };
-    loadRecentProjects();
-  }, []);
+    refreshRecentProjects();
+  }, [refreshRecentProjects]);
 
   // Subscribe to file changes
   useEffect(() => {
@@ -112,75 +113,85 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     [],
   );
 
-  const openProject = useCallback(async (path: string) => {
-    const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '');
-    const previousProjectDirectory = currentProjectDirectoryRef.current;
-
-    if (
-      previousProjectDirectory &&
-      previousProjectDirectory !== normalizedPath
-    ) {
-      try {
-        const shouldProceed = await runProjectSwitchGuards(
-          projectSwitchGuardsRef.current,
-          {
-            fromProjectDirectory: previousProjectDirectory,
-            toProjectDirectory: normalizedPath,
-          },
-        );
-        if (!shouldProceed) {
-          return;
-        }
-      } catch (error) {
-        console.error(
-          '[WorkspaceContext] Project switch guard failed, blocking switch:',
-          error,
-        );
-        return;
-      }
-    }
-
-    setState((prev) => ({ ...prev, isLoading: true }));
-    try {
-      // Read only first level to prevent freeze
-      const tree = await window.electron.project.readTree(path, 1);
-      const projectName = normalizedPath.split('/').pop() || path;
+  const openProject = useCallback(
+    async (path: string) => {
+      const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '');
+      const previousProjectDirectory = currentProjectDirectoryRef.current;
 
       if (
         previousProjectDirectory &&
         previousProjectDirectory !== normalizedPath
       ) {
-        await window.electron.project
-          .unwatchDirectory(previousProjectDirectory)
-          .catch(() => undefined);
+        try {
+          const shouldProceed = await runProjectSwitchGuards(
+            projectSwitchGuardsRef.current,
+            {
+              fromProjectDirectory: previousProjectDirectory,
+              toProjectDirectory: normalizedPath,
+            },
+          );
+          if (!shouldProceed) {
+            return;
+          }
+        } catch (error) {
+          console.error(
+            '[WorkspaceContext] Project switch guard failed, blocking switch:',
+            error,
+          );
+          return;
+        }
       }
 
-      // Start watching the directory
-      await window.electron.project.watchDirectory(path);
+      setState((prev) => ({ ...prev, isLoading: true }));
+      try {
+        const exists = await window.electron.project.checkFileExists(path);
+        if (!exists) {
+          await refreshRecentProjects();
+          throw new Error('Selected project folder does not exist anymore.');
+        }
 
-      // Add to recent projects
-      await window.electron.project.addRecent(path);
-      const recent = await window.electron.project.getRecent();
+        // Read only first level to prevent freeze
+        const tree = await window.electron.project.readTree(path, 1);
+        const projectName = normalizedPath.split('/').pop() || path;
 
-      setState((prev) => ({
-        ...prev,
-        projectDirectory: normalizedPath,
-        projectName,
-        fileTree: tree,
-        recentProjects: recent,
-        isLoading: false,
-        selectedFile: null,
-        activeContextFiles: [],
-      }));
+        if (
+          previousProjectDirectory &&
+          previousProjectDirectory !== normalizedPath
+        ) {
+          await window.electron.project
+            .unwatchDirectory(previousProjectDirectory)
+            .catch(() => undefined);
+        }
 
-      console.log('[WorkspaceContext] Project opened:', {
-        projectDirectory: normalizedPath,
-        projectName,
-      });
-    } catch {
-      setState((prev) => ({ ...prev, isLoading: false }));
-    }
-  }, []);
+        // Start watching the directory
+        await window.electron.project.watchDirectory(path);
+
+        // Add to recent projects
+        await window.electron.project.addRecent(path);
+        const recent = await window.electron.project.getRecent();
+
+        setState((prev) => ({
+          ...prev,
+          projectDirectory: normalizedPath,
+          projectName,
+          fileTree: tree,
+          recentProjects: recent,
+          isLoading: false,
+          selectedFile: null,
+          activeContextFiles: [],
+        }));
+
+        console.log('[WorkspaceContext] Project opened:', {
+          projectDirectory: normalizedPath,
+          projectName,
+        });
+      } catch (error) {
+        setState((prev) => ({ ...prev, isLoading: false }));
+        throw error;
+      }
+    },
+    [refreshRecentProjects],
+  );
 
   const closeProject = useCallback(() => {
     if (state.projectDirectory) {

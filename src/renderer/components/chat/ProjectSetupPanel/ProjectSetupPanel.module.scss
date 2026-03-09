@@ -1,0 +1,248 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.banner {
+  margin: $spacing-md $spacing-md 0;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid rgba($color-accent-cyan, 0.35);
+  border-radius: $radius-md;
+  background: rgba($color-accent-cyan, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+}
+
+.bannerLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
+.bannerButton {
+  @include button-primary;
+  min-width: 112px;
+}
+
+.summary {
+  margin: $spacing-md $spacing-md 0;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-md;
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+}
+
+.summaryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+}
+
+.summaryTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.summaryEdit {
+  @include button-ghost;
+  font-size: $font-size-xs;
+  height: 24px;
+  padding: 0 $spacing-sm;
+}
+
+.summaryTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+}
+
+.tag {
+  padding: 3px $spacing-sm;
+  border-radius: $radius-sm;
+  border: 1px solid rgba($color-accent-green, 0.4);
+  background: rgba($color-accent-green, 0.08);
+  color: $color-text-primary;
+  font-size: $font-size-xs;
+}
+
+.summaryStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+}
+
+.wizard {
+  margin: $spacing-md $spacing-md 0;
+  padding: $spacing-md;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-lg;
+  background: linear-gradient(
+      145deg,
+      rgba($color-accent-cyan, 0.08),
+      rgba($color-accent-green, 0.04)
+    ),
+    rgba(11, 15, 24, 0.9);
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.wizardHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wizardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.backButton {
+  @include button-ghost;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.wizardStep {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.wizardTitle {
+  margin: 0;
+  font-size: $font-size-lg;
+  color: $color-text-primary;
+}
+
+.cardsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: $spacing-sm;
+}
+
+.card {
+  text-align: left;
+  padding: $spacing-sm;
+  border-radius: $radius-md;
+  border: 1px solid rgba($color-panel-border, 0.9);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: border-color $transition-fast, background $transition-fast;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  &:hover {
+    border-color: rgba($color-accent-cyan, 0.7);
+    background: rgba($color-accent-cyan, 0.12);
+  }
+}
+
+.cardSelected {
+  border-color: rgba($color-accent-green, 0.9);
+  background: rgba($color-accent-green, 0.14);
+}
+
+.cardIndex {
+  color: $color-text-muted;
+  font-size: $font-size-xs;
+}
+
+.cardName {
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+}
+
+.cardDescription {
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  line-height: $line-height-relaxed;
+}
+
+.durationRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+}
+
+.durationButton {
+  @include button-secondary;
+  height: 30px;
+  font-size: $font-size-xs;
+}
+
+.durationSelected {
+  background: rgba($color-accent-green, 0.14);
+  border-color: rgba($color-accent-green, 0.85);
+  color: $color-text-primary;
+}
+
+.customDurationRow {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+}
+
+.customInput {
+  width: 110px;
+  height: 30px;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  padding: 0 $spacing-sm;
+  background: rgba(255, 255, 255, 0.02);
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+
+  &:focus {
+    outline: none;
+    border-color: rgba($color-accent-cyan, 0.75);
+  }
+}
+
+.customSet {
+  @include button-primary;
+  height: 30px;
+}
+
+.loading {
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+}
+
+.errorText {
+  color: $color-error;
+  font-size: $font-size-xs;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

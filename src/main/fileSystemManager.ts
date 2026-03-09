@@ -431,6 +431,28 @@ class FileSystemManager extends EventEmitter {
     return this.store.get('recentProjects', []);
   }
 
+  async getRecentProjectsValidated(): Promise<RecentProject[]> {
+    const recentProjects = this.getRecentProjects();
+    const validatedProjects = (
+      await Promise.all(
+        recentProjects.map(async (project) => {
+          try {
+            const stats = await fs.promises.stat(project.path);
+            return stats.isDirectory() ? project : null;
+          } catch {
+            return null;
+          }
+        }),
+      )
+    ).filter((project): project is RecentProject => project !== null);
+
+    if (validatedProjects.length !== recentProjects.length) {
+      this.store.set('recentProjects', validatedProjects);
+    }
+
+    return validatedProjects;
+  }
+
   addRecentProject(projectPath: string): void {
     const recentProjects = this.getRecentProjects();
     const name = path.basename(projectPath);

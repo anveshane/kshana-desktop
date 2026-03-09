@@ -1,0 +1,134 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 8, 12, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: $z-index-modal;
+}
+
+.dialog {
+  width: min(560px, 92vw);
+  @include panel-base;
+  border-radius: $radius-xl;
+  box-shadow: $shadow-lg;
+  padding: $spacing-xl;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-lg;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  margin: 0;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.closeButton {
+  @include button-ghost;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.label {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  font-weight: $font-weight-medium;
+}
+
+.input,
+.textarea {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid $color-panel-border;
+  color: $color-text-primary;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-base;
+  font-family: $font-family-base;
+
+  &:focus {
+    border-color: rgba($color-accent-green, 0.7);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba($color-accent-green, 0.15);
+  }
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 84px;
+}
+
+.locationRow {
+  margin-top: $spacing-sm;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.locationInfo {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.locationLabel {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+}
+
+.locationPath {
+  font-size: $font-size-base;
+  color: $color-text-primary;
+  @include truncate;
+}
+
+.pickButton {
+  @include button-secondary;
+  flex-shrink: 0;
+}
+
+.error {
+  margin: $spacing-xs 0 0;
+  color: $color-error;
+  font-size: $font-size-sm;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: $spacing-sm;
+}
+
+.cancelButton {
+  @include button-secondary;
+}
+
+.createButton {
+  @include button-primary;
+}
