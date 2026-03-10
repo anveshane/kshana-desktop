@@ -1419,42 +1419,56 @@ ipcMain.handle(
           `x=(w-text_w)/2:` +
           `y=(h-text_h)/2`
         : null;
-      const outputOptions = [
+      const buildBaseOutputOptions = () => [
         '-c:v libx264',
         '-preset medium',
         '-crf 23',
         '-pix_fmt yuv420p',
       ];
-      if (drawTextFilter) {
-        outputOptions.push('-vf', drawTextFilter);
-      }
 
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg()
-          .input(`color=c=black:s=1920x1080:d=${duration}`)
-          .inputOptions(['-f lavfi'])
-          .outputOptions(outputOptions)
-          .output(segmentPath)
-          .on('start', (commandLine) => {
-            console.log(
-              `[VideoComposition] Placeholder FFmpeg command (${segmentNumber}, ${placementLabel}): ${commandLine}`,
-            );
-          })
-          .on('end', () => {
-            console.log(
-              `[VideoComposition] Placeholder segment ${segmentNumber} completed`,
-            );
-            resolve();
-          })
-          .on('error', (err) => {
-            console.error(
-              `[VideoComposition] Placeholder segment ${segmentNumber} error:`,
-              err,
-            );
-            reject(err);
-          })
-          .run();
-      });
+      const renderPlaceholderWithOptions = async (
+        outputOptions: string[],
+      ): Promise<void> =>
+        new Promise<void>((resolve, reject) => {
+          ffmpeg()
+            .input(`color=c=black:s=1920x1080:d=${duration}`)
+            .inputOptions(['-f lavfi'])
+            .outputOptions(outputOptions)
+            .output(segmentPath)
+            .on('start', (commandLine) => {
+              console.log(
+                `[VideoComposition] Placeholder FFmpeg command (${segmentNumber}, ${placementLabel}): ${commandLine}`,
+              );
+            })
+            .on('end', () => {
+              console.log(
+                `[VideoComposition] Placeholder segment ${segmentNumber} completed`,
+              );
+              resolve();
+            })
+            .on('error', (err) => {
+              reject(err);
+            })
+            .run();
+        });
+
+      try {
+        const outputOptions = buildBaseOutputOptions();
+        if (drawTextFilter) {
+          outputOptions.push('-vf', drawTextFilter);
+        }
+        await renderPlaceholderWithOptions(outputOptions);
+      } catch (err) {
+        if (!drawTextFilter) {
+          throw err;
+        }
+        console.warn(
+          `[VideoComposition] Placeholder drawtext failed for segment ${segmentNumber}. Retrying without label overlay.`,
+          err,
+        );
+        const fallbackOutputOptions = buildBaseOutputOptions();
+        await renderPlaceholderWithOptions(fallbackOutputOptions);
+      }
     };
 
     if (overlayItems && overlayItems.length > 0) {
