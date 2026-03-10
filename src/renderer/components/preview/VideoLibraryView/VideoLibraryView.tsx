@@ -154,8 +154,12 @@ export default function VideoLibraryView({
     overlayItems,
     textOverlayCues,
     totalDuration,
+    timelineSource,
     error: timelineError,
   } = useTimelineDataContext();
+
+  const isTimelinePending =
+    timelineSource !== 'server_timeline' && !timelineError;
 
   // Notify parent when totalDuration changes (for playback bounds checking)
   useEffect(() => {
@@ -1737,10 +1741,16 @@ export default function VideoLibraryView({
             /* Empty state - only show if no scene and no items in timeline */
             <div className={styles.emptyPlayer}>
               <Film size={48} className={styles.emptyPlayerIcon} />
-              <p>{timelineError || 'No items in timeline'}</p>
+              <p>
+                {isTimelinePending
+                  ? 'Timeline is being prepared'
+                  : timelineError || 'No items in timeline'}
+              </p>
               <p className={styles.emptySubtext}>
-                {timelineError ||
-                  'Add videos or scenes to the timeline to preview them here'}
+                {isTimelinePending
+                  ? 'Preview will appear here once timeline generation completes'
+                  : timelineError ||
+                    'Add videos or scenes to the timeline to preview them here'}
               </p>
             </div>
           ) : null}

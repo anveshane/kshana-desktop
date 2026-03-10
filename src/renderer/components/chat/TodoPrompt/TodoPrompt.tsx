@@ -5,6 +5,7 @@ import styles from './TodoPrompt.module.scss';
 
 export interface TodoPromptProps {
   todos: TodoItem[];
+  isRunning?: boolean;
 }
 
 const STATUS_SYMBOLS: Record<TodoStatus, string> = {
@@ -14,12 +15,65 @@ const STATUS_SYMBOLS: Record<TodoStatus, string> = {
   cancelled: '✗',
 };
 
-export default function TodoPrompt({ todos }: TodoPromptProps) {
+export function buildTodoPromptSummary(
+  todos: TodoItem[],
+  isRunning: boolean = true,
+): {
+  visibleTodos: TodoItem[];
+  completedCount: number;
+  pendingCount: number;
+  currentTask: string;
+} {
+  const visibleTodos = todos
+    .filter((todo) => todo.task || todo.content)
+    .map((todo) =>
+      !isRunning && todo.status === 'in_progress'
+        ? { ...todo, status: 'pending' as TodoStatus }
+        : todo,
+    );
+  const completedCount = visibleTodos.filter(
+    (todo) => todo.status === 'completed',
+  ).length;
+  const originalInProgressTodo = todos.find(
+    (todo) => todo.status === 'in_progress',
+  );
+  const inProgressTodo = visibleTodos.find(
+    (todo) => todo.status === 'in_progress',
+  );
+  const pendingCount = visibleTodos.filter(
+    (todo) => (todo.status || 'pending') === 'pending',
+  ).length;
+  const currentTask =
+    inProgressTodo?.task ||
+    inProgressTodo?.content ||
+    (!isRunning
+      ? originalInProgressTodo?.task || originalInProgressTodo?.content
+        ? `Pending: ${
+            originalInProgressTodo?.task ||
+            originalInProgressTodo?.content ||
+            'Waiting for next task'
+          }`
+        : undefined
+      : undefined) ||
+    (pendingCount > 0 ? 'Waiting for next task' : 'Run complete');
+
+  return {
+    visibleTodos,
+    completedCount,
+    pendingCount,
+    currentTask,
+  };
+}
+
+export default function TodoPrompt({
+  todos,
+  isRunning = true,
+}: TodoPromptProps) {
   const [collapsed, setCollapsed] = useState(true);
 
-  const visibleTodos = useMemo(
-    () => todos.filter((todo) => todo.task || todo.content),
-    [todos],
+  const { visibleTodos, completedCount, pendingCount, currentTask } = useMemo(
+    () => buildTodoPromptSummary(todos, isRunning),
+    [isRunning, todos],
   );
 
   useEffect(() => {
@@ -28,21 +82,11 @@ export default function TodoPrompt({ todos }: TodoPromptProps) {
     }
   }, [visibleTodos.length]);
 
-  const completedCount = visibleTodos.filter(
-    (todo) => todo.status === 'completed',
-  ).length;
   const inProgressTodo = visibleTodos.find(
     (todo) => todo.status === 'in_progress',
   );
-  const pendingCount = visibleTodos.filter(
-    (todo) => (todo.status || 'pending') === 'pending',
-  ).length;
   const totalCount = visibleTodos.length;
   const progressLabel = `${completedCount}/${totalCount}`;
-  const currentTask =
-    inProgressTodo?.task ||
-    inProgressTodo?.content ||
-    (pendingCount > 0 ? 'Waiting for next task' : 'Run complete');
 
   if (visibleTodos.length === 0) {
     return null;
@@ -66,7 +110,9 @@ export default function TodoPrompt({ todos }: TodoPromptProps) {
           </div>
         </div>
         <div className={styles.summaryText}>
-          {inProgressTodo && <LoaderCircle size={13} className={styles.spinner} />}
+          {isRunning && inProgressTodo && (
+            <LoaderCircle size={13} className={styles.spinner} />
+          )}
           <span>{currentTask}</span>
         </div>
       </button>

@@ -11,7 +11,7 @@ describe('useTimelineData server timeline helpers', () => {
 
     expect(result.source).toBe('none');
     expect(result.timeline).toBeNull();
-    expect(result.error).toContain('Missing timeline.json');
+    expect(result.error).toBeNull();
   });
 
   it('returns none state when timeline.json is invalid JSON', () => {

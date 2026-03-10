@@ -21,41 +21,6 @@ export interface ToolCallCardProps {
   onFileClick?: (filePath: string) => void;
 }
 
-// Tools with special rendering
-const SPECIAL_RENDER_TOOLS = new Set([
-  'think',
-  'write_project_state',
-  'read_project_state',
-  'dispatch_agent',
-]);
-
-// User-friendly display names
-const TOOL_DISPLAY_NAMES: Record<string, { gerund: string; past: string }> = {
-  think: { gerund: 'Thinking', past: 'Thought' },
-  ask_user: { gerund: 'Asking user', past: 'Asked user' },
-  dispatch_agent: { gerund: 'Dispatching agent', past: 'Dispatched agent' },
-  generate_image: { gerund: 'Generating image', past: 'Generated image' },
-  generate_video: { gerund: 'Generating video', past: 'Generated video' },
-  edit_image: { gerund: 'Editing image', past: 'Edited image' },
-  wait_for_job: { gerund: 'Waiting for job', past: 'Job completed' },
-  read_project_state: {
-    gerund: 'Reading project state',
-    past: 'Read project state',
-  },
-  write_project_state: {
-    gerund: 'Saving project state',
-    past: 'Saved project state',
-  },
-};
-
-function getDisplayName(toolName: string, isExecuting: boolean): string {
-  const names = TOOL_DISPLAY_NAMES[toolName];
-  if (!names) {
-    return isExecuting ? `Running ${toolName}` : `Ran ${toolName}`;
-  }
-  return isExecuting ? names.gerund : names.past;
-}
-
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
@@ -85,6 +50,35 @@ function formatToolCall(name: string, args?: Record<string, unknown>): string {
 
 function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+export function isRoutineTool(toolName: string): boolean {
+  const normalized = toolName.toLowerCase();
+  return (
+    normalized.includes('read') ||
+    normalized.includes('list') ||
+    normalized.includes('scan') ||
+    normalized === 'search_files' ||
+    normalized.includes('todo')
+  );
+}
+
+export function isGenerationTool(toolName: string): boolean {
+  const normalized = toolName.toLowerCase();
+  return (
+    normalized.includes('generate_image') ||
+    normalized.includes('generate_video')
+  );
+}
+
+export function prefersInlineTextPreview(toolName: string): boolean {
+  const normalized = toolName.toLowerCase();
+  return (
+    normalized === 'import_file' ||
+    normalized === 'generate_content' ||
+    normalized.includes('write') ||
+    normalized.includes('create')
+  );
 }
 
 type CompactToolSummary = {
@@ -483,8 +477,106 @@ function renderProjectStateTool(
   );
 }
 
-// Tools that should be expanded by default (not collapsed)
-const EXPANDED_BY_DEFAULT_TOOLS = new Set(['Task', 'dispatch_agent']);
+function renderGenerationTool(
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+  status: ToolCallStatus | undefined,
+  result?: unknown,
+): React.ReactNode {
+  const sceneNumber = args?.scene_number as number | undefined;
+  const prompt =
+    (args?.prompt as string | undefined) ||
+    (args?.motion_prompt as string | undefined);
+  const promptFile =
+    (args?.prompt_file as string | undefined) ||
+    (args?.motion_prompt_file as string | undefined);
+  const referenceImages = Array.isArray(args?.reference_images)
+    ? args?.reference_images
+    : [];
+  const imageType = args?.image_type as string | undefined;
+  const generationMode = args?.generation_mode as string | undefined;
+  const aspectRatio = args?.aspect_ratio as string | undefined;
+  const resultObj =
+    result && typeof result === 'object'
+      ? (result as Record<string, unknown>)
+      : undefined;
+  const resultSummary =
+    typeof resultObj?.summary === 'string'
+      ? resultObj.summary
+      : typeof resultObj?.content === 'string'
+        ? resultObj.content
+        : typeof result === 'string'
+          ? result
+          : undefined;
+
+  return (
+    <div className={styles.generateTool}>
+      <div className={styles.generateHeader}>
+        <span className={styles.generateTitle}>
+          {toolName.replace(/_/g, ' ')}
+        </span>
+        <span className={styles.generateState}>
+          {status === 'executing' ? 'In progress' : 'Completed'}
+        </span>
+      </div>
+      <div className={styles.generateMeta}>
+        {sceneNumber !== undefined && <span>Scene {sceneNumber}</span>}
+        {imageType && <span>{imageType}</span>}
+        {generationMode && <span>{generationMode}</span>}
+        {aspectRatio && <span>{aspectRatio}</span>}
+      </div>
+      {prompt && (
+        <div className={styles.generateSection}>
+          <div className={styles.resultLabel}>Prompt</div>
+          <div className={styles.generatePrompt}>{prompt}</div>
+        </div>
+      )}
+      {promptFile && (
+        <div className={styles.generateSection}>
+          <div className={styles.resultLabel}>Prompt file</div>
+          <div className={styles.generatePrompt}>{promptFile}</div>
+        </div>
+      )}
+      {referenceImages.length > 0 && (
+        <div className={styles.generateSection}>
+          <div className={styles.resultLabel}>References</div>
+          <div className={styles.referenceList}>
+            {referenceImages.map((reference, index) => {
+              const ref =
+                reference && typeof reference === 'object'
+                  ? (reference as Record<string, unknown>)
+                  : null;
+              const label =
+                (typeof ref?.name === 'string' && ref.name) ||
+                (typeof ref?.image_id === 'string' && ref.image_id) ||
+                `Reference ${index + 1}`;
+              return (
+                <span key={`${label}-${index}`} className={styles.referenceChip}>
+                  {label}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {resultSummary && status !== 'executing' && (
+        <div className={styles.generateSection}>
+          <div className={styles.resultLabel}>Summary</div>
+          <div className={styles.generateResult}>
+            <ReactMarkdown>{resultSummary}</ReactMarkdown>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function shouldToolStartExpanded(
+  _toolName: string,
+  _status: ToolCallStatus,
+): boolean {
+  return false;
+}
 
 export default function ToolCallCard({
   toolName,
@@ -497,17 +589,17 @@ export default function ToolCallCard({
   onFileClick,
 }: ToolCallCardProps) {
   const isExecuting = status === 'executing';
-  
-  // Task tool and executing tools stay expanded by default, all others are collapsed
-  const [isExpanded, setIsExpanded] = useState(() => 
-    EXPANDED_BY_DEFAULT_TOOLS.has(toolName) || isExecuting
+
+  // Important/generative tools stay open, routine tools collapse after completion.
+  const [isExpanded, setIsExpanded] = useState(
+    () => shouldToolStartExpanded(toolName, status),
   );
-  
-  // Keep expanded while executing (can't collapse running tools)
-  const effectiveExpanded = isExecuting ? true : isExpanded;
-  
+
+  const effectiveExpanded = isExpanded;
+
   const isError = status === 'error';
   const isCompleted = status === 'completed';
+  const needsConfirmation = status === 'needs_confirmation';
 
   // CLI-style format: [TOOL] toolName
   const prefix = agentName ? `[${agentName}]` : '[TOOL]';
@@ -562,6 +654,13 @@ export default function ToolCallCard({
         typeof resultObj.output === 'string'
       ) {
         resultDisplay = String(resultObj.output);
+      } else if (
+        preview &&
+        prefersInlineTextPreview(toolName) &&
+        !isGenerationTool(toolName)
+      ) {
+        resultDisplay = preview;
+        preview = undefined;
       } else if (filePath && !resultDisplay) {
         // If we have a file path but no content, show the file path
         resultDisplay = `File: ${filePath}`;
@@ -590,19 +689,38 @@ export default function ToolCallCard({
     ? styles.borderExecuting
     : isError
       ? styles.borderError
+      : needsConfirmation
+        ? styles.borderNeedsConfirmation
       : isCompleted
         ? styles.borderCompleted
         : styles.borderDefault;
 
   const toolCallText = formatToolCall(toolName, args);
 
+  const renderSpecialContent = (): React.ReactNode | null => {
+    if (toolName === 'think') {
+      return renderThinkTool(args, status);
+    }
+    if (toolName === 'dispatch_agent') {
+      return renderDispatchAgentTool(args, status, result);
+    }
+    if (toolName === 'read_project_state' || toolName === 'write_project_state') {
+      return renderProjectStateTool(toolName, args, status);
+    }
+    if (isGenerationTool(toolName)) {
+      return renderGenerationTool(toolName, args, status, result);
+    }
+    return null;
+  };
+
+  const specialContent = renderSpecialContent();
+
   return (
     <div className={`${styles.container} ${borderClass}`}>
       <button
         type="button"
-        className={`${styles.header} ${isExecuting ? styles.headerNoCollapse : ''}`}
-        onClick={() => !isExecuting && setIsExpanded(!isExpanded)}
-        style={isExecuting ? { cursor: 'default' } : undefined}
+        className={styles.header}
+        onClick={() => setIsExpanded(!isExpanded)}
       >
         <ChevronRight
           size={14}
@@ -612,13 +730,24 @@ export default function ToolCallCard({
           <AlertCircle size={14} className={styles.statusIconExecuting} />
         ) : isError ? (
           <XCircle size={14} className={styles.statusIconError} />
+        ) : needsConfirmation ? (
+          <AlertCircle
+            size={14}
+            className={styles.statusIconNeedsConfirmation}
+          />
         ) : (
           <CheckCircle2 size={14} className={styles.statusIconCompleted} />
         )}
         <span className={styles.toolName}>{toolName}</span>
         <span className={styles.cliPrefix}>{prefix}</span>
         <span className={styles.cliToolName}>
-          {isExecuting ? 'Running' : isError ? 'Failed' : 'Success'}
+          {isExecuting
+            ? 'Running'
+            : isError
+              ? 'Failed'
+              : needsConfirmation
+                ? 'Needs confirmation'
+                : 'Success'}
         </span>
         {!isExecuting && duration !== undefined && duration > 0 && (
           <span className={styles.duration}>{formatDuration(duration)}</span>
@@ -631,13 +760,22 @@ export default function ToolCallCard({
             <span className={styles.toolCallCode}>{toolCallText}</span>
           </div>
 
+          {needsConfirmation && (
+            <div className={styles.confirmationState}>
+              Waiting for your confirmation before this tool can continue.
+            </div>
+          )}
+
+          {specialContent}
+
           {!isExecuting &&
             (filePath ||
               fileSize ||
               resultDisplay ||
               summaryText ||
               nextActionText ||
-              compactSummary) && (
+              compactSummary) &&
+            !specialContent && (
             <div className={styles.cliResult}>
               {compactSummary && (
                 <div className={styles.summaryCard}>

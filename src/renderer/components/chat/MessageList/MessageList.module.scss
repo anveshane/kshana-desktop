@@ -2,6 +2,7 @@
 @import '../../../styles/mixins';
 
 .container {
+  position: relative;
   height: 100%;
   @include flex-column;
   overflow: hidden;
@@ -12,7 +13,6 @@
   overflow-y: auto;
   @include custom-scrollbar;
   padding: $spacing-md;
-  scroll-behavior: smooth;
 }
 
 .emptyState {
@@ -48,6 +48,15 @@
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   text-align: center;
+}
+
+.agentGroupLabel {
+  margin: $spacing-lg 0 $spacing-sm;
+  color: $color-accent-cyan;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .phaseBannerContent {
@@ -86,6 +95,45 @@
   animation: pulse 1.5s ease-in-out infinite;
 }
 
+.liveStreamMeta {
+  margin: $spacing-lg 0 $spacing-xs;
+  color: $color-accent-blue;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+}
+
+.resumeButton {
+  position: absolute;
+  right: $spacing-lg;
+  bottom: $spacing-lg;
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid rgba($color-accent-blue, 0.35);
+  border-radius: 999px;
+  background: rgba($color-panel-background, 0.96);
+  color: $color-text-primary;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  z-index: 2;
+  transition:
+    transform $transition-fast,
+    border-color $transition-fast,
+    background-color $transition-fast;
+
+  &:hover {
+    transform: translateY(-1px);
+    border-color: rgba($color-accent-blue, 0.55);
+    background: rgba($color-panel-background, 1);
+  }
+}
+
+.resumeButtonIcon {
+  color: $color-accent-blue;
+  font-weight: $font-weight-bold;
+}
+
 @keyframes pulse {
   0%, 100% {
     opacity: 1;
@@ -94,4 +142,3 @@
     opacity: 0.3;
   }
 }
-

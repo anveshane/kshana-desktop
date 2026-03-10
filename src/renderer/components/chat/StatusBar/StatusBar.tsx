@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import styles from './StatusBar.module.scss';
 
 export type AgentStatus =
@@ -14,6 +15,19 @@ export interface StatusBarProps {
   message?: string;
   currentPhase?: string;
   phaseDisplayName?: string;
+  contextUsagePercentage?: number;
+  contextWasCompressed?: boolean;
+  sessionTimerStartedAt?: number;
+  sessionTimerCompletedAt?: number;
+}
+
+function formatElapsedTimer(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((part) => String(part).padStart(2, '0'))
+    .join(':');
 }
 
 export default function StatusBar({
@@ -22,7 +36,37 @@ export default function StatusBar({
   message,
   currentPhase,
   phaseDisplayName,
+  contextUsagePercentage,
+  contextWasCompressed,
+  sessionTimerStartedAt,
+  sessionTimerCompletedAt,
 }: StatusBarProps) {
+  const [elapsedLabel, setElapsedLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!sessionTimerStartedAt) {
+      setElapsedLabel(null);
+      return undefined;
+    }
+
+    const updateElapsedLabel = () => {
+      const endTime = sessionTimerCompletedAt ?? Date.now();
+      const totalSeconds = Math.max(
+        0,
+        Math.floor((endTime - sessionTimerStartedAt) / 1000),
+      );
+      setElapsedLabel(formatElapsedTimer(totalSeconds));
+    };
+
+    updateElapsedLabel();
+    if (sessionTimerCompletedAt) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(updateElapsedLabel, 1000);
+    return () => window.clearInterval(timer);
+  }, [sessionTimerCompletedAt, sessionTimerStartedAt]);
+
   const getStatusClass = () => {
     switch (status) {
       case 'idle':
@@ -64,12 +108,43 @@ export default function StatusBar({
 
   return (
     <div className={styles.container}>
-      <div className={`${styles.statusIndicator} ${getStatusClass()}`} />
-      {agentName && <span className={styles.agentName}>[{agentName}]</span>}
-      {phaseDisplayName && (
-        <span className={styles.phaseName}>{phaseDisplayName}</span>
-      )}
-      <span className={styles.statusText}>{getStatusText()}</span>
+      <div className={styles.primary}>
+        <div className={`${styles.statusIndicator} ${getStatusClass()}`} />
+        {agentName && <span className={styles.agentName}>[{agentName}]</span>}
+        {phaseDisplayName && (
+          <span className={styles.phaseName}>{phaseDisplayName}</span>
+        )}
+        <span className={styles.statusText}>{getStatusText()}</span>
+      </div>
+      <div className={styles.metrics}>
+        {elapsedLabel && (
+          <span
+            className={`${styles.metricChip} ${sessionTimerCompletedAt ? styles.metricCompleted : ''}`}
+            title="Session timer"
+          >
+            {elapsedLabel}
+          </span>
+        )}
+        {typeof contextUsagePercentage === 'number' && (
+          <span
+            className={`${styles.metricChip} ${
+              contextUsagePercentage >= 85
+                ? styles.metricDanger
+                : contextUsagePercentage >= 65
+                  ? styles.metricWarning
+                  : styles.metricNormal
+            }`}
+            title={
+              contextWasCompressed
+                ? 'Context usage (recently compressed)'
+                : 'Context usage'
+            }
+          >
+            CTX {Math.round(contextUsagePercentage)}%
+            {contextWasCompressed ? ' compressed' : ''}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

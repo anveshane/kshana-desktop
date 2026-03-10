@@ -8,6 +8,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { ChatMessage } from '../../../types/chat';
+import type { ChatToolCallMeta } from '../../../types/chat';
 import MessageBubble from '../MessageBubble';
 import styles from './IntermediateMessageGroup.module.scss';
 
@@ -29,9 +30,10 @@ export default function IntermediateMessageGroup({
   if (messages.length === 0) return null;
 
   const firstMessage = messages[0];
+  const firstMeta = (firstMessage.meta || {}) as ChatToolCallMeta;
   const toolName =
     firstMessage.type === 'tool_call'
-      ? (firstMessage.meta?.tool_name as string) || 'tool'
+      ? (firstMeta.toolName as string) || 'tool'
       : firstMessage.type;
 
   const getStatusIcon = () => {

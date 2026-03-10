@@ -12,7 +12,12 @@ import type {
   RemotionServerRenderResult,
   RemotionServerRenderProgress,
 } from '../../../../shared/remotionTypes';
-import type { ChatMessage } from '../../../types/chat';
+import type {
+  ChatMessage,
+  ChatQuestionOption,
+  ChatTodoItemMeta,
+  ChatToolCallMeta,
+} from '../../../types/chat';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useAgent } from '../../../contexts/AgentContext';
 import {
@@ -35,6 +40,15 @@ import {
   failExecutingToolCalls,
   isCancelAckStatus,
 } from './chatPanelStopUtils';
+import {
+  buildCompletedToolMeta,
+  buildPhaseTransitionSummary,
+  findActiveToolCall,
+  normalizeQuestionPayload,
+  summarizeTodoUpdate,
+  withToolAlias,
+  type ActiveToolCallEntry,
+} from './chatPanelEventUtils';
 import {
   applyDesktopRemotionQueryParams,
   extractIncomingFileOpPath,
@@ -62,6 +76,13 @@ const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
 const DEFAULT_SETUP_TEMPLATE_ID = 'narrative';
 const DEFAULT_SETUP_STYLE_ID = 'cinematic_realism';
 const DEFAULT_SETUP_DURATION_SECONDS = 120;
+
+interface LiveToolStreamState {
+  toolCallId?: string;
+  toolName?: string;
+  agentName?: string;
+  text: string;
+}
 
 interface ProjectSetupPersisted {
   version: 1;
@@ -196,6 +217,18 @@ export default function ChatPanel() {
   const [phaseDisplayName, setPhaseDisplayName] = useState<
     string | undefined
   >();
+  const [contextUsagePercentage, setContextUsagePercentage] = useState<
+    number | undefined
+  >(undefined);
+  const [contextWasCompressed, setContextWasCompressed] = useState(false);
+  const [sessionTimerStartedAt, setSessionTimerStartedAt] = useState<
+    number | undefined
+  >(undefined);
+  const [sessionTimerCompletedAt, setSessionTimerCompletedAt] = useState<
+    number | undefined
+  >(undefined);
+  const [liveToolStream, setLiveToolStream] =
+    useState<LiveToolStreamState | null>(null);
   const [hasUserSentMessage, setHasUserSentMessage] = useState(false);
   const [isTaskRunning, setIsTaskRunning] = useState(false);
   const [isStopPending, setIsStopPending] = useState(false);
@@ -229,10 +262,8 @@ export default function ChatPanel() {
     null,
   );
   const awaitingResponseRef = useRef(false);
-  // Track active tool calls by toolCallId or by toolName+sequence when toolCallId is missing
-  const activeToolCallsRef = useRef<
-    Map<string, { messageId: string; startTime: number; toolName: string }>
-  >(new Map());
+  // Track active tool calls by UI key and attach backend toolCallIds when available.
+  const activeToolCallsRef = useRef<Map<string, ActiveToolCallEntry>>(new Map());
   const toolCallSequenceRef = useRef<Map<string, number>>(new Map());
   // Track the last todo message ID for in-place updates
   const lastTodoMessageIdRef = useRef<string | null>(null);
@@ -255,7 +286,12 @@ export default function ChatPanel() {
   const statusMessageRef = useRef('');
   const currentPhaseRef = useRef<string | undefined>(undefined);
   const phaseDisplayNameRef = useRef<string | undefined>(undefined);
+  const contextUsagePercentageRef = useRef<number | undefined>(undefined);
+  const contextWasCompressedRef = useRef(false);
+  const sessionTimerStartedAtRef = useRef<number | undefined>(undefined);
+  const sessionTimerCompletedAtRef = useRef<number | undefined>(undefined);
   const hasUserSentMessageRef = useRef(false);
+  const liveToolStreamRef = useRef<LiveToolStreamState | null>(null);
   const isTaskRunningRef = useRef(false);
   const isStopPendingRef = useRef(false);
   const supportsProjectStateSyncRef = useRef(true);
@@ -284,6 +320,12 @@ export default function ChatPanel() {
     lastTodoMessageIdRef.current = null;
     lastQuestionMessageIdRef.current = null;
     backgroundGenerationEventDedupe.clear();
+    contextUsagePercentageRef.current = undefined;
+    contextWasCompressedRef.current = false;
+    sessionTimerStartedAtRef.current = undefined;
+    sessionTimerCompletedAtRef.current = undefined;
+    liveToolStreamRef.current = null;
+    setLiveToolStream(null);
   }, []);
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
@@ -339,6 +381,18 @@ export default function ChatPanel() {
     [appendMessage],
   );
 
+  const appendTimelineEvent = useCallback(
+    (content: string, meta?: Record<string, unknown>) => {
+      appendMessage({
+        role: 'system',
+        type: 'timeline_event',
+        content,
+        meta,
+      });
+    },
+    [appendMessage],
+  );
+
   useEffect(() => {
     messagesRef.current = messages;
     agentStatusRef.current = agentStatus;
@@ -346,7 +400,12 @@ export default function ChatPanel() {
     statusMessageRef.current = statusMessage;
     currentPhaseRef.current = currentPhase;
     phaseDisplayNameRef.current = phaseDisplayName;
+    contextUsagePercentageRef.current = contextUsagePercentage;
+    contextWasCompressedRef.current = contextWasCompressed;
+    sessionTimerStartedAtRef.current = sessionTimerStartedAt;
+    sessionTimerCompletedAtRef.current = sessionTimerCompletedAt;
     hasUserSentMessageRef.current = hasUserSentMessage;
+    liveToolStreamRef.current = liveToolStream;
     isTaskRunningRef.current = isTaskRunning;
     isStopPendingRef.current = isStopPending;
     sessionIdRef.current = sessionId;
@@ -357,7 +416,12 @@ export default function ChatPanel() {
     statusMessage,
     currentPhase,
     phaseDisplayName,
+    contextUsagePercentage,
+    contextWasCompressed,
+    sessionTimerStartedAt,
+    sessionTimerCompletedAt,
     hasUserSentMessage,
+    liveToolStream,
     isTaskRunning,
     isStopPending,
     sessionId,
@@ -698,7 +762,234 @@ export default function ChatPanel() {
     toolCallSequenceRef.current.clear();
     setIsStreaming(false);
     lastAssistantIdRef.current = null;
+    liveToolStreamRef.current = null;
+    setLiveToolStream(null);
   }, []);
+
+  const updateLiveToolStream = useCallback(
+    (params: {
+      toolCallId?: string;
+      toolName?: string;
+      agentName?: string;
+      content?: string;
+      reset?: boolean;
+    }) => {
+      const nextAgentName = params.agentName || agentNameRef.current;
+      setLiveToolStream((previous) => {
+        const matchesPrevious =
+          (params.toolCallId &&
+            previous?.toolCallId &&
+            previous.toolCallId === params.toolCallId) ||
+          (!params.toolCallId &&
+            previous?.toolName === params.toolName &&
+            previous?.agentName === nextAgentName);
+
+        const baseText =
+          params.reset || !matchesPrevious ? '' : previous?.text || '';
+        const nextText = `${baseText}${params.content || ''}`;
+
+        if (!nextText.trim()) {
+          return previous;
+        }
+
+        return {
+          toolCallId: params.toolCallId || previous?.toolCallId,
+          toolName: params.toolName || previous?.toolName,
+          agentName: nextAgentName,
+          text: nextText,
+        };
+      });
+    },
+    [],
+  );
+
+  const clearLiveToolStream = useCallback(
+    (params?: {
+      toolCallId?: string;
+      toolName?: string;
+      agentName?: string;
+    }) => {
+      if (!params?.toolCallId && !params?.toolName) {
+        liveToolStreamRef.current = null;
+        setLiveToolStream(null);
+        return;
+      }
+
+      setLiveToolStream((previous) => {
+        if (!previous) {
+          return previous;
+        }
+
+        if (params.toolCallId && previous.toolCallId === params.toolCallId) {
+          return null;
+        }
+
+        const agentMatches =
+          !params.agentName || previous.agentName === params.agentName;
+        if (
+          !params.toolCallId &&
+          params.toolName &&
+          previous.toolName === params.toolName &&
+          agentMatches
+        ) {
+          return null;
+        }
+
+        return previous;
+      });
+    },
+    [],
+  );
+
+  const completeLiveToolStream = useCallback(
+    (params?: {
+      toolCallId?: string;
+      toolName?: string;
+      agentName?: string;
+    }) => {
+      const currentStream = liveToolStreamRef.current;
+      if (!currentStream?.text.trim()) {
+        return;
+      }
+
+      const agentMatches =
+        !params?.agentName || currentStream.agentName === params.agentName;
+      const toolCallMatches =
+        !params?.toolCallId || currentStream.toolCallId === params.toolCallId;
+      const toolNameMatches =
+        !params?.toolName || currentStream.toolName === params.toolName;
+
+      if (!agentMatches || !toolCallMatches || !toolNameMatches) {
+        return;
+      }
+
+      const persistedContent = currentStream.text;
+      const persistedAuthor = currentStream.agentName || agentNameRef.current;
+
+      setMessages((prev) => {
+        const lastMessage = prev[prev.length - 1];
+        if (
+          lastMessage?.role === 'assistant' &&
+          lastMessage.author === persistedAuthor &&
+          lastMessage.content === persistedContent
+        ) {
+          return prev;
+        }
+
+        return [
+          ...prev,
+          {
+            id: makeId(),
+            role: 'assistant',
+            type: 'agent_text',
+            content: persistedContent,
+            timestamp: Date.now(),
+            author: persistedAuthor,
+          },
+        ];
+      });
+
+      liveToolStreamRef.current = null;
+      setLiveToolStream(null);
+    },
+    [],
+  );
+
+  const ensureActiveToolCallEntry = useCallback(
+    (params: {
+      toolCallId?: string;
+      toolName?: string;
+      agentName?: string;
+    }): [string, ActiveToolCallEntry] | null => {
+      if (!params.toolName) {
+        return null;
+      }
+
+      const existing = findActiveToolCall(activeToolCallsRef.current.entries(), {
+        toolCallId: params.toolCallId,
+        toolName: params.toolName,
+        agentName: params.agentName,
+      });
+      if (existing) {
+        return existing;
+      }
+
+      const now = Date.now();
+      const sequence =
+        (toolCallSequenceRef.current.get(params.toolName) ?? 0) + 1;
+      toolCallSequenceRef.current.set(params.toolName, sequence);
+      const fallbackKey = `${params.toolName}-${sequence}`;
+      const key = params.toolCallId || fallbackKey;
+      const messageId = appendMessage({
+        role: 'system',
+        type: 'tool_call',
+        content: '',
+        author: params.agentName,
+        meta: {
+          toolCallId: params.toolCallId || key,
+          toolName: params.toolName,
+          args: {},
+          startedArgs: {},
+          status: 'executing',
+          result: undefined,
+          duration: undefined,
+        },
+      });
+
+      const entry: ActiveToolCallEntry = {
+        messageId,
+        startTime: now,
+        toolName: params.toolName,
+        startedArgs: {},
+        agentName: params.agentName,
+        knownToolCallIds: params.toolCallId ? [params.toolCallId] : [],
+        isProvisional: true,
+      };
+      activeToolCallsRef.current.set(key, entry);
+      return [key, entry];
+    },
+    [appendMessage],
+  );
+
+  const markRunInterrupted = useCallback(
+    (
+      reason: string,
+      options?: {
+        status?: AgentStatus;
+        statusMessage?: string;
+      },
+    ): boolean => {
+      const hasExecutingToolCard = messagesRef.current.some((message) => {
+        const meta = message.meta as ChatToolCallMeta | undefined;
+        return message.type === 'tool_call' && meta?.status === 'executing';
+      });
+      const hasActiveRunUi =
+        isTaskRunningRef.current ||
+        isStopPendingRef.current ||
+        isStreaming ||
+        activeToolCallsRef.current.size > 0 ||
+        hasExecutingToolCard;
+
+      if (!hasActiveRunUi) {
+        return false;
+      }
+
+      if (isStopPendingRef.current) {
+        resolveStopRequest(false, reason);
+      } else {
+        setIsStopPending(false);
+        setIsTaskRunning(false);
+      }
+
+      awaitingResponseRef.current = false;
+      setAgentStatus(options?.status ?? 'error');
+      setStatusMessage(options?.statusMessage ?? reason);
+      clearLiveToolStream();
+      failActiveToolCalls(reason);
+      return true;
+    },
+    [clearLiveToolStream, failActiveToolCalls, isStreaming, resolveStopRequest],
+  );
 
   const getRendererErrorMessage = useCallback(
     (error: unknown, fallback: string): string => {
@@ -724,6 +1015,10 @@ export default function ChatPanel() {
       statusMessage: statusMessageRef.current,
       currentPhase: currentPhaseRef.current,
       phaseDisplayName: phaseDisplayNameRef.current,
+      contextUsagePercentage: contextUsagePercentageRef.current,
+      contextWasCompressed: contextWasCompressedRef.current,
+      sessionTimerStartedAt: sessionTimerStartedAtRef.current,
+      sessionTimerCompletedAt: sessionTimerCompletedAtRef.current,
       hasUserSentMessage: hasUserSentMessageRef.current,
       isTaskRunning: isTaskRunningRef.current,
     };
@@ -927,6 +1222,10 @@ export default function ChatPanel() {
         setStatusMessage('Ready');
         setCurrentPhase(undefined);
         setPhaseDisplayName(undefined);
+        setContextUsagePercentage(undefined);
+        setContextWasCompressed(false);
+        setSessionTimerStartedAt(undefined);
+        setSessionTimerCompletedAt(undefined);
         setHasUserSentMessage(false);
         setIsTaskRunning(false);
         setIsStopPending(false);
@@ -955,6 +1254,10 @@ export default function ChatPanel() {
       setStatusMessage(snapshot.uiState.statusMessage || 'Ready');
       setCurrentPhase(snapshot.uiState.currentPhase);
       setPhaseDisplayName(snapshot.uiState.phaseDisplayName);
+      setContextUsagePercentage(snapshot.uiState.contextUsagePercentage);
+      setContextWasCompressed(Boolean(snapshot.uiState.contextWasCompressed));
+      setSessionTimerStartedAt(snapshot.uiState.sessionTimerStartedAt);
+      setSessionTimerCompletedAt(snapshot.uiState.sessionTimerCompletedAt);
       setHasUserSentMessage(Boolean(snapshot.uiState.hasUserSentMessage));
       setIsTaskRunning(Boolean(snapshot.uiState.isTaskRunning));
       setIsStopPending(false);
@@ -978,6 +1281,10 @@ export default function ChatPanel() {
     setStatusMessage('Ready');
     setCurrentPhase(undefined);
     setPhaseDisplayName(undefined);
+    setContextUsagePercentage(undefined);
+    setContextWasCompressed(false);
+    setSessionTimerStartedAt(undefined);
+    setSessionTimerCompletedAt(undefined);
     setHasUserSentMessage(false);
     setIsTaskRunning(false);
     setIsStopPending(false);
@@ -1386,9 +1693,81 @@ export default function ChatPanel() {
         }
         case 'stream_chunk': {
           // kshana-ink stream_chunk: { content, done }
-          // This represents thinking/reasoning that happens BEFORE tool calls start
           const content = (data.content as string) ?? '';
           const done = (data.done as boolean) ?? false;
+          const streamAgentName =
+            typeof data.agentName === 'string' ? data.agentName : agentName;
+          const streamToolCallId =
+            typeof data.toolCallId === 'string' ? data.toolCallId : undefined;
+          const streamToolName =
+            typeof data.toolName === 'string' ? data.toolName : undefined;
+
+          if (streamToolCallId || streamToolName) {
+            if (content || data.reset) {
+              updateLiveToolStream({
+                toolCallId: streamToolCallId,
+                toolName: streamToolName,
+                agentName: streamAgentName,
+                content,
+                reset: Boolean(data.reset),
+              });
+            }
+            let matchedToolCall = findActiveToolCall(
+              activeToolCallsRef.current.entries(),
+              {
+                toolCallId: streamToolCallId,
+                toolName: streamToolName,
+                agentName: streamAgentName,
+              },
+            );
+
+            if (!matchedToolCall && streamToolName) {
+              matchedToolCall = ensureActiveToolCallEntry({
+                toolCallId: streamToolCallId,
+                toolName: streamToolName,
+                agentName: streamAgentName,
+              });
+            }
+
+            if (matchedToolCall) {
+              const [entryKey, entry] = matchedToolCall;
+              activeToolCallsRef.current.set(
+                entryKey,
+                withToolAlias(entry, streamToolCallId),
+              );
+              setMessages((prev) =>
+                prev.map((message) => {
+                  if (message.id !== entry.messageId) {
+                    return message;
+                  }
+
+                  const existingMeta = (message.meta || {}) as ChatToolCallMeta;
+                  const previousStreamingContent =
+                    typeof existingMeta.streamingContent === 'string'
+                      ? existingMeta.streamingContent
+                      : '';
+                  const nextStreamingContent = data.reset
+                    ? content
+                    : `${previousStreamingContent}${content}`;
+
+                  return {
+                    ...message,
+                    timestamp: Date.now(),
+                    meta: {
+                      ...existingMeta,
+                      toolCallId:
+                        streamToolCallId ||
+                        existingMeta.toolCallId ||
+                        entryKey,
+                      streamingContent: nextStreamingContent,
+                      status: 'executing',
+                    },
+                  };
+                }),
+              );
+              break;
+            }
+          }
 
           // Skip empty chunks
           if (!content && !done) {
@@ -1457,6 +1836,8 @@ export default function ChatPanel() {
           // Status: 'started' (from onToolCall) or 'completed'/'error' (from onToolResult)
           const toolName = (data.toolName as string) ?? 'tool';
           const toolStatus = (data.status as string) ?? 'started';
+          const eventAgentName =
+            typeof data.agentName === 'string' ? data.agentName : agentName;
           const args = (data.arguments as Record<string, unknown>) ?? {};
           const { result } = data;
           const { error } = data;
@@ -1489,26 +1870,16 @@ export default function ChatPanel() {
 
             const now = Date.now();
             let duration = (data.duration as number) ?? 0;
-            let activeKey: string | null = null;
-
-            if (toolCallId) {
-              activeKey = toolCallId;
-            }
-
-            let activeEntry = activeKey
-              ? activeToolCallsRef.current.get(activeKey)
-              : undefined;
-
-            if (!activeEntry) {
-              // Find the oldest active tool call for this toolName (FIFO)
-              for (const [key, value] of activeToolCallsRef.current.entries()) {
-                if (value.toolName === toolName) {
-                  activeKey = key;
-                  activeEntry = value;
-                  break;
-                }
-              }
-            }
+            const matchedToolCall = findActiveToolCall(
+              activeToolCallsRef.current.entries(),
+              {
+                toolCallId,
+                toolName,
+                agentName: eventAgentName,
+              },
+            );
+            const activeKey = matchedToolCall?.[0] ?? null;
+            const activeEntry = matchedToolCall?.[1];
             if (!duration && activeEntry) {
               duration = Math.max(0, now - activeEntry.startTime);
             }
@@ -1521,12 +1892,28 @@ export default function ChatPanel() {
               toolStatus === 'error',
             );
 
+            const startedArgs = activeEntry?.startedArgs || {};
+            const completedToolMeta = buildCompletedToolMeta({
+              toolName,
+              toolCallId: toolCallId || activeKey || undefined,
+              args,
+              startedArgs,
+              result: cleanedResult,
+              duration,
+              status: toolStatus === 'error' ? 'error' : 'completed',
+            });
+
             // Update existing tool call message (if it exists), otherwise append
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
 
             if (activeEntry) {
               activeToolCallsRef.current.delete(activeKey as string);
+              completeLiveToolStream({
+                toolCallId: toolCallId || activeKey || undefined,
+                toolName,
+                agentName: eventAgentName,
+              });
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === activeEntry.messageId
@@ -1534,13 +1921,7 @@ export default function ChatPanel() {
                       ...msg,
                       meta: {
                         ...(msg.meta || {}),
-                        toolCallId: toolCallId || activeKey,
-                        toolName,
-                        args,
-                        status:
-                          toolStatus === 'error' ? 'error' : 'completed',
-                        result: cleanedResult,
-                        duration,
+                        ...completedToolMeta,
                       },
                       timestamp: Date.now(),
                     }
@@ -1548,18 +1929,19 @@ export default function ChatPanel() {
                 ),
               );
             } else {
+              completeLiveToolStream({
+                toolCallId: completedToolMeta.toolCallId,
+                toolName,
+                agentName: eventAgentName,
+              });
               appendMessage({
                 role: 'system',
                 type: 'tool_call',
                 content: '',
-                author: agentName,
+                author: eventAgentName,
                 meta: {
-                  toolCallId: toolCallId || makeId(),
-                  toolName,
-                  args,
-                  status: toolStatus === 'error' ? 'error' : 'completed',
-                  result: cleanedResult,
-                  duration,
+                  ...completedToolMeta,
+                  toolCallId: completedToolMeta.toolCallId || makeId(),
                 },
               });
             }
@@ -1601,40 +1983,99 @@ export default function ChatPanel() {
             }
           } else if (toolStatus === 'started') {
             const now = Date.now();
-            const sequence =
-              (toolCallSequenceRef.current.get(toolName) ?? 0) + 1;
-            toolCallSequenceRef.current.set(toolName, sequence);
-            const fallbackKey = `${toolName}-${sequence}`;
-            const key = toolCallId || fallbackKey;
-
             debouncedSetStatus('executing', `Running ${toolName}...`);
             window.electron.logger.logToolStart(toolName, args);
             window.electron.logger.logStatusChange(
               'executing',
-              agentName,
+              eventAgentName,
               `Running ${toolName}...`,
             );
-
-            const messageId = appendMessage({
-              role: 'system',
-              type: 'tool_call',
-              content: '',
-              author: agentName,
-              meta: {
-                toolCallId: toolCallId || key,
+            const matchedToolCall = findActiveToolCall(
+              activeToolCallsRef.current.entries(),
+              {
+                toolCallId,
                 toolName,
-                args,
-                status: 'executing',
-                result: undefined,
-                duration: undefined,
+                agentName: eventAgentName,
               },
-            });
+            );
 
-            activeToolCallsRef.current.set(key, {
-              messageId,
-              startTime: now,
-              toolName,
-            });
+            if (matchedToolCall) {
+              const [existingKey, existingEntry] = matchedToolCall;
+              const nextKey = toolCallId || existingKey;
+              const hydratedEntry = withToolAlias(
+                {
+                  ...existingEntry,
+                  toolName,
+                  startedArgs: args,
+                  agentName: eventAgentName,
+                  isProvisional: false,
+                },
+                toolCallId,
+              );
+
+              if (existingKey !== nextKey) {
+                activeToolCallsRef.current.delete(existingKey);
+              }
+              activeToolCallsRef.current.set(nextKey, hydratedEntry);
+
+              setMessages((prev) =>
+                prev.map((msg) => {
+                  if (msg.id !== existingEntry.messageId) {
+                    return msg;
+                  }
+
+                  const existingMeta = (msg.meta || {}) as ChatToolCallMeta;
+                  return {
+                    ...msg,
+                    author: eventAgentName,
+                    timestamp: Date.now(),
+                    meta: {
+                      ...existingMeta,
+                      toolCallId:
+                        toolCallId ||
+                        (existingMeta.toolCallId as string | undefined) ||
+                        nextKey,
+                      toolName,
+                      args,
+                      startedArgs: args,
+                      status: 'executing',
+                    },
+                  };
+                }),
+              );
+            } else {
+              const sequence =
+                (toolCallSequenceRef.current.get(toolName) ?? 0) + 1;
+              toolCallSequenceRef.current.set(toolName, sequence);
+              const fallbackKey = `${toolName}-${sequence}`;
+              const key = toolCallId || fallbackKey;
+
+              const messageId = appendMessage({
+                role: 'system',
+                type: 'tool_call',
+                content: '',
+                author: eventAgentName,
+                meta: {
+                  toolCallId: toolCallId || key,
+                  toolName,
+                  args,
+                  startedArgs: args,
+                  status: 'executing',
+                  result: undefined,
+                  duration: undefined,
+                },
+              });
+
+              activeToolCallsRef.current.set(key, {
+                messageId,
+                startTime: now,
+                toolName,
+                startedArgs: args,
+                agentName: eventAgentName,
+                knownToolCallIds: toolCallId ? [toolCallId] : [],
+                isProvisional: false,
+              });
+            }
           }
           break;
         }
@@ -1787,22 +2228,15 @@ export default function ChatPanel() {
           break;
         }
         case 'agent_question': {
-          // kshana-ink agent_question: { question, options?, timeout?, defaultOption?, questionType? }
-          // options can be string[] or Array<{ label: string; description?: string }>
-          const question = (data.question as string) ?? '';
-          const rawOptions = data.options as
-            | string[]
-            | Array<{ label: string; description?: string }>
-            | undefined;
-          // Extract labels if options are objects, otherwise use as-is
-          const options = rawOptions
-            ? rawOptions.map((opt) =>
-              typeof opt === 'string' ? opt : opt.label,
-            )
-            : undefined;
-          const questionType = (data.questionType as string) ?? 'text'; // text, confirm, select
-          const timeout = (data.timeout as number) ?? undefined;
-          const defaultOption = (data.defaultOption as string) ?? undefined;
+          const normalizedQuestion = normalizeQuestionPayload(data);
+          const {
+            question,
+            options,
+            questionType,
+            autoApproveTimeoutMs,
+            defaultOption,
+            isConfirmation,
+          } = normalizedQuestion;
 
           if (question) {
             setAgentStatus('waiting');
@@ -1814,16 +2248,13 @@ export default function ChatPanel() {
             );
 
             // Log question
-            const questionOptions = rawOptions
-              ? rawOptions.map((opt) =>
-                typeof opt === 'string' ? { label: opt } : opt,
-              )
-              : undefined;
             window.electron.logger.logQuestion(
               question,
-              questionOptions,
-              questionType === 'confirm',
-              timeout,
+              options,
+              questionType === 'confirm' || isConfirmation,
+              autoApproveTimeoutMs
+                ? Math.ceil(autoApproveTimeoutMs / 1000)
+                : undefined,
             );
 
             // Update existing question message if it exists to avoid duplicates
@@ -1845,7 +2276,8 @@ export default function ChatPanel() {
                         meta: {
                           options,
                           questionType,
-                          timeout,
+                          isConfirmation,
+                          autoApproveTimeoutMs,
                           defaultOption,
                         },
                         timestamp: Date.now(),
@@ -1880,12 +2312,15 @@ export default function ChatPanel() {
                   meta: {
                     options,
                     questionType,
-                    timeout,
+                    isConfirmation,
+                    autoApproveTimeoutMs,
                     defaultOption,
                   },
                 },
               ];
             });
+
+            appendTimelineEvent(`Question: ${question}`);
 
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
@@ -1896,13 +2331,13 @@ export default function ChatPanel() {
         }
         case 'todo_update': {
           // kshana-ink todo_update: { todos }
-          const todos = data.todos as Array<any>;
+          const todos = (data.todos as ChatTodoItemMeta[]) || [];
           if (todos?.length) {
             // Log todo update
             window.electron.logger.logTodoUpdate(
               todos.map((t) => ({
-                content: t.content || t.id,
-                status: t.status,
+                content: t.content || t.task || t.id || 'Task',
+                status: t.status || 'pending',
               })),
             );
 
@@ -1912,7 +2347,11 @@ export default function ChatPanel() {
                   msg.id === lastTodoMessageIdRef.current
                     ? {
                       ...msg,
-                      meta: { ...msg.meta, todos },
+                      meta: {
+                        ...(msg.meta || {}),
+                        todos,
+                        summary: summarizeTodoUpdate(todos),
+                      },
                       timestamp: Date.now(),
                     }
                     : msg,
@@ -1923,11 +2362,96 @@ export default function ChatPanel() {
                 role: 'system',
                 type: 'todo_update',
                 content: '',
-                meta: { todos },
+                meta: {
+                  todos,
+                  summary: summarizeTodoUpdate(todos),
+                },
               });
               lastTodoMessageIdRef.current = messageId;
             }
+            appendTimelineEvent(summarizeTodoUpdate(todos));
           }
+          break;
+        }
+        case 'phase_transition': {
+          const fromPhase =
+            typeof data.fromPhase === 'string' ? data.fromPhase : undefined;
+          const toPhase =
+            typeof data.toPhase === 'string' ? data.toPhase : undefined;
+          const displayName =
+            typeof data.displayName === 'string'
+              ? data.displayName
+              : undefined;
+          const description =
+            typeof data.description === 'string'
+              ? data.description
+              : undefined;
+          if (!toPhase) {
+            break;
+          }
+
+          setCurrentPhase(toPhase);
+          setPhaseDisplayName(displayName || toPhase);
+          appendTimelineEvent(
+            buildPhaseTransitionSummary({
+              fromPhase,
+              toPhase,
+              displayName,
+              description,
+            }),
+            {
+              fromPhase,
+              toPhase,
+              displayName,
+              description,
+            },
+          );
+          window.electron.logger.logPhaseTransition(
+            fromPhase || '',
+            toPhase,
+            true,
+            description || displayName || toPhase,
+          );
+          break;
+        }
+        case 'context_usage': {
+          const percentage =
+            typeof data.percentage === 'number' ? data.percentage : undefined;
+          if (percentage === undefined) {
+            break;
+          }
+          setContextUsagePercentage(percentage);
+          setContextWasCompressed(Boolean(data.wasCompressed));
+          break;
+        }
+        case 'notification': {
+          const level =
+            data.level === 'warning' || data.level === 'error'
+              ? (data.level as 'warning' | 'error')
+              : 'info';
+          const notificationMessage =
+            typeof data.message === 'string' ? data.message : '';
+          if (notificationMessage) {
+            appendMessage({
+              role: 'system',
+              type: 'notification',
+              content: notificationMessage,
+              meta: { level },
+            });
+          }
+          break;
+        }
+        case 'session_timer': {
+          const startedAt =
+            typeof data.productionStartedAt === 'number'
+              ? data.productionStartedAt
+              : undefined;
+          const completedAt =
+            typeof data.productionCompletedAt === 'number'
+              ? data.productionCompletedAt
+              : undefined;
+          setSessionTimerStartedAt(startedAt);
+          setSessionTimerCompletedAt(completedAt);
           break;
         }
         case 'background_generation': {
@@ -2018,6 +2542,17 @@ export default function ChatPanel() {
           setAgentStatus('error');
           setStatusMessage(errorMsg);
           setIsTaskRunning(false);
+          if (
+            /session already has a running task/i.test(errorMsg) ||
+            /task interrupted|backend unavailable|connection to backend lost/i.test(
+              errorMsg,
+            )
+          ) {
+            markRunInterrupted(errorMsg, {
+              status: 'error',
+              statusMessage: errorMsg,
+            });
+          }
           window.electron.logger.logError(
             errorMsg,
             data as Record<string, unknown>,
@@ -2712,9 +3247,11 @@ export default function ChatPanel() {
       }
     },
     [
+      agentName,
       appendAssistantChunk,
       appendMessage,
       appendSystemMessage,
+      appendTimelineEvent,
       debouncedSetStatus,
       getRendererErrorMessage,
       projectDirectory,
@@ -2892,6 +3429,10 @@ export default function ChatPanel() {
           clearTimeout(timeout);
           connectingRef.current = false;
           console.error('[ChatPanel] WebSocket error:', error);
+          markRunInterrupted('Connection to backend lost. Task interrupted.', {
+            status: 'error',
+            statusMessage: 'Connection lost. Task interrupted.',
+          });
           appendConnectionBanner(
             'ws_connection_error',
             'WebSocket connection error. Check if backend is running.',
@@ -2907,6 +3448,13 @@ export default function ChatPanel() {
             wsRef.current = null;
           }
           if (event.code !== 1000) {
+            markRunInterrupted(
+              'Connection to backend lost. Current task was interrupted.',
+              {
+                status: 'error',
+                statusMessage: 'Connection lost. Task interrupted.',
+              },
+            );
             appendConnectionBanner(
               'ws_disconnected',
               'Connection to backend lost. Attempting to reconnect...',
@@ -3040,11 +3588,14 @@ export default function ChatPanel() {
 
   const sendResponse = useCallback(
     async (content: string) => {
-      const questionOptions = lastQuestionMessageIdRef.current
+      const activeQuestionMeta = lastQuestionMessageIdRef.current
         ? ((messagesRef.current.find(
             (message) => message.id === lastQuestionMessageIdRef.current,
-          )?.meta?.options as string[] | undefined) || [])
-        : [];
+          )?.meta || {}) as Record<string, unknown>)
+        : null;
+      const questionOptions = (
+        (activeQuestionMeta?.options as ChatQuestionOption[] | undefined) || []
+      ).map((option) => option.label);
 
       if (lastQuestionMessageIdRef.current) {
         setMessages((prev) =>
@@ -3082,6 +3633,8 @@ export default function ChatPanel() {
       // Clear question ref since we've responded
       lastQuestionMessageIdRef.current = null;
 
+      appendTimelineEvent(`Answered question: ${content}`);
+
       // Also append user message for visual feedback
       appendMessage({
         role: 'user',
@@ -3089,7 +3642,12 @@ export default function ChatPanel() {
         content,
       });
     },
-    [appendMessage, persistOriginalInputIfNeeded, sendClientAction],
+    [
+      appendMessage,
+      appendTimelineEvent,
+      persistOriginalInputIfNeeded,
+      sendClientAction,
+    ],
   );
 
   const sendMessage = useCallback(
@@ -3280,6 +3838,18 @@ export default function ChatPanel() {
         !!projectDirectory
       ) {
         connectWebSocket().catch(() => undefined);
+      } else if (
+        (state.status === 'error' ||
+          state.status === 'stopped' ||
+          state.status === 'disconnected')
+      ) {
+        markRunInterrupted(
+          state.message || 'Backend unavailable. Current task was interrupted.',
+          {
+            status: 'error',
+            statusMessage: 'Backend unavailable. Task interrupted.',
+          },
+        );
       }
     };
     bootstrap().catch(() => { });
@@ -3288,6 +3858,21 @@ export default function ChatPanel() {
       (state: BackendState) => {
         if (state.status === 'error' && state.message) {
           appendSystemMessage(`Backend error: ${state.message}`, 'error');
+          markRunInterrupted(state.message, {
+            status: 'error',
+            statusMessage: state.message,
+          });
+        } else if (
+          state.status === 'disconnected' ||
+          state.status === 'stopped'
+        ) {
+          markRunInterrupted(
+            state.message || 'Connection to backend lost. Task interrupted.',
+            {
+              status: 'error',
+              statusMessage: 'Connection lost. Task interrupted.',
+            },
+          );
         } else if (
           state.status === 'ready' &&
           !connectingRef.current &&
@@ -3305,6 +3890,7 @@ export default function ChatPanel() {
   }, [
     connectWebSocket,
     appendSystemMessage,
+    markRunInterrupted,
     projectDirectory,
   ]);
 
@@ -3488,8 +4074,9 @@ export default function ChatPanel() {
       if (message.type !== 'agent_question') {
         continue;
       }
+      const questionMeta = (message.meta || {}) as Record<string, unknown>;
 
-      const selectedResponse = message.meta?.selectedResponse as
+      const selectedResponse = questionMeta.selectedResponse as
         | string
         | undefined;
       if (selectedResponse) {
@@ -3499,12 +4086,17 @@ export default function ChatPanel() {
       return {
         id: message.id,
         question: message.content,
-        options: ((message.meta?.options as string[]) || []).slice(0, 9),
+        options: ((questionMeta.options as ChatQuestionOption[]) || []).slice(
+          0,
+          9,
+        ),
         type:
-          (message.meta?.questionType as 'text' | 'confirm' | 'select') ||
+          (questionMeta.questionType as 'text' | 'confirm' | 'select') ||
           'text',
-        timeoutSeconds: message.meta?.timeout as number | undefined,
-        defaultOption: message.meta?.defaultOption as string | undefined,
+        isConfirmation: Boolean(questionMeta.isConfirmation),
+        autoApproveTimeoutMs:
+          questionMeta.autoApproveTimeoutMs as number | undefined,
+        defaultOption: questionMeta.defaultOption as string | undefined,
       };
     }
 
@@ -3517,8 +4109,8 @@ export default function ChatPanel() {
       if (message.type !== 'todo_update') {
         continue;
       }
-
-      const todos = (message.meta?.todos as Array<any> | undefined) || [];
+      const todoMeta = (message.meta || {}) as Record<string, unknown>;
+      const todos = (todoMeta.todos as Array<any> | undefined) || [];
       if (todos.length === 0) {
         continue;
       }
@@ -3577,6 +4169,19 @@ export default function ChatPanel() {
     return undefined;
   }, [activeQuestion, isTaskRunning, showDockedTodoPrompt]);
 
+  const activeToolStream = useMemo(() => {
+    if (!liveToolStream?.text.trim()) {
+      return null;
+    }
+
+    return {
+      toolCallId: liveToolStream.toolCallId,
+      agentName: liveToolStream.agentName || 'Agent',
+      toolName: liveToolStream.toolName || 'tool',
+      text: liveToolStream.text,
+    };
+  }, [liveToolStream]);
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
@@ -3609,12 +4214,17 @@ export default function ChatPanel() {
         message={statusMessage}
         currentPhase={currentPhase}
         phaseDisplayName={phaseDisplayName}
+        contextUsagePercentage={contextUsagePercentage}
+        contextWasCompressed={contextWasCompressed}
+        sessionTimerStartedAt={sessionTimerStartedAt}
+        sessionTimerCompletedAt={sessionTimerCompletedAt}
       />
 
       <div className={styles.messages}>
         <MessageList
           messages={filteredMessages}
           isStreaming={isStreaming}
+          liveToolStream={activeToolStream}
           onDelete={deleteMessage}
         />
       </div>
@@ -3639,7 +4249,7 @@ export default function ChatPanel() {
       />
 
       {showDockedTodoPrompt && (
-        <TodoPrompt todos={activeTodos} />
+        <TodoPrompt todos={activeTodos} isRunning={isTaskRunning} />
       )}
 
       {setupPanelMode === 'hidden' && activeQuestion && (
@@ -3647,8 +4257,9 @@ export default function ChatPanel() {
           question={activeQuestion.question}
           options={activeQuestion.options}
           type={activeQuestion.type}
-          timeoutSeconds={activeQuestion.timeoutSeconds}
+          autoApproveTimeoutMs={activeQuestion.autoApproveTimeoutMs}
           defaultOption={activeQuestion.defaultOption}
+          isConfirmation={activeQuestion.isConfirmation}
           onSelect={sendResponse}
         />
       )}

@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../../../types/chat';
+import type { ChatMessage, ChatToolCallMeta } from '../../../types/chat';
 
 export interface ActiveToolCallEntry {
   messageId: string;
@@ -33,10 +33,10 @@ export function failExecutingToolCalls(
   );
 
   return messages.map((message) => {
+    const messageMeta = message.meta as ChatToolCallMeta | undefined;
     const isExecutingToolCard =
       message.type === 'tool_call' &&
-      (message.meta?.status === 'executing' ||
-        message.meta?.status === 'started');
+      messageMeta?.status === 'executing';
 
     if (!activeMessageIds.has(message.id) && !isExecutingToolCard) {
       return message;

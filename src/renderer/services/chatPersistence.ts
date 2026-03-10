@@ -83,6 +83,22 @@ function normalizeUiState(value: unknown): ChatSnapshotUiState {
       typeof value.statusMessage === 'string' ? value.statusMessage : 'Ready',
     currentPhase,
     phaseDisplayName,
+    contextUsagePercentage:
+      typeof value.contextUsagePercentage === 'number'
+        ? value.contextUsagePercentage
+        : undefined,
+    contextWasCompressed:
+      typeof value.contextWasCompressed === 'boolean'
+        ? value.contextWasCompressed
+        : undefined,
+    sessionTimerStartedAt:
+      typeof value.sessionTimerStartedAt === 'number'
+        ? value.sessionTimerStartedAt
+        : undefined,
+    sessionTimerCompletedAt:
+      typeof value.sessionTimerCompletedAt === 'number'
+        ? value.sessionTimerCompletedAt
+        : undefined,
     hasUserSentMessage: Boolean(value.hasUserSentMessage),
     isTaskRunning: Boolean(value.isTaskRunning),
   };
@@ -96,7 +112,7 @@ function mapToPersistedMessage(message: ChatMessage): PersistedChatMessage {
     content: message.content,
     timestamp: message.timestamp,
     author: message.author,
-    meta: message.meta,
+    meta: message.meta as Record<string, unknown> | undefined,
   };
 }
 

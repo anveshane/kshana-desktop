@@ -1,4 +1,4 @@
-export const CHAT_SNAPSHOT_VERSION = 1;
+export const CHAT_SNAPSHOT_VERSION = 2;
 export const MAX_PERSISTED_CHAT_MESSAGES = 1000;
 
 export type ChatMessageRole = 'user' | 'assistant' | 'system';
@@ -19,6 +19,10 @@ export interface ChatSnapshotUiState {
   statusMessage: string;
   currentPhase?: string;
   phaseDisplayName?: string;
+  contextUsagePercentage?: number;
+  contextWasCompressed?: boolean;
+  sessionTimerStartedAt?: number;
+  sessionTimerCompletedAt?: number;
   hasUserSentMessage: boolean;
   isTaskRunning: boolean;
 }

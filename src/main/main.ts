@@ -255,15 +255,30 @@ function resolveBootstrapValidationRoot(
   fallbackPath: string | null,
   meta?: FileOpMeta,
 ): string | null {
-  if (activeProjectRoot && activeProjectRoot.trim()) {
-    return activeProjectRoot;
-  }
+  const hasActiveRoot = Boolean(activeProjectRoot && activeProjectRoot.trim());
 
   if (isAgentWireSource(meta) || !fallbackPath) {
-    return null;
+    return hasActiveRoot ? (activeProjectRoot as string) : null;
   }
 
-  return path.resolve(fallbackPath);
+  const resolvedFallback = path.resolve(fallbackPath);
+  if (!hasActiveRoot) {
+    return resolvedFallback;
+  }
+
+  const resolvedActiveRoot = path.resolve(activeProjectRoot as string);
+  const relativeToActive = path.relative(resolvedActiveRoot, resolvedFallback);
+  const fallbackInsideActiveRoot =
+    relativeToActive === '' ||
+    (!relativeToActive.startsWith('..') && !path.isAbsolute(relativeToActive));
+
+  // Allow renderer bootstrap operations (new project setup) to validate
+  // against their requested absolute base path when a stale active root exists.
+  if (!fallbackInsideActiveRoot) {
+    return resolvedFallback;
+  }
+
+  return activeProjectRoot as string;
 }
 
 const broadcastAppUpdateStatus = (

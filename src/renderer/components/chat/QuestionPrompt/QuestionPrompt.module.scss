@@ -137,6 +137,14 @@
   }
 }
 
+.optionContent {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
 .confirmed {
   border-color: rgba($color-accent-green, 0.85);
   background: rgba($color-accent-green, 0.14);
@@ -166,7 +174,12 @@
   color: $color-text-primary;
   font-size: $font-size-sm;
   line-height: $line-height-relaxed;
-  flex: 1;
+}
+
+.optionDescription {
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  line-height: 1.45;
 }
 
 .checkIcon {
@@ -186,6 +199,15 @@
 .timer {
   color: $color-text-secondary;
   font-size: $font-size-xs;
+}
+
+.selectedState {
+  padding: $spacing-sm;
+  border-radius: $radius-md;
+  border: 1px solid rgba($color-accent-green, 0.25);
+  background: rgba($color-accent-green, 0.1);
+  color: $color-text-primary;
+  font-size: $font-size-sm;
 }
 
 .timerIcon {

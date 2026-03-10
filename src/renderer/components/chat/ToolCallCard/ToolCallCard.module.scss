@@ -243,6 +243,7 @@
   }
 }
 
+
 .thinkText {
   font-style: italic;
   color: $color-text-primary;
@@ -385,6 +386,98 @@
   margin-bottom: $spacing-xs;
 }
 
+.generateTool {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+  padding: $spacing-sm;
+  border: 1px solid rgba($color-accent-cyan, 0.18);
+  border-radius: $radius-sm;
+  background: rgba($color-bg-subtle, 0.25);
+  margin-bottom: $spacing-sm;
+}
+
+.generateHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+}
+
+.generateTitle {
+  color: $color-text-primary;
+  font-weight: $font-weight-semibold;
+  text-transform: capitalize;
+}
+
+.generateState {
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+}
+
+.generateMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  span {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba($color-text-primary, 0.06);
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+  }
+}
+
+.generateSection {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+}
+
+.generatePrompt {
+  padding: $spacing-sm;
+  border-radius: $radius-sm;
+  background: rgba(0, 0, 0, 0.2);
+  color: $color-text-primary;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: $font-size-sm;
+  line-height: 1.5;
+}
+
+.referenceList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.referenceChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba($color-accent-green, 0.12);
+  color: $color-accent-green;
+  font-size: $font-size-xs;
+}
+
+.generateResult {
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  line-height: 1.5;
+
+  :global {
+    p {
+      margin: 0 0 $spacing-xs;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+  }
+}
+
 // Streaming content styles
 .streamingContent {
   margin-top: $spacing-sm;
@@ -425,6 +518,16 @@
       font-size: 0.9em;
     }
   }
+}
+
+.confirmationState {
+  margin-top: $spacing-sm;
+  padding: $spacing-sm;
+  border-left: 2px solid $color-accent-cyan;
+  background: rgba($color-accent-cyan, 0.1);
+  color: $color-text-primary;
+  border-radius: $radius-sm;
+  font-size: $font-size-sm;
 }
 
 // CLI-style display
@@ -577,4 +680,3 @@
   max-width: 100%;
   overflow: hidden;
 }
-

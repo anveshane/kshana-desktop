@@ -1,5 +1,6 @@
 import { useMemo, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../../../types/chat';
+import type { ChatToolCallMeta } from '../../../types/chat';
 import MessageBubble from '../MessageBubble';
 import styles from './MessageList.module.scss';
 
@@ -7,6 +8,12 @@ import styles from './MessageList.module.scss';
 interface MessageListProps {
   messages: ChatMessage[];
   isStreaming?: boolean;
+  liveToolStream?: {
+    toolCallId?: string;
+    agentName: string;
+    toolName: string;
+    text: string;
+  } | null;
   onRegenerate?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
 }
@@ -26,6 +33,83 @@ const PHASE_DISPLAY_NAMES: Record<string, string> = {
   completed: 'Completed',
 };
 
+export const AUTO_FOLLOW_BOTTOM_THRESHOLD_PX = 96;
+
+export function isViewportNearBottom(
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+  threshold = AUTO_FOLLOW_BOTTOM_THRESHOLD_PX,
+): boolean {
+  return scrollHeight - scrollTop - clientHeight <= threshold;
+}
+
+export function deriveScrollFollowState(params: {
+  scrollTop: number;
+  previousScrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  isAutoFollowEnabled: boolean;
+  hasUnreadBelow: boolean;
+}): {
+  isAutoFollowEnabled: boolean;
+  hasUnreadBelow: boolean;
+} {
+  const isNearBottom = isViewportNearBottom(
+    params.scrollTop,
+    params.scrollHeight,
+    params.clientHeight,
+  );
+  const isScrollingUp = params.scrollTop < params.previousScrollTop;
+
+  if (isNearBottom) {
+    return {
+      isAutoFollowEnabled: true,
+      hasUnreadBelow: false,
+    };
+  }
+
+  if (isScrollingUp) {
+    return {
+      isAutoFollowEnabled: false,
+      hasUnreadBelow: params.hasUnreadBelow,
+    };
+  }
+
+  return {
+    isAutoFollowEnabled: params.isAutoFollowEnabled,
+    hasUnreadBelow: params.hasUnreadBelow,
+  };
+}
+
+export function deriveContentArrivalState(params: {
+  isAutoFollowEnabled: boolean;
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+}): {
+  isAutoFollowEnabled: boolean;
+  hasUnreadBelow: boolean;
+} {
+  const isNearBottom = isViewportNearBottom(
+    params.scrollTop,
+    params.scrollHeight,
+    params.clientHeight,
+  );
+
+  if (params.isAutoFollowEnabled || isNearBottom) {
+    return {
+      isAutoFollowEnabled: true,
+      hasUnreadBelow: false,
+    };
+  }
+
+  return {
+    isAutoFollowEnabled: false,
+    hasUnreadBelow: true,
+  };
+}
+
 // Extract phase transition info from message
 function extractPhaseTransition(message: ChatMessage): {
   fromPhase?: string;
@@ -34,13 +118,14 @@ function extractPhaseTransition(message: ChatMessage): {
 } | null {
   // Check tool_call messages for phase transitions
   if (message.type === 'tool_call' && message.meta) {
-    const toolName = message.meta.toolName as string;
-    const result = message.meta.result as Record<string, unknown> | undefined;
+    const toolMeta = message.meta as ChatToolCallMeta;
+    const toolName = toolMeta.toolName as string;
+    const result = toolMeta.result as Record<string, unknown> | undefined;
 
     // Check for update_project with transition_phase
     if (toolName === 'update_project' && result) {
       const action = (result.action as string) || '';
-      const args = message.meta.args as Record<string, unknown> | undefined;
+      const args = toolMeta.args as Record<string, unknown> | undefined;
 
       // Check if this is a transition_phase action
       if (
@@ -132,44 +217,134 @@ function extractPhaseTransition(message: ChatMessage): {
 export default function MessageList({
   messages,
   isStreaming = false,
+  liveToolStream = null,
   onRegenerate = undefined,
   onDelete = undefined,
 }: MessageListProps) {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const lastScrollTopRef = useRef(0);
+  const lastContentVersionRef = useRef<string | null>(null);
+  const [isAutoFollowEnabled, setIsAutoFollowEnabled] = useState(true);
+  const [hasUnreadBelow, setHasUnreadBelow] = useState(false);
 
   const items = useMemo(() => messages, [messages]);
-
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    if (shouldAutoScroll && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  const liveToolMessage = useMemo<ChatMessage | null>(() => {
+    if (!liveToolStream?.text.trim()) {
+      return null;
     }
-  }, [items, shouldAutoScroll]);
 
-  // Check if user has scrolled up
+    return {
+      id: 'live-tool-stream',
+      role: 'assistant',
+      type: 'agent_text',
+      content: liveToolStream.text,
+      timestamp: Date.now(),
+      author: liveToolStream.agentName,
+    };
+  }, [liveToolStream]);
+  const contentVersion = useMemo(
+    () =>
+      [
+        items.length,
+        items[items.length - 1]?.id || 'none',
+        liveToolStream?.toolCallId || 'no-tool',
+        liveToolStream?.agentName || 'no-agent',
+        liveToolStream?.toolName || 'no-name',
+        liveToolStream?.text.length || 0,
+      ].join(':'),
+    [items, liveToolStream],
+  );
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior,
+    });
+    lastScrollTopRef.current = container.scrollHeight;
+  };
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const previousVersion = lastContentVersionRef.current;
+    lastContentVersionRef.current = contentVersion;
+
+    if (previousVersion === null) {
+      scrollToBottom('auto');
+      setHasUnreadBelow(false);
+      return;
+    }
+
+    if (previousVersion === contentVersion) {
+      return;
+    }
+
+    const nextState = deriveContentArrivalState({
+      isAutoFollowEnabled,
+      scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight,
+      clientHeight: container.clientHeight,
+    });
+
+    if (nextState.isAutoFollowEnabled) {
+      scrollToBottom('auto');
+      setHasUnreadBelow(nextState.hasUnreadBelow);
+      setIsAutoFollowEnabled(nextState.isAutoFollowEnabled);
+      return;
+    }
+
+    setHasUnreadBelow(nextState.hasUnreadBelow);
+  }, [contentVersion, isAutoFollowEnabled]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return undefined;
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
-      setShouldAutoScroll(isNearBottom);
+      const nextState = deriveScrollFollowState({
+        scrollTop,
+        previousScrollTop: lastScrollTopRef.current,
+        scrollHeight,
+        clientHeight,
+        isAutoFollowEnabled,
+        hasUnreadBelow,
+      });
+      setIsAutoFollowEnabled(nextState.isAutoFollowEnabled);
+      setHasUnreadBelow(nextState.hasUnreadBelow);
+      lastScrollTopRef.current = scrollTop;
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) {
+        setIsAutoFollowEnabled(false);
+      }
     };
 
     container.addEventListener('scroll', handleScroll);
+    container.addEventListener('wheel', handleWheel, { passive: true });
     return () => {
       container.removeEventListener('scroll', handleScroll);
+      container.removeEventListener('wheel', handleWheel);
     };
-  }, []);
+  }, [hasUnreadBelow, isAutoFollowEnabled]);
 
   // Track last phase to detect transitions
   const lastPhaseRef = useRef<string | null>(null);
 
+  const handleResumeAutoFollow = () => {
+    setIsAutoFollowEnabled(true);
+    setHasUnreadBelow(false);
+    scrollToBottom('smooth');
+  };
+
   return (
-    <div ref={containerRef} className={styles.container}>
+    <div className={styles.container}>
       {items.length === 0 && (
         <div className={styles.emptyState}>
           <h3 className={styles.emptyTitle}>Start your storyboard</h3>
@@ -180,8 +355,33 @@ export default function MessageList({
           </p>
         </div>
       )}
-      <div className={styles.messages}>
+      <div
+        ref={containerRef}
+        className={styles.messages}
+        data-testid="message-list-scroll-container"
+      >
         {items.map((message, index) => {
+          const previousMessage = items[index - 1];
+          const groupAuthor =
+            message.author ||
+            (message.role === 'assistant' ? 'Orchestrator' : undefined);
+          const shouldGroupWithAgent =
+            Boolean(groupAuthor) &&
+            (message.role === 'assistant' || message.type === 'tool_call');
+          const previousGroupAuthor =
+            previousMessage?.author ||
+            (previousMessage?.role === 'assistant'
+              ? 'Orchestrator'
+              : undefined);
+          const previousWasGroupable = Boolean(previousGroupAuthor) &&
+            (previousMessage?.role === 'assistant' ||
+              previousMessage?.type === 'tool_call');
+          const startsAgentGroup =
+            shouldGroupWithAgent &&
+            (!previousMessage ||
+              !previousWasGroupable ||
+              previousGroupAuthor !== groupAuthor);
+
           // Check for phase transition
           const phaseTransition = extractPhaseTransition(message);
           const showPhaseBanner =
@@ -195,6 +395,9 @@ export default function MessageList({
 
           return (
             <div key={message.id}>
+              {startsAgentGroup && groupAuthor && (
+                <div className={styles.agentGroupLabel}>{groupAuthor}</div>
+              )}
               {showPhaseBanner && phaseTransition.displayName && (
                 <div className={styles.phaseBanner}>
                   <div className={styles.phaseBannerContent}>
@@ -207,6 +410,7 @@ export default function MessageList({
               )}
               <MessageBubble
                 message={message}
+                showHeader={!shouldGroupWithAgent}
                 isStreaming={
                   isStreaming &&
                   message.role === 'assistant' &&
@@ -220,8 +424,30 @@ export default function MessageList({
             </div>
           );
         })}
-        <div ref={messagesEndRef} />
+        {liveToolMessage && (
+          <div aria-live="polite">
+            <div className={styles.liveStreamMeta}>
+              {liveToolStream?.agentName || 'Agent'} ·{' '}
+              {liveToolStream?.toolName || 'tool'}
+            </div>
+            <MessageBubble
+              message={liveToolMessage}
+              showHeader={false}
+              isStreaming={isStreaming}
+            />
+          </div>
+        )}
       </div>
+      {!isAutoFollowEnabled && hasUnreadBelow && (
+        <button
+          type="button"
+          className={styles.resumeButton}
+          onClick={handleResumeAutoFollow}
+        >
+          <span className={styles.resumeButtonIcon}>↓</span>
+          <span>New messages</span>
+        </button>
+      )}
     </div>
   );
 }

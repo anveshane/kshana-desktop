@@ -4,7 +4,7 @@ import {
   isCancelAckStatus,
   type ActiveToolCallEntry,
 } from './chatPanelStopUtils';
-import type { ChatMessage } from '../../../types/chat';
+import type { ChatMessage, ChatToolCallMeta } from '../../../types/chat';
 
 describe('chatPanelStopUtils', () => {
   it('detects cancellation acknowledgements from status payloads', () => {
@@ -63,9 +63,10 @@ describe('chatPanelStopUtils', () => {
     );
 
     expect(updated[0]).toEqual(messages[0]);
-    expect(updated[1]?.meta?.status).toBe('error');
-    expect(updated[1]?.meta?.result).toBe('Cancelled due to project switch');
-    expect(updated[1]?.meta?.duration).toBe(700);
+    const updatedMeta = updated[1]?.meta as ChatToolCallMeta | undefined;
+    expect(updatedMeta?.status).toBe('error');
+    expect(updatedMeta?.result).toBe('Cancelled due to project switch');
+    expect(updatedMeta?.duration).toBe(700);
     expect(updated[2]).toEqual(messages[2]);
   });
 });

@@ -5,14 +5,15 @@ import {
   PanelResizeHandle,
   ImperativePanelHandle,
 } from 'react-resizable-panels';
-import { MessageSquare } from 'lucide-react';
+import { ArrowLeft, MessageSquare } from 'lucide-react';
 import PreviewPanel from '../../preview/PreviewPanel/PreviewPanel';
 import ChatPanel from '../../chat/ChatPanel/ChatPanel';
 import StatusBar from '../StatusBar/StatusBar';
-import RecentProjectsDropdown from '../RecentProjectsDropdown/RecentProjectsDropdown';
+import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import styles from './WorkspaceLayout.module.scss';
 
 export default function WorkspaceLayout() {
+  const { closeProject } = useWorkspace();
   const [chatExpanded, setChatExpanded] = useState(true);
 
   const chatPanelRef = useRef<ImperativePanelHandle>(null);
@@ -48,7 +49,15 @@ export default function WorkspaceLayout() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <RecentProjectsDropdown />
+          <button
+            type="button"
+            className={styles.backButton}
+            onClick={closeProject}
+            title="Back to Landing"
+          >
+            <ArrowLeft size={15} />
+            <span>Back</span>
+          </button>
         </div>
         <span className={styles.title}>Kshana Desktop</span>
         <div className={styles.headerRight}>

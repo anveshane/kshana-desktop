@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { ChatMessage } from '../../../types/chat';
+import type { ChatTodoMeta, ChatToolCallMeta } from '../../../types/chat';
 import CodeBlock from '../CodeBlock';
 import MessageActions from '../MessageActions';
 import ToolCallCard from '../ToolCallCard';
@@ -15,6 +16,7 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
   onRegenerate?: () => void;
   onDelete?: () => void;
+  showHeader?: boolean;
 }
 
 const roleLabels: Record<ChatMessage['role'], string> = {
@@ -74,8 +76,11 @@ export default function MessageBubble({
   isStreaming = false,
   onRegenerate,
   onDelete,
+  showHeader = true,
 }: MessageBubbleProps) {
   const [remarkGfm, setRemarkGfm] = useState<any>(null);
+  const [isReasoningExpanded, setIsReasoningExpanded] = useState(false);
+  const [isUserMessageExpanded, setIsUserMessageExpanded] = useState(false);
 
   useEffect(() => {
     import('remark-gfm')
@@ -96,52 +101,14 @@ export default function MessageBubble({
   const isToolCall = message.type === 'tool_call';
   const isTodoUpdate = message.type === 'todo_update';
   const isGreeting = message.type === 'greeting';
+  const toolMeta = (message.meta || {}) as ChatToolCallMeta;
+  const todoMeta = (message.meta || {}) as ChatTodoMeta;
 
   // Get navigateToFile from context
   const { navigateToFile } = useWorkspace();
 
-  // Render tool call card
-  if (isToolCall && message.meta) {
-    const toolName = (message.meta.toolName as string) || 'tool';
-    const status = (message.meta.status as string) || 'executing';
-    const args = (message.meta.args as Record<string, unknown>) || {};
-    const { result } = message.meta;
-    const duration = message.meta.duration as number | undefined;
-    const streamingContent = message.meta.streamingContent as
-      | string
-      | undefined;
-
-    return (
-      <div className={`${styles.container} ${styles.system}`}>
-        <ToolCallCard
-          toolName={toolName}
-          agentName={message.author} // Pass agent name if available
-          args={args}
-          status={
-            status as 'executing' | 'completed' | 'error' | 'needs_confirmation'
-          }
-          result={result}
-          duration={duration}
-          toolCallId={message.meta.toolCallId as string | undefined}
-          streamingContent={streamingContent}
-          onFileClick={navigateToFile}
-        />
-      </div>
-    );
-  }
-
-  // Render todo display
-  if (isTodoUpdate && message.meta?.todos) {
-    const todos = message.meta.todos as TodoItem[];
-    return (
-      <div className={`${styles.container} ${styles.system}`}>
-        <TodoDisplay todos={todos} />
-      </div>
-    );
-  }
-
   // Handle dispatch_agent (plan) messages with markdown
-  const isDispatchAgent = message.meta?.toolName === 'dispatch_agent';
+  const isDispatchAgent = toolMeta.toolName === 'dispatch_agent';
   const agentName = message.author;
 
   // Check if message contains only reasoning (should be collapsible when done)
@@ -153,7 +120,6 @@ export default function MessageBubble({
   // Message is "reasoning only" if it starts with a reasoning tag
   const isReasoningOnly =
     hasReasoning && contentStartLower.trim().startsWith('<think');
-  const [isReasoningExpanded, setIsReasoningExpanded] = useState(false);
 
   // Auto-collapse reasoning messages when done (not streaming)
   useEffect(() => {
@@ -166,13 +132,48 @@ export default function MessageBubble({
   const isUserMessage = message.role === 'user';
   const shouldTruncate =
     isUserMessage && message.content.length > USER_MESSAGE_TRUNCATE_LIMIT;
-  const [isUserMessageExpanded, setIsUserMessageExpanded] = useState(false);
 
   // Get truncated content for user messages
   const getTruncatedContent = (content: string) => {
     if (!shouldTruncate) return content;
     return `${content.substring(0, USER_MESSAGE_TRUNCATE_LIMIT)}...`;
   };
+
+  if (isToolCall && message.meta) {
+    const toolName = (toolMeta.toolName as string) || 'tool';
+    const status = (toolMeta.status as string) || 'executing';
+    const args = (toolMeta.args as Record<string, unknown>) || {};
+    const { result } = toolMeta;
+    const duration = toolMeta.duration as number | undefined;
+    const streamingContent = toolMeta.streamingContent as string | undefined;
+
+    return (
+      <div className={`${styles.container} ${styles.system}`}>
+        <ToolCallCard
+          toolName={toolName}
+          agentName={message.author}
+          args={args}
+          status={
+            status as 'executing' | 'completed' | 'error' | 'needs_confirmation'
+          }
+          result={result}
+          duration={duration}
+          toolCallId={toolMeta.toolCallId as string | undefined}
+          streamingContent={streamingContent}
+          onFileClick={navigateToFile}
+        />
+      </div>
+    );
+  }
+
+  if (isTodoUpdate && todoMeta.todos) {
+    const todos = todoMeta.todos as TodoItem[];
+    return (
+      <div className={`${styles.container} ${styles.system}`}>
+        <TodoDisplay todos={todos} />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -182,7 +183,7 @@ export default function MessageBubble({
         isError ? styles.error : ''
       } ${isGreeting ? styles.greeting : ''}`}
     >
-      {!isGreeting && (
+      {!isGreeting && showHeader && (
         <div className={styles.header}>
           {message.role === 'assistant' && agentName ? (
             <span className={styles.role}>
@@ -229,13 +230,13 @@ export default function MessageBubble({
           </div>
         ) : isSystem ? (
           <div className={styles.systemContent}>{message.content}</div>
-        ) : isDispatchAgent && message.meta?.result ? (
+        ) : isDispatchAgent && toolMeta.result ? (
           // Render plan from dispatch_agent result
           <ReactMarkdown
             remarkPlugins={remarkGfm ? [remarkGfm] : []}
             components={MarkdownComponents}
           >
-            {((message.meta.result as Record<string, unknown>)
+            {((toolMeta.result as Record<string, unknown>)
               ?.plan as string) || message.content}
           </ReactMarkdown>
         ) : isReasoningOnly && !isStreaming ? (
