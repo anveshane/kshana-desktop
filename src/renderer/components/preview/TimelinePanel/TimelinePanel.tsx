@@ -32,6 +32,7 @@ import {
   clampImageResizeRight,
   buildUpdatedImageOverride,
   buildUpdatedInfographicOverride,
+  buildUpdatedSegmentTimingOverride,
   buildUpdatedVideoSplitOverride,
   snapToSecond,
 } from '../../../utils/timelineImageEditing';
@@ -70,6 +71,14 @@ interface TimelineItemComponentProps {
     e: React.MouseEvent<HTMLDivElement>,
     item: TimelineItem,
   ) => void;
+  onVisualDragMouseDown?: (
+    e: React.MouseEvent<HTMLDivElement>,
+    item: TimelineItem,
+  ) => void;
+  onVisualResizeMouseDown?: (
+    e: React.MouseEvent<HTMLDivElement>,
+    item: TimelineItem,
+  ) => void;
   onInfographicDragMouseDown?: (
     e: React.MouseEvent<HTMLDivElement>,
     item: TimelineItem,
@@ -89,6 +98,8 @@ function TimelineItemComponent({
   isSelected,
   onItemClick,
   onImageResizeMouseDown,
+  onVisualDragMouseDown,
+  onVisualResizeMouseDown,
   onInfographicDragMouseDown,
   onItemContextMenu,
   isEditing = false,
@@ -285,10 +296,15 @@ function TimelineItemComponent({
   if (item.type === 'video' && videoPath) {
     return (
       <div
-        className={`${styles.videoBlock} ${isSelected ? styles.selected : ''}`}
+        className={`${styles.videoBlock} ${item.sourceType === 'server_timeline' ? styles.editableImageBlock : ''} ${isSelected ? styles.selected : ''} ${isEditing ? styles.editing : ''}`}
         style={{
           left: `${left}px`,
           width: `${width}px`,
+        }}
+        onMouseDown={(e) => {
+          if (item.sourceType === 'server_timeline' && onVisualDragMouseDown) {
+            onVisualDragMouseDown(e, item);
+          }
         }}
         onClick={(e) => {
           if (onItemClick) {
@@ -309,6 +325,19 @@ function TimelineItemComponent({
           muted
         />
         <div className={styles.videoLabel}>{item.label}</div>
+        {item.sourceType === 'server_timeline' && (
+          <div
+            className={styles.imageResizeHandle}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (onVisualResizeMouseDown) {
+                onVisualResizeMouseDown(e, item);
+              }
+            }}
+            role="presentation"
+          />
+        )}
       </div>
     );
   }
@@ -388,9 +417,7 @@ function TimelineItemComponent({
         }}
         title={item.label}
       >
-        <div className={styles.textOverlayLabel}>
-          {item.label}
-        </div>
+        <div className={styles.textOverlayLabel}>{item.label}</div>
       </div>
     );
   }
@@ -429,6 +456,11 @@ function TimelineItemComponent({
         left: `${left}px`,
         width: `${width}px`,
       }}
+      onMouseDown={(e) => {
+        if (item.sourceType === 'server_timeline' && onVisualDragMouseDown) {
+          onVisualDragMouseDown(e, item);
+        }
+      }}
       onClick={(e) => {
         if (onItemClick) {
           onItemClick(e, item);
@@ -455,7 +487,12 @@ function TimelineItemComponent({
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (onImageResizeMouseDown) {
+          if (
+            item.sourceType === 'server_timeline' &&
+            onVisualResizeMouseDown
+          ) {
+            onVisualResizeMouseDown(e, item);
+          } else if (onImageResizeMouseDown) {
             onImageResizeMouseDown(e, item);
           }
         }}
@@ -521,6 +558,7 @@ interface TimelineEditSnapshot {
   image_timing_overrides: KshanaTimelineState['image_timing_overrides'];
   infographic_timing_overrides: KshanaTimelineState['infographic_timing_overrides'];
   video_split_overrides: KshanaTimelineState['video_split_overrides'];
+  segment_timing_overrides: KshanaTimelineState['segment_timing_overrides'];
 }
 
 const MemoTimelineItemComponent = React.memo(
@@ -578,6 +616,19 @@ function cloneVideoSplitOverrides(
   return next;
 }
 
+function cloneSegmentTimingOverrides(
+  overrides: KshanaTimelineState['segment_timing_overrides'],
+): KshanaTimelineState['segment_timing_overrides'] {
+  const next: KshanaTimelineState['segment_timing_overrides'] = {};
+  Object.entries(overrides).forEach(([key, value]) => {
+    next[key] = {
+      start_time_seconds: value.start_time_seconds,
+      end_time_seconds: value.end_time_seconds,
+    };
+  });
+  return next;
+}
+
 export default function TimelinePanel({
   isOpen,
   onToggle,
@@ -605,6 +656,7 @@ export default function TimelinePanel({
     updateImageTimingOverrides,
     updateInfographicTimingOverrides,
     updateVideoSplitOverrides,
+    updateSegmentTimingOverrides,
     addAsset,
   } = useProject();
 
@@ -615,6 +667,8 @@ export default function TimelinePanel({
     textOverlayItems,
     totalDuration: timelineTotalDuration,
     refreshAudioFiles,
+    timelineSource,
+    error: timelineError,
   } = useTimelineDataContext();
 
   // Initialize zoom level from timeline state
@@ -642,7 +696,8 @@ export default function TimelinePanel({
   }, [timelineTotalDuration, timelineItems]);
 
   const audioTimelineItems = useMemo(
-    () => timelineItems.filter((item) => item.type === 'audio' && !!item.audioPath),
+    () =>
+      timelineItems.filter((item) => item.type === 'audio' && !!item.audioPath),
     [timelineItems],
   );
 
@@ -934,13 +989,17 @@ export default function TimelinePanel({
   const videoSplitOverridesRef = useRef(
     timelineState.video_split_overrides || {},
   );
+  const segmentTimingOverridesRef = useRef(
+    timelineState.segment_timing_overrides || {},
+  );
 
   useEffect(() => {
     markersRef.current = markers;
   }, [markers]);
 
   useEffect(() => {
-    imageTimingOverridesRef.current = timelineState.image_timing_overrides || {};
+    imageTimingOverridesRef.current =
+      timelineState.image_timing_overrides || {};
   }, [timelineState.image_timing_overrides]);
 
   useEffect(() => {
@@ -951,6 +1010,11 @@ export default function TimelinePanel({
   useEffect(() => {
     videoSplitOverridesRef.current = timelineState.video_split_overrides || {};
   }, [timelineState.video_split_overrides]);
+
+  useEffect(() => {
+    segmentTimingOverridesRef.current =
+      timelineState.segment_timing_overrides || {};
+  }, [timelineState.segment_timing_overrides]);
 
   const captureSnapshot = useCallback((): TimelineEditSnapshot => {
     return {
@@ -963,6 +1027,9 @@ export default function TimelinePanel({
       ),
       video_split_overrides: cloneVideoSplitOverrides(
         videoSplitOverridesRef.current,
+      ),
+      segment_timing_overrides: cloneSegmentTimingOverrides(
+        segmentTimingOverridesRef.current,
       ),
     };
   }, []);
@@ -1013,12 +1080,16 @@ export default function TimelinePanel({
     updateVideoSplitOverrides(
       cloneVideoSplitOverrides(previous.video_split_overrides),
     );
+    updateSegmentTimingOverrides(
+      cloneSegmentTimingOverrides(previous.segment_timing_overrides),
+    );
     setContextMenuState(null);
     setCanUndo(stack.length > 0);
   }, [
     updateImageTimingOverrides,
     updateInfographicTimingOverrides,
     updateVideoSplitOverrides,
+    updateSegmentTimingOverrides,
   ]);
 
   useEffect(() => {
@@ -1081,6 +1152,31 @@ export default function TimelinePanel({
       }
     },
     [updateInfographicTimingOverrides],
+  );
+
+  const commitSegmentTimingOverride = useCallback(
+    (
+      segmentId: string | undefined,
+      sourceStartTime: number,
+      sourceEndTime: number,
+      editedStartTime: number,
+      editedEndTime: number,
+    ) => {
+      const currentOverrides = segmentTimingOverridesRef.current;
+      const nextOverrides = buildUpdatedSegmentTimingOverride(
+        currentOverrides,
+        segmentId,
+        sourceStartTime,
+        sourceEndTime,
+        editedStartTime,
+        editedEndTime,
+      );
+
+      if (nextOverrides !== currentOverrides) {
+        updateSegmentTimingOverrides(nextOverrides);
+      }
+    },
+    [updateSegmentTimingOverrides],
   );
 
   const commitVideoSplitAtTime = useCallback(
@@ -1489,6 +1585,211 @@ export default function TimelinePanel({
     ],
   );
 
+  const handleServerVisualDragMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
+      if (
+        item.sourceType !== 'server_timeline' ||
+        (item.type !== 'image' && item.type !== 'video')
+      ) {
+        return;
+      }
+      if (e.button !== 0) return;
+
+      e.stopPropagation();
+      e.preventDefault();
+      scrollPositionBeforeEditRef.current =
+        tracksRef.current?.scrollLeft ?? null;
+
+      const sourceStartTime = item.sourceStartTime ?? item.startTime;
+      const sourceEndTime = item.sourceEndTime ?? item.endTime;
+      const initialStartTime = item.startTime;
+      const initialDuration = Math.max(1, item.duration);
+
+      let lastStartTime = initialStartTime;
+      let hasRecordedUndoSnapshot = false;
+      const interactionSnapshot = captureSnapshot();
+
+      setActiveEditingItemId(item.id);
+      setIsDragging(true);
+      if (onDragStateChange) {
+        onDragStateChange(true);
+      }
+      wasPlayingBeforeDragRef.current = isPlaying;
+      dragStartXRef.current = e.clientX;
+      dragStartPositionRef.current = currentPosition;
+
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const deltaX = moveEvent.clientX - dragStartXRef.current;
+        if (Math.abs(deltaX) <= 5) {
+          return;
+        }
+
+        const deltaSeconds = pixelsToSeconds(deltaX, zoomLevel);
+        const nextRange = clampImageMove({
+          desiredStart: initialStartTime + deltaSeconds,
+          duration: initialDuration,
+          minStart: 0,
+          maxEnd: totalDuration,
+        });
+
+        if (nextRange.startTime !== lastStartTime) {
+          if (!hasRecordedUndoSnapshot) {
+            pushUndoSnapshot(interactionSnapshot);
+            hasRecordedUndoSnapshot = true;
+          }
+
+          lastStartTime = nextRange.startTime;
+          commitSegmentTimingOverride(
+            item.segmentId,
+            sourceStartTime,
+            sourceEndTime,
+            nextRange.startTime,
+            nextRange.endTime,
+          );
+        }
+      };
+
+      const handleMouseUpGlobal = () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUpGlobal);
+        setIsDragging(false);
+        if (onDragStateChange) {
+          onDragStateChange(false);
+        }
+        setActiveEditingItemId(null);
+
+        if (wasPlayingBeforeDragRef.current) {
+          setIsPlaying(true);
+        }
+      };
+
+      document.addEventListener('mousemove', handleMouseMove, {
+        passive: true,
+      });
+      document.addEventListener('mouseup', handleMouseUpGlobal);
+    },
+    [
+      captureSnapshot,
+      commitSegmentTimingOverride,
+      currentPosition,
+      isPlaying,
+      onDragStateChange,
+      pushUndoSnapshot,
+      setIsPlaying,
+      totalDuration,
+      zoomLevel,
+    ],
+  );
+
+  const handleServerVisualResizeMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
+      if (
+        item.sourceType !== 'server_timeline' ||
+        (item.type !== 'image' && item.type !== 'video')
+      ) {
+        return;
+      }
+      if (e.button !== 0) return;
+
+      e.stopPropagation();
+      e.preventDefault();
+      scrollPositionBeforeEditRef.current =
+        tracksRef.current?.scrollLeft ?? null;
+
+      const sourceStartTime = item.sourceStartTime ?? item.startTime;
+      const sourceEndTime = item.sourceEndTime ?? item.endTime;
+      const initialStartTime = item.startTime;
+      const initialEndTime = item.endTime;
+
+      let lastStartTime = initialStartTime;
+      let lastEndTime = initialEndTime;
+      let hasRecordedUndoSnapshot = false;
+      const interactionSnapshot = captureSnapshot();
+
+      setActiveEditingItemId(item.id);
+      setIsDragging(true);
+      if (onDragStateChange) {
+        onDragStateChange(true);
+      }
+      wasPlayingBeforeDragRef.current = isPlaying;
+      dragStartXRef.current = e.clientX;
+      dragStartPositionRef.current = currentPosition;
+
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const deltaX = moveEvent.clientX - dragStartXRef.current;
+        if (Math.abs(deltaX) <= 5) {
+          return;
+        }
+
+        const deltaSeconds = pixelsToSeconds(deltaX, zoomLevel);
+        const nextRange = clampImageResizeRight({
+          startTime: initialStartTime,
+          desiredEnd: initialEndTime + deltaSeconds,
+          maxEnd: totalDuration,
+          minDuration: 1,
+        });
+
+        if (
+          nextRange.startTime !== lastStartTime ||
+          nextRange.endTime !== lastEndTime
+        ) {
+          if (!hasRecordedUndoSnapshot) {
+            pushUndoSnapshot(interactionSnapshot);
+            hasRecordedUndoSnapshot = true;
+          }
+
+          lastStartTime = nextRange.startTime;
+          lastEndTime = nextRange.endTime;
+          commitSegmentTimingOverride(
+            item.segmentId,
+            sourceStartTime,
+            sourceEndTime,
+            nextRange.startTime,
+            nextRange.endTime,
+          );
+        }
+      };
+
+      const handleMouseUpGlobal = () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUpGlobal);
+        setIsDragging(false);
+        if (onDragStateChange) {
+          onDragStateChange(false);
+        }
+        setActiveEditingItemId(null);
+
+        if (wasPlayingBeforeDragRef.current) {
+          setIsPlaying(true);
+        }
+      };
+
+      document.addEventListener('mousemove', handleMouseMove, {
+        passive: true,
+      });
+      document.addEventListener('mouseup', handleMouseUpGlobal);
+    },
+    [
+      captureSnapshot,
+      commitSegmentTimingOverride,
+      currentPosition,
+      isPlaying,
+      onDragStateChange,
+      pushUndoSnapshot,
+      setIsPlaying,
+      totalDuration,
+      zoomLevel,
+    ],
+  );
+
   const handleImageResizeMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>, item: TimelineItem) => {
       if (item.type !== 'image' || item.placementNumber === undefined) return;
@@ -1496,7 +1797,8 @@ export default function TimelinePanel({
 
       e.stopPropagation();
       e.preventDefault();
-      scrollPositionBeforeEditRef.current = tracksRef.current?.scrollLeft ?? null;
+      scrollPositionBeforeEditRef.current =
+        tracksRef.current?.scrollLeft ?? null;
 
       const sourceStartTime = item.sourceStartTime ?? item.startTime;
       const sourceEndTime = item.sourceEndTime ?? item.endTime;
@@ -1597,7 +1899,8 @@ export default function TimelinePanel({
 
       e.stopPropagation();
       e.preventDefault();
-      scrollPositionBeforeEditRef.current = tracksRef.current?.scrollLeft ?? null;
+      scrollPositionBeforeEditRef.current =
+        tracksRef.current?.scrollLeft ?? null;
 
       const sourceStartTime = item.sourceStartTime ?? item.startTime;
       const sourceEndTime = item.sourceEndTime ?? item.endTime;
@@ -1838,7 +2141,8 @@ export default function TimelinePanel({
 
       // Copy video to videos/imported folder
       const videoFileName =
-        videoPath.replace(/\\/g, '/').split('/').pop() || `video-${Date.now()}.mp4`;
+        videoPath.replace(/\\/g, '/').split('/').pop() ||
+        `video-${Date.now()}.mp4`;
       const destPath = await window.electron.project.copy(
         videoPath,
         videosFolder,
@@ -1950,7 +2254,8 @@ export default function TimelinePanel({
       item.sourcePlacementDurationSeconds ??
       Math.max(
         1,
-        (item.sourceEndTime ?? item.endTime) - (item.sourceStartTime ?? item.startTime),
+        (item.sourceEndTime ?? item.endTime) -
+          (item.sourceStartTime ?? item.startTime),
       );
     const splitOffset = snapToSecond(
       sourceOffset + (currentPosition - item.startTime),
@@ -1998,9 +2303,9 @@ export default function TimelinePanel({
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore if user is typing in an input, textarea, or contenteditable element
       const target = e.target as HTMLElement;
-      const isTyping = 
-        target.tagName === 'INPUT' || 
-        target.tagName === 'TEXTAREA' || 
+      const isTyping =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
         target.isContentEditable;
 
       // Ctrl/Cmd+Z: Undo timeline edits (only when not typing)
@@ -2013,7 +2318,7 @@ export default function TimelinePanel({
         e.preventDefault();
         undoLastTimelineEdit();
       }
-      
+
       // Space: Play/Pause
       else if (e.code === 'Space' && e.target === document.body) {
         e.preventDefault();
@@ -2056,12 +2361,24 @@ export default function TimelinePanel({
         handleZoomOut();
       }
       // S: Split scene at playhead (only when not typing)
-      else if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !isTyping) {
+      else if (
+        e.code === 'KeyS' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        !isTyping
+      ) {
         e.preventDefault();
         handleSplitScene();
       }
       // M: Add marker at current playhead position (only when not typing)
-      else if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !isTyping) {
+      else if (
+        e.code === 'KeyM' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        !isTyping
+      ) {
         e.preventDefault();
         handleOpenMarkerPopover();
       }
@@ -2167,6 +2484,11 @@ export default function TimelinePanel({
                   {captionGenerationMessage}
                 </span>
               )}
+              {timelineError && (
+                <span className={styles.captionGenerationStatus}>
+                  {timelineError}
+                </span>
+              )}
               <button
                 type="button"
                 className={styles.toolbarButton}
@@ -2216,20 +2538,22 @@ export default function TimelinePanel({
           </div>
 
           <div className={styles.timelineContainer} ref={timelineRef}>
-            <VersionSelector
-              timelineItems={timelineItems}
-              activeVersions={activeVersions}
-              onVersionSelect={(placementNumber, assetType, version) => {
-                const newVersions: Record<number, SceneVersions> = {
-                  ...activeVersions,
-                  [placementNumber]: {
-                    ...activeVersions[placementNumber],
-                    [assetType]: version,
-                  },
-                };
-                setActiveVersions(newVersions);
-              }}
-            />
+            {timelineSource !== 'server_timeline' && (
+              <VersionSelector
+                timelineItems={timelineItems}
+                activeVersions={activeVersions}
+                onVersionSelect={(placementNumber, assetType, version) => {
+                  const newVersions: Record<number, SceneVersions> = {
+                    ...activeVersions,
+                    [placementNumber]: {
+                      ...activeVersions[placementNumber],
+                      [assetType]: version,
+                    },
+                  };
+                  setActiveVersions(newVersions);
+                }}
+              />
+            )}
             {/* eslint-disable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
             <div
               className={styles.tracksArea}
@@ -2310,7 +2634,15 @@ export default function TimelinePanel({
                               projectDirectory={projectDirectory || null}
                               isSelected={activeEditingItemId === item.id}
                               onItemClick={handleItemClick}
-                              onImageResizeMouseDown={handleImageResizeMouseDown}
+                              onImageResizeMouseDown={
+                                handleImageResizeMouseDown
+                              }
+                              onVisualDragMouseDown={
+                                handleServerVisualDragMouseDown
+                              }
+                              onVisualResizeMouseDown={
+                                handleServerVisualResizeMouseDown
+                              }
                               onInfographicDragMouseDown={
                                 handleInfographicDragMouseDown
                               }
@@ -2328,14 +2660,8 @@ export default function TimelinePanel({
                   <div className={`${styles.track} ${styles.overlayTrack}`}>
                     <div className={styles.trackContent}>
                       {overlayItems.map((item) => {
-                        const left = secondsToPixels(
-                          item.startTime,
-                          zoomLevel,
-                        );
-                        const width = secondsToPixels(
-                          item.duration,
-                          zoomLevel,
-                        );
+                        const left = secondsToPixels(item.startTime, zoomLevel);
+                        const width = secondsToPixels(item.duration, zoomLevel);
 
                         return (
                           <MemoTimelineItemComponent
@@ -2363,14 +2689,8 @@ export default function TimelinePanel({
                   <div className={`${styles.track} ${styles.textOverlayTrack}`}>
                     <div className={styles.trackContent}>
                       {textOverlayItems.map((item) => {
-                        const left = secondsToPixels(
-                          item.startTime,
-                          zoomLevel,
-                        );
-                        const width = secondsToPixels(
-                          item.duration,
-                          zoomLevel,
-                        );
+                        const left = secondsToPixels(item.startTime, zoomLevel);
+                        const width = secondsToPixels(item.duration, zoomLevel);
 
                         return (
                           <MemoTimelineItemComponent
@@ -2445,7 +2765,9 @@ export default function TimelinePanel({
               isGeneratingWordCaptions={isGeneratingWordCaptions}
               showVideoEditActions={isPlacementVideoContextTarget}
               onUndo={handleUndoFromContextMenu}
-              onAddTimelineInstruction={handleAddTimelineInstructionFromContextMenu}
+              onAddTimelineInstruction={
+                handleAddTimelineInstructionFromContextMenu
+              }
               onGenerateWordCaptions={handleGenerateWordCaptions}
               onSplitClip={
                 isPlacementVideoContextTarget && canSplitContextTarget

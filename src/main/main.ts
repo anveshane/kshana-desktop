@@ -250,6 +250,22 @@ function isAgentWireSource(meta?: FileOpMeta): boolean {
   return meta?.source === 'agent_ws';
 }
 
+function resolveBootstrapValidationRoot(
+  activeProjectRoot: string | null,
+  fallbackPath: string | null,
+  meta?: FileOpMeta,
+): string | null {
+  if (activeProjectRoot && activeProjectRoot.trim()) {
+    return activeProjectRoot;
+  }
+
+  if (isAgentWireSource(meta) || !fallbackPath) {
+    return null;
+  }
+
+  return path.resolve(fallbackPath);
+}
+
 const broadcastAppUpdateStatus = (
   status: Omit<AppUpdateStatus, 'checkedAt'>,
 ) => {
@@ -795,6 +811,90 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'project:read-project-snapshot',
+  async (
+    _event,
+    projectDir: string,
+  ): Promise<{
+    files: Record<string, string>;
+    directories: string[];
+    projectRoot: string;
+  }> => {
+    const files: Record<string, string> = {};
+    const directories = new Set<string>();
+    const TEXT_EXTS = new Set([
+      '.json',
+      '.md',
+      '.txt',
+      '.yaml',
+      '.yml',
+      '.ts',
+      '.tsx',
+      '.js',
+      '.jsx',
+      '.css',
+      '.html',
+      '.xml',
+    ]);
+    const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', '__pycache__']);
+    const MAX_TEXT_BYTES = 5 * 1024 * 1024;
+    const normalizedRoot = path.resolve(projectDir);
+
+    async function walk(dir: string): Promise<void> {
+      let entries;
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        const relativePath = path
+          .relative(normalizedRoot, fullPath)
+          .split(path.sep)
+          .join('/');
+
+        if (entry.isDirectory()) {
+          if (SKIP_DIRS.has(entry.name)) {
+            continue;
+          }
+          if (relativePath) {
+            directories.add(relativePath);
+          }
+          await walk(fullPath);
+          continue;
+        }
+
+        const ext = path.extname(entry.name).toLowerCase();
+        if (!TEXT_EXTS.has(ext)) {
+          continue;
+        }
+
+        try {
+          const stat = await fs.stat(fullPath);
+          if (stat.size > MAX_TEXT_BYTES) {
+            continue;
+          }
+
+          files[relativePath] = await fs.readFile(fullPath, 'utf-8');
+        } catch {
+          // Skip unreadable files
+        }
+      }
+    }
+
+    await walk(normalizedRoot);
+
+    return {
+      files,
+      directories: Array.from(directories).sort(),
+      projectRoot: normalizedRoot,
+    };
+  },
+);
+
+ipcMain.handle(
   'project:list-directory',
   async (
     _event,
@@ -876,7 +976,11 @@ ipcMain.handle(
 ipcMain.handle(
   'project:mkdir',
   async (_event, dirPath: string, meta?: FileOpMeta): Promise<void> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      path.isAbsolute(dirPath) ? dirPath : null,
+      meta,
+    );
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
     try {
@@ -914,7 +1018,11 @@ ipcMain.handle(
     content: string,
     meta?: FileOpMeta,
   ): Promise<void> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      path.isAbsolute(filePath) ? path.dirname(filePath) : null,
+      meta,
+    );
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
 
@@ -969,7 +1077,11 @@ ipcMain.handle(
     base64Data: string,
     meta?: FileOpMeta,
   ): Promise<void> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      path.isAbsolute(filePath) ? path.dirname(filePath) : null,
+      meta,
+    );
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
     try {
@@ -1013,7 +1125,11 @@ ipcMain.handle(
     relativePath: string,
     meta?: FileOpMeta,
   ): Promise<string | null> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      path.isAbsolute(basePath) ? basePath : null,
+      meta,
+    );
     const combinedPath = path.join(basePath, relativePath);
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -1054,7 +1170,11 @@ ipcMain.handle(
     relativePath: string,
     meta?: FileOpMeta,
   ): Promise<string | null> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      path.isAbsolute(basePath) ? basePath : null,
+      meta,
+    );
     const combinedPath = path.join(basePath, relativePath);
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;

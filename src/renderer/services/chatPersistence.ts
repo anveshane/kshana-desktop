@@ -8,7 +8,7 @@ import {
   type PersistedChatMessage,
 } from '../../shared/chatTypes';
 
-const CHAT_HISTORY_RELATIVE_PATH = '.kshana/ui/chat-history.json';
+const CHAT_HISTORY_RELATIVE_PATH = 'chat-history.json';
 
 export interface ChatSnapshotStorage {
   readFile(filePath: string): Promise<string | null>;

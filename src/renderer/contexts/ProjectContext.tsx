@@ -134,6 +134,11 @@ interface ProjectActions {
     overrides: KshanaTimelineState['video_split_overrides'],
   ) => void;
 
+  /** Update per-segment timing overrides */
+  updateSegmentTimingOverrides: (
+    overrides: KshanaTimelineState['segment_timing_overrides'],
+  ) => void;
+
   /** Add an asset to the asset manifest */
   addAsset: (assetInfo: AssetInfo) => Promise<boolean>;
 
@@ -219,11 +224,9 @@ function normalizeProjectDirectoryPath(
 function getImageSyncV2Flag(): boolean {
   try {
     const stored = window.localStorage.getItem('renderer.image_sync_v2');
-    if (stored === 'false') return false;
-    // Default ON unless explicitly disabled
-    return true;
+    return stored === 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -252,7 +255,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   // Get workspace context for sync
   const { projectDirectory } = useWorkspace();
   const lastLoadedDir = useRef<string | null>(null);
-  const loadRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // WebSocket connection refs to prevent duplicate connections
   const wsRef = useRef<WebSocket | null>(null);
@@ -260,9 +265,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     null,
   );
   const reconnectDelayRef = useRef(500);
-  const manifestRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const manifestRefreshTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const connectAssetWebSocketRef = useRef<(source: string) => void>(() => {});
   const connectingRef = useRef(false);
   const currentProjectDirRef = useRef<string | null>(null);
@@ -280,7 +285,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   const scanImagePlacementFiles = useCallback(
     async (directory: string): Promise<Record<number, string>> => {
       try {
-        const imageDir = `${directory}/.kshana/agent/image-placements`;
+        const imageDir = `${directory}/assets/images`;
         const files = await window.electron.project.readTree(imageDir, 1);
         const placementMap: Record<number, string> = {};
 
@@ -291,7 +296,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
             .sort((a, b) => b.localeCompare(a));
 
           for (const filename of candidateFiles) {
-            const match = filename.match(/^image(\d+)[-_].+\.(png|jpe?g|webp)$/i);
+            const match = filename.match(
+              /^image(\d+)[-_].+\.(png|jpe?g|webp)$/i,
+            );
             if (!match) continue;
 
             const placementNumber = Number(match[1]);
@@ -299,8 +306,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
               Number.isFinite(placementNumber) &&
               !placementMap[placementNumber]
             ) {
-              placementMap[placementNumber] =
-                `agent/image-placements/${filename}`;
+              placementMap[placementNumber] = `assets/images/${filename}`;
             }
           }
         }
@@ -359,7 +365,11 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       if (cancelled) return;
       const normalizedDir =
         normalizeProjectDirectoryPath(projectDirectory) ?? projectDirectory;
-      console.log('[ProjectContext] Loading project from:', normalizedDir, attempt > 0 ? `(retry ${attempt})` : '');
+      console.log(
+        '[ProjectContext] Loading project from:',
+        normalizedDir,
+        attempt > 0 ? `(retry ${attempt})` : '',
+      );
       setState((prev) => ({
         ...prev,
         isLoading: true,
@@ -398,9 +408,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
         // Set up explicit watches for manifest and placements
         try {
-          const manifestPath = `${normalizedDir}/.kshana/agent/manifest.json`;
-          const imagePlacementsDir = `${normalizedDir}/.kshana/agent/image-placements`;
-          const infographicPlacementsDir = `${normalizedDir}/.kshana/agent/infographic-placements`;
+          const manifestPath = `${normalizedDir}/assets/manifest.json`;
+          const imagePlacementsDir = `${normalizedDir}/assets/images`;
+          const infographicPlacementsDir = `${normalizedDir}/assets/infographics`;
 
           await window.electron.project.watchManifest(manifestPath);
           await window.electron.project.watchImagePlacements(
@@ -430,7 +440,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
         if (attempt < MAX_LOAD_RETRIES) {
           const delay = RETRY_DELAYS[attempt] ?? 8000;
-          console.log(`[ProjectContext] Scheduling load retry ${attempt + 1}/${MAX_LOAD_RETRIES} in ${delay}ms`);
+          console.log(
+            `[ProjectContext] Scheduling load retry ${attempt + 1}/${MAX_LOAD_RETRIES} in ${delay}ms`,
+          );
           loadRetryTimeoutRef.current = setTimeout(() => {
             loadRetryTimeoutRef.current = null;
             loadProject(attempt + 1);
@@ -471,25 +483,32 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     const normalizedDir =
       normalizeProjectDirectoryPath(projectDirectory) ?? projectDirectory;
 
-    const unsubscribe = window.electron.project.onManifestWritten(async (event) => {
-      if (!event.path.replace(/\\/g, '/').includes('.kshana/agent/manifest.json')) return;
-      projectService.invalidateCache();
-      imageSyncEngineRef.current?.triggerReconcile('manifest_written', event.path);
+    const unsubscribe = window.electron.project.onManifestWritten(
+      async (event) => {
+        if (!event.path.replace(/\\/g, '/').includes('assets/manifest.json'))
+          return;
+        projectService.invalidateCache();
+        imageSyncEngineRef.current?.triggerReconcile(
+          'manifest_written',
+          event.path,
+        );
 
-      try {
-        const manifest = await projectService.readAssetManifest(normalizedDir);
-        if (manifest) {
-          setState((prev) => {
-            const prevCount = prev.assetManifest?.assets?.length ?? 0;
-            const nextCount = manifest.assets?.length ?? 0;
-            if (prevCount === nextCount && prevCount === 0) return prev;
-            return { ...prev, assetManifest: manifest };
-          });
+        try {
+          const manifest =
+            await projectService.readAssetManifest(normalizedDir);
+          if (manifest) {
+            setState((prev) => {
+              const prevCount = prev.assetManifest?.assets?.length ?? 0;
+              const nextCount = manifest.assets?.length ?? 0;
+              if (prevCount === nextCount && prevCount === 0) return prev;
+              return { ...prev, assetManifest: manifest };
+            });
+          }
+        } catch {
+          // Non-critical: engine projection is the primary source for V2
         }
-      } catch {
-        // Non-critical: engine projection is the primary source for V2
-      }
-    });
+      },
+    );
 
     return () => {
       unsubscribe();
@@ -504,13 +523,11 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
     const unsubscribe = window.electron.project.onFileChange((event) => {
       const filePath = event.path.replace(/\\/g, '/');
-      const isManifestFile = filePath.includes('.kshana/agent/manifest.json');
+      const isManifestFile = filePath.includes('assets/manifest.json');
       const isProjectStateFile =
-        filePath.includes('.kshana/agent/project.json') ||
-        filePath.includes('.kshana/context/index.json');
-      const isImagePlacementFile = filePath.includes(
-        '.kshana/agent/image-placements',
-      );
+        filePath.endsWith('/project.json') ||
+        filePath.endsWith('/context-index.json');
+      const isImagePlacementFile = filePath.includes('assets/images/');
 
       if (isImageSyncV2Enabled && (isManifestFile || isImagePlacementFile)) {
         projectService.invalidateCache();
@@ -520,7 +537,8 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       // Reload project when key files change.
       // When V2 sync is enabled, skip manifest-only changes here --
       // the dedicated onManifestWritten handler owns those to avoid duplicate reads.
-      const shouldReload = isProjectStateFile || (isManifestFile && !isImageSyncV2Enabled);
+      const shouldReload =
+        isProjectStateFile || (isManifestFile && !isImageSyncV2Enabled);
       if (shouldReload) {
         console.log('[ProjectContext][file_watch] File change detected', {
           source: 'file_watch',
@@ -629,7 +647,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       // Compare metadata field by field without JSON.stringify
       const oldMeta = oldAsset.metadata || {};
       const newMeta = newAsset.metadata || {};
-      const metaKeys = new Set([...Object.keys(oldMeta), ...Object.keys(newMeta)]);
+      const metaKeys = new Set([
+        ...Object.keys(oldMeta),
+        ...Object.keys(newMeta),
+      ]);
 
       for (const key of metaKeys) {
         if (oldMeta[key] !== newMeta[key]) return true;
@@ -660,7 +681,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
         // Use functional setState to compare with latest state (avoids stale closure)
         setState((prev) => {
-          const changed = compareAssetManifests(prev.assetManifest, newManifest);
+          const changed = compareAssetManifests(
+            prev.assetManifest,
+            newManifest,
+          );
           if (changed) {
             console.log('[ProjectContext] Asset manifest refreshed:', {
               oldCount: prev.assetManifest?.assets?.length || 0,
@@ -671,7 +695,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
               assetManifest: newManifest,
             };
           }
-          console.log('[ProjectContext] Asset manifest unchanged after refresh');
+          console.log(
+            '[ProjectContext] Asset manifest unchanged after refresh',
+          );
           return prev;
         });
       } else {
@@ -746,7 +772,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
       reconnectTimeoutRef.current = setTimeout(() => {
         reconnectTimeoutRef.current = null;
-        reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 5000);
+        reconnectDelayRef.current = Math.min(
+          reconnectDelayRef.current * 2,
+          5000,
+        );
         connectAssetWebSocketRef.current('reconnect_timer');
       }, delayMs);
     },
@@ -803,7 +832,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           return;
         }
 
-        const baseUrl = backendState.serverUrl || `http://localhost:${backendState.port || 8001}`;
+        const baseUrl =
+          backendState.serverUrl ||
+          `http://localhost:${backendState.port || 8001}`;
         const wsBase = baseUrl.replace(/^http/, 'ws');
         const wsUrl = `${wsBase}/api/v1/ws/chat?project_dir=${encodeURIComponent(projectDirectoryForQuery)}&channel=assets`;
         const ws = new WebSocket(wsUrl);
@@ -978,17 +1009,22 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
   // If backend becomes ready after initial mount, retry socket connection.
   useEffect(() => {
-    const unsubscribe = window.electron.backend.onStateChange((backendState) => {
-      if (!projectDirectory || !state.isLoaded) return;
-      if (backendState.status !== 'ready') return;
-      if (connectingRef.current) return;
-      if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    const unsubscribe = window.electron.backend.onStateChange(
+      (backendState) => {
+        if (!projectDirectory || !state.isLoaded) return;
+        if (backendState.status !== 'ready') return;
+        if (connectingRef.current) return;
+        if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-      console.log('[ProjectContext][ws_connect] Backend transitioned to ready', {
-        source: 'backend_state_change',
-      });
-      connectAssetWebSocketRef.current('backend_ready');
-    });
+        console.log(
+          '[ProjectContext][ws_connect] Backend transitioned to ready',
+          {
+            source: 'backend_state_change',
+          },
+        );
+        connectAssetWebSocketRef.current('backend_ready');
+      },
+    );
 
     return () => {
       unsubscribe();
@@ -1250,6 +1286,19 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     [],
   );
 
+  const updateSegmentTimingOverrides = useCallback(
+    (overrides: KshanaTimelineState['segment_timing_overrides']) => {
+      setState((prev) => ({
+        ...prev,
+        timelineState: {
+          ...prev.timelineState,
+          segment_timing_overrides: overrides,
+        },
+      }));
+    },
+    [],
+  );
+
   // Add asset to manifest
   const addAsset = useCallback(
     async (assetInfo: AssetInfo): Promise<boolean> => {
@@ -1294,12 +1343,13 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     [isImageSyncV2Enabled, projectDirectory],
   );
 
-  const getImageProjectionSnapshot = useCallback((): ImageProjectionSnapshot => {
-    if (!isImageSyncV2Enabled || !imageSyncEngineRef.current) {
-      return createEmptyImageProjectionSnapshot(projectDirectory ?? null);
-    }
-    return imageSyncEngineRef.current.getSnapshot();
-  }, [isImageSyncV2Enabled, projectDirectory]);
+  const getImageProjectionSnapshot =
+    useCallback((): ImageProjectionSnapshot => {
+      if (!isImageSyncV2Enabled || !imageSyncEngineRef.current) {
+        return createEmptyImageProjectionSnapshot(projectDirectory ?? null);
+      }
+      return imageSyncEngineRef.current.getSnapshot();
+    }, [isImageSyncV2Enabled, projectDirectory]);
 
   const triggerImageProjectionReconcile = useCallback(
     (source: ImageSyncTriggerSource) => {
@@ -1349,6 +1399,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       infographic_timing_overrides:
         state.timelineState.infographic_timing_overrides,
       video_split_overrides: state.timelineState.video_split_overrides,
+      segment_timing_overrides: state.timelineState.segment_timing_overrides,
     });
 
     // Only save if state actually changed
@@ -1386,6 +1437,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     JSON.stringify(state.timelineState.image_timing_overrides),
     JSON.stringify(state.timelineState.infographic_timing_overrides),
     JSON.stringify(state.timelineState.video_split_overrides),
+    JSON.stringify(state.timelineState.segment_timing_overrides),
     saveTimelineState,
   ]);
 
@@ -1437,6 +1489,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateImageTimingOverrides,
       updateInfographicTimingOverrides,
       updateVideoSplitOverrides,
+      updateSegmentTimingOverrides,
       addAsset,
       refreshAssetManifest,
       subscribeImageProjection,
@@ -1461,6 +1514,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateImageTimingOverrides,
       updateInfographicTimingOverrides,
       updateVideoSplitOverrides,
+      updateSegmentTimingOverrides,
       addAsset,
       refreshAssetManifest,
       subscribeImageProjection,

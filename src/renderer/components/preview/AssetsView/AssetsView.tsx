@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Image as ImageIcon, Video, X, Play, ImagePlus } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import { useProject } from '../../../contexts/ProjectContext';
 import { FileNode, getFileType } from '../../../../shared/fileSystemTypes';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
@@ -10,10 +11,136 @@ interface MediaAsset {
   name: string;
   path: string;
   type: 'image' | 'video';
+  category: 'images' | 'videos' | 'infographics';
 }
+
+const MEDIA_SCAN_ROOTS = ['assets', 'characters', 'settings', 'scenes'];
+const MAX_SCAN_DEPTH = 5;
+
+const normalizeMediaPath = (
+  filePath: string,
+  projectDirectory: string | null,
+): string => {
+  const normalizedPath = filePath.replace(/\\/g, '/').replace(/^\.\//, '');
+  const normalizedProjectDirectory = projectDirectory
+    ?.trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '');
+
+  if (
+    normalizedProjectDirectory &&
+    (normalizedPath === normalizedProjectDirectory ||
+      normalizedPath.startsWith(`${normalizedProjectDirectory}/`))
+  ) {
+    return normalizedPath.slice(normalizedProjectDirectory.length + 1);
+  }
+
+  return normalizedPath;
+};
+
+const assetKey = (
+  asset: Pick<MediaAsset, 'path' | 'category'>,
+  projectDirectory: string | null,
+): string => `${asset.category}:${normalizeMediaPath(asset.path, projectDirectory)}`;
+
+const mediaNameFromPath = (filePath: string): string => {
+  return filePath.replace(/\\/g, '/').split('/').pop() || filePath;
+};
+
+const inferCategoryFromManifest = (
+  path: string,
+  type?: string,
+): MediaAsset['category'] | null => {
+  if (type === 'scene_infographic' || /infographic/i.test(path)) {
+    return 'infographics';
+  }
+
+  if (
+    type === 'scene_video' ||
+    type === 'final_video' ||
+    type === 'scene_dialogue_audio' ||
+    type === 'scene_music' ||
+    type === 'scene_sfx' ||
+    type === 'scene_audio_mix'
+  ) {
+    return 'videos';
+  }
+
+  if (
+    type === 'character_ref' ||
+    type === 'setting_ref' ||
+    type === 'scene_image' ||
+    type === 'scene_thumbnail'
+  ) {
+    return 'images';
+  }
+
+  const ext = path.split('.').pop()?.toLowerCase();
+  const fileType = getFileType(ext ? `.${ext}` : undefined);
+  if (fileType === 'image') {
+    return 'images';
+  }
+  if (fileType === 'video') {
+    return /infographic/i.test(path) ? 'infographics' : 'videos';
+  }
+
+  return null;
+};
+
+const classifyScannedMedia = (
+  node: FileNode,
+  projectDirectory: string | null,
+): Pick<MediaAsset, 'name' | 'path' | 'type' | 'category'> | null => {
+  if (node.type !== 'file') {
+    return null;
+  }
+
+  const fileType = getFileType(node.extension);
+  if (fileType !== 'image' && fileType !== 'video') {
+    return null;
+  }
+
+  const normalizedPath = node.path.replace(/\\/g, '/');
+  if (!MEDIA_SCAN_ROOTS.some((segment) => normalizedPath.includes(`/${segment}/`))) {
+    return null;
+  }
+
+  const category =
+    fileType === 'video' && /infographic/i.test(normalizedPath)
+      ? 'infographics'
+      : fileType === 'video'
+        ? 'videos'
+        : 'images';
+
+  return {
+    name: node.name,
+    path: normalizeMediaPath(normalizedPath, projectDirectory),
+    type: fileType,
+    category,
+  };
+};
+
+const collectScannedMedia = (
+  node: FileNode,
+  map: Map<string, MediaAsset>,
+  projectDirectory: string | null,
+): void => {
+  const media = classifyScannedMedia(node, projectDirectory);
+  if (media) {
+    const key = assetKey(media, projectDirectory);
+    if (!map.has(key)) {
+      map.set(key, media);
+    }
+  }
+
+  node.children?.forEach((child) =>
+    collectScannedMedia(child, map, projectDirectory),
+  );
+};
 
 export default function AssetsView() {
   const { projectDirectory } = useWorkspace();
+  const { assetManifest } = useProject();
 
   const [generatedImages, setGeneratedImages] = useState<MediaAsset[]>([]);
   const [generatedVideos, setGeneratedVideos] = useState<MediaAsset[]>([]);
@@ -31,8 +158,7 @@ export default function AssetsView() {
     Record<string, string>
   >({});
 
-  // Load generated images and videos from placement directories
-  useEffect(() => {
+  const loadMediaFiles = useCallback(async () => {
     if (!projectDirectory) {
       setGeneratedImages([]);
       setGeneratedVideos([]);
@@ -40,132 +166,77 @@ export default function AssetsView() {
       return;
     }
 
-    const loadMediaFiles = async () => {
-      setIsLoadingMedia(true);
-      try {
-        const imagePlacementsDir = `${projectDirectory}/.kshana/agent/image-placements`;
-        const videoPlacementsDir = `${projectDirectory}/.kshana/agent/video-placements`;
-        const infographicPlacementsDir = `${projectDirectory}/.kshana/agent/infographic-placements`;
+    setIsLoadingMedia(true);
+    try {
+      const discoveredMedia = new Map<string, MediaAsset>();
 
-        // Load images
-        try {
-          const imageTree = await window.electron.project.readTree(
-            imagePlacementsDir,
-            1,
-          );
-          const imageFiles: MediaAsset[] = [];
-
-          const collectImageFiles = (node: FileNode) => {
-            if (node.type === 'file' && node.extension) {
-              const fileType = getFileType(node.extension);
-              if (fileType === 'image') {
-                imageFiles.push({
-                  name: node.name,
-                  path: node.path,
-                  type: 'image',
-                });
-              }
-            }
-            if (node.children) {
-              node.children.forEach(collectImageFiles);
-            }
-          };
-
-          collectImageFiles(imageTree);
-          setGeneratedImages(imageFiles);
-        } catch (err) {
-          // Directory might not exist yet
-          setGeneratedImages([]);
+      for (const asset of assetManifest?.assets || []) {
+        const category = inferCategoryFromManifest(asset.path, asset.type);
+        if (!category) {
+          continue;
         }
 
-        // Load videos
-        try {
-          const videoTree = await window.electron.project.readTree(
-            videoPlacementsDir,
-            1,
-          );
-          const videoFiles: MediaAsset[] = [];
-
-          const collectVideoFiles = (node: FileNode) => {
-            if (node.type === 'file' && node.extension) {
-              const fileType = getFileType(node.extension);
-              if (fileType === 'video') {
-                videoFiles.push({
-                  name: node.name,
-                  path: node.path,
-                  type: 'video',
-                });
-              }
-            }
-            if (node.children) {
-              node.children.forEach(collectVideoFiles);
-            }
-          };
-
-          collectVideoFiles(videoTree);
-          setGeneratedVideos(videoFiles);
-        } catch (err) {
-          setGeneratedVideos([]);
-        }
-
-        // Load infographics (MP4s and WebMs from Remotion)
-        try {
-          const infographicTree = await window.electron.project.readTree(
-            infographicPlacementsDir,
-            2, // Increased depth to handle subdirectories
-          );
-          const infographicFiles: MediaAsset[] = [];
-
-          const collectInfographicFiles = (node: FileNode) => {
-            if (node.type === 'file' && node.extension) {
-              // Display both MP4 and WebM files (WebM for transparency support)
-              const ext = node.extension.toLowerCase();
-              if (ext === '.mp4' || ext === '.webm') {
-                console.log('[AssetsView] Found infographic file:', node.name, node.path);
-                infographicFiles.push({
-                  name: node.name,
-                  path: node.path,
-                  type: 'video',
-                });
-              }
-            }
-            if (node.children) {
-              node.children.forEach(collectInfographicFiles);
-            }
-          };
-
-          collectInfographicFiles(infographicTree);
-          console.log('[AssetsView] Total infographic files found:', infographicFiles.length);
-          setGeneratedInfographics(infographicFiles);
-        } catch (err) {
-          console.error('[AssetsView] Error loading infographics:', err);
-          setGeneratedInfographics([]);
-        }
-      } catch (err) {
-        console.error('Failed to load media files:', err);
-      } finally {
-        setIsLoadingMedia(false);
+        const media: MediaAsset = {
+          name: mediaNameFromPath(asset.path),
+          path: normalizeMediaPath(asset.path, projectDirectory),
+          type: category === 'images' ? 'image' : 'video',
+          category,
+        };
+        discoveredMedia.set(assetKey(media, projectDirectory), media);
       }
-    };
 
-    loadMediaFiles();
+      try {
+        const projectTree = await window.electron.project.readTree(
+          projectDirectory,
+          MAX_SCAN_DEPTH,
+        );
+        collectScannedMedia(projectTree, discoveredMedia, projectDirectory);
+      } catch (error) {
+        console.error('[AssetsView] Failed to scan project tree for media:', error);
+      }
 
-    // Listen for file changes to refresh media files
+      const allMedia = Array.from(discoveredMedia.values()).sort((left, right) =>
+        left.name.localeCompare(right.name),
+      );
+
+      setGeneratedImages(allMedia.filter((asset) => asset.category === 'images'));
+      setGeneratedVideos(allMedia.filter((asset) => asset.category === 'videos'));
+      setGeneratedInfographics(
+        allMedia.filter((asset) => asset.category === 'infographics'),
+      );
+    } catch (err) {
+      console.error('Failed to load media files:', err);
+      setGeneratedImages([]);
+      setGeneratedVideos([]);
+      setGeneratedInfographics([]);
+    } finally {
+      setIsLoadingMedia(false);
+    }
+  }, [assetManifest, projectDirectory]);
+
+  useEffect(() => {
+    void loadMediaFiles();
+  }, [loadMediaFiles]);
+
+  useEffect(() => {
     const unsubscribe = window.electron.project.onFileChange((event) => {
-      // Refresh if files changed in placement directories
-      if (
-        event.path.includes('image-placements') ||
-        event.path.includes('video-placements') ||
-        event.path.includes('infographic-placements')
-      ) {
-        loadMediaFiles();
+      const normalizedPath = event.path.replace(/\\/g, '/');
+      const isRelevantMediaChange =
+        normalizedPath.includes('/assets/') ||
+        normalizedPath.includes('/characters/') ||
+        normalizedPath.includes('/settings/') ||
+        normalizedPath.includes('/scenes/') ||
+        normalizedPath.endsWith('/assets/manifest.json');
+
+      if (isRelevantMediaChange) {
+        void loadMediaFiles();
       }
     });
 
     return () => {
       unsubscribe();
     };
-  }, [projectDirectory]);
+  }, [loadMediaFiles]);
 
   // Resolve image paths
   useEffect(() => {

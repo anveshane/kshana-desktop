@@ -9,7 +9,6 @@ interface MessageListProps {
   isStreaming?: boolean;
   onRegenerate?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
-  onResponse?: (response: string) => void;
 }
 /* eslint-enable react/require-default-props */
 
@@ -135,7 +134,6 @@ export default function MessageList({
   isStreaming = false,
   onRegenerate = undefined,
   onDelete = undefined,
-  onResponse = undefined,
 }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -218,20 +216,10 @@ export default function MessageList({
                   onRegenerate ? () => onRegenerate(message.id) : undefined
                 }
                 onDelete={onDelete ? () => onDelete(message.id) : undefined}
-                onResponse={onResponse}
               />
             </div>
           );
         })}
-        {/* Show thinking indicator when streaming */}
-        {isStreaming && (
-          <div className={styles.thinkingIndicator}>
-            <span className={styles.thinkingText}>
-              [Orchestrator] <span className={styles.thinkingDots}>●</span>{' '}
-              Thinking...
-            </span>
-          </div>
-        )}
         <div ref={messagesEndRef} />
       </div>
     </div>

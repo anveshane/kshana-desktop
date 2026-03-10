@@ -228,12 +228,16 @@ export async function resolveAssetPathForDisplay(
       return toFileUrl(`${normalizedProjectDir}/${cleanedPath}`);
     }
 
-    // Handle paths relative to .kshana/agent/ (e.g., characters/alice-chen/image.png)
-    if (cleanedPath.match(/^(characters|settings|props|plans|scenes)\//)) {
-      return toFileUrl(`${normalizedProjectDir}/.kshana/agent/${cleanedPath}`);
+    // Backend-format project assets and content live at the project root.
+    if (
+      cleanedPath.match(
+        /^(assets|characters|settings|props|plans|scenes|content)\//,
+      )
+    ) {
+      return toFileUrl(`${normalizedProjectDir}/${cleanedPath}`);
     }
 
-    // Handle paths starting with "agent/" (e.g., agent/image-placements/...)
+    // Legacy agent-prefixed paths are still resolved for compatibility.
     if (cleanedPath.startsWith('agent/')) {
       return toFileUrl(`${normalizedProjectDir}/.kshana/${cleanedPath}`);
     }

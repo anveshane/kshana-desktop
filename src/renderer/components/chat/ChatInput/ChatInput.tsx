@@ -7,6 +7,8 @@ interface ChatInputProps {
   isRunning?: boolean;
   isStopping?: boolean;
   placeholder?: string;
+  hintText?: string;
+  questionMode?: boolean;
   onSend: (message: string) => void;
   onStop?: () => void;
 }
@@ -20,6 +22,8 @@ export default function ChatInput({
   isRunning = false,
   isStopping = false,
   placeholder = 'Describe your story, ask for a storyboard, or request assets…',
+  hintText,
+  questionMode = false,
   onSend,
   onStop,
 }: ChatInputProps) {
@@ -84,8 +88,13 @@ export default function ChatInput({
   const canStop = !disabled && isRunning && !isStopping;
 
   return (
-    <form className={styles.container} onSubmit={handleSubmit}>
-      <div className={styles.inputWrapper}>
+    <form
+      className={`${styles.container} ${questionMode ? styles.questionMode : ''}`}
+      onSubmit={handleSubmit}
+    >
+      <div
+        className={`${styles.inputWrapper} ${questionMode ? styles.inputWrapperQuestionMode : ''}`}
+      >
         <textarea
           ref={textareaRef}
           value={value}
@@ -121,6 +130,8 @@ export default function ChatInput({
           ) : (
             <>Agent is running. Use Stop to cancel this run.</>
           )
+        ) : hintText ? (
+          <>{hintText}</>
         ) : (
           <>
             Press <kbd>Enter</kbd> for new line, <kbd>Shift+Enter</kbd> or{' '}

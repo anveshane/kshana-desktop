@@ -41,7 +41,11 @@ export default function VersionSelector({
 
     timelineItems.forEach((item) => {
       // Skip placeholders and items without placement numbers
-      if (item.placementNumber === undefined || item.type === 'placeholder') {
+      if (
+        item.placementNumber === undefined ||
+        item.type === 'placeholder' ||
+        (item.type !== 'image' && item.type !== 'video')
+      ) {
         return;
       }
 

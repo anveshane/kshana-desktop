@@ -20,6 +20,8 @@ import {
   loadChatSnapshot,
   saveChatSnapshot,
 } from '../../../services/chatPersistence';
+import QuestionPrompt from '../QuestionPrompt';
+import TodoPrompt from '../TodoPrompt';
 import MessageList from '../MessageList';
 import ChatInput from '../ChatInput';
 import StatusBar, { AgentStatus } from '../StatusBar';
@@ -55,7 +57,7 @@ const OUTBOUND_ACTION_QUEUE_CAP = 200;
 const CONNECTION_BANNER_DEDUPE_MS = 5000;
 const STOP_ACK_TIMEOUT_MS = 12000;
 const SETTINGS_RECONNECT_DEBOUNCE_MS = 400;
-const PROJECT_SETUP_FILE = '.kshana/ui/project-setup.json';
+const PROJECT_SETUP_FILE = 'project-setup.json';
 const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
 const DEFAULT_SETUP_TEMPLATE_ID = 'narrative';
 const DEFAULT_SETUP_STYLE_ID = 'cinematic_realism';
@@ -78,6 +80,7 @@ interface ConfigureProjectPayload {
   style: string;
   duration: number;
   projectDir: string;
+  projectName?: string;
 }
 
 const FALLBACK_TEMPLATE_CATALOG: TemplateCatalogResponse = {
@@ -137,6 +140,19 @@ const resolvePreferredDuration = (
 const normalizeProjectDirectory = (value: string): string => {
   return value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
 };
+
+const getProjectNameFromDirectory = (value: string): string => {
+  return (
+    normalizeProjectDirectory(value).split('/').pop()?.replace(/\.kshana$/i, '') ||
+    value
+  );
+};
+
+const normalizeComparableChatText = (value: string): string => {
+  return value.trim().replace(/\r\n/g, '\n');
+};
+
+const ORIGINAL_INPUT_FILE = 'original_input.md';
 
 const normalizeHttpUrl = (value?: string): string | null => {
   if (!value) return null;
@@ -242,6 +258,7 @@ export default function ChatPanel() {
   const hasUserSentMessageRef = useRef(false);
   const isTaskRunningRef = useRef(false);
   const isStopPendingRef = useRef(false);
+  const supportsProjectStateSyncRef = useRef(true);
   const stopRequestRef = useRef<{
     promise: Promise<boolean>;
     resolve: (success: boolean) => void;
@@ -447,7 +464,7 @@ export default function ChatPanel() {
 
       try {
         await window.electron.project.writeFile(
-          PROJECT_SETUP_FILE,
+          `${projectDirectory}/${PROJECT_SETUP_FILE}`,
           JSON.stringify(payload, null, 2),
         );
       } catch (error) {
@@ -457,9 +474,42 @@ export default function ChatPanel() {
     [projectDirectory],
   );
 
+  const loadPersistedSetupForDirectory = useCallback(
+    async (
+      targetProjectDirectory: string,
+    ): Promise<ProjectSetupPersisted | null> => {
+      try {
+        const content = await window.electron.project.readFile(
+          `${targetProjectDirectory}/${PROJECT_SETUP_FILE}`,
+        );
+        if (!content) return null;
+        const parsed = JSON.parse(content) as ProjectSetupPersisted;
+        if (
+          parsed &&
+          parsed.version === 1 &&
+          typeof parsed.templateId === 'string' &&
+          typeof parsed.style === 'string' &&
+          typeof parsed.duration === 'number'
+        ) {
+          return parsed;
+        }
+      } catch {
+        // Ignore malformed or missing setup files.
+      }
+      return null;
+    },
+    [],
+  );
+
   const configureProjectSetup = useCallback(
     async (config: ConfigureProjectPayload): Promise<void> => {
       if (!projectDirectory) return;
+
+      const normalizedConfig: ConfigureProjectPayload = {
+        ...config,
+        projectName:
+          config.projectName ?? getProjectNameFromDirectory(config.projectDir),
+      };
 
       setSetupError(null);
       setIsConfiguringProjectSetup(true);
@@ -467,9 +517,9 @@ export default function ChatPanel() {
       try {
         await sendClientActionRef.current({
           type: 'configure_project',
-          data: config,
+          data: normalizedConfig,
         });
-        await persistProjectSetup(config);
+        await persistProjectSetup(normalizedConfig);
       } catch (error) {
         setSetupError(
           `Failed to configure project setup: ${
@@ -490,27 +540,11 @@ export default function ChatPanel() {
   }, [ensureTemplateCatalogLoaded]);
 
   const loadPersistedSetup = useCallback(async (): Promise<ProjectSetupPersisted | null> => {
-    try {
-      const setupFilePath = projectDirectory
-        ? `${projectDirectory}/${PROJECT_SETUP_FILE}`
-        : PROJECT_SETUP_FILE;
-      const content = await window.electron.project.readFile(setupFilePath);
-      if (!content) return null;
-      const parsed = JSON.parse(content) as ProjectSetupPersisted;
-      if (
-        parsed &&
-        parsed.version === 1 &&
-        typeof parsed.templateId === 'string' &&
-        typeof parsed.style === 'string' &&
-        typeof parsed.duration === 'number'
-      ) {
-        return parsed;
-      }
-    } catch {
-      // Ignore malformed/missing setup file.
+    if (!projectDirectory) {
+      return null;
     }
-    return null;
-  }, [projectDirectory]);
+    return loadPersistedSetupForDirectory(projectDirectory);
+  }, [loadPersistedSetupForDirectory, projectDirectory]);
 
   const deriveDefaultSetup = useCallback(
     (
@@ -540,6 +574,7 @@ export default function ChatPanel() {
         style,
         duration,
         projectDir: projectDirectory,
+        projectName: getProjectNameFromDirectory(projectDirectory),
       };
     },
     [projectDirectory],
@@ -592,10 +627,11 @@ export default function ChatPanel() {
         style: selectedStyleId,
         duration,
         projectDir: projectDirectory,
+        projectName: getProjectNameFromDirectory(projectDirectory),
       };
 
       setSelectedDuration(duration);
-      setSetupPanelMode('summary');
+      setSetupPanelMode('wizard');
       setSetupStep('duration');
       void configureProjectSetup(payload);
     },
@@ -737,6 +773,86 @@ export default function ChatPanel() {
     [persistSnapshot],
   );
 
+  const hasQueuedOutboundActionType = useCallback((type: string): boolean => {
+    return pendingOutboundActionsRef.current.some((payload) => {
+      try {
+        const parsed = JSON.parse(payload) as { type?: unknown };
+        return parsed.type === type;
+      } catch {
+        return false;
+      }
+    });
+  }, []);
+
+  const syncProjectState = useCallback(
+    async (
+      socket?: WebSocket,
+      targetProjectDirectory?: string | null,
+    ): Promise<void> => {
+      const activeSocket = socket ?? wsRef.current;
+      if (
+        !activeSocket ||
+        activeSocket.readyState !== WebSocket.OPEN ||
+        !targetProjectDirectory ||
+        !supportsProjectStateSyncRef.current
+      ) {
+        return;
+      }
+
+      try {
+        const snapshot =
+          await window.electron.project.readProjectSnapshot(
+            targetProjectDirectory,
+          );
+        activeSocket.send(
+          JSON.stringify({
+            type: 'project_state_sync',
+            data: snapshot,
+          }),
+        );
+      } catch (error) {
+        console.warn('[ChatPanel] Failed to sync project state:', error);
+      }
+    },
+    [],
+  );
+
+  const syncConfiguredProject = useCallback(
+    async (
+      socket?: WebSocket,
+      targetProjectDirectory?: string | null,
+    ): Promise<void> => {
+      const activeSocket = socket ?? wsRef.current;
+      if (
+        !activeSocket ||
+        activeSocket.readyState !== WebSocket.OPEN ||
+        !targetProjectDirectory
+      ) {
+        return;
+      }
+
+      const persistedSetup =
+        await loadPersistedSetupForDirectory(targetProjectDirectory);
+      if (!persistedSetup) {
+        return;
+      }
+
+      activeSocket.send(
+        JSON.stringify({
+          type: 'configure_project',
+          data: {
+            templateId: persistedSetup.templateId,
+            style: persistedSetup.style,
+            duration: persistedSetup.duration,
+            projectDir: targetProjectDirectory,
+            projectName: getProjectNameFromDirectory(targetProjectDirectory),
+          },
+        }),
+      );
+    },
+    [loadPersistedSetupForDirectory],
+  );
+
   const flushSnapshotSave = useCallback(
     (targetProjectDirectory: string | null | undefined) => {
       if (snapshotSaveTimeoutRef.current) {
@@ -751,6 +867,45 @@ export default function ChatPanel() {
       });
     },
     [persistSnapshot],
+  );
+
+  const persistOriginalInputIfNeeded = useCallback(
+    async (
+      content: string,
+      optionsToIgnore: string[] = [],
+    ): Promise<void> => {
+      if (!projectDirectory) {
+        return;
+      }
+
+      const normalizedContent = normalizeComparableChatText(content);
+      if (!normalizedContent) {
+        return;
+      }
+
+      if (
+        optionsToIgnore.some(
+          (option) =>
+            normalizeComparableChatText(option) === normalizedContent,
+        )
+      ) {
+        return;
+      }
+
+      const inputPath = `${projectDirectory}/${ORIGINAL_INPUT_FILE}`;
+      try {
+        const existingContent =
+          await window.electron.project.readFile(inputPath);
+        if (existingContent && normalizeComparableChatText(existingContent)) {
+          return;
+        }
+
+        await window.electron.project.writeFile(inputPath, content.trim());
+      } catch (error) {
+        console.warn('[ChatPanel] Failed to persist original input:', error);
+      }
+    },
+    [projectDirectory],
   );
 
   const restoreSnapshot = useCallback(
@@ -783,6 +938,17 @@ export default function ChatPanel() {
           (msg) => !(msg.type === 'greeting' && msg.role === 'system'),
         ),
       );
+
+      const firstUserMessage = snapshot.messages.find(
+        (message) =>
+          message.role === 'user' &&
+          message.type === 'message' &&
+          normalizeComparableChatText(message.content),
+      );
+      if (firstUserMessage) {
+        void persistOriginalInputIfNeeded(firstUserMessage.content);
+      }
+
       setSessionId(snapshot.sessionId);
       setAgentStatus(resolveAgentStatus(snapshot.uiState.agentStatus));
       setAgentName(snapshot.uiState.agentName || 'Kshana');
@@ -793,7 +959,7 @@ export default function ChatPanel() {
       setIsTaskRunning(Boolean(snapshot.uiState.isTaskRunning));
       setIsStopPending(false);
     },
-    [resetConversationRefs, resolveAgentStatus],
+    [persistOriginalInputIfNeeded, resetConversationRefs, resolveAgentStatus],
   );
 
   const clearChat = useCallback(() => {
@@ -1151,6 +1317,7 @@ export default function ChatPanel() {
               if (isConfiguringProjectSetupRef.current) {
                 setIsConfiguringProjectSetup(false);
                 setIsProjectSetupConfigured(true);
+                setSetupPanelMode('hidden');
               }
               if (isCancelAck) {
                 resolveStopRequest(true);
@@ -1476,6 +1643,8 @@ export default function ChatPanel() {
           const output = (data.output as string) ?? '';
           const responseStatus = data.status as string;
           if (output) {
+            const normalizedOutput = normalizeComparableChatText(output);
+
             // Log agent response
             window.electron.logger.logAgentText(output, agentName);
 
@@ -1517,11 +1686,24 @@ export default function ChatPanel() {
                 );
               }
 
+              const mirrorsExistingQuestion = prev.some((msg) => {
+                if (msg.type !== 'agent_question') {
+                  return false;
+                }
+
+                return (
+                  normalizeComparableChatText(msg.content) === normalizedOutput
+                );
+              });
+              if (mirrorsExistingQuestion) {
+                return prev;
+              }
+
               // Check if output already exists in messages to avoid duplicates
               const existingMessage = prev.find(
                 (msg) =>
                   msg.role === 'assistant' &&
-                  msg.content === output &&
+                  normalizeComparableChatText(msg.content) === normalizedOutput &&
                   msg.type === 'agent_response',
               );
               if (existingMessage) {
@@ -1791,11 +1973,22 @@ export default function ChatPanel() {
         case 'error': {
           const errorMsg = (data.message as string) ?? 'An error occurred';
           const errorCode = (data.code as string) ?? '';
+          const isUnsupportedProjectStateSync =
+            errorCode === 'unknown_message_type' &&
+            /project_state_sync/i.test(errorMsg);
           const isTransientNetworkError =
             errorCode === 'transient_network_error' ||
             /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|connection reset|network error|fetch failed/i.test(
               errorMsg,
             );
+
+          if (isUnsupportedProjectStateSync) {
+            supportsProjectStateSyncRef.current = false;
+            console.warn(
+              '[ChatPanel] Backend does not support project_state_sync; disabling snapshot sync.',
+            );
+            break;
+          }
 
           if (errorCode === 'cancel_failed' && isStopPendingRef.current) {
             resolveStopRequest(false, errorMsg);
@@ -1950,32 +2143,6 @@ export default function ChatPanel() {
                 'error',
               );
             });
-          break;
-        }
-        case 'file_sync_request': {
-          const syncProjectDir = data.projectDir as string;
-          if (syncProjectDir) {
-            console.log('[ChatPanel] Received file_sync_request, reading project files...', syncProjectDir);
-            window.electron.project.readAllFiles(syncProjectDir).then((files) => {
-              console.log(`[ChatPanel] Sending file_sync_init with ${files.length} files`);
-              const ws = wsRef.current;
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                  type: 'file_sync_init',
-                  data: { files },
-                }));
-              }
-            }).catch((err) => {
-              console.error('[ChatPanel] Failed to read project files for sync:', err);
-              const ws = wsRef.current;
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                  type: 'file_sync_init',
-                  data: { files: [] },
-                }));
-              }
-            });
-          }
           break;
         }
         case 'file_read_request': {
@@ -2666,7 +2833,7 @@ export default function ChatPanel() {
       }
 
       if (sessionIdRef.current) {
-        url.searchParams.set('session_id', sessionIdRef.current);
+        url.searchParams.set('sessionId', sessionIdRef.current);
       }
 
       console.log('[ChatPanel] Final WebSocket URL:', url.toString());
@@ -2702,8 +2869,23 @@ export default function ChatPanel() {
                 ),
             ),
           );
-          flushPendingOutboundActions(socket);
-          resolve(socket);
+          const hasQueuedConfigureProject =
+            hasQueuedOutboundActionType('configure_project');
+          void (async () => {
+            await syncProjectState(socket, projectDirectory);
+            flushPendingOutboundActions(socket);
+            if (!hasQueuedConfigureProject) {
+              await syncConfiguredProject(socket, projectDirectory);
+            }
+            resolve(socket);
+          })().catch((error) => {
+            console.warn(
+              '[ChatPanel] WebSocket post-connect sync failed:',
+              error,
+            );
+            flushPendingOutboundActions(socket);
+            resolve(socket);
+          });
         };
 
         socket.onerror = (error) => {
@@ -2751,7 +2933,10 @@ export default function ChatPanel() {
     appendConnectionBanner,
     flushPendingOutboundActions,
     handleServerPayload,
+    hasQueuedOutboundActionType,
     projectDirectory,
+    syncConfiguredProject,
+    syncProjectState,
   ]);
 
   useEffect(() => {
@@ -2855,11 +3040,36 @@ export default function ChatPanel() {
 
   const sendResponse = useCallback(
     async (content: string) => {
+      const questionOptions = lastQuestionMessageIdRef.current
+        ? ((messagesRef.current.find(
+            (message) => message.id === lastQuestionMessageIdRef.current,
+          )?.meta?.options as string[] | undefined) || [])
+        : [];
+
+      if (lastQuestionMessageIdRef.current) {
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === lastQuestionMessageIdRef.current
+              ? {
+                  ...message,
+                  meta: {
+                    ...message.meta,
+                    selectedResponse: content,
+                  },
+                  timestamp: Date.now(),
+                }
+              : message,
+          ),
+        );
+      }
+
       // Used for clicking options in QuestionPrompt
       window.electron.logger.logUserInput(content);
 
       // Mark that user has sent their first message
       setHasUserSentMessage(true);
+
+      await persistOriginalInputIfNeeded(content, questionOptions);
 
       await sendClientAction({
         type: 'user_response',
@@ -2879,7 +3089,7 @@ export default function ChatPanel() {
         content,
       });
     },
-    [appendMessage, sendClientAction],
+    [appendMessage, persistOriginalInputIfNeeded, sendClientAction],
   );
 
   const sendMessage = useCallback(
@@ -2894,8 +3104,9 @@ export default function ChatPanel() {
         }
         if (projectDirectory && !isProjectSetupConfigured) {
           if (setupPanelMode !== 'wizard') {
+            void openSetupWizard();
             appendSystemMessage(
-              'Applying default project setup. Please retry in a moment.',
+              'Complete Project Setup before sending your first prompt.',
               'status',
             );
             return;
@@ -2914,6 +3125,8 @@ export default function ChatPanel() {
       // Mark that user has sent their first message
       setHasUserSentMessage(true);
       setIsTaskRunning(true);
+
+      await persistOriginalInputIfNeeded(content);
 
       appendMessage({
         role: 'user',
@@ -2950,6 +3163,7 @@ export default function ChatPanel() {
       isProjectSetupConfigured,
       openSetupWizard,
       projectDirectory,
+      persistOriginalInputIfNeeded,
       setupPanelMode,
     ],
   );
@@ -3188,9 +3402,10 @@ export default function ChatPanel() {
             style: persistedSetup.style,
             duration: persistedSetup.duration,
             projectDir: projectDirectory,
+            projectName: getProjectNameFromDirectory(projectDirectory),
           };
           applySetupSelection(persistedPayload);
-          setSetupPanelMode('summary');
+          setSetupPanelMode('hidden');
           void configureProjectSetup(persistedPayload);
         } else {
           const pendingSetupDir = window.localStorage.getItem(
@@ -3206,10 +3421,8 @@ export default function ChatPanel() {
             setSetupPanelMode('wizard');
             setSetupStep('template');
           } else {
-            setSetupPanelMode('summary');
-            if (defaultSetup) {
-              void configureProjectSetup(defaultSetup);
-            }
+            setSetupPanelMode('wizard');
+            setSetupStep('template');
           }
         }
 
@@ -3269,12 +3482,100 @@ export default function ChatPanel() {
     }
   }, [appendSystemMessage, projectDirectory]);
 
+  const activeQuestion = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.type !== 'agent_question') {
+        continue;
+      }
+
+      const selectedResponse = message.meta?.selectedResponse as
+        | string
+        | undefined;
+      if (selectedResponse) {
+        return null;
+      }
+
+      return {
+        id: message.id,
+        question: message.content,
+        options: ((message.meta?.options as string[]) || []).slice(0, 9),
+        type:
+          (message.meta?.questionType as 'text' | 'confirm' | 'select') ||
+          'text',
+        timeoutSeconds: message.meta?.timeout as number | undefined,
+        defaultOption: message.meta?.defaultOption as string | undefined,
+      };
+    }
+
+    return null;
+  }, [messages]);
+
+  const activeTodos = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.type !== 'todo_update') {
+        continue;
+      }
+
+      const todos = (message.meta?.todos as Array<any> | undefined) || [];
+      if (todos.length === 0) {
+        continue;
+      }
+
+      return todos;
+    }
+
+    return null;
+  }, [messages]);
+
+  const showDockedTodoPrompt =
+    setupPanelMode === 'hidden' && !activeQuestion && !!activeTodos;
   // Never show legacy greeting messages.
   const filteredMessages = useMemo(() => {
     return messages.filter(
-      (msg) => !(msg.type === 'greeting' && msg.role === 'system'),
+      (msg) =>
+        !(msg.type === 'greeting' && msg.role === 'system') &&
+        msg.type !== 'agent_question' &&
+        msg.type !== 'todo_update',
     );
   }, [messages]);
+
+  const chatInputPlaceholder = useMemo(() => {
+    if (activeQuestion && (activeQuestion.options?.length || 0) > 0) {
+      return 'Choose an option above, press 1-9, or type a custom reply…';
+    }
+
+    if (activeQuestion) {
+      return 'Type your answer to continue…';
+    }
+
+    if (showDockedTodoPrompt) {
+      return isTaskRunning
+        ? 'Current task progress is shown above. Use Stop if you want to interrupt this run…'
+        : 'Continue the workflow, refine the output, or ask for the next step…';
+    }
+
+    return 'Describe your story, ask for a storyboard, or request assets…';
+  }, [activeQuestion, isTaskRunning, showDockedTodoPrompt]);
+
+  const chatInputHint = useMemo(() => {
+    if (activeQuestion && (activeQuestion.options?.length || 0) > 0) {
+      return 'Quick reply: press 1-9, click an option, or type your own answer and send.';
+    }
+
+    if (activeQuestion) {
+      return 'Answer the active question here to continue the workflow.';
+    }
+
+    if (showDockedTodoPrompt) {
+      return isTaskRunning
+        ? 'Live task progress is docked above the composer.'
+        : 'Latest task progress is docked above. You can keep iterating from here.';
+    }
+
+    return undefined;
+  }, [activeQuestion, isTaskRunning, showDockedTodoPrompt]);
 
   return (
     <div className={styles.container}>
@@ -3315,7 +3616,6 @@ export default function ChatPanel() {
           messages={filteredMessages}
           isStreaming={isStreaming}
           onDelete={deleteMessage}
-          onResponse={sendResponse}
         />
       </div>
 
@@ -3338,6 +3638,21 @@ export default function ChatPanel() {
         onBack={handleSetupBack}
       />
 
+      {showDockedTodoPrompt && (
+        <TodoPrompt todos={activeTodos} />
+      )}
+
+      {setupPanelMode === 'hidden' && activeQuestion && (
+        <QuestionPrompt
+          question={activeQuestion.question}
+          options={activeQuestion.options}
+          type={activeQuestion.type}
+          timeoutSeconds={activeQuestion.timeoutSeconds}
+          defaultOption={activeQuestion.defaultOption}
+          onSelect={sendResponse}
+        />
+      )}
+
       <ChatInput
         disabled={
           connectionState === 'connecting' ||
@@ -3346,6 +3661,9 @@ export default function ChatPanel() {
         }
         isRunning={isTaskRunning}
         isStopping={isStopPending}
+        placeholder={chatInputPlaceholder}
+        hintText={chatInputHint}
+        questionMode={!!activeQuestion && setupPanelMode === 'hidden'}
         onSend={sendMessage}
         onStop={stopTask}
       />

@@ -132,6 +132,15 @@ export interface TimelineState {
 
   /** Per-video split overrides keyed by placement number string */
   video_split_overrides: Record<string, VideoSplitOverride>;
+
+  /** Per-segment timing overrides keyed by server timeline segment id */
+  segment_timing_overrides: Record<
+    string,
+    {
+      start_time_seconds: number;
+      end_time_seconds: number;
+    }
+  >;
 }
 
 /**
@@ -147,6 +156,7 @@ export const DEFAULT_TIMELINE_STATE: TimelineState = {
   image_timing_overrides: {},
   infographic_timing_overrides: {},
   video_split_overrides: {},
+  segment_timing_overrides: {},
 };
 
 /**

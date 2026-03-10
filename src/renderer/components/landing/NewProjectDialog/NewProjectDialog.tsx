@@ -66,7 +66,7 @@ export default function NewProjectDialog({
     try {
       const projectDirectory = await window.electron.project.createFolder(
         workspacePath,
-        trimmedName,
+        `${trimmedName}.kshana`,
       );
 
       if (!projectDirectory) {
