@@ -26,6 +26,83 @@ const PHASE_DISPLAY_NAMES: Record<string, string> = {
   completed: 'Completed',
 };
 
+export const AUTO_FOLLOW_BOTTOM_THRESHOLD_PX = 96;
+
+export function isViewportNearBottom(
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+  threshold = AUTO_FOLLOW_BOTTOM_THRESHOLD_PX,
+): boolean {
+  return scrollHeight - scrollTop - clientHeight <= threshold;
+}
+
+export function deriveScrollFollowState(params: {
+  scrollTop: number;
+  previousScrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  isAutoFollowEnabled: boolean;
+  hasUnreadBelow: boolean;
+}): {
+  isAutoFollowEnabled: boolean;
+  hasUnreadBelow: boolean;
+} {
+  const isNearBottom = isViewportNearBottom(
+    params.scrollTop,
+    params.scrollHeight,
+    params.clientHeight,
+  );
+  const isScrollingUp = params.scrollTop < params.previousScrollTop;
+
+  if (isNearBottom) {
+    return {
+      isAutoFollowEnabled: true,
+      hasUnreadBelow: false,
+    };
+  }
+
+  if (isScrollingUp) {
+    return {
+      isAutoFollowEnabled: false,
+      hasUnreadBelow: params.hasUnreadBelow,
+    };
+  }
+
+  return {
+    isAutoFollowEnabled: params.isAutoFollowEnabled,
+    hasUnreadBelow: params.hasUnreadBelow,
+  };
+}
+
+export function deriveContentArrivalState(params: {
+  isAutoFollowEnabled: boolean;
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+}): {
+  isAutoFollowEnabled: boolean;
+  hasUnreadBelow: boolean;
+} {
+  const isNearBottom = isViewportNearBottom(
+    params.scrollTop,
+    params.scrollHeight,
+    params.clientHeight,
+  );
+
+  if (params.isAutoFollowEnabled || isNearBottom) {
+    return {
+      isAutoFollowEnabled: true,
+      hasUnreadBelow: false,
+    };
+  }
+
+  return {
+    isAutoFollowEnabled: false,
+    hasUnreadBelow: true,
+  };
+}
+
 // Extract phase transition info from message
 function extractPhaseTransition(message: ChatMessage): {
   fromPhase?: string;
@@ -137,16 +214,67 @@ export default function MessageList({
 }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const lastScrollTopRef = useRef(0);
+  const lastContentVersionRef = useRef<string | null>(null);
+  const [isAutoFollowEnabled, setIsAutoFollowEnabled] = useState(true);
+  const [hasUnreadBelow, setHasUnreadBelow] = useState(false);
 
   const items = useMemo(() => messages, [messages]);
+  const contentVersion = useMemo(
+    () =>
+      [
+        items.length,
+        items[items.length - 1]?.id || 'none',
+        items[items.length - 1]?.content.length || 0,
+      ].join(':'),
+    [items],
+  );
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior,
+    });
+    lastScrollTopRef.current = container.scrollHeight;
+  };
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    if (shouldAutoScroll && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    const container = containerRef.current;
+    if (!container) {
+      return;
     }
-  }, [items, shouldAutoScroll]);
+
+    const previousVersion = lastContentVersionRef.current;
+    lastContentVersionRef.current = contentVersion;
+
+    if (previousVersion === null) {
+      scrollToBottom('auto');
+      setHasUnreadBelow(false);
+      return;
+    }
+
+    if (previousVersion === contentVersion) {
+      return;
+    }
+
+    const nextState = deriveContentArrivalState({
+      isAutoFollowEnabled,
+      scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight,
+      clientHeight: container.clientHeight,
+    });
+
+    if (nextState.isAutoFollowEnabled) {
+      scrollToBottom('auto');
+      setHasUnreadBelow(false);
+      return;
+    }
+
+    setHasUnreadBelow(nextState.hasUnreadBelow);
+  }, [contentVersion, isAutoFollowEnabled]);
 
   // Check if user has scrolled up
   useEffect(() => {
@@ -155,21 +283,36 @@ export default function MessageList({
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
-      setShouldAutoScroll(isNearBottom);
+      const nextState = deriveScrollFollowState({
+        scrollTop,
+        previousScrollTop: lastScrollTopRef.current,
+        scrollHeight,
+        clientHeight,
+        isAutoFollowEnabled,
+        hasUnreadBelow,
+      });
+      setIsAutoFollowEnabled(nextState.isAutoFollowEnabled);
+      setHasUnreadBelow(nextState.hasUnreadBelow);
+      lastScrollTopRef.current = scrollTop;
     };
 
     container.addEventListener('scroll', handleScroll);
     return () => {
       container.removeEventListener('scroll', handleScroll);
     };
-  }, []);
+  }, [hasUnreadBelow, isAutoFollowEnabled]);
 
   // Track last phase to detect transitions
   const lastPhaseRef = useRef<string | null>(null);
 
+  const handleResumeAutoFollow = () => {
+    setIsAutoFollowEnabled(true);
+    setHasUnreadBelow(false);
+    scrollToBottom('smooth');
+  };
+
   return (
-    <div ref={containerRef} className={styles.container}>
+    <div className={styles.container}>
       {items.length === 0 && (
         <div className={styles.emptyState}>
           <h3 className={styles.emptyTitle}>Start your storyboard</h3>
@@ -180,7 +323,11 @@ export default function MessageList({
           </p>
         </div>
       )}
-      <div className={styles.messages}>
+      <div
+        ref={containerRef}
+        className={styles.messages}
+        data-testid="message-list-scroll-container"
+      >
         {items.map((message, index) => {
           // Check for phase transition
           const phaseTransition = extractPhaseTransition(message);
@@ -222,6 +369,16 @@ export default function MessageList({
         })}
         <div ref={messagesEndRef} />
       </div>
+      {!isAutoFollowEnabled && hasUnreadBelow && (
+        <button
+          type="button"
+          className={styles.resumeButton}
+          onClick={handleResumeAutoFollow}
+        >
+          <span className={styles.resumeButtonIcon}>↓</span>
+          <span>New messages</span>
+        </button>
+      )}
     </div>
   );
 }

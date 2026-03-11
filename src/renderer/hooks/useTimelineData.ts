@@ -255,7 +255,7 @@ export function getTimelineFileState(
     return {
       source: 'none',
       timeline: null,
-      error: 'Missing timeline.json in the project root.',
+      error: null,
     };
   }
 

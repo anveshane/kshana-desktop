@@ -35,7 +35,7 @@ export default function RecentProjectsList({
             <Folder size={14} className={styles.icon} />
             <div className={styles.textBlock}>
               <span className={styles.name}>
-                {project.name || getProjectNameFromPath(project.path)}
+                {getProjectNameFromPath(project.name || project.path)}
               </span>
               <span className={styles.time}>
                 {formatRelativeTime(project.lastOpened)}
