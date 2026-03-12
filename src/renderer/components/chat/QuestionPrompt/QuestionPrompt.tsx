@@ -1,33 +1,67 @@
 import { useState, useEffect } from 'react';
 import { Check, Clock, HelpCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import type { ChatQuestionOption } from '../../../types/chat';
 import styles from './QuestionPrompt.module.scss';
 
+/* eslint-disable react/require-default-props */
 export interface QuestionPromptProps {
   question: string;
-  options?: string[];
+  options?: ChatQuestionOption[];
   type?: 'text' | 'confirm' | 'select';
-  timeoutSeconds?: number;
+  autoApproveTimeoutMs?: number;
   defaultOption?: string;
+  isConfirmation?: boolean;
   onSelect: (response: string) => void;
   selectedResponse?: string; // If already selected
+}
+
+export function normalizeAutoApproveSeconds(
+  autoApproveTimeoutMs?: number,
+): number | null {
+  return typeof autoApproveTimeoutMs === 'number' &&
+    Number.isFinite(autoApproveTimeoutMs)
+    ? Math.ceil(autoApproveTimeoutMs / 1000)
+    : null;
+}
+
+export function buildDisplayOptions(
+  options: ChatQuestionOption[] | undefined,
+  type: 'text' | 'confirm' | 'select',
+  isConfirmation: boolean,
+): ChatQuestionOption[] {
+  if (options && options.length > 0) {
+    return options;
+  }
+
+  if (type === 'confirm' || isConfirmation) {
+    return [{ label: 'Yes' }, { label: 'No' }];
+  }
+
+  return [];
 }
 
 export default function QuestionPrompt({
   question,
   options,
   type = 'text',
-  timeoutSeconds,
+  autoApproveTimeoutMs,
   defaultOption,
+  isConfirmation = false,
   onSelect,
   selectedResponse,
 }: QuestionPromptProps) {
+  const timeoutSeconds = normalizeAutoApproveSeconds(autoApproveTimeoutMs);
   const [timeLeft, setTimeLeft] = useState<number | null>(
     timeoutSeconds ?? null,
   );
   const [remarkGfm, setRemarkGfm] = useState<any>(null);
 
-  const displayOptions = options || (type === 'confirm' ? ['Yes', 'No'] : []);
+  const displayOptions = buildDisplayOptions(options, type, isConfirmation);
+
+  useEffect(() => {
+    setTimeLeft(timeoutSeconds);
+  }, [timeoutSeconds]);
 
   useEffect(() => {
     import('remark-gfm')
@@ -41,15 +75,15 @@ export default function QuestionPrompt({
   }, []);
 
   useEffect(() => {
-    if (selectedResponse || !timeoutSeconds) return;
-
-    if (timeLeft === null) return;
+    if (selectedResponse || timeoutSeconds === null || timeLeft === null) {
+      return undefined;
+    }
 
     if (timeLeft <= 0) {
       if (defaultOption) {
         onSelect(defaultOption);
       }
-      return;
+      return undefined;
     }
 
     const timer = setInterval(() => {
@@ -73,7 +107,7 @@ export default function QuestionPrompt({
       if (!option) return;
 
       event.preventDefault();
-      onSelect(option);
+      onSelect(option.label);
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -82,9 +116,9 @@ export default function QuestionPrompt({
     };
   }, [displayOptions, onSelect, selectedResponse]);
 
-  const handleSelect = (option: string) => {
+  const handleSelect = (option: ChatQuestionOption) => {
     if (selectedResponse) return;
-    onSelect(option);
+    onSelect(option.label);
   };
 
   return (
@@ -113,21 +147,30 @@ export default function QuestionPrompt({
         {displayOptions.length > 0 && (
           <div className={styles.optionsList}>
             {displayOptions.map((option, index) => {
-              const isSelected = selectedResponse === option;
+              const isSelected = selectedResponse === option.label;
               const isRejected =
-                selectedResponse && selectedResponse !== option;
+                selectedResponse && selectedResponse !== option.label;
 
               return (
                 <button
-                  key={index}
+                  key={`${option.label}-${option.description || 'option'}`}
                   type="button"
                   className={`${styles.optionButton} ${isSelected ? styles.confirmed : ''} ${isRejected ? styles.rejected : ''}`}
                   onClick={() => handleSelect(option)}
                   disabled={!!selectedResponse}
                 >
                   <span className={styles.optionIndex}>{index + 1}</span>
-                  <span className={styles.optionLabel}>{option}</span>
-                  {isSelected && <Check size={14} className={styles.checkIcon} />}
+                  <span className={styles.optionContent}>
+                    <span className={styles.optionLabel}>{option.label}</span>
+                    {option.description && (
+                      <span className={styles.optionDescription}>
+                        {option.description}
+                      </span>
+                    )}
+                  </span>
+                  {isSelected && (
+                    <Check size={14} className={styles.checkIcon} />
+                  )}
                 </button>
               );
             })}
@@ -140,11 +183,14 @@ export default function QuestionPrompt({
           </div>
         )}
 
-        {timeLeft !== null && timeLeft > 0 && defaultOption && !selectedResponse && (
-          <div className={styles.timer}>
-            Auto-approving in {timeLeft}s. Default: {defaultOption}
-          </div>
-        )}
+        {timeLeft !== null &&
+          timeLeft > 0 &&
+          defaultOption &&
+          !selectedResponse && (
+            <div className={styles.timer}>
+              Auto-approving in {timeLeft}s. Default: {defaultOption}
+            </div>
+          )}
       </div>
     </div>
   );

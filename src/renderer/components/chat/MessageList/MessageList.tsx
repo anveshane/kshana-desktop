@@ -7,6 +7,9 @@ import styles from './MessageList.module.scss';
 interface MessageListProps {
   messages: ChatMessage[];
   isStreaming?: boolean;
+  showThinkingPlaceholder?: boolean;
+  thinkingPlaceholderText?: string;
+  thinkingAgentName?: string;
   onRegenerate?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
 }
@@ -209,6 +212,9 @@ function extractPhaseTransition(message: ChatMessage): {
 export default function MessageList({
   messages,
   isStreaming = false,
+  showThinkingPlaceholder = false,
+  thinkingPlaceholderText = 'Thinking through the next steps...',
+  thinkingAgentName = 'Kshana',
   onRegenerate = undefined,
   onDelete = undefined,
 }: MessageListProps) {
@@ -230,7 +236,7 @@ export default function MessageList({
     [items],
   );
 
-  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+  const scrollToBottom = (behavior: 'auto' | 'smooth' = 'auto') => {
     const container = containerRef.current;
     if (!container) return;
     container.scrollTo({
@@ -328,7 +334,7 @@ export default function MessageList({
         className={styles.messages}
         data-testid="message-list-scroll-container"
       >
-        {items.map((message, index) => {
+        {items.map((message) => {
           // Check for phase transition
           const phaseTransition = extractPhaseTransition(message);
           const showPhaseBanner =
@@ -367,6 +373,20 @@ export default function MessageList({
             </div>
           );
         })}
+        {showThinkingPlaceholder && (
+          <div
+            className={styles.thinkingInline}
+            aria-live="polite"
+            aria-label={`${thinkingAgentName} is thinking`}
+          >
+            <span className={styles.thinkingInlineAgent}>
+              [{thinkingAgentName}]
+            </span>{' '}
+            <span className={styles.thinkingInlineText}>
+              {thinkingPlaceholderText}
+            </span>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
       {!isAutoFollowEnabled && hasUnreadBelow && (

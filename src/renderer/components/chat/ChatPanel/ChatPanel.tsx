@@ -12,7 +12,7 @@ import type {
   RemotionServerRenderResult,
   RemotionServerRenderProgress,
 } from '../../../../shared/remotionTypes';
-import type { ChatMessage } from '../../../types/chat';
+import type { ChatMessage, ChatQuestionOption } from '../../../types/chat';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useAgent } from '../../../contexts/AgentContext';
 import {
@@ -62,6 +62,7 @@ const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
 const DEFAULT_SETUP_TEMPLATE_ID = 'narrative';
 const DEFAULT_SETUP_STYLE_ID = 'cinematic_realism';
 const DEFAULT_SETUP_DURATION_SECONDS = 120;
+const NOTIFICATION_AUTO_CLEAR_MS = 8000;
 
 interface ProjectSetupPersisted {
   version: 1;
@@ -73,6 +74,18 @@ interface ProjectSetupPersisted {
 interface TemplateCatalogResponse {
   templates?: SetupTemplateOption[];
   durationPresets?: Record<string, SetupDurationOption[]>;
+}
+
+interface NotificationBannerState {
+  level: 'info' | 'warning' | 'error';
+  message: string;
+}
+
+interface SessionTimerState {
+  visible: boolean;
+  elapsedMs: number;
+  running: boolean;
+  completed: boolean;
 }
 
 interface ConfigureProjectPayload {
@@ -182,6 +195,15 @@ const getComfyUISettingsKey = (settings: AppSettings | null): string => {
   return `${mode}:${override}`;
 };
 
+const normalizeNotificationLevel = (
+  value: unknown,
+): NotificationBannerState['level'] => {
+  if (value === 'warning' || value === 'error') {
+    return value;
+  }
+  return 'info';
+};
+
 export default function ChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connectionState, setConnectionState] =
@@ -217,6 +239,14 @@ export default function ChatPanel() {
     useState(false);
   const [isProjectSetupConfigured, setIsProjectSetupConfigured] =
     useState(false);
+  const [notificationBanner, setNotificationBanner] =
+    useState<NotificationBannerState | null>(null);
+  const [sessionTimer, setSessionTimer] = useState<SessionTimerState>({
+    visible: false,
+    elapsedMs: 0,
+    running: false,
+    completed: false,
+  });
 
   const { setConnectionStatus, projectDirectory, registerProjectSwitchGuard } =
     useWorkspace();
@@ -240,6 +270,9 @@ export default function ChatPanel() {
   const lastQuestionMessageIdRef = useRef<string | null>(null);
   const reconnectAttemptRef = useRef(0);
   const settingsReconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const comfyUISettingsKeyRef = useRef<string>('');
   const appSettingsRef = useRef<AppSettings | null>(null);
   const pendingOutboundActionsRef = useRef<string[]>([]);
@@ -366,6 +399,14 @@ export default function ChatPanel() {
   useEffect(() => {
     isConfiguringProjectSetupRef.current = isConfiguringProjectSetup;
   }, [isConfiguringProjectSetup]);
+
+  useEffect(() => {
+    return () => {
+      if (notificationTimeoutRef.current) {
+        clearTimeout(notificationTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const appendConnectionBanner = useCallback(
     (key: string, content: string) => {
@@ -930,6 +971,13 @@ export default function ChatPanel() {
         setHasUserSentMessage(false);
         setIsTaskRunning(false);
         setIsStopPending(false);
+        setNotificationBanner(null);
+        setSessionTimer({
+          visible: false,
+          elapsedMs: 0,
+          running: false,
+          completed: false,
+        });
         return;
       }
 
@@ -958,6 +1006,13 @@ export default function ChatPanel() {
       setHasUserSentMessage(Boolean(snapshot.uiState.hasUserSentMessage));
       setIsTaskRunning(Boolean(snapshot.uiState.isTaskRunning));
       setIsStopPending(false);
+      setNotificationBanner(null);
+      setSessionTimer({
+        visible: false,
+        elapsedMs: 0,
+        running: false,
+        completed: false,
+      });
     },
     [persistOriginalInputIfNeeded, resetConversationRefs, resolveAgentStatus],
   );
@@ -981,6 +1036,13 @@ export default function ChatPanel() {
     setHasUserSentMessage(false);
     setIsTaskRunning(false);
     setIsStopPending(false);
+    setNotificationBanner(null);
+    setSessionTimer({
+      visible: false,
+      elapsedMs: 0,
+      running: false,
+      completed: false,
+    });
     scheduleSnapshotSave(projectDirectory);
   }, [projectDirectory, resetConversationRefs, scheduleSnapshotSave]);
 
@@ -1179,6 +1241,20 @@ export default function ChatPanel() {
         setAgentStatus(status);
         setStatusMessage(message);
       }, 100); // 100ms debounce
+    },
+    [],
+  );
+
+  const showNotificationBanner = useCallback(
+    (message: string, level: NotificationBannerState['level']) => {
+      if (notificationTimeoutRef.current) {
+        clearTimeout(notificationTimeoutRef.current);
+      }
+      setNotificationBanner({ message, level });
+      notificationTimeoutRef.current = setTimeout(() => {
+        setNotificationBanner(null);
+        notificationTimeoutRef.current = null;
+      }, NOTIFICATION_AUTO_CLEAR_MS);
     },
     [],
   );
@@ -1794,14 +1870,29 @@ export default function ChatPanel() {
             | string[]
             | Array<{ label: string; description?: string }>
             | undefined;
-          // Extract labels if options are objects, otherwise use as-is
-          const options = rawOptions
-            ? rawOptions.map((opt) =>
-              typeof opt === 'string' ? opt : opt.label,
-            )
-            : undefined;
-          const questionType = (data.questionType as string) ?? 'text'; // text, confirm, select
-          const timeout = (data.timeout as number) ?? undefined;
+          const options: ChatQuestionOption[] | undefined = rawOptions?.map(
+            (option) =>
+              typeof option === 'string'
+                ? { label: option }
+                : {
+                  label: option.label,
+                  description: option.description,
+                },
+          );
+          const isConfirmation = Boolean(data.isConfirmation);
+          const questionType =
+            ((data.questionType as 'text' | 'confirm' | 'select' | undefined) ??
+              (isConfirmation
+                ? 'confirm'
+                : options && options.length > 0
+                  ? 'select'
+                  : 'text'));
+          const autoApproveTimeoutMs =
+            typeof data.autoApproveTimeoutMs === 'number'
+              ? data.autoApproveTimeoutMs
+              : typeof data.timeout === 'number'
+                ? data.timeout * 1000
+                : undefined;
           const defaultOption = (data.defaultOption as string) ?? undefined;
 
           if (question) {
@@ -1821,9 +1912,9 @@ export default function ChatPanel() {
               : undefined;
             window.electron.logger.logQuestion(
               question,
-              questionOptions,
-              questionType === 'confirm',
-              timeout,
+              questionOptions as Array<{ label: string; description?: string }> | undefined,
+              isConfirmation || questionType === 'confirm',
+              autoApproveTimeoutMs,
             );
 
             // Update existing question message if it exists to avoid duplicates
@@ -1845,7 +1936,8 @@ export default function ChatPanel() {
                         meta: {
                           options,
                           questionType,
-                          timeout,
+                          isConfirmation,
+                          autoApproveTimeoutMs,
                           defaultOption,
                         },
                         timestamp: Date.now(),
@@ -1875,16 +1967,17 @@ export default function ChatPanel() {
                   role: 'assistant',
                   type: 'agent_question',
                   content: question,
-                  author: agentName,
-                  timestamp: Date.now(),
-                  meta: {
-                    options,
-                    questionType,
-                    timeout,
-                    defaultOption,
+                    author: agentName,
+                    timestamp: Date.now(),
+                    meta: {
+                      options,
+                      questionType,
+                      isConfirmation,
+                      autoApproveTimeoutMs,
+                      defaultOption,
+                    },
                   },
-                },
-              ];
+                ];
             });
 
             lastAssistantIdRef.current = null;
@@ -1968,6 +2061,30 @@ export default function ChatPanel() {
               'status',
             );
           }
+          break;
+        }
+        case 'notification': {
+          const notificationMessage = (data.message as string) ?? '';
+          if (!notificationMessage.trim()) {
+            break;
+          }
+
+          showNotificationBanner(
+            notificationMessage,
+            normalizeNotificationLevel(data.level),
+          );
+          break;
+        }
+        case 'session_timer': {
+          setSessionTimer({
+            visible: true,
+            elapsedMs:
+              typeof data.elapsedMs === 'number' && Number.isFinite(data.elapsedMs)
+                ? data.elapsedMs
+                : 0,
+            running: Boolean(data.running),
+            completed: Boolean(data.completed),
+          });
           break;
         }
         case 'error': {
@@ -2719,6 +2836,7 @@ export default function ChatPanel() {
       getRendererErrorMessage,
       projectDirectory,
       resolveStopRequest,
+      showNotificationBanner,
     ],
   );
 
@@ -3041,9 +3159,13 @@ export default function ChatPanel() {
   const sendResponse = useCallback(
     async (content: string) => {
       const questionOptions = lastQuestionMessageIdRef.current
-        ? ((messagesRef.current.find(
-            (message) => message.id === lastQuestionMessageIdRef.current,
-          )?.meta?.options as string[] | undefined) || [])
+        ? (
+          (
+            messagesRef.current.find(
+              (message) => message.id === lastQuestionMessageIdRef.current,
+            )?.meta?.options as ChatQuestionOption[] | undefined
+          ) || []
+        ).map((option) => option.label)
         : [];
 
       if (lastQuestionMessageIdRef.current) {
@@ -3379,6 +3501,13 @@ export default function ChatPanel() {
       setHasUserSentMessage(false);
       setIsTaskRunning(false);
       setIsStopPending(false);
+      setNotificationBanner(null);
+      setSessionTimer({
+        visible: false,
+        elapsedMs: 0,
+        running: false,
+        completed: false,
+      });
       return;
     }
 
@@ -3499,11 +3628,16 @@ export default function ChatPanel() {
       return {
         id: message.id,
         question: message.content,
-        options: ((message.meta?.options as string[]) || []).slice(0, 9),
+        options: ((message.meta?.options as ChatQuestionOption[]) || []).slice(
+          0,
+          9,
+        ),
         type:
           (message.meta?.questionType as 'text' | 'confirm' | 'select') ||
           'text',
-        timeoutSeconds: message.meta?.timeout as number | undefined,
+        isConfirmation: Boolean(message.meta?.isConfirmation),
+        autoApproveTimeoutMs:
+          message.meta?.autoApproveTimeoutMs as number | undefined,
         defaultOption: message.meta?.defaultOption as string | undefined,
       };
     }
@@ -3540,6 +3674,26 @@ export default function ChatPanel() {
         msg.type !== 'todo_update',
     );
   }, [messages]);
+
+  const showThinkingPlaceholder = useMemo(() => {
+    if (!isTaskRunning) {
+      return false;
+    }
+
+    return filteredMessages.every((message) => message.role === 'user');
+  }, [filteredMessages, isTaskRunning]);
+
+  const thinkingPlaceholderText = useMemo(() => {
+    if (statusMessage.trim()) {
+      return statusMessage;
+    }
+
+    if (agentStatus === 'executing') {
+      return 'Running tools in the background...';
+    }
+
+    return 'Thinking through the next steps...';
+  }, [agentStatus, statusMessage]);
 
   const chatInputPlaceholder = useMemo(() => {
     if (activeQuestion && (activeQuestion.options?.length || 0) > 0) {
@@ -3609,12 +3763,28 @@ export default function ChatPanel() {
         message={statusMessage}
         currentPhase={currentPhase}
         phaseDisplayName={phaseDisplayName}
+        sessionTimer={sessionTimer}
       />
+
+      {notificationBanner && (
+        <div
+          className={`${styles.notificationBanner} ${
+            styles[`notification${notificationBanner.level[0].toUpperCase()}${notificationBanner.level.slice(1)}`]
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          {notificationBanner.message}
+        </div>
+      )}
 
       <div className={styles.messages}>
         <MessageList
           messages={filteredMessages}
           isStreaming={isStreaming}
+          showThinkingPlaceholder={showThinkingPlaceholder}
+          thinkingPlaceholderText={thinkingPlaceholderText}
+          thinkingAgentName={agentName}
           onDelete={deleteMessage}
         />
       </div>
@@ -3647,7 +3817,8 @@ export default function ChatPanel() {
           question={activeQuestion.question}
           options={activeQuestion.options}
           type={activeQuestion.type}
-          timeoutSeconds={activeQuestion.timeoutSeconds}
+          autoApproveTimeoutMs={activeQuestion.autoApproveTimeoutMs}
+          isConfirmation={activeQuestion.isConfirmation}
           defaultOption={activeQuestion.defaultOption}
           onSelect={sendResponse}
         />

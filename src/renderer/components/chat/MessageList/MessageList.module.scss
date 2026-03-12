@@ -77,6 +77,23 @@
   font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
 }
 
+.thinkingInline {
+  margin-top: $spacing-sm;
+  padding: 0 $spacing-sm;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  line-height: 1.5;
+}
+
+.thinkingInlineAgent {
+  color: $color-accent-blue;
+  font-weight: $font-weight-semibold;
+}
+
+.thinkingInlineText {
+  color: $color-text-secondary;
+}
+
 .thinkingText {
   color: #06b6d4; // cyan color
 }

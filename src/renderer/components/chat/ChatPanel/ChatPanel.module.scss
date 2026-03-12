@@ -82,3 +82,25 @@
   @include custom-scrollbar;
   padding: $spacing-md;
 }
+
+.notificationBanner {
+  padding: $spacing-sm $spacing-lg;
+  border-bottom: 1px solid $color-panel-border;
+  font-size: $font-size-xs;
+  line-height: 1.45;
+}
+
+.notificationInfo {
+  background: rgba($color-accent-cyan, 0.08);
+  color: $color-accent-cyan;
+}
+
+.notificationWarning {
+  background: rgba($color-warning, 0.1);
+  color: $color-warning;
+}
+
+.notificationError {
+  background: rgba($color-error, 0.12);
+  color: $color-error;
+}

@@ -483,8 +483,9 @@ function renderProjectStateTool(
   );
 }
 
-// Tools that should be expanded by default (not collapsed)
-const EXPANDED_BY_DEFAULT_TOOLS = new Set(['Task', 'dispatch_agent']);
+export function shouldToolStartExpanded(): boolean {
+  return false;
+}
 
 export default function ToolCallCard({
   toolName,
@@ -497,15 +498,9 @@ export default function ToolCallCard({
   onFileClick,
 }: ToolCallCardProps) {
   const isExecuting = status === 'executing';
-  
-  // Task tool and executing tools stay expanded by default, all others are collapsed
-  const [isExpanded, setIsExpanded] = useState(() => 
-    EXPANDED_BY_DEFAULT_TOOLS.has(toolName) || isExecuting
-  );
-  
-  // Keep expanded while executing (can't collapse running tools)
-  const effectiveExpanded = isExecuting ? true : isExpanded;
-  
+
+  const [isExpanded, setIsExpanded] = useState(() => shouldToolStartExpanded());
+
   const isError = status === 'error';
   const isCompleted = status === 'completed';
 
@@ -600,13 +595,12 @@ export default function ToolCallCard({
     <div className={`${styles.container} ${borderClass}`}>
       <button
         type="button"
-        className={`${styles.header} ${isExecuting ? styles.headerNoCollapse : ''}`}
-        onClick={() => !isExecuting && setIsExpanded(!isExpanded)}
-        style={isExecuting ? { cursor: 'default' } : undefined}
+        className={styles.header}
+        onClick={() => setIsExpanded(!isExpanded)}
       >
         <ChevronRight
           size={14}
-          className={effectiveExpanded ? styles.chevronExpanded : styles.chevron}
+          className={isExpanded ? styles.chevronExpanded : styles.chevron}
         />
         {isExecuting ? (
           <AlertCircle size={14} className={styles.statusIconExecuting} />
@@ -625,7 +619,7 @@ export default function ToolCallCard({
         )}
       </button>
 
-      {effectiveExpanded && (
+      {isExpanded && (
         <div className={styles.content}>
           <div className={styles.toolCall}>
             <span className={styles.toolCallCode}>{toolCallText}</span>

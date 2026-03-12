@@ -1,6 +1,8 @@
 .container {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 8px 16px;
   background-color: var(--color-bg-panel, #161b22);
   border-bottom: 1px solid var(--color-border, #30363d);
@@ -11,6 +13,13 @@
   z-index: 10;
   color: var(--color-text-secondary, #8b949e);
   min-height: 36px;
+}
+
+.primary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
 }
 
 .agentName {
@@ -63,6 +72,36 @@
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+}
+
+.metrics {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.metricChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.metricRunning {
+  color: var(--color-warning, #d29922);
+}
+
+.metricPaused {
+  color: var(--color-text-secondary, #8b949e);
+}
+
+.metricCompleted {
+  color: var(--color-success, #238636);
 }
 
 @keyframes pulse {
