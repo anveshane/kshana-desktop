@@ -1452,6 +1452,24 @@ interface TextOverlayCue {
   words: TextOverlayWord[];
 }
 
+const VIDEO_WATERMARK_TEXT = 'kshana';
+const VIDEO_WATERMARK_FONT_SIZE = 54;
+const VIDEO_WATERMARK_MARGIN_X = 48;
+const VIDEO_WATERMARK_MARGIN_Y = 28;
+const SYSTEM_FONT_CANDIDATES =
+  process.platform === 'win32'
+    ? ['C:/Windows/Fonts/arial.ttf', 'C:/Windows/Fonts/segoeui.ttf']
+    : process.platform === 'darwin'
+      ? [
+          '/System/Library/Fonts/Supplemental/Arial.ttf',
+          '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+          '/System/Library/Fonts/Helvetica.ttc',
+        ]
+      : [
+          '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+          '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+        ];
+
 function formatAssTimestamp(seconds: number): string {
   const totalCentiseconds = Math.max(0, Math.round(seconds * 100));
   const centiseconds = totalCentiseconds % 100;
@@ -1488,6 +1506,28 @@ function buildAssDialogueText(cue: TextOverlayCue): string {
     segments.push(`{\\k${durationCentiseconds}}${safeText}${suffix}`);
   });
   return segments.join('');
+}
+
+async function findAvailableSystemFont(): Promise<string | null> {
+  for (const candidate of SYSTEM_FONT_CANDIDATES) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  return null;
+}
+
+function escapeDrawtextValue(input: string): string {
+  return input
+    .replace(/\\/g, '/')
+    .replace(/:/g, '\\:')
+    .replace(/'/g, "\\'")
+    .replace(/%/g, '\\%')
+    .replace(/[\r\n]+/g, ' ');
 }
 
 function buildAssFromTextOverlayCues(cues: TextOverlayCue[]): string {
@@ -1670,6 +1710,72 @@ async function burnWordCaptionsIntoVideo(
   );
 }
 
+async function burnWatermarkIntoVideo(
+  inputVideoPath: string,
+  outputVideoPath: string,
+): Promise<void> {
+  const fontPath = await findAvailableSystemFont();
+  const drawtextParts = [
+    `text='${escapeDrawtextValue(VIDEO_WATERMARK_TEXT)}'`,
+    `fontsize=${VIDEO_WATERMARK_FONT_SIZE}`,
+    'fontcolor=white@0.4',
+    'shadowcolor=black@0.6',
+    'shadowx=3',
+    'shadowy=3',
+    `x=w-tw-${VIDEO_WATERMARK_MARGIN_X}`,
+    `y=h-th-${VIDEO_WATERMARK_MARGIN_Y}`,
+  ];
+
+  if (fontPath) {
+    drawtextParts.unshift(`fontfile='${escapeDrawtextValue(fontPath)}'`);
+  } else {
+    console.warn(
+      '[VideoComposition] No system font found for watermark, relying on FFmpeg defaults.',
+    );
+  }
+
+  const filter = `drawtext=${drawtextParts.join(':')}`;
+
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg()
+      .input(inputVideoPath)
+      .videoFilters(filter)
+      .outputOptions([
+        '-map 0:v:0',
+        '-map 0:a?',
+        '-c:v libx264',
+        '-crf 18',
+        '-preset medium',
+        '-c:a copy',
+        '-pix_fmt yuv420p',
+      ])
+      .output(outputVideoPath)
+      .on('start', (cmd) =>
+        console.log(`[VideoComposition] Watermark FFmpeg command: ${cmd}`),
+      )
+      .on('progress', (progress) => {
+        if (progress.percent != null) {
+          console.log(
+            `[VideoComposition] Watermark progress: ${Math.round(progress.percent)}%`,
+          );
+        }
+      })
+      .on('end', () => {
+        console.log('[VideoComposition] Watermark burn completed');
+        resolve();
+      })
+      .on('error', (error, _stdout, stderr) => {
+        if (stderr) {
+          console.error(
+            `[VideoComposition] Watermark FFmpeg stderr: ${stderr.slice(-500)}`,
+          );
+        }
+        reject(error);
+      })
+      .run();
+  });
+}
+
 ipcMain.handle(
   'project:compose-timeline-video',
   async (
@@ -1696,30 +1802,7 @@ ipcMain.handle(
     const segmentFiles: string[] = [];
     const cleanupFiles: string[] = [];
     const normalizedOverlayItems: Array<OverlayItem & { absolutePath: string }> = [];
-    const fontCandidates =
-      process.platform === 'win32'
-        ? ['C:/Windows/Fonts/arial.ttf', 'C:/Windows/Fonts/segoeui.ttf']
-        : process.platform === 'darwin'
-          ? [
-              '/System/Library/Fonts/Supplemental/Arial.ttf',
-              '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-              '/System/Library/Fonts/Helvetica.ttc',
-            ]
-          : [
-              '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-              '/usr/share/fonts/dejavu/DejaVuSans.ttf',
-            ];
-
-    let placeholderFontPath: string | null = null;
-    for (const candidate of fontCandidates) {
-      try {
-        await fs.access(candidate);
-        placeholderFontPath = candidate;
-        break;
-      } catch {
-        // Try next candidate.
-      }
-    }
+    const placeholderFontPath = await findAvailableSystemFont();
 
     if (!placeholderFontPath) {
       console.warn(
@@ -2392,6 +2475,14 @@ ipcMain.handle(
           );
         }
       }
+
+      const watermarkedOutputPath = path.join(
+        tempDir,
+        'composed-video-watermarked.mp4',
+      );
+      await burnWatermarkIntoVideo(finalOutputPath, watermarkedOutputPath);
+      cleanupFiles.push(watermarkedOutputPath);
+      finalOutputPath = watermarkedOutputPath;
 
       // Verify output file exists
       try {

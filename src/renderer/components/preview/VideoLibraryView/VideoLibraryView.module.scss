@@ -349,6 +349,21 @@
   color: #00d7ff;
 }
 
+.watermarkOverlay {
+  position: absolute;
+  right: $spacing-lg;
+  bottom: calc(10px + 56px);
+  z-index: 2;
+  pointer-events: none;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: lowercase;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+  user-select: none;
+}
+
 .videoPlaceholder {
   position: absolute;
   inset: 0;

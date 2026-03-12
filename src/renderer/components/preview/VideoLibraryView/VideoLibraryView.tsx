@@ -41,6 +41,8 @@ import {
 } from '../../../utils/captionGrouping';
 import styles from './VideoLibraryView.module.scss';
 
+const PREVIEW_WATERMARK_TEXT = 'kshana';
+
 function normalizeVideoSourcePath(path: string): string {
   const trimmed = path.trim();
   if (!trimmed) return '';
@@ -1683,6 +1685,9 @@ export default function VideoLibraryView({
                   </div>
                 </div>
               )}
+              <div className={styles.watermarkOverlay} aria-hidden>
+                {PREVIEW_WATERMARK_TEXT}
+              </div>
               <div className={styles.playerControls}>
                 <button
                   type="button"
