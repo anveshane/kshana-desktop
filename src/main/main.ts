@@ -19,6 +19,11 @@ import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 import { normalizePathForFFmpeg } from './utils/pathNormalizer';
 import {
+  configureAudioWaveformExtractor,
+  getAudioWaveform,
+  type AudioWaveformOptions,
+} from './utils/audioWaveform';
+import {
   assertCanonicalProjectContainment,
   normalizeIncomingPath,
   ProjectFileOpGuardError,
@@ -426,6 +431,32 @@ async function getAudioDuration(audioPath: string): Promise<number> {
     });
   });
 }
+
+ipcMain.handle(
+  'project:get-audio-waveform',
+  async (
+    _event,
+    audioPath: string,
+    options?: AudioWaveformOptions,
+  ): Promise<{ peaks: number[]; duration: number }> => {
+    const fullPath = path.normalize(
+      path.isAbsolute(audioPath) ? audioPath : path.resolve(audioPath),
+    );
+
+    try {
+      return await getAudioWaveform(fullPath, getAudioDuration, options);
+    } catch (error) {
+      log.warn(
+        `[Audio Waveform IPC] Error getting waveform for ${audioPath}:`,
+        error,
+      );
+      return {
+        peaks: [],
+        duration: await getAudioDuration(fullPath).catch(() => 0),
+      };
+    }
+  },
+);
 
 ipcMain.handle(
   'project:get-audio-duration',
@@ -1417,6 +1448,7 @@ if (app.isPackaged) {
 }
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
+configureAudioWaveformExtractor(ffmpegPath);
 log.info('[FFmpeg] Paths configured:', { ffmpeg: ffmpegPath, ffprobe: ffprobePath });
 
 interface TimelineItem {

@@ -6,7 +6,7 @@
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background-color: $color-background-dark;
+  background: $color-bg-app;
 }
 
 .header {
@@ -15,9 +15,10 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 $spacing-lg;
-  background-color: $color-panel-background;
-  border-bottom: 1px solid $color-panel-border;
+  background-color: rgba(var(--color-bg-panel-rgb), 0.98);
+  border-bottom: 1px solid rgba(var(--color-border-strong-rgb), 0.6);
   -webkit-app-region: drag;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .headerLeft,
@@ -32,18 +33,21 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
+  height: 30px;
   padding: 0 $spacing-sm;
-  border: 1px solid $color-panel-border;
-  border-radius: $radius-sm;
-  background-color: transparent;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.65);
+  border-radius: $radius-md;
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.65);
   color: $color-text-secondary;
   cursor: pointer;
-  transition: all $transition-fast;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    color $transition-fast;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.08);
-    border-color: rgba($color-text-primary, 0.2);
+    background-color: rgba(var(--color-bg-panel-soft-rgb), 0.82);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.28);
     color: $color-text-primary;
   }
 }
@@ -53,31 +57,38 @@
   min-width: 0;
   font-size: $font-size-sm;
   font-weight: $font-weight-semibold;
-  color: $color-text-secondary;
+  letter-spacing: 0.01em;
+  color: $color-text-primary;
   @include truncate;
 }
 
 .toggleButton {
   @include flex-center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: $radius-sm;
-  background-color: transparent;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: $radius-md;
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.36);
   color: $color-text-muted;
   cursor: pointer;
-  transition: all $transition-fast;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    color $transition-fast;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.08);
+    background-color: rgba(var(--color-bg-panel-soft-rgb), 0.72);
+    border-color: rgba(var(--color-border-strong-rgb), 0.75);
     color: $color-text-secondary;
   }
 
   &.active {
-    color: $color-accent-green;
+    color: $color-text-primary;
+    background-color: rgba(var(--color-accent-primary-rgb), 0.1);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.24);
 
     &:hover {
-      background-color: rgba($color-accent-green, 0.15);
+      background-color: rgba(var(--color-accent-primary-rgb), 0.13);
     }
   }
 }
@@ -89,7 +100,7 @@
 
 .resizeHandle {
   width: 4px;
-  background-color: transparent;
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.2);
   transition: background-color $transition-fast;
   position: relative;
 
@@ -100,22 +111,22 @@
     bottom: 0;
     left: 1px;
     width: 1px;
-    background-color: $color-panel-border;
+    background-color: rgba(var(--color-border-strong-rgb), 0.8);
   }
 
   &:hover {
-    background-color: rgba($color-accent-green, 0.3);
+    background-color: rgba(var(--color-accent-primary-rgb), 0.12);
     
     &::after {
-      background-color: $color-accent-green;
+      background-color: rgba(var(--color-accent-primary-rgb), 0.8);
     }
   }
 
   &[data-resize-handle-active] {
-    background-color: rgba($color-accent-green, 0.5);
+    background-color: rgba(var(--color-accent-primary-rgb), 0.18);
     
     &::after {
-      background-color: $color-accent-green;
+      background-color: rgba(var(--color-accent-primary-rgb), 0.92);
     }
   }
 }

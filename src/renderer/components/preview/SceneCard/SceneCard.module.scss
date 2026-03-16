@@ -27,8 +27,8 @@
   top: $spacing-sm;
   left: $spacing-sm;
   padding: $spacing-xs $spacing-sm;
-  background-color: rgba($color-accent-cyan, 0.9);
-  color: $color-background-dark;
+  background-color: rgba(var(--color-accent-primary-rgb), 0.88);
+  color: $color-text-primary;
   font-size: $font-size-xs;
   font-weight: $font-weight-semibold;
   border-radius: $radius-sm;
@@ -47,8 +47,8 @@
   height: 100%;
   background: linear-gradient(
     135deg,
-    rgba($color-panel-background, 0.8) 0%,
-    rgba($color-background-dark, 0.9) 100%
+    rgba(var(--color-panel-background-rgb), 0.8) 0%,
+    rgba(var(--color-background-dark-rgb), 0.9) 100%
   );
 }
 
@@ -70,7 +70,7 @@
 
 .tag {
   padding: $spacing-xs $spacing-sm;
-  background-color: rgba($color-text-primary, 0.05);
+  background-color: rgba(var(--color-text-primary-rgb), 0.05);
   color: $color-text-secondary;
   font-size: $font-size-xs;
   border-radius: $radius-full;
@@ -113,8 +113,8 @@
 
   &:hover {
     color: $color-text-primary;
-    border-color: $color-accent-cyan;
-    background-color: rgba($color-accent-cyan, 0.1);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.26);
+    background-color: rgba(var(--color-accent-primary-rgb), 0.08);
   }
 
   &:focus-visible {
@@ -137,11 +137,11 @@
 }
 
 .generated {
-  color: $color-accent-green;
+  color: $color-success;
 
   .statusDot {
-    background-color: $color-accent-green;
-    box-shadow: 0 0 6px rgba($color-accent-green, 0.6);
+    background-color: $color-success;
+    box-shadow: 0 0 6px rgba(var(--color-success-rgb), 0.35);
   }
 }
 
@@ -170,7 +170,6 @@
 
   &:hover {
     color: $color-text-secondary;
-    background-color: rgba($color-text-primary, 0.05);
+    background-color: rgba(var(--color-text-primary-rgb), 0.05);
   }
 }
-

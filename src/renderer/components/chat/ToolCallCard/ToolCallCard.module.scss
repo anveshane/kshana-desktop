@@ -6,29 +6,29 @@
   border-radius: $radius-md;
   padding: $spacing-sm $spacing-md;
   margin-bottom: $spacing-md;
-  background: rgba($color-panel-background, 0.5);
+  background: rgba(var(--color-panel-background-rgb), 0.5);
   transition: all $transition-normal;
   max-width: 100%;
   overflow: hidden;
 
   &.borderExecuting {
     border-color: $color-warning;
-    background: rgba($color-warning, 0.1);
+    background: rgba(var(--color-warning-rgb), 0.1);
   }
 
   &.borderCompleted {
     border-color: $color-accent-green;
-    background: rgba($color-accent-green, 0.05);
+    background: rgba(var(--color-accent-green-rgb), 0.05);
   }
 
   &.borderError {
     border-color: $color-error;
-    background: rgba($color-error, 0.1);
+    background: rgba(var(--color-error-rgb), 0.1);
   }
 
   &.borderNeedsConfirmation {
     border-color: $color-accent-cyan;
-    background: rgba($color-accent-cyan, 0.1);
+    background: rgba(var(--color-accent-cyan-rgb), 0.1);
   }
 
   &.borderDefault {
@@ -53,7 +53,7 @@
   user-select: none;
   
   &:hover {
-    background: rgba($color-text-primary, 0.03);
+    background: rgba(var(--color-text-primary-rgb), 0.03);
   }
   
   &:focus-visible {
@@ -134,7 +134,7 @@
 .content {
   margin-top: $spacing-sm;
   padding-left: $spacing-lg;
-  border-top: 1px solid rgba($color-panel-border, 0.5);
+  border-top: 1px solid rgba(var(--color-panel-border-rgb), 0.5);
   padding-top: $spacing-sm;
   max-width: 100%;
   overflow: hidden;
@@ -175,7 +175,7 @@
   font-family: $font-family-mono;
   font-size: $font-size-xs;
   color: $color-error;
-  background: rgba($color-error, 0.1);
+  background: rgba(var(--color-error-rgb), 0.1);
   padding: $spacing-xs $spacing-sm;
   border-radius: $radius-sm;
   white-space: pre-wrap;
@@ -252,7 +252,7 @@
   margin-top: $spacing-sm;
   padding-left: $spacing-md;
   padding-top: $spacing-sm;
-  border-top: 1px solid rgba($color-panel-border, 0.3);
+  border-top: 1px solid rgba(var(--color-panel-border-rgb), 0.3);
   color: $color-text-secondary;
   font-size: $font-size-sm;
   line-height: 1.6;
@@ -274,7 +274,7 @@
   border-radius: $radius-md;
   padding: $spacing-md;
   margin-bottom: $spacing-md;
-  background: rgba($color-accent-cyan, 0.05);
+  background: rgba(var(--color-accent-cyan-rgb), 0.05);
 }
 
 .dispatchHeader {
@@ -339,7 +339,7 @@
   border-radius: $radius-md;
   padding: $spacing-md;
   margin-bottom: $spacing-md;
-  background: rgba($color-accent-cyan, 0.05);
+  background: rgba(var(--color-accent-cyan-rgb), 0.05);
 }
 
 .projectStateHeader {
@@ -389,7 +389,7 @@
 .streamingContent {
   margin-top: $spacing-sm;
   padding: $spacing-sm;
-  background: rgba($color-accent-blue, 0.05);
+  background: rgba(var(--color-accent-blue-rgb), 0.05);
   border-radius: $radius-sm;
   border-left: 2px solid $color-accent-blue;
 }
@@ -419,7 +419,7 @@
     
     code {
       font-family: $font-family-mono;
-      background-color: rgba($color-text-primary, 0.1);
+      background-color: rgba(var(--color-text-primary-rgb), 0.1);
       padding: 2px 4px;
       border-radius: $radius-sm;
       font-size: 0.9em;
@@ -472,7 +472,7 @@
   color: $color-accent-green;
   margin-bottom: $spacing-xs;
   padding: $spacing-xs $spacing-sm;
-  background: rgba($color-accent-green, 0.1);
+  background: rgba(var(--color-accent-green-rgb), 0.1);
   border-radius: $radius-sm;
   border-left: 2px solid $color-accent-green;
   border-top: none;
@@ -485,7 +485,7 @@
   transition: background-color $transition-fast;
   
   &:hover {
-    background: rgba($color-accent-green, 0.2);
+    background: rgba(var(--color-accent-green-rgb), 0.2);
     color: $color-accent-green;
   }
   
@@ -540,8 +540,8 @@
 }
 
 .summaryCard {
-  border: 1px solid rgba($color-panel-border, 0.6);
-  background: rgba($color-panel-background, 0.35);
+  border: 1px solid rgba(var(--color-panel-border-rgb), 0.6);
+  background: rgba(var(--color-panel-background-rgb), 0.35);
   border-radius: $radius-sm;
   padding: $spacing-sm;
   margin-bottom: $spacing-sm;
@@ -561,7 +561,7 @@
   margin-top: $spacing-sm;
   padding: $spacing-xs $spacing-sm;
   border-left: 2px solid $color-error;
-  background: rgba($color-error, 0.12);
+  background: rgba(var(--color-error-rgb), 0.12);
   color: $color-error;
   border-radius: $radius-sm;
   font-size: $font-size-xs;

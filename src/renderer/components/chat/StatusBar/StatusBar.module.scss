@@ -4,14 +4,14 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 16px;
-  background-color: var(--color-bg-panel, #161b22);
-  border-bottom: 1px solid var(--color-border, #30363d);
+  background-color: var(--color-bg-panel-elevated, #2d2d2d);
+  border-bottom: 1px solid var(--color-border, #3a3a3a);
   font-family: var(--font-mono, monospace);
   font-size: 13px;
   position: sticky;
   top: 0;
   z-index: 10;
-  color: var(--color-text-secondary, #8b949e);
+  color: var(--color-text-secondary, #a0a0a0);
   min-height: 36px;
 }
 
@@ -24,17 +24,18 @@
 
 .agentName {
   font-weight: 600;
-  color: var(--color-accent-blue, #58a6ff);
+  color: var(--color-accent-primary, #0078d4);
   margin-right: 8px;
 }
 
 .phaseName {
   font-weight: 500;
-  color: var(--color-text-primary, #c9d1d9);
+  color: var(--color-text-primary, #d4d4d4);
   margin-right: 8px;
   padding: 2px 8px;
-  background-color: var(--color-bg-tertiary, #21262d);
-  border-radius: 4px;
+  background-color: var(--color-bg-tertiary, #333333);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
   font-size: 12px;
 }
 
@@ -47,23 +48,23 @@
   flex-shrink: 0;
 
   &.ready {
-    background-color: var(--color-success, #238636);
-    box-shadow: 0 0 4px var(--color-success, #238636);
+    background-color: var(--color-success, #7c9a86);
+    box-shadow: 0 0 0 3px rgba(115, 187, 147, 0.16);
   }
 
   &.thinking, &.executing {
-    background-color: var(--color-warning, #d29922);
-    box-shadow: 0 0 4px var(--color-warning, #d29922);
+    background-color: var(--color-warning, #b99258);
+    box-shadow: 0 0 0 3px rgba(215, 171, 98, 0.14);
     animation: pulse 1.5s infinite;
   }
 
   &.error {
-    background-color: var(--color-danger, #f85149);
-    box-shadow: 0 0 4px var(--color-danger, #f85149);
+    background-color: var(--color-danger, #b87070);
+    box-shadow: 0 0 0 3px rgba(223, 118, 118, 0.14);
   }
 
   &.completed {
-    background-color: var(--color-accent-primary, #1f6feb);
+    background-color: var(--color-accent-primary, #0078d4);
   }
 }
 
@@ -87,21 +88,21 @@
   padding: 0 8px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: rgba(255, 255, 255, 0.03);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .metricRunning {
-  color: var(--color-warning, #d29922);
+  color: var(--color-warning, #b99258);
 }
 
 .metricPaused {
-  color: var(--color-text-secondary, #8b949e);
+  color: var(--color-text-secondary, #a0a0a0);
 }
 
 .metricCompleted {
-  color: var(--color-success, #238636);
+  color: var(--color-success, #7c9a86);
 }
 
 @keyframes pulse {

@@ -42,7 +42,7 @@
   border: 1px solid transparent;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.05);
+    background-color: rgba(var(--color-text-primary-rgb), 0.05);
   }
 
   &.active {
@@ -56,7 +56,7 @@
   display: flex;
   gap: $spacing-xs;
   padding: $spacing-xs;
-  background-color: rgba($color-text-primary, 0.05);
+  background-color: rgba(var(--color-text-primary-rgb), 0.05);
   border-radius: $radius-sm;
 }
 

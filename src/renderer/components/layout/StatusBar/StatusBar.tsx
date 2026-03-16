@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings, HelpCircle } from 'lucide-react';
+import { HelpCircle } from 'lucide-react';
 import styles from './StatusBar.module.scss';
 
 const FALLBACK_APP_VERSION = 'v?.?.?';
@@ -38,9 +38,6 @@ export default function StatusBar() {
         <span className={styles.version}>{appVersion}</span>
         <button type="button" className={styles.iconButton} title="Help">
           <HelpCircle size={14} />
-        </button>
-        <button type="button" className={styles.iconButton} title="Settings">
-          <Settings size={14} />
         </button>
       </div>
     </footer>

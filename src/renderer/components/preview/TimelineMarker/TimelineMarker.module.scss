@@ -12,32 +12,32 @@
 
 .markerFlag {
   position: absolute;
-  top: 30px;
-  left: -6px;
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 12px solid;
+  top: 26px;
+  left: -7px;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px 4px 4px 0;
+  border: 1px solid rgba(var(--color-bg-panel-inset-rgb), 0.75);
+  transform: rotate(45deg);
   pointer-events: auto;
   cursor: pointer;
   transition: all $transition-fast;
 }
 
 .marker.pending .markerFlag {
-  border-bottom-color: $color-timeline-marker-pending;
+  background-color: $color-timeline-marker-pending;
 }
 
 .marker.processing .markerFlag {
-  border-bottom-color: $color-timeline-marker-processing;
+  background-color: $color-timeline-marker-processing;
 }
 
 .marker.complete .markerFlag {
-  border-bottom-color: $color-timeline-marker-complete;
+  background-color: $color-timeline-marker-complete;
 }
 
 .marker.error .markerFlag {
-  border-bottom-color: $color-timeline-marker-error;
+  background-color: $color-timeline-marker-error;
 }
 
 .marker.pulsing .markerFlag {
@@ -57,13 +57,13 @@
 
 .markerTooltip {
   position: absolute;
-  top: 45px;
-  left: -100px;
-  width: 200px;
-  padding: $spacing-sm;
-  background-color: $color-panel-background;
-  border: 1px solid $color-panel-border;
-  border-radius: $radius-sm;
+  top: 48px;
+  left: -104px;
+  width: 208px;
+  padding: $spacing-sm $spacing-md;
+  background-color: rgba(var(--color-bg-panel-elevated-rgb), 0.98);
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.68);
+  border-radius: $radius-md;
   box-shadow: $shadow-md;
   z-index: 100;
   pointer-events: auto;
@@ -86,4 +86,3 @@
   color: $color-text-secondary;
   line-height: $line-height-normal;
 }
-

@@ -5,18 +5,18 @@
   margin-bottom: 4px;
   border: 1px solid $color-panel-border;
   border-radius: $radius-sm;
-  background: rgba($color-panel-background, 0.5);
+  background: rgba(var(--color-panel-background-rgb), 0.5);
   overflow: hidden;
   transition: all $transition-normal;
 
   &.active {
     border-color: $color-accent-green;
-    background: rgba($color-accent-green, 0.05);
+    background: rgba(var(--color-accent-green-rgb), 0.05);
   }
 
   &.error {
     border-color: $color-error;
-    background: rgba($color-error, 0.05);
+    background: rgba(var(--color-error-rgb), 0.05);
   }
 }
 
@@ -36,7 +36,7 @@
   height: 28px;
 
   &:hover {
-    background: rgba($color-text-primary, 0.05);
+    background: rgba(var(--color-text-primary-rgb), 0.05);
   }
 
   &:focus-visible {

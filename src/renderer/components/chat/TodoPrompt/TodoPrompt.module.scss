@@ -5,13 +5,7 @@
   margin: 0 $spacing-md $spacing-sm;
   border: none;
   border-radius: 18px;
-  background:
-    linear-gradient(
-      145deg,
-      rgba($color-accent-cyan, 0.1),
-      rgba($color-accent-green, 0.09)
-    ),
-    rgba(11, 15, 24, 0.82);
+  background: rgba(var(--color-bg-panel-elevated-rgb), 0.98);
   box-shadow:
     0 12px 28px rgba(0, 0, 0, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -34,7 +28,7 @@
   transition: background $transition-fast;
 
   &:hover {
-    background: rgba($color-accent-cyan, 0.045);
+    background: rgba(var(--color-accent-primary-rgb), 0.04);
   }
 }
 
@@ -64,7 +58,7 @@
 .icon {
   width: 15px;
   height: 15px;
-  color: $color-accent-cyan;
+  color: $color-accent-primary;
 }
 
 .progressBadge {
@@ -75,7 +69,7 @@
   height: 22px;
   padding: 0 8px;
   border-radius: 999px;
-  background: rgba($color-text-primary, 0.07);
+  background: rgba(var(--color-text-primary-rgb), 0.07);
   color: $color-text-primary;
   font-size: 11px;
   font-weight: $font-weight-semibold;
@@ -101,7 +95,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 0 12px 10px;
-  border-top: 1px solid rgba($color-panel-border, 0.45);
+  border-top: 1px solid rgba(var(--color-panel-border-rgb), 0.45);
 }
 
 .todoItem {
@@ -127,7 +121,7 @@
 }
 
 .statuscompleted {
-  color: $color-accent-green;
+  color: $color-accent-primary;
 }
 
 .statuscancelled {

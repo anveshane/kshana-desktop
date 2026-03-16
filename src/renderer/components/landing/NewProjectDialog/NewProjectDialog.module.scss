@@ -67,9 +67,9 @@
   font-family: $font-family-base;
 
   &:focus {
-    border-color: rgba($color-accent-green, 0.7);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.4);
     outline: none;
-    box-shadow: 0 0 0 2px rgba($color-accent-green, 0.15);
+    box-shadow: 0 0 0 2px rgba(var(--color-accent-primary-rgb), 0.14);
   }
 }
 

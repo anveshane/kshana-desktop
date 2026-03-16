@@ -40,6 +40,7 @@ export interface TimelineItem {
   imagePath?: string;
   videoPath?: string;
   audioPath?: string;
+  waveformPeaks?: number[];
   sourceStartTime?: number;
   sourceEndTime?: number;
   sourceOffsetSeconds?: number;
@@ -69,6 +70,7 @@ export interface TimelineDataWithRefresh extends TimelineData {
 export interface TimelineAudioFile {
   path: string;
   duration: number;
+  waveformPeaks?: number[];
 }
 
 interface LatestRequestRef {
@@ -110,6 +112,12 @@ function isSupportedAudioFileName(fileName: string): boolean {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function getAudioLabelFromPath(audioPath: string): string {
+  const fileName = audioPath.split(/[\\/]/).pop() ?? '';
+  const label = fileName.replace(/\.[^.]+$/, '').trim();
+  return label || 'Audio Track';
 }
 
 function isValidSegmentRange(segment: ServerTimelineSegment): boolean {
@@ -383,6 +391,45 @@ export async function collectAudioFilesWithDuration({
   });
 }
 
+export async function attachWaveformPeaksToAudioFiles({
+  audioFiles,
+  projectDirectory,
+  getAudioWaveform,
+}: {
+  audioFiles: TimelineAudioFile[];
+  projectDirectory: string;
+  getAudioWaveform: (
+    audioPath: string,
+    options?: { sampleCount?: number },
+  ) => Promise<{ peaks: number[]; duration: number }>;
+}): Promise<TimelineAudioFile[]> {
+  const waveformResults = await Promise.allSettled(
+    audioFiles.map(async (audioFile) => {
+      const fullAudioPath = `${projectDirectory}/${audioFile.path}`;
+      const waveformResult = await getAudioWaveform(fullAudioPath);
+      return {
+        ...audioFile,
+        duration:
+          waveformResult.duration > 0
+            ? waveformResult.duration
+            : audioFile.duration,
+        waveformPeaks:
+          Array.isArray(waveformResult.peaks) &&
+          waveformResult.peaks.length > 0
+            ? waveformResult.peaks
+            : undefined,
+      } satisfies TimelineAudioFile;
+    }),
+  );
+
+  return audioFiles.map((audioFile, index) => {
+    const waveformResult = waveformResults[index];
+    return waveformResult?.status === 'fulfilled'
+      ? waveformResult.value
+      : audioFile;
+  });
+}
+
 export async function runLatestAsyncTask<T>({
   requestRef,
   task,
@@ -480,33 +527,62 @@ export function useTimelineData(
       return;
     }
 
+    const requestId = audioReloadRequestIdRef.current + 1;
+    audioReloadRequestIdRef.current = requestId;
     setIsAudioLoading(true);
-    await runLatestAsyncTask({
-      requestRef: audioReloadRequestIdRef,
-      task: async () => {
-        try {
-          const audioDir = `${projectDirectory}/${PROJECT_PATHS.AGENT_AUDIO}`;
-          const files = await window.electron.project.readTree(audioDir, 1);
-          return await collectAudioFilesWithDuration({
-            files,
-            projectDirectory,
-            transcriptDuration,
-            getAudioDuration: (audioPath: string) =>
-              window.electron.project.getAudioDuration(audioPath),
-          });
-        } catch (error) {
+
+    try {
+      const audioDir = `${projectDirectory}/${PROJECT_PATHS.AGENT_AUDIO}`;
+      const files = await window.electron.project.readTree(audioDir, 1);
+      const nextAudioFiles = await collectAudioFilesWithDuration({
+        files,
+        projectDirectory,
+        transcriptDuration,
+        getAudioDuration: (audioPath: string) =>
+          window.electron.project.getAudioDuration(audioPath),
+      });
+
+      if (requestId !== audioReloadRequestIdRef.current) {
+        return;
+      }
+
+      setAudioFiles(nextAudioFiles);
+      setIsAudioLoading(false);
+
+      if (nextAudioFiles.length === 0) {
+        return;
+      }
+
+      void attachWaveformPeaksToAudioFiles({
+        audioFiles: nextAudioFiles,
+        projectDirectory,
+        getAudioWaveform: (audioPath: string, options) =>
+          window.electron.project.getAudioWaveform(audioPath, options),
+      })
+        .then((audioFilesWithWaveforms) => {
+          if (requestId !== audioReloadRequestIdRef.current) {
+            return;
+          }
+          setAudioFiles(audioFilesWithWaveforms);
+        })
+        .catch((error) => {
           debugRendererDebug(
-            '[useTimelineData] Audio directory not found or error loading:',
+            '[useTimelineData] Failed to attach audio waveforms:',
             error,
           );
-          return [];
-        }
-      },
-      commit: (nextAudioFiles) => {
-        setAudioFiles(nextAudioFiles);
-        setIsAudioLoading(false);
-      },
-    });
+        });
+    } catch (error) {
+      if (requestId !== audioReloadRequestIdRef.current) {
+        return;
+      }
+
+      debugRendererDebug(
+        '[useTimelineData] Audio directory not found or error loading:',
+        error,
+      );
+      setAudioFiles([]);
+      setIsAudioLoading(false);
+    }
   }, [projectDirectory, isLoaded, transcriptDuration]);
 
   useEffect(() => {
@@ -712,8 +788,9 @@ export function useTimelineData(
         startTime: 0,
         endTime: audioFile.duration || calculatedTotalDuration,
         duration: audioFile.duration || calculatedTotalDuration,
-        label: 'Audio Track',
+        label: getAudioLabelFromPath(audioFile.path),
         audioPath: audioFile.path,
+        waveformPeaks: audioFile.waveformPeaks,
       });
     });
 

@@ -13,6 +13,7 @@ import { json } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { yaml } from '@codemirror/lang-yaml';
 import { oneDark } from '@codemirror/theme-one-dark';
+import { useAppSettings } from '../../../contexts/AppSettingsContext';
 import styles from './CodePreview.module.scss';
 
 // Check if CodeMirror is available - handle case where imports might fail
@@ -154,6 +155,9 @@ export default function CodePreview({
   filePath,
   onDirtyChange,
 }: CodePreviewProps) {
+  const { themeId } = useAppSettings();
+  const isLightTheme = themeId === 'paper-light';
+
   // Use plain text fallback if CodeMirror is not available
   if (!codemirrorAvailable) {
     return (
@@ -258,7 +262,7 @@ export default function CodePreview({
           lineNumbers(),
           highlightActiveLine(),
           keymap.of(searchKeymap),
-          oneDark,
+          ...(isLightTheme ? [] : [oneDark]),
           EditorView.editable.of(true),
           EditorView.lineWrapping,
           updateListener,
@@ -289,7 +293,7 @@ export default function CodePreview({
         viewRef.current = null;
       }
     };
-  }, [content, extension, onDirtyChange]);
+  }, [content, extension, isLightTheme, onDirtyChange]);
 
   // If CodeMirror fails to initialize, fall back to plain text editor
   if (error === 'FALLBACK_TO_PLAINTEXT') {
@@ -312,7 +316,9 @@ export default function CodePreview({
   }
 
   return (
-    <div className={styles.container}>
+    <div
+      className={`${styles.container} ${isLightTheme ? styles.lightTheme : ''}`}
+    >
       {fileName && (
         <div className={styles.fileName}>
           {fileName}

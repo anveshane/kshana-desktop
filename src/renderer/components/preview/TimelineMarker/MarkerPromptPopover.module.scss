@@ -50,7 +50,7 @@
   transition: all $transition-fast;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.1);
+    background-color: rgba(var(--color-text-primary-rgb), 0.1);
     color: $color-text-secondary;
   }
 }
@@ -94,8 +94,8 @@
 
   &:focus {
     outline: none;
-    border-color: $color-accent-green;
-    box-shadow: 0 0 0 2px rgba($color-accent-green, 0.2);
+    border-color: $color-accent-primary;
+    box-shadow: 0 0 0 2px rgba(var(--color-accent-primary-rgb), 0.18);
   }
 
   &::placeholder {
@@ -142,17 +142,17 @@
   color: $color-text-secondary;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.1);
+    background-color: rgba(var(--color-text-primary-rgb), 0.1);
     color: $color-text-primary;
   }
 }
 
 .submitButton {
-  background-color: $color-accent-green;
+  background-color: $color-accent-primary;
   color: $color-background-dark;
 
   &:hover:not(:disabled) {
-    background-color: color.adjust($color-accent-green, $lightness: 5%);
+    background-color: $color-accent-primary-hover;
   }
 
   &:disabled {
@@ -160,4 +160,3 @@
     cursor: not-allowed;
   }
 }
-

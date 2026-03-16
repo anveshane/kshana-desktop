@@ -127,8 +127,8 @@
   border-color: $color-accent-green;
 
   &:hover:not(:disabled) {
-    background: #00f584;
-    border-color: #00f584;
+    background: $color-accent-primary-hover;
+    border-color: $color-accent-primary-hover;
   }
 }
 

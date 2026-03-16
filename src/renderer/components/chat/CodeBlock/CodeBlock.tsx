@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Copy, Check } from 'lucide-react';
+import { useAppSettings } from '../../../contexts/AppSettingsContext';
 import styles from './CodeBlock.module.scss';
 
 interface CodeBlockProps {
@@ -10,7 +12,9 @@ interface CodeBlockProps {
 }
 
 export default function CodeBlock({ code, language = 'text' }: CodeBlockProps) {
+  const { themeId } = useAppSettings();
   const [copied, setCopied] = useState(false);
+  const syntaxStyle = themeId === 'paper-light' ? oneLight : vscDarkPlus;
 
   const handleCopy = async () => {
     try {
@@ -49,12 +53,13 @@ export default function CodeBlock({ code, language = 'text' }: CodeBlockProps) {
       <div className={styles.codeWrapper}>
         <SyntaxHighlighter
           language={language}
-          style={vscDarkPlus}
+          style={syntaxStyle}
           customStyle={{
             margin: 0,
             padding: 0,
             background: 'transparent',
             fontSize: '12px',
+            color: 'var(--color-text-primary)',
             fontFamily:
               'JetBrains Mono, Fira Code, SF Mono, Consolas, monospace',
           }}

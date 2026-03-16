@@ -5,8 +5,8 @@
   margin: $spacing-md 0;
   border-radius: $radius-lg;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid $color-panel-border;
+  background: $color-code-bg;
+  border: 1px solid $color-code-border;
 }
 
 .header {
@@ -14,8 +14,8 @@
   align-items: center;
   justify-content: space-between;
   padding: $spacing-sm $spacing-md;
-  background: rgba(0, 0, 0, 0.2);
-  border-bottom: 1px solid $color-panel-border;
+  background: $color-code-gutter-bg;
+  border-bottom: 1px solid $color-code-border;
 }
 
 .language {
@@ -40,7 +40,7 @@
   transition: all $transition-fast;
 
   &:hover {
-    background: rgba($color-accent-green, 0.1);
+    background: rgba(var(--color-accent-green-rgb), 0.1);
     border-color: $color-accent-green;
     color: $color-accent-green;
   }
@@ -54,7 +54,7 @@
   overflow-x: auto;
   @include custom-scrollbar;
   padding: $spacing-md;
-  background: rgba(0, 0, 0, 0.2);
+  background: $color-code-bg;
 }
 
 // Override syntax highlighter styles
@@ -63,4 +63,3 @@
   padding: 0 !important;
   background: transparent !important;
 }
-

@@ -1,28 +1,36 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { ChevronUp, Settings } from 'lucide-react';
-import type { AppSettings } from '../../../../shared/settingsTypes';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
+import {
+  ChevronUp,
+  FolderKanban,
+  Clapperboard,
+  FileCode2,
+} from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { TimelineDataProvider } from '../../../contexts/TimelineDataContext';
+import { useAppSettings } from '../../../contexts/AppSettingsContext';
 import { useBackendHealth } from '../../../hooks/useBackendHealth';
 import type { SceneVersions } from '../../../types/kshana/timeline';
 import AssetsView from '../AssetsView/AssetsView';
 import VideoLibraryView from '../VideoLibraryView/VideoLibraryView';
 import PlansView from '../PlansView/PlansView';
 import TimelinePanel from '../TimelinePanel/TimelinePanel';
-import SettingsPanel from '../../SettingsPanel';
+import { TimelineDockIcon } from '../EditorIcons';
 import styles from './PreviewPanel.module.scss';
 
 type Tab = 'storyboard' | 'assets' | 'video-library' | 'preview';
 
 export default function PreviewPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('video-library');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [isRestartingBackend, setIsRestartingBackend] = useState(false);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [timelineOpen, setTimelineOpen] = useState(false);
-  const [timelineHeight, setTimelineHeight] = useState(300);
+  const [timelineOpen, setTimelineOpen] = useState(true);
+  const [timelineHeight, setTimelineHeight] = useState(320);
 
   // Shared playback state for timeline and video preview synchronization
   const [playbackTime, setPlaybackTime] = useState(0);
@@ -34,18 +42,44 @@ export default function PreviewPanel() {
   );
 
   const {
-    connectionState,
     projectDirectory,
     pendingFileNavigation,
     clearFileNavigation,
   } = useWorkspace();
+  const { settings } = useAppSettings();
 
+  const tabs = useMemo(
+    () => [
+      {
+        id: 'video-library' as const,
+        label: 'Library',
+        icon: Clapperboard,
+      },
+      {
+        id: 'assets' as const,
+        label: 'Assets',
+        icon: FolderKanban,
+      },
+      {
+        id: 'preview' as const,
+        label: 'Files',
+        icon: FileCode2,
+      },
+    ],
+    [],
+  );
   // Handle file navigation from chat panel
   useEffect(() => {
     if (pendingFileNavigation) {
       setActiveTab('preview');
     }
   }, [pendingFileNavigation]);
+
+  useEffect(() => {
+    if (projectDirectory) {
+      setTimelineOpen(true);
+    }
+  }, [projectDirectory]);
   const { timelineState, scenes: projectScenes } = useProject();
 
   // Initialize activeVersions from timelineState with migration support
@@ -143,7 +177,7 @@ export default function PreviewPanel() {
 
   // Handle timeline resize
   const handleTimelineResize = useCallback(
-    (e: React.MouseEvent) => {
+    (e: ReactMouseEvent) => {
       e.preventDefault();
       const startY = e.clientY;
       const startHeight = timelineHeight;
@@ -167,50 +201,6 @@ export default function PreviewPanel() {
 
   // Check backend health periodically
   useBackendHealth(settings);
-
-  // Load settings on mount
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const storedSettings = await window.electron.settings.get();
-        setSettings(storedSettings);
-      } catch (error) {
-        console.error('Failed to load settings:', error);
-      }
-    };
-    loadSettings();
-
-    // Subscribe to settings changes
-    const unsubscribe = window.electron.settings.onChange((next) => {
-      setSettings(next);
-    });
-
-    return unsubscribe;
-  }, []);
-
-  const handleSaveSettings = useCallback(async (next: AppSettings) => {
-    setIsRestartingBackend(true);
-    setSettingsError(null);
-    try {
-      const updated = await window.electron.settings.update(next);
-      setSettings(updated);
-      const result = await window.electron.backend.restart();
-      if (result.status === 'error') {
-        setSettingsError(
-          result.message || 'Failed to connect to backend server',
-        );
-      } else {
-        setSettingsOpen(false);
-      }
-    } catch (error) {
-      console.error('Failed to restart backend:', error);
-      setSettingsError(
-        error instanceof Error ? error.message : 'Failed to save settings',
-      );
-    } finally {
-      setIsRestartingBackend(false);
-    }
-  }, []);
 
   const shouldHydrateTimeline = activeTab === 'video-library' || timelineOpen;
 
@@ -247,15 +237,23 @@ export default function PreviewPanel() {
 
     if (!timelineOpen) {
       return (
-        <div className={styles.timelineContainer}>
+        <div className={`${styles.timelineContainer} ${styles.timelineDock}`}>
           <button
             type="button"
             className={styles.timelineCollapsedButton}
             onClick={() => setTimelineOpen(true)}
             title="Show Timeline"
           >
-            <span className={styles.timelineCollapsedLabel}>Timeline</span>
-            <ChevronUp size={16} />
+            <span className={styles.timelineCollapsedMeta}>
+              <TimelineDockIcon size={16} />
+              <span className={styles.timelineCollapsedLabel}>
+                Timeline hidden
+              </span>
+            </span>
+            <span className={styles.timelineCollapsedHint}>
+              Open editor dock
+              <ChevronUp size={16} />
+            </span>
           </button>
         </div>
       );
@@ -285,64 +283,26 @@ export default function PreviewPanel() {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <div className={styles.tabs}>
-          <button
-            type="button"
-            className={`${styles.tab} ${activeTab === 'video-library' ? styles.active : ''}`}
-            onClick={() => setActiveTab('video-library')}
+        <div className={styles.headerLeft}>
+          <div
+            className={styles.tabs}
+            role="tablist"
+            aria-label="Workspace views"
           >
-            Video Library
-          </button>
-          {/* Storyboard tab hidden for now */}
-          {/* <button
-            type="button"
-            className={`${styles.tab} ${activeTab === 'storyboard' ? styles.active : ''}`}
-            onClick={() => setActiveTab('storyboard')}
-          >
-            Storyboard
-          </button> */}
-          <button
-            type="button"
-            className={`${styles.tab} ${activeTab === 'assets' ? styles.active : ''}`}
-            onClick={() => setActiveTab('assets')}
-          >
-            Assets
-          </button>
-          <button
-            type="button"
-            className={`${styles.tab} ${activeTab === 'preview' ? styles.active : ''}`}
-            onClick={() => setActiveTab('preview')}
-          >
-            Preview
-          </button>
-        </div>
-
-        <div className={styles.headerRight}>
-          <div className={styles.statusIndicators}>
-            <div className={styles.statusItem}>
-              <span
-                className={`${styles.statusDot} ${
-                  connectionState.server === 'connected' ? styles.connected : ''
-                }`}
-              />
-              <span className={styles.statusLabel}>
-                Backend:{' '}
-                {connectionState.server === 'connected'
-                  ? 'Connected'
-                  : connectionState.server === 'connecting'
-                    ? 'Starting'
-                    : 'Offline'}
-              </span>
-            </div>
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.tab} ${activeTab === id ? styles.active : ''}`}
+                onClick={() => setActiveTab(id)}
+                role="tab"
+                aria-selected={activeTab === id}
+              >
+                <Icon size={15} />
+                <span>{label}</span>
+              </button>
+            ))}
           </div>
-          <button
-            type="button"
-            className={styles.settingsButton}
-            title="Settings"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings size={16} />
-          </button>
         </div>
       </div>
 
@@ -360,17 +320,6 @@ export default function PreviewPanel() {
         )}
       </div>
 
-      <SettingsPanel
-        isOpen={settingsOpen}
-        settings={settings}
-        onClose={() => {
-          setSettingsOpen(false);
-          setSettingsError(null);
-        }}
-        onSave={handleSaveSettings}
-        isRestarting={isRestartingBackend}
-        error={settingsError}
-      />
     </div>
   );
 }

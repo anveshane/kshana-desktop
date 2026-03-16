@@ -44,6 +44,12 @@ import type {
 } from '../../../types/kshana';
 import type { SceneVersions } from '../../../types/kshana/timeline';
 import { PROJECT_PATHS, createAssetInfo } from '../../../types/kshana';
+import {
+  TrackAudioIcon,
+  TrackOverlayIcon,
+  TrackTextIcon,
+  TrackVisualIcon,
+} from '../EditorIcons';
 import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
 import VersionSelector from '../VersionSelector';
@@ -55,6 +61,114 @@ import styles from './TimelinePanel.module.scss';
 
 const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 const modKey = isMac ? 'Cmd' : 'Ctrl';
+const AUDIO_WAVEFORM_HEIGHT = 28;
+
+function downsampleWaveformPeaks(
+  peaks: number[],
+  targetSamples: number,
+): number[] {
+  if (peaks.length <= targetSamples) {
+    return peaks;
+  }
+
+  const downsampled: number[] = [];
+  for (let index = 0; index < targetSamples; index += 1) {
+    const startIndex = Math.floor((index * peaks.length) / targetSamples);
+    const endIndex = Math.max(
+      startIndex + 1,
+      Math.floor(((index + 1) * peaks.length) / targetSamples),
+    );
+
+    let bucketPeak = 0;
+    for (let sampleIndex = startIndex; sampleIndex < endIndex; sampleIndex += 1) {
+      bucketPeak = Math.max(bucketPeak, peaks[sampleIndex] ?? 0);
+    }
+
+    downsampled.push(bucketPeak);
+  }
+
+  return downsampled;
+}
+
+function AudioWaveform({
+  peaks,
+  width,
+}: {
+  peaks?: number[];
+  width: number;
+}) {
+  const waveformBars = useMemo(() => {
+    if (!peaks?.length) {
+      return [];
+    }
+
+    const svgWidth = Math.max(1, Math.round(width));
+    const barWidth = 2;
+    const barGap = 1;
+    const centerY = AUDIO_WAVEFORM_HEIGHT / 2;
+    const usableHeight = AUDIO_WAVEFORM_HEIGHT * 0.42;
+    const maxColumns = Math.max(10, Math.floor(svgWidth / (barWidth + barGap)));
+    const columns = downsampleWaveformPeaks(
+      peaks,
+      Math.max(1, Math.min(peaks.length, maxColumns)),
+    );
+    const totalBarsWidth =
+      columns.length * barWidth + Math.max(0, columns.length - 1) * barGap;
+    const startX = (svgWidth - totalBarsWidth) / 2;
+
+    return columns.map((peak, index) => {
+      const amplitude = Math.max(0.08, Math.min(1, peak));
+      const barHeight = Math.max(2, amplitude * usableHeight * 2);
+      const x = startX + index * (barWidth + barGap);
+      const y = centerY - barHeight / 2;
+      const dotRadius = 1.4;
+      const dotY = Math.max(dotRadius + 0.5, y - dotRadius - 0.8);
+
+      return {
+        x,
+        y,
+        barHeight,
+        dotRadius,
+        dotY,
+        showPeakDot: amplitude > 0.72,
+      };
+    });
+  }, [peaks, width]);
+
+  if (!waveformBars.length) {
+    return <div className={styles.audioWaveformPlaceholder} />;
+  }
+
+  return (
+    <svg
+      className={styles.audioWaveformSvg}
+      viewBox={`0 0 ${Math.max(1, Math.round(width))} ${AUDIO_WAVEFORM_HEIGHT}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      {waveformBars.map(({ x, y, barHeight, dotRadius, dotY, showPeakDot }, index) => (
+        <g key={`waveform-bar-${index}`}>
+          <rect
+            className={styles.audioWaveformBar}
+            x={x}
+            y={y}
+            width={2}
+            height={barHeight}
+            rx={0.75}
+          />
+          {showPeakDot ? (
+            <circle
+              className={styles.audioWaveformPeakDot}
+              cx={x + 1}
+              cy={dotY}
+              r={dotRadius}
+            />
+          ) : null}
+        </g>
+      ))}
+    </svg>
+  );
+}
 
 // Timeline Item Component for proper hook usage
 interface TimelineItemComponentProps {
@@ -286,8 +400,15 @@ function TimelineItemComponent({
         }}
         title={item.label}
       >
-        <div className={styles.audioWaveform} />
-        <div className={styles.audioLabel}>{item.label}</div>
+        <div className={styles.audioMetaRow}>
+          <span className={styles.audioClipIcon}>
+            <Music size={12} />
+          </span>
+          <div className={styles.audioLabel}>{item.label}</div>
+        </div>
+        <div className={styles.audioWaveform}>
+          <AudioWaveform peaks={item.waveformPeaks} width={width} />
+        </div>
       </div>
     );
   }
@@ -675,6 +796,7 @@ export default function TimelinePanel({
   // Initialize zoom level from timeline state
   const [zoomLevel, setZoomLevel] = useState(timelineState.zoom_level);
   const [scrollLeft, setScrollLeft] = useState(0);
+  const [scrollTop, setScrollTop] = useState(0);
 
   // Sync zoom level to timeline state
   useEffect(() => {
@@ -699,6 +821,10 @@ export default function TimelinePanel({
   const audioTimelineItems = useMemo(
     () =>
       timelineItems.filter((item) => item.type === 'audio' && !!item.audioPath),
+    [timelineItems],
+  );
+  const mainTimelineItems = useMemo(
+    () => timelineItems.filter((item) => item.type !== 'audio'),
     [timelineItems],
   );
 
@@ -1471,7 +1597,7 @@ export default function TimelinePanel({
 
     setIsGeneratingWordCaptions(true);
     setCaptionGenerationMessage(
-      'Generating word captions... First run may take longer while Whisper installs.',
+      'Generating captions... they will appear in the timeline when ready.',
     );
 
     try {
@@ -2109,6 +2235,7 @@ export default function TimelinePanel({
   // Handle scroll
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     setScrollLeft(e.currentTarget.scrollLeft);
+    setScrollTop(e.currentTarget.scrollTop);
   }, []);
 
   // Handle mouse wheel zoom
@@ -2421,8 +2548,6 @@ export default function TimelinePanel({
     );
   }
 
-  const effectiveProjectDir = projectDirectory || '/mock';
-
   // Timeline extends past content by TAIL_PADDING_SECONDS so user can scroll into empty space. Playhead stays in [0, totalDuration].
   const displayDuration =
     totalDuration > 0 ? totalDuration + TAIL_PADDING_SECONDS : 10;
@@ -2433,6 +2558,75 @@ export default function TimelinePanel({
   for (let i = 0; i <= maxMarkerTime; i += 5) {
     timeMarkers.push(i);
   }
+
+  const visibleTracks = [
+    mainTimelineItems.length > 0
+      ? {
+          key: 'main',
+          label: 'Visuals',
+          meta: 'Primary clips',
+          icon: TrackVisualIcon,
+          rowClassName: styles.visualTrackLabel,
+          toneClassName: styles.visualTone,
+        }
+      : null,
+    overlayItems.length > 0
+      ? {
+          key: 'overlay',
+          label: 'Overlays',
+          meta: 'Infographics',
+          icon: TrackOverlayIcon,
+          rowClassName: styles.overlayTrackLabel,
+          toneClassName: styles.overlayTone,
+        }
+      : null,
+    textOverlayItems.length > 0
+      ? {
+          key: 'text',
+          label: 'Captions',
+          meta: 'Text sync',
+          icon: TrackTextIcon,
+          rowClassName: styles.textTrackLabel,
+          toneClassName: styles.textTone,
+        }
+      : null,
+    audioTimelineItems.length > 0
+      ? {
+          key: 'audio',
+          label: 'Audio',
+          meta: 'Music and VO',
+          icon: TrackAudioIcon,
+          rowClassName: styles.audioTrackLabel,
+          toneClassName: styles.audioTone,
+        }
+      : null,
+  ].filter(
+    (
+      track,
+    ): track is {
+      key: string;
+      label: string;
+      meta: string;
+      icon: typeof TrackVisualIcon;
+      rowClassName: string;
+      toneClassName: string;
+    } => track !== null,
+  );
+
+  const timelineStateMessage = timelineError
+    ? timelineError
+    : isTimelineLoading
+      ? 'Loading local timeline'
+      : captionGenerationMessage ||
+        'Timeline ready';
+
+  const timelineStateClass = timelineError
+    ? styles.stateError
+    : isTimelineLoading
+      ? styles.stateLoading
+      : captionGenerationMessage
+        ? styles.stateInfo
+        : styles.stateReady;
 
   // Playhead stays within content only; currentPosition is already clamped to [0, totalDuration]
   const playheadPosition = Math.min(
@@ -2445,6 +2639,11 @@ export default function TimelinePanel({
       <div className={styles.header}>
         <div className={styles.headerControl}>
           <span className={styles.headerTitle}>Timeline</span>
+          <span className={styles.headerMeta}>
+            {visibleTracks.length > 0
+              ? `${visibleTracks.length} lanes`
+              : 'Ready for media'}
+          </span>
           <button
             type="button"
             className={styles.toggleButton}
@@ -2466,35 +2665,32 @@ export default function TimelinePanel({
       {isOpen && (
         <>
           <div className={styles.toolbar}>
-            <div className={styles.toolbarLeft}>
-              <button
-                type="button"
-                className={styles.playButton}
-                onClick={() => setIsPlaying(!isPlaying)}
-                title={isPlaying ? 'Pause' : 'Play'}
-              >
-                {isPlaying ? <Pause size={14} /> : <Play size={14} />}
-              </button>
-              <span className={styles.timeDisplay}>
-                {formatTime(currentPosition)}
-              </span>
+            <div className={styles.toolbarGroup}>
+              <div className={styles.transportGroup}>
+                <button
+                  type="button"
+                  className={styles.playButton}
+                  onClick={() => setIsPlaying(!isPlaying)}
+                  title={isPlaying ? 'Pause' : 'Play'}
+                >
+                  {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+                </button>
+                <div className={styles.timeDisplayGroup}>
+                  <span className={styles.timeDisplay}>
+                    {formatTime(currentPosition)}
+                  </span>
+                  <span className={styles.timeDisplayMeta}>
+                    / {formatTime(totalDuration)}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className={styles.toolbarRight}>
-              {captionGenerationMessage && (
-                <span className={styles.captionGenerationStatus}>
-                  {captionGenerationMessage}
-                </span>
-              )}
-              {isTimelineLoading && (
-                <span className={styles.captionGenerationStatus}>
-                  Loading local timeline...
-                </span>
-              )}
-              {timelineError && (
-                <span className={styles.captionGenerationStatus}>
-                  {timelineError}
-                </span>
-              )}
+            <div className={styles.toolbarGroup}>
+              <span
+                className={`${styles.timelineStatePill} ${timelineStateClass}`}
+              >
+                {timelineStateMessage}
+              </span>
               <button
                 type="button"
                 className={styles.toolbarButton}
@@ -2511,7 +2707,7 @@ export default function TimelinePanel({
                 title="Import Audio"
               >
                 <Music size={14} />
-                <span>Import Audio</span>
+                <span>Audio</span>
               </button>
               <button
                 type="button"
@@ -2520,7 +2716,9 @@ export default function TimelinePanel({
                 title="Split Scene at Playhead (S)"
               >
                 <Scissors size={14} />
+                <span>Split</span>
               </button>
+              <div className={styles.toolbarDivider} />
               <button
                 type="button"
                 className={styles.zoomButton}
@@ -2559,6 +2757,40 @@ export default function TimelinePanel({
                   setActiveVersions(newVersions);
                 }}
               />
+            )}
+            {visibleTracks.length > 0 && (
+              <div className={styles.trackLabelsDock}>
+                <div className={styles.trackLabelsSpacer}>Lanes</div>
+                <div
+                  className={styles.trackLabelsInner}
+                  style={{ transform: `translateY(-${scrollTop}px)` }}
+                >
+                  {visibleTracks.map((track) => {
+                    const Icon = track.icon;
+
+                    return (
+                      <div
+                        key={track.key}
+                        className={`${styles.trackLabelRow} ${track.rowClassName}`}
+                      >
+                        <span
+                          className={`${styles.trackLabelIcon} ${track.toneClassName}`}
+                        >
+                          <Icon size={14} />
+                        </span>
+                        <div className={styles.trackLabelText}>
+                          <span className={styles.trackLabelName}>
+                            {track.label}
+                          </span>
+                          <span className={styles.trackLabelMeta}>
+                            {track.meta}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
             {/* eslint-disable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
             <div
@@ -2614,49 +2846,50 @@ export default function TimelinePanel({
                   }}
                 />
 
-                {/* Main Track */}
-                {timelineItems.filter((item) => item.type !== 'audio').length >
-                  0 && (
-                  <div className={styles.track}>
-                    <div className={styles.trackContent}>
-                      {timelineItems
-                        .filter((item) => item.type !== 'audio')
-                        .map((item) => {
-                          const left = secondsToPixels(
-                            item.startTime,
-                            zoomLevel,
-                          );
-                          const width = secondsToPixels(
-                            item.duration,
-                            zoomLevel,
-                          );
+                {visibleTracks.length === 0 && (
+                  <div className={styles.emptyTimelineState}>
+                    <div className={styles.emptyTimelineTitle}>
+                      Timeline is ready for edits
+                    </div>
+                    <div className={styles.emptyTimelineCopy}>
+                      Import media or generate scenes to start arranging the
+                      cut.
+                    </div>
+                  </div>
+                )}
 
-                          return (
-                            <MemoTimelineItemComponent
-                              key={item.id}
-                              item={item}
-                              left={left}
-                              width={width}
-                              projectDirectory={projectDirectory || null}
-                              isSelected={activeEditingItemId === item.id}
-                              onItemClick={handleItemClick}
-                              onImageResizeMouseDown={
-                                handleImageResizeMouseDown
-                              }
-                              onVisualDragMouseDown={
-                                handleServerVisualDragMouseDown
-                              }
-                              onVisualResizeMouseDown={
-                                handleServerVisualResizeMouseDown
-                              }
-                              onInfographicDragMouseDown={
-                                handleInfographicDragMouseDown
-                              }
-                              onItemContextMenu={handleTimelineItemContextMenu}
-                              isEditing={activeEditingItemId === item.id}
-                            />
-                          );
-                        })}
+                {/* Main Track */}
+                {mainTimelineItems.length > 0 && (
+                  <div className={`${styles.track} ${styles.visualTrack}`}>
+                    <div className={styles.trackContent}>
+                      {mainTimelineItems.map((item) => {
+                        const left = secondsToPixels(item.startTime, zoomLevel);
+                        const width = secondsToPixels(item.duration, zoomLevel);
+
+                        return (
+                          <MemoTimelineItemComponent
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            isSelected={activeEditingItemId === item.id}
+                            onItemClick={handleItemClick}
+                            onImageResizeMouseDown={handleImageResizeMouseDown}
+                            onVisualDragMouseDown={
+                              handleServerVisualDragMouseDown
+                            }
+                            onVisualResizeMouseDown={
+                              handleServerVisualResizeMouseDown
+                            }
+                            onInfographicDragMouseDown={
+                              handleInfographicDragMouseDown
+                            }
+                            onItemContextMenu={handleTimelineItemContextMenu}
+                            isEditing={activeEditingItemId === item.id}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -2716,35 +2949,29 @@ export default function TimelinePanel({
                 )}
 
                 {/* Audio Track */}
-                {timelineItems.filter((item) => item.type === 'audio').length >
-                  0 && (
+                {audioTimelineItems.length > 0 && (
                   <div className={`${styles.track} ${styles.audioTrack}`}>
                     <div className={styles.trackContent}>
-                      {timelineItems
-                        .filter((item) => item.type === 'audio')
-                        .map((item) => {
-                          const left = secondsToPixels(
-                            item.startTime,
-                            zoomLevel,
-                          );
-                          const width = getAudioBlockWidthPx({
-                            duration: item.duration,
-                            zoomLevel,
-                          });
+                      {audioTimelineItems.map((item) => {
+                        const left = secondsToPixels(item.startTime, zoomLevel);
+                        const width = getAudioBlockWidthPx({
+                          duration: item.duration,
+                          zoomLevel,
+                        });
 
-                          return (
-                            <MemoTimelineItemComponent
-                              key={item.id}
-                              item={item}
-                              left={left}
-                              width={width}
-                              projectDirectory={projectDirectory || null}
-                              isSelected={false}
-                              onItemClick={handleItemClick}
-                              onItemContextMenu={handleTimelineItemContextMenu}
-                            />
-                          );
-                        })}
+                        return (
+                          <MemoTimelineItemComponent
+                            key={item.id}
+                            item={item}
+                            left={left}
+                            width={width}
+                            projectDirectory={projectDirectory || null}
+                            isSelected={false}
+                            onItemClick={handleItemClick}
+                            onItemContextMenu={handleTimelineItemContextMenu}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 )}

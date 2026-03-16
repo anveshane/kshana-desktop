@@ -80,10 +80,18 @@ interface VideoCardProps {
   projectDirectory: string | null;
 }
 
+function getVideoCardPreviewTime(duration: number | undefined): number {
+  if (!Number.isFinite(duration) || (duration ?? 0) <= 0) return 0;
+  return Math.max(0, Math.min((duration ?? 0) * 0.12, (duration ?? 0) - 0.05));
+}
+
 function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [shouldLoadThumbnail, setShouldLoadThumbnail] = useState(false);
   const [videoPath, setVideoPath] = useState<string>('');
+  const [hasPreviewFrame, setHasPreviewFrame] = useState(false);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
 
   useEffect(() => {
     if (shouldLoadThumbnail) {
@@ -115,17 +123,104 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
   }, [shouldLoadThumbnail]);
 
   useEffect(() => {
+    setVideoPath('');
+    setHasPreviewFrame(false);
+    setThumbnailFailed(false);
+  }, [artifact.artifact_id, artifact.file_path]);
+
+  useEffect(() => {
     if (!shouldLoadThumbnail) {
       return undefined;
     }
 
-    resolveAssetPathForDisplay(artifact.file_path, projectDirectory).then(
-      (resolved) => {
+    let isCancelled = false;
+    setHasPreviewFrame(false);
+    setThumbnailFailed(false);
+
+    resolveAssetPathWithRetry(artifact.file_path, projectDirectory, {
+      maxRetries: 3,
+      retryDelayBase: 350,
+      timeout: 5000,
+      verifyExists: true,
+    })
+      .then((resolved) => {
+        if (isCancelled) return;
         setVideoPath(resolved);
-      },
-    );
+      })
+      .catch((error) => {
+        if (isCancelled) return;
+        console.warn(
+          `[VideoLibraryView] Failed to resolve thumbnail path for ${artifact.artifact_id}:`,
+          error,
+        );
+        setVideoPath('');
+        setThumbnailFailed(true);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [artifact.artifact_id, artifact.file_path, projectDirectory, shouldLoadThumbnail]);
+
+  const primePreviewFrame = useCallback((video: HTMLVideoElement) => {
+    const previewTime = getVideoCardPreviewTime(video.duration);
+    if (!Number.isFinite(previewTime) || previewTime <= 0) {
+      setHasPreviewFrame(true);
+      return;
+    }
+
+    if (Math.abs((video.currentTime || 0) - previewTime) < 0.04) {
+      setHasPreviewFrame(true);
+      return;
+    }
+
+    try {
+      video.currentTime = previewTime;
+    } catch {
+      setHasPreviewFrame(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !videoPath) return undefined;
+
+    const handleLoadedMetadata = () => {
+      primePreviewFrame(video);
+    };
+    const handleLoadedData = () => {
+      setHasPreviewFrame(true);
+    };
+    const handleSeeked = () => {
+      setHasPreviewFrame(true);
+      video.pause();
+    };
+    const handleError = () => {
+      setThumbnailFailed(true);
+      setHasPreviewFrame(false);
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('loadeddata', handleLoadedData);
+    video.addEventListener('seeked', handleSeeked);
+    video.addEventListener('error', handleError);
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('seeked', handleSeeked);
+      video.removeEventListener('error', handleError);
+    };
+  }, [primePreviewFrame, videoPath]);
+
+  useEffect(() => {
+    if (!videoPath) return undefined;
+    const video = videoRef.current;
+    if (!video) return undefined;
+
+    video.load();
     return undefined;
-  }, [artifact.file_path, projectDirectory, shouldLoadThumbnail]);
+  }, [videoPath]);
 
   return (
     <div
@@ -134,22 +229,25 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
       onMouseEnter={() => setShouldLoadThumbnail(true)}
     >
       <div className={styles.videoThumbnail}>
-        {videoPath ? (
-          <video
-            src={videoPath}
-            className={styles.video}
-            preload="none"
-            muted
-            playsInline
-          />
-        ) : (
+        {(!videoPath || thumbnailFailed || !hasPreviewFrame) && (
           <div className={styles.videoThumbnailPlaceholder}>
             <Film size={24} className={styles.videoThumbnailPlaceholderIcon} />
             <span className={styles.videoThumbnailPlaceholderLabel}>
-              Video preview
+              {thumbnailFailed ? 'Preview unavailable' : 'Video preview'}
             </span>
           </div>
         )}
+        {videoPath && !thumbnailFailed ? (
+          <video
+            ref={videoRef}
+            src={videoPath}
+            className={styles.video}
+            preload="metadata"
+            muted
+            playsInline
+            style={{ visibility: hasPreviewFrame ? 'visible' : 'hidden' }}
+          />
+        ) : null}
         {artifact.scene_number && (
           <div className={styles.sceneBadge}>Scene {artifact.scene_number}</div>
         )}

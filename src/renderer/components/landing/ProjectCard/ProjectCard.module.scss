@@ -18,7 +18,7 @@
 
   &:hover {
     transform: translateY(-2px);
-    border-color: rgba($color-accent-cyan, 0.35);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.24);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
   }
 }
@@ -26,7 +26,7 @@
 .media {
   position: relative;
   aspect-ratio: 16 / 9;
-  background: linear-gradient(140deg, #24323f 0%, #111724 46%, #0b1018 100%);
+  background: linear-gradient(140deg, #343434 0%, #242424 48%, #1e1e1e 100%);
 }
 
 .thumbnail {
@@ -87,7 +87,7 @@
 .stats {
   margin: 0;
   font-size: $font-size-sm;
-  color: rgba($color-accent-cyan, 0.95);
+  color: $color-text-secondary;
 }
 
 .meta {
