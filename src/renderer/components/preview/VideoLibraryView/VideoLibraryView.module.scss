@@ -192,12 +192,35 @@
   overflow: hidden;
 }
 
+.videoThumbnailPlaceholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-xs;
+  color: $color-text-muted;
+  background: linear-gradient(
+    135deg,
+    rgba($color-text-primary, 0.03),
+    rgba($color-text-primary, 0.08)
+  );
+}
+
+.videoThumbnailPlaceholderIcon {
+  opacity: 0.7;
+}
+
+.videoThumbnailPlaceholderLabel {
+  font-size: $font-size-xs;
+}
+
 .video {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-
 
 .sceneBadge {
   position: absolute;
@@ -486,7 +509,6 @@
   }
 }
 
-
 .emptyPlayer {
   flex: 1;
   @include flex-center;
@@ -689,7 +711,7 @@
   font-weight: $font-weight-medium;
   color: $color-text-secondary;
   flex-shrink: 0;
-  
+
   .sceneName {
     font-weight: $font-weight-normal;
     color: $color-text-muted;

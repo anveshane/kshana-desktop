@@ -1,14 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Settings } from 'lucide-react';
+import { ChevronUp, Settings } from 'lucide-react';
 import type { AppSettings } from '../../../../shared/settingsTypes';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { TimelineDataProvider } from '../../../contexts/TimelineDataContext';
 import { useBackendHealth } from '../../../hooks/useBackendHealth';
 import type { SceneVersions } from '../../../types/kshana/timeline';
-import PreviewPlaceholder from '../PreviewPlaceholder/PreviewPlaceholder';
-import MediaPreview from '../MediaPreview/MediaPreview';
-import StoryboardView from '../StoryboardView/StoryboardView';
 import AssetsView from '../AssetsView/AssetsView';
 import VideoLibraryView from '../VideoLibraryView/VideoLibraryView';
 import PlansView from '../PlansView/PlansView';
@@ -36,8 +33,13 @@ export default function PreviewPanel() {
     null,
   );
 
-  const { selectedFile, connectionState, projectDirectory, pendingFileNavigation, clearFileNavigation } = useWorkspace();
-  
+  const {
+    connectionState,
+    projectDirectory,
+    pendingFileNavigation,
+    clearFileNavigation,
+  } = useWorkspace();
+
   // Handle file navigation from chat panel
   useEffect(() => {
     if (pendingFileNavigation) {
@@ -194,7 +196,9 @@ export default function PreviewPanel() {
       setSettings(updated);
       const result = await window.electron.backend.restart();
       if (result.status === 'error') {
-        setSettingsError(result.message || 'Failed to connect to backend server');
+        setSettingsError(
+          result.message || 'Failed to connect to backend server',
+        );
       } else {
         setSettingsOpen(false);
       }
@@ -207,6 +211,76 @@ export default function PreviewPanel() {
       setIsRestartingBackend(false);
     }
   }, []);
+
+  const shouldHydrateTimeline = activeTab === 'video-library' || timelineOpen;
+
+  const renderActiveContent = () => (
+    <div className={styles.content}>
+      {/* Storyboard view hidden for now */}
+      {/* {activeTab === 'storyboard' && <StoryboardView />} */}
+      {activeTab === 'assets' && <AssetsView />}
+      {activeTab === 'video-library' && (
+        <VideoLibraryView
+          playbackTime={playbackTime}
+          isPlaying={isPlaying}
+          isDragging={isDragging}
+          onPlaybackTimeChange={setPlaybackTime}
+          onPlaybackStateChange={setIsPlaying}
+          onTotalDurationChange={setTotalDuration}
+          activeVersions={activeVersions}
+          projectScenes={projectScenes}
+        />
+      )}
+      {activeTab === 'preview' && (
+        <PlansView
+          fileToOpen={pendingFileNavigation}
+          onFileOpened={clearFileNavigation}
+        />
+      )}
+    </div>
+  );
+
+  const renderTimelineSection = () => {
+    if (!projectDirectory) {
+      return null;
+    }
+
+    if (!timelineOpen) {
+      return (
+        <div className={styles.timelineContainer}>
+          <button
+            type="button"
+            className={styles.timelineCollapsedButton}
+            onClick={() => setTimelineOpen(true)}
+            title="Show Timeline"
+          >
+            <span className={styles.timelineCollapsedLabel}>Timeline</span>
+            <ChevronUp size={16} />
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className={styles.timelineContainer}
+        style={{ height: `${timelineHeight}px` }}
+      >
+        <TimelinePanel
+          isOpen={timelineOpen}
+          onToggle={() => setTimelineOpen(!timelineOpen)}
+          onResize={handleTimelineResize}
+          playbackTime={playbackTime}
+          isPlaying={isPlaying}
+          onSeek={setPlaybackTime}
+          onPlayPause={setIsPlaying}
+          onDragStateChange={setIsDragging}
+          activeVersions={activeVersions}
+          onActiveVersionsChange={setActiveVersions}
+        />
+      </div>
+    );
+  };
 
   return (
     <div className={styles.container}>
@@ -248,9 +322,7 @@ export default function PreviewPanel() {
             <div className={styles.statusItem}>
               <span
                 className={`${styles.statusDot} ${
-                  connectionState.server === 'connected'
-                    ? styles.connected
-                    : ''
+                  connectionState.server === 'connected' ? styles.connected : ''
                 }`}
               />
               <span className={styles.statusLabel}>
@@ -258,8 +330,8 @@ export default function PreviewPanel() {
                 {connectionState.server === 'connected'
                   ? 'Connected'
                   : connectionState.server === 'connecting'
-                    ? 'Connecting'
-                    : 'Disconnected'}
+                    ? 'Starting'
+                    : 'Offline'}
               </span>
             </div>
           </div>
@@ -275,55 +347,17 @@ export default function PreviewPanel() {
       </div>
 
       <div className={styles.contentWrapper}>
-        <TimelineDataProvider activeVersions={activeVersions}>
-          <div className={styles.content}>
-            {/* Storyboard view hidden for now */}
-            {/* {activeTab === 'storyboard' && <StoryboardView />} */}
-            {activeTab === 'assets' && <AssetsView />}
-            {activeTab === 'video-library' && (
-              <VideoLibraryView
-                playbackTime={playbackTime}
-                isPlaying={isPlaying}
-                isDragging={isDragging}
-                onPlaybackTimeChange={setPlaybackTime}
-                onPlaybackStateChange={setIsPlaying}
-                onTotalDurationChange={setTotalDuration}
-                activeVersions={activeVersions}
-                projectScenes={projectScenes}
-              />
-            )}
-            {activeTab === 'preview' && (
-              <PlansView 
-                fileToOpen={pendingFileNavigation} 
-                onFileOpened={clearFileNavigation}
-              />
-            )}
-          </div>
-
-          {projectDirectory && (
-            <div
-              className={styles.timelineContainer}
-              style={
-                timelineOpen
-                  ? { height: `${timelineHeight}px` }
-                  : { height: '28px' }
-              }
-            >
-              <TimelinePanel
-                isOpen={timelineOpen}
-                onToggle={() => setTimelineOpen(!timelineOpen)}
-                onResize={handleTimelineResize}
-                playbackTime={playbackTime}
-                isPlaying={isPlaying}
-                onSeek={setPlaybackTime}
-                onPlayPause={setIsPlaying}
-                onDragStateChange={setIsDragging}
-                activeVersions={activeVersions}
-                onActiveVersionsChange={setActiveVersions}
-              />
-            </div>
-          )}
-        </TimelineDataProvider>
+        {shouldHydrateTimeline ? (
+          <TimelineDataProvider activeVersions={activeVersions}>
+            {renderActiveContent()}
+            {renderTimelineSection()}
+          </TimelineDataProvider>
+        ) : (
+          <>
+            {renderActiveContent()}
+            {renderTimelineSection()}
+          </>
+        )}
       </div>
 
       <SettingsPanel

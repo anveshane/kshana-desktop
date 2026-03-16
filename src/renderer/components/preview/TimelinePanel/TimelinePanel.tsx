@@ -669,6 +669,7 @@ export default function TimelinePanel({
     refreshAudioFiles,
     timelineSource,
     error: timelineError,
+    isTimelineLoading,
   } = useTimelineDataContext();
 
   // Initialize zoom level from timeline state
@@ -2482,6 +2483,11 @@ export default function TimelinePanel({
               {captionGenerationMessage && (
                 <span className={styles.captionGenerationStatus}>
                   {captionGenerationMessage}
+                </span>
+              )}
+              {isTimelineLoading && (
+                <span className={styles.captionGenerationStatus}>
+                  Loading local timeline...
                 </span>
               )}
               {timelineError && (

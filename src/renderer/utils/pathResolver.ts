@@ -4,6 +4,11 @@
  */
 
 import { stripFileProtocol } from './pathNormalizer';
+import {
+  debugRendererDebug,
+  debugRendererLog,
+  debugRendererWarn,
+} from './debugLogger';
 
 /**
  * Build a file:// URL from an absolute path.
@@ -54,7 +59,10 @@ async function getResourcesPath(): Promise<string> {
       }
     }
   } catch (error) {
-    console.warn('[PathResolver] Failed to get resources path via IPC:', error);
+    debugRendererWarn(
+      '[PathResolver] Failed to get resources path via IPC:',
+      error,
+    );
   }
 
   // Fallback: try environment variable
@@ -67,7 +75,7 @@ async function getResourcesPath(): Promise<string> {
   }
 
   // Last resort: return empty string to avoid hardcoded paths
-  console.warn(
+  debugRendererWarn(
     '[PathResolver] Could not determine resources path - using fallback',
   );
   cachedResourcesPath = '';
@@ -120,7 +128,7 @@ export async function resolveTestAssetPathToAbsolute(
   testAssetPath: string,
 ): Promise<string> {
   if (!testAssetPath) {
-    console.warn('[PathResolver] Cannot resolve empty test asset path');
+    debugRendererWarn('[PathResolver] Cannot resolve empty test asset path');
     return '';
   }
 
@@ -137,7 +145,7 @@ export async function resolveTestAssetPathToAbsolute(
   // Parse test asset path
   const parsed = parseTestAssetPath(testAssetPath);
   if (!parsed) {
-    console.warn(
+    debugRendererWarn(
       `[PathResolver] Invalid test asset path format: ${testAssetPath}`,
     );
     return '';
@@ -148,7 +156,7 @@ export async function resolveTestAssetPathToAbsolute(
   // Get resources path
   const resourcesPath = await getResourcesPath();
   if (!resourcesPath) {
-    console.warn(
+    debugRendererWarn(
       '[PathResolver] Cannot resolve test asset path: resources path not available',
     );
     return '';
@@ -190,7 +198,7 @@ export async function resolveAssetPathForDisplay(
     if (absolutePath) {
       const result = toFileUrl(absolutePath);
       if (assetPath.endsWith('.mp4')) {
-        console.log(
+        debugRendererLog(
           `[PathResolver] Resolved test video: ${assetPath} -> ${result}`,
         );
       }
@@ -245,7 +253,7 @@ export async function resolveAssetPathForDisplay(
     // Handle other relative paths
     const result = toFileUrl(`${normalizedProjectDir}/${cleanedPath}`);
     if (assetPath.endsWith('.mp4')) {
-      console.log(
+      debugRendererLog(
         `[PathResolver] Resolved project video: ${assetPath} -> ${result}`,
       );
     }
@@ -253,7 +261,7 @@ export async function resolveAssetPathForDisplay(
   }
 
   // Fallback: treat as absolute path (may fail, but better than nothing)
-  console.warn(
+  debugRendererWarn(
     `[PathResolver] No project directory provided for relative path: ${trimmedPath}`,
   );
   return toFileUrl(trimmedPath);
@@ -272,7 +280,7 @@ async function checkFileExists(filePath: string): Promise<boolean> {
     }
     return true;
   } catch (error) {
-    console.debug(
+    debugRendererDebug(
       `[PathResolver] File existence check failed for ${filePath}:`,
       error,
     );
@@ -336,7 +344,7 @@ export async function resolveAssetPathWithRetry(
         if (!exists && attempt < maxRetries) {
           // File doesn't exist yet, retry
           const delay = retryDelayBase * 2 ** attempt;
-          console.log(
+          debugRendererLog(
             `[PathResolver] File not found, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries}):`,
             filePath,
           );
@@ -344,7 +352,7 @@ export async function resolveAssetPathWithRetry(
           return resolveWithRetry(attempt + 1);
         }
         if (!exists) {
-          console.warn(
+          debugRendererWarn(
             `[PathResolver] File not found after ${maxRetries} attempts:`,
             filePath,
           );
@@ -364,7 +372,7 @@ export async function resolveAssetPathWithRetry(
 
       if (attempt < maxRetries) {
         const delay = retryDelayBase * 2 ** attempt;
-        console.log(
+        debugRendererLog(
           `[PathResolver] Resolution failed, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries}):`,
           lastError.message,
         );

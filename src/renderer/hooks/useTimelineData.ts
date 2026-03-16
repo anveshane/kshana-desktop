@@ -17,6 +17,7 @@ import {
   applySegmentTimingOverridesToItems,
   type SegmentTimingOverride,
 } from '../utils/timelineImageEditing';
+import { debugRendererDebug } from '../utils/debugLogger';
 
 export interface TimelineItem {
   id: string;
@@ -61,6 +62,8 @@ export interface TimelineDataWithRefresh extends TimelineData {
   refreshAudioFiles: () => Promise<void>;
   timelineSource: 'server_timeline' | 'none';
   error: string | null;
+  isTimelineLoading: boolean;
+  isAudioLoading: boolean;
 }
 
 export interface TimelineAudioFile {
@@ -410,6 +413,8 @@ export function useTimelineData(
   const { totalDuration: transcriptDuration } = useTranscript();
   const { cues: wordCaptionCues } = useWordCaptions();
   const [audioFiles, setAudioFiles] = useState<TimelineAudioFile[]>([]);
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
+  const [isTimelineLoading, setIsTimelineLoading] = useState(false);
   const [timelineFileState, setTimelineFileState] = useState<TimelineFileState>(
     {
       source: 'none',
@@ -419,10 +424,25 @@ export function useTimelineData(
   );
   const audioReloadRequestIdRef = useRef(0);
   const timelineReloadRequestIdRef = useRef(0);
+  const deferredAudioReloadRef = useRef<number | null>(null);
+
+  const clearDeferredAudioReload = useCallback(() => {
+    if (deferredAudioReloadRef.current === null) {
+      return;
+    }
+
+    if (typeof window !== 'undefined' && window.cancelIdleCallback) {
+      window.cancelIdleCallback(deferredAudioReloadRef.current);
+    } else {
+      window.clearTimeout(deferredAudioReloadRef.current);
+    }
+    deferredAudioReloadRef.current = null;
+  }, []);
 
   const loadTimelineFile = useCallback(async () => {
     if (!projectDirectory || !isLoaded) {
       timelineReloadRequestIdRef.current += 1;
+      setIsTimelineLoading(false);
       setTimelineFileState((prev) =>
         prev.source === 'none' && prev.timeline === null && prev.error === null
           ? prev
@@ -435,6 +455,7 @@ export function useTimelineData(
       return;
     }
 
+    setIsTimelineLoading(true);
     await runLatestAsyncTask({
       requestRef: timelineReloadRequestIdRef,
       task: async () => {
@@ -446,6 +467,7 @@ export function useTimelineData(
       },
       commit: (nextState) => {
         setTimelineFileState(nextState);
+        setIsTimelineLoading(false);
       },
     });
   }, [projectDirectory, isLoaded]);
@@ -453,10 +475,12 @@ export function useTimelineData(
   const reloadAudioFiles = useCallback(async () => {
     if (!projectDirectory || !isLoaded) {
       audioReloadRequestIdRef.current += 1;
+      setIsAudioLoading(false);
       setAudioFiles((prev) => (prev.length === 0 ? prev : []));
       return;
     }
 
+    setIsAudioLoading(true);
     await runLatestAsyncTask({
       requestRef: audioReloadRequestIdRef,
       task: async () => {
@@ -471,7 +495,7 @@ export function useTimelineData(
               window.electron.project.getAudioDuration(audioPath),
           });
         } catch (error) {
-          console.debug(
+          debugRendererDebug(
             '[useTimelineData] Audio directory not found or error loading:',
             error,
           );
@@ -480,6 +504,7 @@ export function useTimelineData(
       },
       commit: (nextAudioFiles) => {
         setAudioFiles(nextAudioFiles);
+        setIsAudioLoading(false);
       },
     });
   }, [projectDirectory, isLoaded, transcriptDuration]);
@@ -489,8 +514,33 @@ export function useTimelineData(
   }, [loadTimelineFile]);
 
   useEffect(() => {
-    void reloadAudioFiles();
-  }, [reloadAudioFiles]);
+    clearDeferredAudioReload();
+
+    if (!projectDirectory || !isLoaded) {
+      void reloadAudioFiles();
+      return () => {
+        clearDeferredAudioReload();
+      };
+    }
+
+    const scheduleReload = () => {
+      deferredAudioReloadRef.current = null;
+      void reloadAudioFiles();
+    };
+
+    if (typeof window !== 'undefined' && window.requestIdleCallback) {
+      deferredAudioReloadRef.current = window.requestIdleCallback(
+        scheduleReload,
+        { timeout: 1200 },
+      );
+    } else {
+      deferredAudioReloadRef.current = window.setTimeout(scheduleReload, 250);
+    }
+
+    return () => {
+      clearDeferredAudioReload();
+    };
+  }, [projectDirectory, isLoaded, reloadAudioFiles, clearDeferredAudioReload]);
 
   useEffect(() => {
     if (!projectDirectory) return;
@@ -517,6 +567,7 @@ export function useTimelineData(
           void loadTimelineFile();
         }
         if (isAudioFile) {
+          clearDeferredAudioReload();
           void reloadAudioFiles();
         }
         debounceTimeout = null;
@@ -529,7 +580,12 @@ export function useTimelineData(
         clearTimeout(debounceTimeout);
       }
     };
-  }, [projectDirectory, loadTimelineFile, reloadAudioFiles]);
+  }, [
+    projectDirectory,
+    loadTimelineFile,
+    reloadAudioFiles,
+    clearDeferredAudioReload,
+  ]);
 
   const refreshTimeline = useCallback(async () => {
     await Promise.all([
@@ -539,8 +595,9 @@ export function useTimelineData(
   }, [loadTimelineFile, refreshAssetManifest]);
 
   const refreshAudioFiles = useCallback(async () => {
+    clearDeferredAudioReload();
     await reloadAudioFiles();
-  }, [reloadAudioFiles]);
+  }, [reloadAudioFiles, clearDeferredAudioReload]);
 
   const baseTimelineItems = useMemo(() => {
     if (timelineFileState.source !== 'server_timeline') {
@@ -679,5 +736,7 @@ export function useTimelineData(
     refreshAudioFiles,
     timelineSource: timelineFileState.source,
     error,
+    isTimelineLoading,
+    isAudioLoading,
   };
 }

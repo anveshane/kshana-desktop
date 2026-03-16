@@ -9,15 +9,35 @@ import { ArrowLeft, MessageSquare } from 'lucide-react';
 import PreviewPanel from '../../preview/PreviewPanel/PreviewPanel';
 import ChatPanel from '../../chat/ChatPanel/ChatPanel';
 import StatusBar from '../StatusBar/StatusBar';
-import RecentProjectsDropdown from '../RecentProjectsDropdown/RecentProjectsDropdown';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import styles from './WorkspaceLayout.module.scss';
 
+function getProjectDisplayName(
+  projectName: string | null,
+  projectDirectory: string | null,
+): string | null {
+  if (projectName?.trim()) {
+    return projectName.trim();
+  }
+
+  if (!projectDirectory) {
+    return null;
+  }
+
+  const folderName = projectDirectory.replace(/\\/g, '/').split('/').pop();
+  if (!folderName) {
+    return null;
+  }
+
+  return folderName.replace(/\.kshana$/i, '');
+}
+
 export default function WorkspaceLayout() {
-  const { closeProject } = useWorkspace();
+  const { closeProject, projectName, projectDirectory } = useWorkspace();
   const [chatExpanded, setChatExpanded] = useState(true);
 
   const chatPanelRef = useRef<ImperativePanelHandle>(null);
+  const displayProjectName = getProjectDisplayName(projectName, projectDirectory);
 
   const toggleChat = useCallback(() => {
     const panel = chatPanelRef.current;
@@ -60,9 +80,10 @@ export default function WorkspaceLayout() {
             <span>Back</span>
           </button>
         </div>
-        <span className={styles.title}>Kshana Desktop</span>
+        <span className={styles.title} title={displayProjectName || 'Kshana Desktop'}>
+          {displayProjectName || 'Kshana Desktop'}
+        </span>
         <div className={styles.headerRight}>
-          <RecentProjectsDropdown />
           <button
             type="button"
             className={`${styles.toggleButton} ${chatExpanded ? styles.active : ''}`}

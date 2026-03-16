@@ -49,9 +49,12 @@
 }
 
 .title {
+  max-width: min(480px, 40vw);
+  min-width: 0;
   font-size: $font-size-sm;
   font-weight: $font-weight-semibold;
   color: $color-text-secondary;
+  @include truncate;
 }
 
 .toggleButton {
