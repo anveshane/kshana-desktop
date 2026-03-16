@@ -36,7 +36,7 @@
   flex-shrink: 0;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.1);
+    background-color: rgba(var(--color-text-primary-rgb), 0.1);
     color: $color-text-secondary;
   }
 }
@@ -74,12 +74,12 @@
   text-align: left;
 
   &:hover {
-    background-color: rgba($color-accent-green, 0.1);
+    background-color: rgba(var(--color-accent-green-rgb), 0.1);
     color: $color-accent-green;
   }
 
   &:active {
-    background-color: rgba($color-accent-green, 0.2);
+    background-color: rgba(var(--color-accent-green-rgb), 0.2);
   }
 
   svg {
@@ -116,7 +116,7 @@
   &:focus {
     outline: none;
     border-color: $color-accent-green;
-    box-shadow: 0 0 0 2px rgba($color-accent-green, 0.2);
+    box-shadow: 0 0 0 2px rgba(var(--color-accent-green-rgb), 0.2);
   }
 
   &::placeholder {
@@ -166,17 +166,17 @@
   color: $color-text-secondary;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.1);
+    background-color: rgba(var(--color-text-primary-rgb), 0.1);
     color: $color-text-primary;
   }
 }
 
 .actionButton {
-  background-color: rgba($color-accent-green, 0.1);
+  background-color: rgba(var(--color-accent-green-rgb), 0.1);
   color: $color-accent-green;
 
   &:hover:not(:disabled) {
-    background-color: rgba($color-accent-green, 0.2);
+    background-color: rgba(var(--color-accent-green-rgb), 0.2);
   }
 
   &:disabled {
@@ -197,7 +197,7 @@
   gap: $spacing-xs;
 
   &:hover:not(:disabled) {
-    background-color: color.adjust($color-accent-green, $lightness: 5%);
+    background-color: $color-accent-primary-hover;
   }
 
   &:disabled {
@@ -209,4 +209,3 @@
     flex-shrink: 0;
   }
 }
-

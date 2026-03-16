@@ -12,11 +12,11 @@
 .header {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding: 0 $spacing-md;
-  height: 28px;
-  background-color: $color-panel-background;
-  border-bottom: 1px solid $color-panel-border;
+  justify-content: space-between;
+  padding: 0 $spacing-lg;
+  height: 34px;
+  background-color: rgba(var(--color-bg-panel-rgb), 0.98);
+  border-bottom: 1px solid rgba(var(--color-border-strong-rgb), 0.55);
   position: relative;
   flex-shrink: 0;
 }
@@ -24,33 +24,42 @@
 .headerControl {
   display: flex;
   align-items: center;
-  gap: $spacing-xs;
-}
-
-.toggleButton {
-  @include flex-center;
-  width: 20px;
-  height: 20px;
-  border: none;
-  border-radius: $radius-sm;
-  background-color: transparent;
-  color: $color-text-muted;
-  cursor: pointer;
-  transition: all $transition-fast;
-  padding: 0;
-
-  &:hover {
-    color: $color-text-secondary;
-    background-color: rgba($color-text-primary, 0.1);
-  }
+  gap: $spacing-sm;
 }
 
 .headerTitle {
   font-size: $font-size-sm;
-  font-weight: $font-weight-medium;
-  color: $color-text-secondary;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.headerMeta {
+  font-size: $font-size-xs;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: $color-text-muted;
+}
+
+.toggleButton {
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: $radius-md;
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.32);
+  color: $color-text-secondary;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    color $transition-fast;
+  padding: 0;
+
+  &:hover {
+    color: $color-text-primary;
+    border-color: rgba(var(--color-border-strong-rgb), 0.76);
+    background-color: rgba(var(--color-bg-panel-soft-rgb), 0.66);
+  }
 }
 
 .resizeHandle {
@@ -65,14 +74,14 @@
   z-index: 10;
 
   &:hover {
-    background-color: rgba($color-accent-green, 0.3);
+    background-color: rgba(var(--color-accent-primary-rgb), 0.22);
   }
 
   &::after {
     content: '';
     display: block;
     height: 1px;
-    background-color: $color-panel-border;
+    background-color: rgba(var(--color-border-strong-rgb), 0.9);
     margin: 1.5px 0;
   }
 }
@@ -81,69 +90,116 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: $spacing-md;
   padding: $spacing-sm $spacing-lg;
-  background-color: $color-panel-background;
-  border-bottom: 1px solid $color-panel-border;
-  min-height: 36px;
+  background-color: rgba(var(--color-bg-panel-rgb), 0.96);
+  border-bottom: 1px solid rgba(var(--color-border-strong-rgb), 0.48);
+  min-height: 46px;
 }
 
-.toolbarLeft {
+.toolbarGroup {
   display: flex;
   align-items: center;
-  gap: $spacing-md;
+  gap: $spacing-sm;
+  min-width: 0;
 }
 
-.toolbarRight {
+.transportGroup {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
 }
 
-.captionGenerationStatus {
-  font-size: $font-size-xs;
-  color: $color-accent-cyan;
-  max-width: 260px;
-  @include truncate;
-}
-
 .playButton {
   @include flex-center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: $radius-sm;
-  background-color: rgba($color-accent-green, 0.1);
-  color: $color-accent-green;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(var(--color-accent-primary-rgb), 0.3);
+  border-radius: $radius-md;
+  background-color: rgba(var(--color-accent-primary-rgb), 0.14);
+  color: $color-accent-primary;
   cursor: pointer;
-  transition: all $transition-fast;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    color $transition-fast;
 
   &:hover {
-    background-color: rgba($color-accent-green, 0.2);
+    background-color: rgba(var(--color-accent-primary-rgb), 0.2);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.42);
+    color: $color-accent-primary-hover;
   }
+}
+
+.timeDisplayGroup {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
 }
 
 .timeDisplay {
   font-family: $font-family-mono;
   font-size: $font-size-sm;
   color: $color-text-primary;
-  min-width: 100px;
+  min-width: 104px;
+}
+
+.timeDisplayMeta {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  font-family: $font-family-mono;
+}
+
+.timelineStatePill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 $spacing-md;
+  border-radius: $radius-full;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.42);
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.3);
+  font-size: $font-size-xs;
+  max-width: 320px;
+  @include truncate;
+}
+
+.stateReady {
+  color: $color-text-secondary;
+}
+
+.stateInfo {
+  color: $color-info;
+}
+
+.stateLoading {
+  color: $color-warning;
+}
+
+.stateError {
+  color: $color-error;
 }
 
 .toolbarButton {
   @include flex-center;
   gap: $spacing-xs;
-  padding: $spacing-xs $spacing-sm;
-  border: none;
-  border-radius: $radius-sm;
-  background-color: transparent;
-  color: $color-text-muted;
+  min-height: 30px;
+  padding: 0 $spacing-sm;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.4);
+  border-radius: $radius-md;
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.28);
+  color: $color-text-secondary;
   cursor: pointer;
-  transition: all $transition-fast;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    color $transition-fast;
   font-size: $font-size-xs;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.1);
-    color: $color-text-secondary;
+    background-color: rgba(var(--color-bg-panel-soft-rgb), 0.66);
+    border-color: rgba(var(--color-border-strong-rgb), 0.9);
+    color: $color-text-primary;
   }
 
   span {
@@ -151,28 +207,39 @@
   }
 }
 
+.toolbarDivider {
+  width: 1px;
+  height: 20px;
+  background-color: rgba(var(--color-border-strong-rgb), 0.55);
+}
+
 .zoomButton {
   @include flex-center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: $radius-sm;
-  background-color: transparent;
-  color: $color-text-muted;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.38);
+  border-radius: $radius-md;
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.28);
+  color: $color-text-secondary;
   cursor: pointer;
-  transition: all $transition-fast;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    color $transition-fast;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.1);
-    color: $color-text-secondary;
+    background-color: rgba(var(--color-bg-panel-soft-rgb), 0.66);
+    border-color: rgba(var(--color-border-strong-rgb), 0.88);
+    color: $color-text-primary;
   }
 }
 
 .zoomLevel {
   font-size: $font-size-xs;
   color: $color-text-muted;
-  min-width: 40px;
+  min-width: 44px;
   text-align: center;
+  font-family: $font-family-mono;
 }
 
 .timelineContainer {
@@ -183,6 +250,99 @@
   flex-direction: row;
 }
 
+.trackLabelsDock {
+  width: 156px;
+  flex-shrink: 0;
+  border-right: 1px solid rgba(var(--color-border-strong-rgb), 0.42);
+  background-color: rgba(var(--color-bg-panel-rgb), 0.98);
+  overflow: hidden;
+}
+
+.trackLabelsSpacer {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  padding: 0 $spacing-md;
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(var(--color-border-strong-rgb), 0.42);
+  background-color: rgba(var(--color-bg-panel-rgb), 0.96);
+}
+
+.trackLabelsInner {
+  will-change: transform;
+}
+
+.trackLabelRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: 0 $spacing-md;
+  border-bottom: 1px solid rgba(var(--color-border-subtle-rgb), 0.75);
+}
+
+.visualTrackLabel {
+  min-height: 120px;
+}
+
+.overlayTrackLabel {
+  min-height: 50px;
+}
+
+.textTrackLabel {
+  min-height: 64px;
+}
+
+.audioTrackLabel {
+  min-height: 78px;
+}
+
+.trackLabelIcon {
+  @include flex-center;
+  width: 28px;
+  height: 28px;
+  border-radius: $radius-md;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.45);
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.28);
+  flex-shrink: 0;
+}
+
+.visualTone {
+  color: rgba(120, 144, 170, 0.96);
+}
+
+.overlayTone {
+  color: rgba(132, 146, 170, 0.96);
+}
+
+.textTone {
+  color: rgba(127, 140, 156, 0.96);
+}
+
+.audioTone {
+  color: rgba(106, 145, 138, 0.96);
+}
+
+.trackLabelText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.trackLabelName {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.trackLabelMeta {
+  font-size: $font-size-xs;
+  color: $color-text-muted;
+}
+
 .tracksArea {
   flex: 1;
   height: 100%;
@@ -191,6 +351,7 @@
   cursor: crosshair;
   user-select: none;
   min-width: 0;
+  @include custom-scrollbar;
 
   &:active {
     cursor: grabbing;
@@ -208,24 +369,22 @@
   position: sticky;
   top: 0;
   height: 30px;
-  background-color: $color-panel-background;
-  border-bottom: 1px solid $color-panel-border;
+  background-color: rgba(var(--color-timeline-ruler-rgb), 0.98);
+  border-bottom: 1px solid rgba(var(--color-border-strong-rgb), 0.45);
   z-index: 10;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .timeMarker {
   position: absolute;
   top: 0;
   bottom: 0;
-  /* Extend to fill height if needed, though parent is fixed height */
   height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   transform: translateX(-50%);
-  /* Center the marker on the exact time coordinate */
 
-  /* Special handling for the start (00:00:00) marker to prevent it being cut off */
   &:first-child {
     transform: none;
     align-items: flex-start;
@@ -234,8 +393,8 @@
 
 .timeMarkerLine {
   width: 1px;
-  height: 20px;
-  background-color: $color-panel-border;
+  height: 18px;
+  background-color: rgba(var(--color-border-strong-rgb), 0.72);
   margin-top: 4px;
 }
 
@@ -251,60 +410,59 @@
   top: 0;
   bottom: 0;
   width: 2px;
-  background-color: $color-accent-green;
+  background-color: $color-accent-primary;
   z-index: 20;
   cursor: ew-resize;
   transition: width $transition-fast;
   user-select: none;
+  box-shadow: 0 0 0 1px rgba(var(--color-accent-primary-rgb), 0.1);
 
   &::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: -4px;
-    width: 0;
-    height: 0;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 8px solid $color-accent-green;
+    top: 8px;
+    left: 50%;
+    width: 12px;
+    height: 12px;
+    border-radius: $radius-full;
+    background-color: $color-accent-primary;
+    border: 2px solid $color-bg-panel-inset;
+    transform: translate(-50%, -50%);
   }
 
   &:hover {
     width: 3px;
-    background-color: color.adjust($color-accent-green, $lightness: 10%);
   }
 
   &.dragging {
     width: 3px;
     cursor: grabbing;
-    background-color: color.adjust($color-accent-green, $lightness: 15%);
+    background-color: $color-accent-primary-hover;
     transition: none;
-
-    &::before {
-      border-top-color: color.adjust($color-accent-green, $lightness: 15%);
-    }
   }
 }
 
 .track {
   display: flex;
   min-height: 120px;
-  
-  // Only show border on last track
-  &:last-child {
-    border-bottom: 1px solid $color-panel-border;
-  }
+  border-bottom: 1px solid rgba(var(--color-border-subtle-rgb), 0.75);
+}
+
+.visualTrack {
+  background-color: $color-track-main-bg;
 }
 
 .audioTrack {
   margin-top: 0 !important;
   padding-top: 28px;
-  min-height: auto; // Let it size based on content
-  
+  min-height: auto;
+  background: transparent;
+  box-shadow: inset 0 -1px 0 rgba(var(--color-border-subtle-rgb), 0.5);
+
   .trackContent {
     padding-top: 0 !important;
     margin-top: 0 !important;
-    min-height: auto; // Remove min-height for audio track
+    min-height: auto;
   }
 }
 
@@ -312,23 +470,12 @@
   margin-top: 0 !important;
   padding-top: 0;
   min-height: 50px;
-  background-color: rgba($color-accent-cyan, 0.03);
+  background-color: $color-track-overlay-bg;
 
   .trackContent {
     padding-top: 0 !important;
     margin-top: 0 !important;
     min-height: 50px;
-  }
-
-  .videoBlock {
-    border-style: dashed;
-    border-color: rgba($color-accent-cyan, 0.6);
-    top: 0;
-    bottom: 0;
-  }
-
-  .scenePlaceholder {
-    background-color: rgba($color-accent-cyan, 0.08);
   }
 }
 
@@ -336,7 +483,7 @@
   margin-top: 0 !important;
   padding-top: 0;
   min-height: 64px;
-  background-color: rgba($color-accent-green, 0.03);
+  background-color: $color-track-text-bg;
 
   .trackContent {
     padding-top: 0 !important;
@@ -345,60 +492,50 @@
   }
 }
 
-.trackLabel {
-  width: 80px;
-  padding: $spacing-sm;
-  background-color: $color-panel-background;
-  border-right: 1px solid $color-panel-border;
-  font-size: $font-size-xs;
-  color: $color-text-secondary;
-  font-weight: $font-weight-medium;
-  display: flex;
-  align-items: center;
-  position: sticky;
-  left: 0;
-  z-index: 5;
-}
-
 .trackContent {
   flex: 1;
   position: relative;
   min-height: 120px;
-  padding-bottom: 0; // Remove extra padding
+  padding-bottom: 0;
 }
 
-.sceneBlock {
+.sceneBlock,
+.videoBlock {
   position: absolute;
   top: $spacing-sm;
   bottom: $spacing-sm;
-  background-color: $color-panel-background;
-  border: 1px solid $color-panel-border;
-  border-radius: $radius-sm;
+  border-radius: $radius-clip;
   overflow: hidden;
   cursor: pointer;
-  transition: all $transition-fast;
+  transition:
+    border-color $transition-fast,
+    background-color $transition-fast,
+    box-shadow $transition-fast,
+    opacity $transition-fast;
   display: flex;
   flex-direction: column;
   user-select: none;
 
   &:hover {
-    border-color: $color-accent-green;
-    box-shadow: 0 0 8px rgba($color-accent-green, 0.3);
+    border-color: rgba(var(--color-border-strong-rgb), 0.96);
+    box-shadow: $shadow-sm;
   }
 
   &.selected {
-    border-color: $color-accent-green;
-    border-width: 2px;
-    box-shadow: 0 0 12px rgba($color-accent-green, 0.5);
-    background-color: rgba($color-accent-green, 0.1);
+    border-color: $color-clip-selected-border;
+    box-shadow: inset 0 0 0 1px rgba(var(--color-accent-primary-rgb), 0.18);
+    background-color: $color-clip-selected-bg;
   }
+}
 
-  &.dragging {
-    opacity: 0.5;
-    transform: scale(1.05);
-    z-index: 100;
-    cursor: grabbing;
-  }
+.sceneBlock {
+  background: $color-clip-visual-bg;
+  border: 1px solid $color-clip-visual-border;
+}
+
+.videoBlock {
+  background: $color-clip-overlay-bg;
+  border: 1px solid $color-clip-overlay-border;
 }
 
 .editableImageBlock {
@@ -411,7 +548,8 @@
 
 .editing {
   cursor: grabbing;
-  box-shadow: 0 0 12px rgba($color-accent-green, 0.5);
+  border-color: $color-clip-selected-border;
+  box-shadow: inset 0 0 0 1px rgba(var(--color-accent-primary-rgb), 0.18);
 }
 
 .imageResizeHandle {
@@ -419,12 +557,12 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: 8px;
+  width: 10px;
   cursor: ew-resize;
   background: linear-gradient(
     90deg,
-    rgba($color-accent-green, 0),
-    rgba($color-accent-green, 0.35)
+    rgba(var(--color-accent-primary-rgb), 0),
+    rgba(var(--color-accent-primary-rgb), 0.28)
   );
   opacity: 0.6;
   transition: opacity $transition-fast;
@@ -441,23 +579,25 @@
   top: $spacing-sm;
   bottom: $spacing-sm;
   width: 3px;
-  background-color: $color-accent-green;
+  background-color: $color-accent-primary;
   z-index: 50;
   pointer-events: none;
-  box-shadow: 0 0 8px rgba($color-accent-green, 0.6);
+  box-shadow: 0 0 0 1px rgba(var(--color-accent-primary-rgb), 0.2);
 }
 
-.sceneThumbnail {
+.sceneThumbnail,
+.videoThumbnail {
   width: 100%;
   height: 60px;
   object-fit: cover;
-  background-color: $color-background-dark;
+  background-color: $color-bg-panel-inset;
 }
 
 .scenePlaceholder {
   width: 100%;
   height: 60px;
-  background-color: $color-background-dark;
+  background:
+    linear-gradient(135deg, rgba(var(--color-bg-panel-soft-rgb), 0.36), rgba(var(--color-bg-panel-inset-rgb), 0.88));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -465,12 +605,14 @@
   font-size: $font-size-xs;
 }
 
-.sceneId {
+.sceneId,
+.videoLabel {
   padding: $spacing-xs $spacing-sm;
   font-size: $font-size-xs;
   font-weight: $font-weight-semibold;
   color: $color-text-primary;
-  background-color: rgba($color-accent-green, 0.1);
+  background-color: rgba(var(--color-bg-panel-inset-rgb), 0.38);
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .sceneDescription {
@@ -485,110 +627,36 @@
   -webkit-box-orient: vertical;
 }
 
-.sceneFooter {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: $spacing-xs;
-  padding: $spacing-xs $spacing-sm;
-  border-top: 1px solid $color-panel-border;
-}
-
-.viewDetailsButton {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-  padding: $spacing-xs $spacing-sm;
-  background: none;
-  border: 1px solid $color-panel-border;
-  border-radius: $radius-sm;
-  color: $color-text-secondary;
-  font-size: $font-size-xs;
-  cursor: pointer;
-  transition: all $transition-fast;
-
-  &:hover {
-    color: $color-text-primary;
-    border-color: $color-accent-cyan;
-    background-color: rgba($color-accent-cyan, 0.1);
-  }
-
-  &:focus-visible {
-    @include focus-ring;
-  }
-}
-
-.videoBlock {
-  position: absolute;
-  top: $spacing-sm;
-  bottom: $spacing-sm;
-  background-color: $color-panel-background;
-  border: 1px solid $color-accent-cyan;
-  border-radius: $radius-sm;
-  overflow: hidden;
-  cursor: pointer;
-  transition: all $transition-fast;
-  display: flex;
-  flex-direction: column;
-  user-select: none;
-
-  &:hover {
-    border-color: $color-accent-cyan;
-    border-width: 2px;
-    box-shadow: 0 0 12px rgba($color-accent-cyan, 0.4);
-    background-color: rgba($color-accent-cyan, 0.15);
-    transform: translateY(-1px);
-  }
-
-  &.selected {
-    border-color: $color-accent-green;
-    border-width: 2px;
-    box-shadow: 0 0 12px rgba($color-accent-green, 0.5);
-    background-color: rgba($color-accent-green, 0.1);
-  }
-}
-
-.videoThumbnail {
-  width: 100%;
-  height: 60px;
-  object-fit: cover;
-  background-color: $color-background-dark;
-}
-
-.videoLabel {
-  padding: $spacing-xs $spacing-sm;
-  font-size: $font-size-xs;
-  font-weight: $font-weight-semibold;
-  color: $color-accent-cyan;
-  background-color: rgba($color-accent-cyan, 0.1);
-}
-
 .textOverlayBlock {
   position: absolute;
   top: $spacing-sm;
   bottom: $spacing-sm;
-  border: 1px solid rgba(96, 165, 250, 0.55);
-  border-radius: $radius-sm;
-  background: linear-gradient(
-    180deg,
-    rgba(96, 165, 250, 0.18) 0%,
-    rgba(59, 130, 246, 0.1) 100%
-  );
+  border: 1px solid $color-clip-text-border;
+  border-radius: $radius-clip;
+  background: $color-clip-text-bg;
   overflow: hidden;
   cursor: pointer;
-  transition: all $transition-fast;
+  transition:
+    border-color $transition-fast,
+    background-color $transition-fast,
+    box-shadow $transition-fast;
   display: flex;
   align-items: center;
   padding: 0 $spacing-sm;
 
   &:hover {
-    border-color: rgba(125, 188, 255, 0.95);
-    box-shadow: 0 0 10px rgba(96, 165, 250, 0.26);
+    border-color: rgba(var(--color-border-strong-rgb), 0.96);
+    box-shadow: $shadow-sm;
+  }
+
+  &.selected {
+    border-color: $color-clip-selected-border;
+    background-color: $color-clip-selected-bg;
   }
 }
 
 .textOverlayLabel {
-  color: #e8f2ff;
+  color: $color-text-primary;
   font-size: $font-size-xs;
   font-weight: $font-weight-medium;
   width: 100%;
@@ -599,64 +667,136 @@
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  height: 50px;
-  min-height: 50px;
+  height: 38px;
+  min-height: 38px;
   min-width: 8px;
-  background-color: rgba($color-accent-cyan, 0.15);
-  border: 1px solid rgba($color-accent-cyan, 0.4);
-  border-radius: $radius-sm;
+  background: $color-clip-audio-bg;
+  border: 1px solid $color-clip-audio-border;
+  border-radius: $radius-clip;
   overflow: hidden;
   cursor: pointer;
-  transition: all $transition-fast;
+  transition:
+    border-color $transition-fast,
+    background-color $transition-fast,
+    box-shadow $transition-fast;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  padding: $spacing-xs;
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 2px;
+  box-shadow: none;
 
   &:hover {
-    background-color: rgba($color-accent-cyan, 0.2);
-    border-color: rgba($color-accent-cyan, 0.6);
+    border-color: rgba(var(--color-border-strong-rgb), 0.92);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
   }
 
   &.selected {
-    border-color: $color-accent-green;
-    box-shadow: 0 0 0 2px rgba($color-accent-green, 0.3);
+    border-color: $color-clip-selected-border;
+    background: $color-clip-selected-bg;
+    box-shadow:
+      inset 0 0 0 1px rgba(var(--color-accent-primary-rgb), 0.1),
+      0 0 0 1px rgba(var(--color-accent-primary-rgb), 0.12);
   }
 }
 
 .audioWaveform {
   width: 100%;
-  height: 10px;
-  background: repeating-linear-gradient(
-    90deg,
-    transparent,
-    transparent 2px,
-    rgba($color-accent-cyan, 0.6) 2px,
-    rgba($color-accent-cyan, 0.6) 4px
-  );
-  background-size: 8px 100%;
-  opacity: 0.9;
-  border-radius: $radius-sm;
+  height: 100%;
+  margin-top: 0;
+  border-radius: calc(#{$radius-clip} - 1px);
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+}
+
+.audioMetaRow {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity $transition-fast;
+}
+
+.audioBlock:hover .audioMetaRow,
+.audioBlock.selected .audioMetaRow {
+  opacity: 0.88;
+}
+
+.audioClipIcon {
+  @include flex-center;
+  width: 12px;
+  height: 12px;
+  color: rgba(122, 145, 171, 0.78);
+  flex-shrink: 0;
+}
+
+.audioWaveformSvg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.audioWaveformBar {
+  fill: rgba(96, 121, 146, 0.9);
+}
+
+.audioWaveformPeakDot {
+  fill: rgba(125, 162, 198, 0.92);
+}
+
+.audioWaveformPlaceholder {
+  width: 100%;
+  height: 100%;
+  background:
+    linear-gradient(180deg, rgba(74, 99, 117, 0.16) 0%, rgba(74, 99, 117, 0.05) 100%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(96, 121, 146, 0.18),
+      rgba(96, 121, 146, 0.18) 2px,
+      rgba(96, 121, 146, 0.68) 2px,
+      rgba(96, 121, 146, 0.68) 3px,
+      rgba(96, 121, 146, 0.14) 3px,
+      rgba(96, 121, 146, 0.14) 6px
+    );
 }
 
 .audioLabel {
-  font-size: $font-size-xs;
-  color: $color-text-primary;
+  font-size: 10px;
+  color: rgba(214, 214, 214, 0.82);
   font-weight: $font-weight-medium;
-  margin-top: $spacing-xs;
   @include truncate;
-  max-width: 100%;
-  padding: 0 $spacing-xs;
+  letter-spacing: 0.01em;
 }
 
-.emptyState {
+.emptyTimelineState {
   @include flex-center;
-  height: 100%;
+  @include flex-column;
+  gap: $spacing-sm;
+  min-height: 220px;
   color: $color-text-muted;
+  text-align: center;
+}
+
+.emptyTimelineTitle {
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  color: $color-text-secondary;
+}
+
+.emptyTimelineCopy {
+  max-width: 360px;
   font-size: $font-size-sm;
 }
 
+.emptyState,
 .loading {
   @include flex-center;
   height: 100%;

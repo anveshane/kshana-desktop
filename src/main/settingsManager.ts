@@ -1,13 +1,15 @@
 import Store from 'electron-store';
-import type { AppSettings, ComfyUIMode } from '../shared/settingsTypes';
+import type { AppSettings, ComfyUIMode, ThemeId } from '../shared/settingsTypes';
 
 const FIXED_COMFYUI_TIMEOUT_SECONDS = 1800;
 const LEGACY_LOCAL_COMFYUI_URL = 'http://localhost:8000';
+const DEFAULT_THEME_ID: ThemeId = 'studio-neutral';
 
 const defaults: AppSettings = {
   comfyuiMode: 'inherit',
   comfyuiUrl: '',
   comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
+  themeId: DEFAULT_THEME_ID,
 };
 
 const store = new Store<AppSettings>({
@@ -30,9 +32,23 @@ function normalizeComfyUIUrl(value: unknown): string {
   return value.trim();
 }
 
+function normalizeThemeId(value: unknown): ThemeId {
+  if (
+    value === 'studio-neutral' ||
+    value === 'deep-forest-gold' ||
+    value === 'petroleum-clay' ||
+    value === 'paper-light' ||
+    value === 'void-cut'
+  ) {
+    return value;
+  }
+  return DEFAULT_THEME_ID;
+}
+
 function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   const comfyuiUrl = normalizeComfyUIUrl(value?.comfyuiUrl);
   const explicitMode = normalizeComfyUIMode(value?.comfyuiMode);
+  const themeId = normalizeThemeId(value?.themeId);
   const projectDir = typeof value?.projectDir === 'string' && value.projectDir.trim().length > 0
     ? value.projectDir
     : undefined;
@@ -53,6 +69,7 @@ function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings
     comfyuiMode: normalizedMode,
     comfyuiUrl: normalizedMode === 'custom' ? comfyuiUrl : '',
     comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
+    themeId,
   };
 
   if (projectDir) {
@@ -78,6 +95,8 @@ export const updateSettings = (patch: Partial<AppSettings>): AppSettings => {
   store.set(normalized);
   return normalized;
 };
+
+export { normalizeSettings, normalizeThemeId, DEFAULT_THEME_ID };
 
 /**
  * Legacy fallback for backend URL migration.

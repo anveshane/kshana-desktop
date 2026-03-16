@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FolderOpen, Plus, Play, Sparkles } from 'lucide-react';
+import { FolderOpen, Plus, Play, Settings, Sparkles } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { safeJsonParse } from '../../../utils/safeJsonParse';
 import { useProject } from '../../../contexts/ProjectContext';
+import { useAppSettings } from '../../../contexts/AppSettingsContext';
+import SettingsPanel from '../../SettingsPanel';
 import type { LandingProjectCard } from '../ProjectCard/ProjectCard';
 import ProjectCard from '../ProjectCard/ProjectCard';
 import RecentProjectsList from '../RecentProjectsList/RecentProjectsList';
@@ -10,7 +12,6 @@ import { getProjectNameFromPath, sortRecentProjects } from '../projectDisplay';
 import styles from './LandingScreen.module.scss';
 import type { BackendProjectFile } from '../../../services/project/backendProjectAdapter';
 
-const FALLBACK_APP_VERSION = 'v?.?.?';
 const THUMBNAIL_CANDIDATES = [
   '.kshana/ui/thumbnail.jpg',
   '.kshana/ui/thumbnail.png',
@@ -20,6 +21,8 @@ const THUMBNAIL_CANDIDATES = [
   'thumbnail.webp',
 ];
 const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
+const FALLBACK_APP_VERSION = 'v?.?.?';
+type LandingView = 'projects' | 'settings';
 
 interface ProjectMetadata {
   manifestName?: string;
@@ -92,37 +95,21 @@ async function loadSingleProjectMetadata(
 export default function LandingScreen() {
   const { recentProjects, openProject, isLoading } = useWorkspace();
   const { isLoading: isProjectLoading, createProject } = useProject();
+  const {
+    themeId,
+    settings,
+    updateTheme,
+    saveConnectionSettings,
+    isSavingConnection,
+    error: settingsError,
+    clearError,
+  } = useAppSettings();
   const [error, setError] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<LandingView>('projects');
   const [appVersion, setAppVersion] = useState<string>(FALLBACK_APP_VERSION);
   const [metadataByPath, setMetadataByPath] = useState<
     Record<string, ProjectMetadata>
   >({});
-
-  useEffect(() => {
-    let isMounted = true;
-    const getVersion = window.electron?.app?.getVersion;
-    if (!getVersion) {
-      return () => {
-        isMounted = false;
-      };
-    }
-
-    getVersion()
-      .then((version) => {
-        if (!isMounted) return null;
-        setAppVersion(version ? `v${version}` : FALLBACK_APP_VERSION);
-        return null;
-      })
-      .catch(() => {
-        if (!isMounted) return null;
-        setAppVersion(FALLBACK_APP_VERSION);
-        return null;
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -148,6 +135,30 @@ export default function LandingScreen() {
       isActive = false;
     };
   }, [recentProjects]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const getVersion = window.electron?.app?.getVersion;
+    if (!getVersion) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    getVersion()
+      .then((version) => {
+        if (!isMounted) return;
+        setAppVersion(version ? `v${version}` : FALLBACK_APP_VERSION);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setAppVersion(FALLBACK_APP_VERSION);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const projectCards = useMemo<LandingProjectCard[]>(
     () =>
@@ -263,61 +274,89 @@ export default function LandingScreen() {
         </div>
 
         <div className={styles.sidebarFooter}>
-          <span>{appVersion}</span>
-          <span className={styles.footerDivider}>·</span>
-          <button type="button" className={styles.footerLink}>
-            Help
+          <button
+            type="button"
+            className={`${styles.settingsAction} ${activeView === 'settings' ? styles.footerActionActive : ''}`}
+            onClick={() => {
+              clearError();
+              setActiveView('settings');
+            }}
+            aria-pressed={activeView === 'settings'}
+          >
+            <Settings size={16} />
+            <span>Settings</span>
           </button>
-          <span className={styles.footerDivider}>·</span>
-          <button type="button" className={styles.footerLink}>
-            Settings
-          </button>
+          <div className={styles.footerMetaRow}>
+            <button type="button" className={styles.footerLink}>
+              Help
+            </button>
+            <span className={styles.footerVersionTag}>{appVersion}</span>
+          </div>
         </div>
       </aside>
 
-      <main className={styles.main}>
-        <section className={styles.hero}>
-          <Sparkles size={16} />
-          <div>
-            <h2 className={styles.heroTitle}>Agentic Video Workspace</h2>
-            <p className={styles.heroSubtitle}>
-              Create and manage your projects with a clean visual dashboard.
-            </p>
-          </div>
-        </section>
+      <main
+        className={`${styles.main} ${themeId === 'paper-light' ? styles.mainLight : ''} ${activeView === 'settings' ? styles.mainSettings : ''}`}
+      >
+        {activeView === 'projects' ? (
+          <>
+            <section className={styles.hero}>
+              <Sparkles size={16} />
+              <div>
+                <h2 className={styles.heroTitle}>Agentic Video Workspace</h2>
+                <p className={styles.heroSubtitle}>
+                  Create and manage your projects with a clean visual dashboard.
+                </p>
+              </div>
+            </section>
 
-        {error && <p className={styles.error}>{error}</p>}
+            {error && <p className={styles.error}>{error}</p>}
 
-        <section className={styles.projectsSection}>
-          <div className={styles.projectsHeader}>
-            <h3 className={styles.projectsTitle}>Projects</h3>
-          </div>
+            <section className={styles.projectsSection}>
+              <div className={styles.projectsHeader}>
+                <h3 className={styles.projectsTitle}>Projects</h3>
+              </div>
 
-          {projectCards.length === 0 ? (
-            <div className={styles.emptyState}>
-              <p>No projects yet. Create your first project to get started.</p>
-              <button
-                type="button"
-                className={styles.newProjectButton}
-                onClick={handleCreateNewProject}
-                disabled={isLoading || isProjectLoading}
-              >
-                <Plus size={16} />
-                Create Project
-              </button>
-            </div>
-          ) : (
-            <div className={styles.projectsGrid}>
-              {projectCards.map((project) => (
-                <ProjectCard
-                  key={project.path}
-                  project={project}
-                  onOpen={handleSelectRecent}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+              {projectCards.length === 0 ? (
+                <div className={styles.emptyState}>
+                  <p>No projects yet. Create your first project to get started.</p>
+                  <button
+                    type="button"
+                    className={styles.newProjectButton}
+                    onClick={handleCreateNewProject}
+                    disabled={isLoading || isProjectLoading}
+                  >
+                    <Plus size={16} />
+                    Create Project
+                  </button>
+                </div>
+              ) : (
+                <div className={styles.projectsGrid}>
+                  {projectCards.map((project) => (
+                    <ProjectCard
+                      key={project.path}
+                      project={project}
+                      onOpen={handleSelectRecent}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        ) : (
+          <section className={styles.settingsSection}>
+            <SettingsPanel
+              isOpen
+              variant="embedded"
+              settings={settings}
+              onClose={() => setActiveView('projects')}
+              onThemeChange={updateTheme}
+              onSaveConnection={saveConnectionSettings}
+              isSavingConnection={isSavingConnection}
+              error={settingsError}
+            />
+          </section>
+        )}
       </main>
     </div>
   );

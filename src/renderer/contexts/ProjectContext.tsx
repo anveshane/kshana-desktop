@@ -37,6 +37,7 @@ import {
   type ImageProjectionSnapshot,
   type ImageSyncTriggerSource,
 } from '../services/assets';
+import { debugRendererLog, debugRendererWarn } from '../utils/debugLogger';
 import { useWorkspace } from './WorkspaceContext';
 
 /**
@@ -741,7 +742,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         clearTimeout(manifestRefreshTimeoutRef.current);
       }
 
-      console.log('[ProjectContext][reconcile_schedule]', {
+      debugRendererLog('[ProjectContext][reconcile_schedule]', {
         source,
         delayMs,
       });
@@ -749,10 +750,13 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       manifestRefreshTimeoutRef.current = setTimeout(() => {
         manifestRefreshTimeoutRef.current = null;
         refreshAssetManifest().catch((error) => {
-          console.warn('[ProjectContext][reconcile_schedule] Refresh failed', {
-            source,
-            error: error instanceof Error ? error.message : String(error),
-          });
+          debugRendererWarn(
+            '[ProjectContext][reconcile_schedule] Refresh failed',
+            {
+              source,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          );
         });
       }, delayMs);
     },
@@ -765,7 +769,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       if (reconnectTimeoutRef.current) return;
 
       const delayMs = reconnectDelayRef.current;
-      console.log('[ProjectContext][ws_reconnect_schedule]', {
+      debugRendererLog('[ProjectContext][ws_reconnect_schedule]', {
         source,
         delayMs,
       });
@@ -824,7 +828,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
         if (backendState.status !== 'ready') {
           connectingRef.current = false;
-          console.log('[ProjectContext][ws_connect] Backend not ready', {
+          debugRendererLog('[ProjectContext][ws_connect] Backend not ready', {
             source,
             backendStatus: backendState.status,
           });
@@ -844,7 +848,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         ws.onopen = () => {
           reconnectDelayRef.current = 500;
           connectingRef.current = false;
-          console.log('[ProjectContext][ws_connect] Connected', {
+          debugRendererLog('[ProjectContext][ws_connect] Connected', {
             source,
             projectDirectory: normalizedProjectDirectory,
           });
@@ -888,7 +892,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
                     : undefined,
               };
 
-              console.log('[ProjectContext][ws_asset]', {
+              debugRendererLog('[ProjectContext][ws_asset]', {
                 source: 'ws_asset',
                 assetId: optimisticAsset.id,
                 assetType: optimisticAsset.type,
@@ -929,7 +933,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
         ws.onerror = (error) => {
           connectingRef.current = false;
-          console.warn('[ProjectContext][ws_connect] Socket error', {
+          debugRendererWarn('[ProjectContext][ws_connect] Socket error', {
             source,
             error,
           });
@@ -938,7 +942,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         ws.onclose = () => {
           wsRef.current = null;
           connectingRef.current = false;
-          console.log('[ProjectContext][ws_connect] Socket closed', {
+          debugRendererLog('[ProjectContext][ws_connect] Socket closed', {
             source,
             projectDirectory: normalizedProjectDirectory,
           });
@@ -956,10 +960,13 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         };
       } catch (error) {
         connectingRef.current = false;
-        console.warn('[ProjectContext][ws_connect] Connection attempt failed', {
-          source,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        debugRendererWarn(
+          '[ProjectContext][ws_connect] Connection attempt failed',
+          {
+            source,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
         scheduleAssetSocketReconnect('connect_error');
       }
     },
@@ -976,10 +983,13 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   useEffect(() => {
     connectAssetWebSocketRef.current = (source: string) => {
       connectAssetWebSocket(source).catch((error) => {
-        console.warn('[ProjectContext][ws_connect] Unhandled connect failure', {
-          source,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        debugRendererWarn(
+          '[ProjectContext][ws_connect] Unhandled connect failure',
+          {
+            source,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
       });
     };
   }, [connectAssetWebSocket]);
@@ -1016,7 +1026,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         if (connectingRef.current) return;
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-        console.log(
+        debugRendererLog(
           '[ProjectContext][ws_connect] Backend transitioned to ready',
           {
             source: 'backend_state_change',

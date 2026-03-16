@@ -77,8 +77,25 @@
   font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
 }
 
+.thinkingInline {
+  margin-top: $spacing-sm;
+  padding: 0 $spacing-sm;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  line-height: 1.5;
+}
+
+.thinkingInlineAgent {
+  color: $color-accent-blue;
+  font-weight: $font-weight-semibold;
+}
+
+.thinkingInlineText {
+  color: $color-text-secondary;
+}
+
 .thinkingText {
-  color: #06b6d4; // cyan color
+  color: $color-accent-primary;
 }
 
 .thinkingDots {
@@ -94,9 +111,9 @@
   align-items: center;
   gap: $spacing-xs;
   padding: $spacing-sm $spacing-md;
-  border: 1px solid rgba($color-accent-blue, 0.35);
+  border: 1px solid rgba(var(--color-accent-blue-rgb), 0.35);
   border-radius: 999px;
-  background: rgba($color-panel-background, 0.96);
+  background: rgba(var(--color-panel-background-rgb), 0.96);
   color: $color-text-primary;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
   cursor: pointer;
@@ -108,8 +125,8 @@
 
   &:hover {
     transform: translateY(-1px);
-    border-color: rgba($color-accent-blue, 0.55);
-    background: rgba($color-panel-background, 1);
+    border-color: rgba(var(--color-accent-blue-rgb), 0.55);
+    background: rgba(var(--color-panel-background-rgb), 1);
   }
 }
 

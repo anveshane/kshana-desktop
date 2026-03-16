@@ -5,18 +5,7 @@
   display: grid;
   grid-template-columns: clamp(208px, 22vw, 272px) minmax(0, 1fr);
   height: 100%;
-  background:
-    radial-gradient(
-      circle at top left,
-      rgba($color-accent-cyan, 0.08),
-      transparent 34%
-    ),
-    radial-gradient(
-      circle at bottom left,
-      rgba($color-accent-green, 0.08),
-      transparent 28%
-    ),
-    $color-background-dark;
+  background: $color-background-dark;
   min-height: 0;
 
   @media (max-width: 1100px) {
@@ -30,16 +19,12 @@
   flex-direction: column;
   min-height: 0;
   padding: $spacing-md;
-  border-right: 1px solid rgba($color-panel-border, 0.9);
-  background: linear-gradient(
-    180deg,
-    rgba(13, 18, 28, 0.98),
-    rgba(9, 13, 22, 0.96)
-  );
+  border-right: 1px solid rgba(var(--color-panel-border-rgb), 0.9);
+  background-color: rgba(var(--color-bg-panel-rgb), 0.98);
 
   @media (max-width: 1100px) {
     border-right: none;
-    border-bottom: 1px solid rgba($color-panel-border, 0.9);
+    border-bottom: 1px solid rgba(var(--color-panel-border-rgb), 0.9);
     padding: $spacing-md;
   }
 }
@@ -51,7 +36,7 @@
   gap: $spacing-md;
   padding-bottom: $spacing-md;
   margin-bottom: $spacing-md;
-  border-bottom: 1px solid rgba($color-panel-border, 0.85);
+  border-bottom: 1px solid rgba(var(--color-panel-border-rgb), 0.85);
 }
 
 .eyebrow {
@@ -77,12 +62,8 @@
   height: 34px;
   padding: 0 $spacing-sm;
   border-radius: 999px;
-  background: linear-gradient(
-    135deg,
-    rgba($color-accent-cyan, 0.22),
-    rgba($color-accent-green, 0.2)
-  );
-  border: 1px solid rgba($color-accent-cyan, 0.25);
+  background: rgba(var(--color-accent-primary-rgb), 0.1);
+  border: 1px solid rgba(var(--color-accent-primary-rgb), 0.22);
   color: $color-text-primary;
   font-size: $font-size-sm;
   font-weight: $font-weight-semibold;
@@ -117,7 +98,7 @@
   }
 
   svg {
-    color: $color-accent-cyan;
+    color: $color-accent-primary;
   }
 }
 
@@ -130,7 +111,7 @@
   padding: 0 8px;
   margin-left: auto;
   border-radius: 999px;
-  background: rgba($color-text-primary, 0.08);
+  background: rgba(var(--color-text-primary-rgb), 0.08);
   color: $color-text-secondary;
   font-size: 11px;
   font-weight: $font-weight-medium;
@@ -149,7 +130,7 @@
   gap: $spacing-sm;
   width: 100%;
   padding: 10px 11px;
-  border: 1px solid rgba($color-panel-border, 0.95);
+  border: 1px solid rgba(var(--color-panel-border-rgb), 0.95);
   border-radius: $radius-md;
   background: rgba(255, 255, 255, 0.025);
   text-align: left;
@@ -161,8 +142,8 @@
     box-shadow $transition-fast;
 
   &:hover {
-    border-color: rgba($color-accent-cyan, 0.45);
-    background: rgba($color-accent-cyan, 0.08);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.24);
+    background: rgba(var(--color-accent-primary-rgb), 0.05);
     transform: translateX(2px);
     box-shadow: 0 6px 14px rgba(0, 0, 0, 0.16);
   }
@@ -172,13 +153,9 @@
   }
 
   &.active {
-    border-color: rgba($color-accent-green, 0.75);
-    background: linear-gradient(
-      135deg,
-      rgba($color-accent-cyan, 0.12),
-      rgba($color-accent-green, 0.12)
-    );
-    box-shadow: inset 0 0 0 1px rgba($color-accent-green, 0.12);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.32);
+    background: rgba(var(--color-accent-primary-rgb), 0.08);
+    box-shadow: inset 0 0 0 1px rgba(var(--color-accent-primary-rgb), 0.08);
 
     &::before {
       content: '';
@@ -188,17 +165,13 @@
       left: 0;
       width: 3px;
       border-radius: 0 999px 999px 0;
-      background: linear-gradient(
-        180deg,
-        $color-accent-cyan,
-        $color-accent-green
-      );
+      background: $color-accent-primary;
     }
   }
 }
 
 .planIcon {
-  color: $color-accent-green;
+  color: $color-accent-primary;
   opacity: 0.95;
   flex-shrink: 0;
   margin-top: 2px;

@@ -5,8 +5,9 @@
 .container {
   width: 120px;
   flex-shrink: 0;
-  background-color: $color-panel-background;
-  border-right: 1px solid $color-panel-border;
+  background:
+    linear-gradient(180deg, rgba(var(--color-bg-panel-rgb), 0.98) 0%, rgba(var(--color-bg-panel-elevated-rgb), 0.98) 100%);
+  border-right: 1px solid rgba(var(--color-border-strong-rgb), 0.45);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -17,8 +18,8 @@
 
 .header {
   padding: $spacing-sm;
-  border-bottom: 1px solid $color-panel-border;
-  background-color: $color-panel-background;
+  border-bottom: 1px solid rgba(var(--color-border-strong-rgb), 0.42);
+  background-color: rgba(var(--color-bg-panel-elevated-rgb), 0.92);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -43,7 +44,7 @@
 
 .sceneVersions {
   padding: $spacing-sm;
-  border-bottom: 1px solid $color-panel-border;
+  border-bottom: 1px solid rgba(var(--color-border-subtle-rgb), 0.82);
   min-height: 120px;
   display: flex;
   flex-direction: column;
@@ -87,9 +88,9 @@
 
 .versionBadge {
   padding: $spacing-xs $spacing-sm;
-  border: 1px solid $color-panel-border;
-  border-radius: $radius-sm;
-  background-color: transparent;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.38);
+  border-radius: $radius-md;
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.42);
   color: $color-text-muted;
   font-size: $font-size-xs;
   font-weight: $font-weight-medium;
@@ -99,21 +100,20 @@
   width: 100%;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.1);
-    border-color: $color-text-muted;
+    background-color: rgba(var(--color-bg-panel-soft-rgb), 0.82);
+    border-color: rgba(var(--color-border-strong-rgb), 0.92);
     color: $color-text-secondary;
   }
 
   &.active {
-    background-color: rgba($color-accent-green, 0.1);
-    border-color: $color-accent-green;
-    color: $color-accent-green;
+    background-color: rgba(var(--color-accent-primary-rgb), 0.14);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.4);
+    color: $color-text-primary;
     font-weight: $font-weight-semibold;
 
     &:hover {
-      background-color: rgba($color-accent-green, 0.15);
-      border-color: color.adjust($color-accent-green, $lightness: 10%);
+      background-color: rgba(var(--color-accent-primary-rgb), 0.18);
+      border-color: rgba(var(--color-accent-primary-rgb), 0.5);
     }
   }
 }
-

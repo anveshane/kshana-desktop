@@ -1,6 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import type { FileNode } from '../../shared/fileSystemTypes';
 import {
+  attachWaveformPeaksToAudioFiles,
   collectAudioFilesWithDuration,
   runLatestAsyncTask,
 } from './useTimelineData';
@@ -81,5 +82,37 @@ describe('useTimelineData audio refresh helpers', () => {
       { path: 'assets/audio/broken.wav', duration: 7 },
     ]);
     expect(getAudioDuration).toHaveBeenCalledTimes(2);
+  });
+
+  it('attaches waveform peaks while preserving files that fail extraction', async () => {
+    const result = await attachWaveformPeaksToAudioFiles({
+      audioFiles: [
+        { path: 'assets/audio/ok.mp3', duration: 12 },
+        { path: 'assets/audio/broken.wav', duration: 7 },
+      ],
+      projectDirectory: '/project',
+      getAudioWaveform: jest.fn(async (audioPath: string) => {
+        if (audioPath.endsWith('/ok.mp3')) {
+          return {
+            peaks: [0.1, 0.6, 1],
+            duration: 12,
+          };
+        }
+
+        throw new Error('waveform extraction failed');
+      }),
+    });
+
+    expect(result).toEqual([
+      {
+        path: 'assets/audio/ok.mp3',
+        duration: 12,
+        waveformPeaks: [0.1, 0.6, 1],
+      },
+      {
+        path: 'assets/audio/broken.wav',
+        duration: 7,
+      },
+    ]);
   });
 });

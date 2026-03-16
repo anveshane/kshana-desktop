@@ -6,7 +6,7 @@
   border-radius: $radius-md;
   padding: $spacing-md;
   margin-bottom: $spacing-md;
-  background: rgba($color-accent-cyan, 0.05);
+  background: rgba(var(--color-accent-cyan-rgb), 0.05);
 }
 
 .header {

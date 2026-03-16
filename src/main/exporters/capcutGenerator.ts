@@ -84,6 +84,17 @@ const CAPCUT_VERSION = '159.0.0';
 const CAPCUT_APP_VERSION = '8.1.1';
 const CAPCUT_APP_ID = 359289;
 const SCHEMA_VERSION = 360000;
+const WATERMARK_TEXT = 'kshana';
+const WATERMARK_RENDER_INDEX = 13000;
+
+interface TextPresentation {
+  alignment?: number;
+  alpha?: number;
+  bold?: boolean;
+  lineMaxWidth?: number;
+  size?: number;
+  transform?: { x: number; y: number };
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -262,6 +273,7 @@ interface TextSegment {
   material_id: string;
   target_timerange: { start: number; duration: number };
   content: string;
+  presentation?: TextPresentation;
 }
 
 // ── Media file copier ─────────────────────────────────────────────────────
@@ -752,6 +764,8 @@ function buildTextSegmentObject(
   renderIndex: number,
   speedMat: SpeedMaterial,
 ): Record<string, unknown> {
+  const transform = seg.presentation?.transform ?? { x: 0.0, y: -0.8 };
+
   return {
     caption_info: null,
     cartoon: false,
@@ -760,7 +774,7 @@ function buildTextSegmentObject(
       flip: { horizontal: false, vertical: false },
       rotation: 0.0,
       scale: { x: 1.0, y: 1.0 },
-      transform: { x: 0.0, y: -0.8 },
+      transform,
     },
     common_keyframes: [],
     enable_adjust: true,
@@ -1007,6 +1021,26 @@ export async function generateCapcutProject(
   // ── Text track segments ────────────────────────────────────────────────
   const textSegments: TextSegment[] = [];
   const promptTextSegments: TextSegment[] = [];
+  const watermarkTextSegments: TextSegment[] = [];
+
+  if (totalDurationMicro > 0) {
+    watermarkTextSegments.push({
+      id: uid(),
+      material_id: uid(),
+      target_timerange: {
+        start: 0,
+        duration: totalDurationMicro,
+      },
+      content: WATERMARK_TEXT,
+      presentation: {
+        alignment: 2,
+        alpha: 0.46,
+        lineMaxWidth: 0.24,
+        size: 6.0,
+        transform: { x: 0.8, y: 0.9 },
+      },
+    });
+  }
 
   if (textOverlayCues && textOverlayCues.length > 0) {
     for (const cue of textOverlayCues) {
@@ -1090,6 +1124,23 @@ export async function generateCapcutProject(
         return buildMediaSegmentObject(seg, 0, false, spd);
       }),
       type: 'audio',
+    });
+  }
+
+  // Watermark text track (render_index = 13000, below prompt/caption tracks)
+  if (watermarkTextSegments.length > 0) {
+    tracks.push({
+      attribute: 0,
+      flag: 0,
+      id: uid(),
+      is_default_name: true,
+      name: '',
+      segments: watermarkTextSegments.map((seg) => {
+        const spd = createSpeedMaterial();
+        speedMaterials.push(spd);
+        return buildTextSegmentObject(seg, WATERMARK_RENDER_INDEX, spd);
+      }),
+      type: 'text',
     });
   }
 
@@ -1241,37 +1292,49 @@ export async function generateCapcutProject(
     }));
 
   // ── Build text materials ─────────────────────────────────────────────
-  const textMaterials = [...promptTextSegments, ...textSegments].map((seg) => ({
-    id: seg.material_id,
-    content: JSON.stringify({
-      styles: [{
-        fill: {
-          alpha: 1.0,
-          content: {
-            render_type: 'solid',
-            solid: { alpha: 1.0, color: [1.0, 1.0, 1.0] },
+  const textMaterials = [
+    ...watermarkTextSegments,
+    ...promptTextSegments,
+    ...textSegments,
+  ].map((seg) => {
+    const alignment = seg.presentation?.alignment ?? 1;
+    const alpha = seg.presentation?.alpha ?? 1.0;
+    const bold = seg.presentation?.bold ?? false;
+    const lineMaxWidth = seg.presentation?.lineMaxWidth ?? 0.82;
+    const size = seg.presentation?.size ?? 8.0;
+
+    return {
+      id: seg.material_id,
+      content: JSON.stringify({
+        styles: [{
+          fill: {
+            alpha,
+            content: {
+              render_type: 'solid',
+              solid: { alpha, color: [1.0, 1.0, 1.0] },
+            },
           },
-        },
-        range: [0, seg.content.length],
-        size: 8.0,
-        bold: false,
-        italic: false,
-        underline: false,
-        strokes: [],
-      }],
-      text: seg.content,
-    }),
-    alignment: 1,
-    check_flag: 7,
-    force_apply_line_max_width: false,
-    global_alpha: 1.0,
-    letter_spacing: 0,
-    line_feed: 1,
-    line_max_width: 0.82,
-    line_spacing: 0.02,
-    type: 'text',
-    typesetting: 0,
-  }));
+          range: [0, seg.content.length],
+          size,
+          bold,
+          italic: false,
+          underline: false,
+          strokes: [],
+        }],
+        text: seg.content,
+      }),
+      alignment,
+      check_flag: 7,
+      force_apply_line_max_width: false,
+      global_alpha: alpha,
+      letter_spacing: 0,
+      line_feed: 1,
+      line_max_width: lineMaxWidth,
+      line_spacing: 0.02,
+      type: 'text',
+      typesetting: 0,
+    };
+  });
 
   // ── Compose draft_info.json (the main content file) ────────────────────
 

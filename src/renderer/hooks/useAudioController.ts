@@ -5,6 +5,7 @@
  */
 
 import { useRef, useEffect, useCallback } from 'react';
+import { debugRendererLog } from '../utils/debugLogger';
 
 export interface AudioControllerOptions {
   playbackTime: number;
@@ -106,7 +107,7 @@ export function useAudioController(
 
     // Mark as initialized when metadata loads
     const handleLoadedMetadata = () => {
-      console.log('[useAudioController] Audio metadata loaded');
+      debugRendererLog('[useAudioController] Audio metadata loaded');
       isInitializedRef.current = true;
     };
 
@@ -151,7 +152,7 @@ export function useAudioController(
       return;
     }
 
-    console.log('[useAudioController] Audio source changing:', {
+    debugRendererLog('[useAudioController] Audio source changing:', {
       from: currentAudioPathRef.current,
       to: resolvedAudioPath,
       currentSrc: currentSrc.substring(0, 100),
@@ -177,7 +178,7 @@ export function useAudioController(
 
     // Restore playback state after load completes
     const handleCanPlay = () => {
-      console.log(
+      debugRendererLog(
         '[useAudioController] Audio can play, restoring position:',
         preservedTimeRef.current,
       );
@@ -303,7 +304,7 @@ export function useAudioController(
 
         // Only update if clamped time is different from current
         if (Math.abs(audioElement.currentTime - clampedTime) > 0.1) {
-          console.log('[useAudioController] Syncing audio position:', {
+          debugRendererLog('[useAudioController] Syncing audio position:', {
             current: currentAudioTime.toFixed(2),
             expected: expectedAudioTime.toFixed(2),
             clamped: clampedTime.toFixed(2),
@@ -339,8 +340,7 @@ export function useAudioController(
       const currentPlaybackTime = playbackTimeRef.current;
       const nativeDur = audioElement.duration;
       const effectiveDuration =
-        audioFile.duration ||
-        (Number.isFinite(nativeDur) ? nativeDur : 0);
+        audioFile.duration || (Number.isFinite(nativeDur) ? nativeDur : 0);
 
       const videoEndTime = currentVideoItem?.endTime;
       const shouldStop = videoEndTime

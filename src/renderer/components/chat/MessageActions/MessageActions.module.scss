@@ -19,7 +19,7 @@
   align-items: center;
   gap: $spacing-xs;
   padding: $spacing-xs $spacing-sm;
-  background: rgba($color-panel-background, 0.9);
+  background: rgba(var(--color-panel-background-rgb), 0.9);
   border: 1px solid $color-panel-border;
   border-radius: $radius-sm;
   color: $color-text-secondary;
@@ -28,9 +28,9 @@
   transition: all $transition-fast;
 
   &:hover {
-    background: rgba($color-accent-green, 0.1);
-    border-color: $color-accent-green;
-    color: $color-accent-green;
+    background: rgba(var(--color-accent-primary-rgb), 0.08);
+    border-color: $color-accent-primary;
+    color: $color-accent-primary;
   }
 
   &:active {
@@ -41,4 +41,3 @@
     font-weight: $font-weight-medium;
   }
 }
-

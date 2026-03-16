@@ -208,7 +208,7 @@
       margin: $spacing-md 0;
       color: $color-text-secondary;
       font-style: italic;
-      background-color: rgba($color-accent-green, 0.05);
+      background-color: rgba(var(--color-accent-green-rgb), 0.05);
       padding: $spacing-md;
       border-radius: 0 $radius-md $radius-md 0;
     }
@@ -246,7 +246,7 @@
     }
 
     tr:hover {
-      background-color: rgba($color-accent-green, 0.05);
+      background-color: rgba(var(--color-accent-green-rgb), 0.05);
     }
 
     // Horizontal rule

@@ -4,9 +4,9 @@
 .banner {
   margin: $spacing-md $spacing-md 0;
   padding: $spacing-sm $spacing-md;
-  border: 1px solid rgba($color-accent-cyan, 0.35);
+  border: 1px solid rgba(var(--color-accent-primary-rgb), 0.22);
   border-radius: $radius-md;
-  background: rgba($color-accent-cyan, 0.08);
+  background: rgba(var(--color-accent-primary-rgb), 0.06);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -71,8 +71,8 @@
 .tag {
   padding: 3px $spacing-sm;
   border-radius: $radius-sm;
-  border: 1px solid rgba($color-accent-green, 0.4);
-  background: rgba($color-accent-green, 0.08);
+  border: 1px solid rgba(var(--color-accent-primary-rgb), 0.24);
+  background: rgba(var(--color-accent-primary-rgb), 0.08);
   color: $color-text-primary;
   font-size: $font-size-xs;
 }
@@ -90,12 +90,7 @@
   padding: $spacing-md;
   border: 1px solid $color-panel-border;
   border-radius: $radius-lg;
-  background: linear-gradient(
-      145deg,
-      rgba($color-accent-cyan, 0.08),
-      rgba($color-accent-green, 0.04)
-    ),
-    rgba(11, 15, 24, 0.9);
+  background: rgba(var(--color-bg-panel-elevated-rgb), 0.96);
   display: flex;
   flex-direction: column;
   gap: $spacing-md;
@@ -143,7 +138,7 @@
   text-align: left;
   padding: $spacing-sm;
   border-radius: $radius-md;
-  border: 1px solid rgba($color-panel-border, 0.9);
+  border: 1px solid rgba(var(--color-panel-border-rgb), 0.9);
   background: rgba(255, 255, 255, 0.02);
   cursor: pointer;
   transition: border-color $transition-fast, background $transition-fast;
@@ -152,14 +147,14 @@
   gap: 4px;
 
   &:hover {
-    border-color: rgba($color-accent-cyan, 0.7);
-    background: rgba($color-accent-cyan, 0.12);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.28);
+    background: rgba(var(--color-accent-primary-rgb), 0.06);
   }
 }
 
 .cardSelected {
-  border-color: rgba($color-accent-green, 0.9);
-  background: rgba($color-accent-green, 0.14);
+  border-color: rgba(var(--color-accent-primary-rgb), 0.34);
+  background: rgba(var(--color-accent-primary-rgb), 0.1);
 }
 
 .cardIndex {
@@ -192,8 +187,8 @@
 }
 
 .durationSelected {
-  background: rgba($color-accent-green, 0.14);
-  border-color: rgba($color-accent-green, 0.85);
+  background: rgba(var(--color-accent-primary-rgb), 0.1);
+  border-color: rgba(var(--color-accent-primary-rgb), 0.34);
   color: $color-text-primary;
 }
 
@@ -215,7 +210,7 @@
 
   &:focus {
     outline: none;
-    border-color: rgba($color-accent-cyan, 0.75);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.34);
   }
 }
 

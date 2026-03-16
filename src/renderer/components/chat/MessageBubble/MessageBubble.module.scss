@@ -10,8 +10,8 @@
 
   &.user {
     align-self: flex-end;
-    border: 1px solid $color-accent-green;
-    background-color: rgba($color-accent-green, 0.05);
+    border: 1px solid rgba(var(--color-accent-primary-rgb), 0.26);
+    background-color: rgba(var(--color-accent-primary-rgb), 0.06);
     border-radius: $radius-md;
     padding: $spacing-md;
     border-left-width: 4px; // Distinctive CLI user input style
@@ -35,7 +35,7 @@
 
   &.error {
     border: 1px solid $color-error;
-    background-color: rgba($color-error, 0.1);
+    background-color: rgba(var(--color-error-rgb), 0.1);
     border-radius: $radius-md;
     padding: $spacing-md;
   }
@@ -120,8 +120,8 @@
 }
 
 .greeting {
-  border: 1px solid $color-accent-cyan;
-  background: linear-gradient(135deg, rgba($color-accent-cyan, 0.1) 0%, rgba($color-accent-cyan, 0.05) 100%);
+  border: 1px solid rgba(var(--color-accent-primary-rgb), 0.2);
+  background: rgba(var(--color-bg-panel-elevated-rgb), 0.82);
   border-radius: $radius-md;
   padding: $spacing-lg;
   margin: $spacing-md 0;
@@ -143,7 +143,7 @@
     }
 
     strong {
-      color: $color-accent-cyan;
+      color: $color-accent-primary;
       font-weight: $font-weight-bold;
       display: block;
       margin-bottom: $spacing-sm;
@@ -165,7 +165,7 @@
       
       &::before {
         content: '• ';
-        color: $color-accent-cyan;
+        color: $color-accent-primary;
         font-weight: $font-weight-bold;
         margin-right: $spacing-xs;
       }
@@ -175,7 +175,7 @@
 
 .inlineCode {
   font-family: $font-family-mono;
-  background-color: rgba($color-text-primary, 0.1);
+  background-color: rgba(var(--color-text-primary-rgb), 0.1);
   padding: 2px 4px;
   border-radius: $radius-sm;
   font-size: 0.9em;
@@ -244,7 +244,7 @@
   transition: background-color $transition-fast;
   
   &:hover {
-    background-color: rgba($color-text-primary, 0.1);
+    background-color: rgba(var(--color-text-primary-rgb), 0.1);
     color: $color-text-primary;
   }
   
@@ -259,9 +259,9 @@
 
 .reasoningContent {
   padding: $spacing-sm;
-  background-color: rgba($color-text-primary, 0.03);
+  background-color: rgba(var(--color-text-primary-rgb), 0.03);
   border-radius: $radius-sm;
-  border-left: 2px solid $color-accent-blue;
+  border-left: 2px solid $color-accent-primary;
   max-height: 400px;
   overflow-y: auto;
   font-size: $font-size-sm;

@@ -4,13 +4,13 @@
 .container {
   @include flex-column;
   height: 100%;
-  background-color: $color-background-dark;
+  background-color: $color-bg-app;
 }
 
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: $spacing-lg;
+  padding: $spacing-xl;
   @include custom-scrollbar;
 }
 
@@ -28,7 +28,7 @@
   gap: $spacing-sm;
   margin-bottom: $spacing-lg;
   padding-bottom: $spacing-sm;
-  border-bottom: 1px solid $color-panel-border;
+  border-bottom: 1px solid rgba(var(--color-border-strong-rgb), 0.42);
   color: $color-text-primary;
 
   h3 {
@@ -51,7 +51,8 @@
   padding: 0 $spacing-sm;
   font-size: $font-size-xs;
   font-weight: $font-weight-medium;
-  background-color: rgba($color-text-primary, 0.1);
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.8);
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.36);
   border-radius: $radius-full;
   color: $color-text-secondary;
   margin-left: auto;
@@ -88,11 +89,12 @@
   p {
     margin: 0;
     font-size: $font-size-sm;
+    max-width: 360px;
   }
 }
 
 .emptyIcon {
-  opacity: 0.5;
+  opacity: 0.55;
 }
 
 .emptySection {
@@ -116,17 +118,19 @@
   align-items: center;
   justify-content: center;
   padding: $spacing-xl;
-  background-color: $color-panel-background;
+  background:
+    linear-gradient(180deg, rgba(var(--color-bg-panel-rgb), 0.98) 0%, rgba(var(--color-bg-panel-elevated-rgb), 0.98) 100%);
   border-radius: $radius-lg;
   cursor: pointer;
-  transition: all $transition-fast;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    box-shadow $transition-fast;
   gap: $spacing-sm;
-  border: 1px solid $color-panel-border;
 
   &:hover {
-    border-color: rgba($color-accent-green, 0.5);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.34);
+    background-color: rgba(var(--color-bg-panel-elevated-rgb), 1);
   }
 
   &:focus-visible {
@@ -135,8 +139,8 @@
 }
 
 .planIcon {
-  color: $color-accent-green;
-  opacity: 0.8;
+  color: $color-accent-primary;
+  opacity: 0.82;
 }
 
 .planName {
@@ -153,22 +157,23 @@
   text-align: center;
 }
 
-// Media card styles
 .mediaCard {
   @include panel-base;
   display: flex;
   flex-direction: column;
-  background-color: $color-panel-background;
+  background:
+    linear-gradient(180deg, rgba(var(--color-bg-panel-rgb), 0.98) 0%, rgba(var(--color-bg-panel-elevated-rgb), 0.98) 100%);
   border-radius: $radius-lg;
-  border: 1px solid $color-panel-border;
   overflow: hidden;
   cursor: pointer;
-  transition: all $transition-fast;
+  transition:
+    border-color $transition-fast,
+    background-color $transition-fast,
+    box-shadow $transition-fast;
 
   &:hover {
-    border-color: rgba($color-accent-green, 0.5);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    border-color: rgba(var(--color-border-strong-rgb), 0.95);
+    box-shadow: $shadow-sm;
   }
 }
 
@@ -176,19 +181,14 @@
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  background-color: $color-background-dark;
+  background-color: $color-bg-panel-inset;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.thumbnailImage {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
+.thumbnailImage,
 .thumbnailVideo {
   width: 100%;
   height: 100%;
@@ -197,12 +197,9 @@
 
 .playOverlay {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   @include flex-center;
-  background-color: rgba(0, 0, 0, 0.3);
+  background: linear-gradient(180deg, rgba(10, 14, 20, 0.18), rgba(10, 14, 20, 0.45));
   color: white;
   opacity: 0;
   transition: opacity $transition-fast;
@@ -215,83 +212,83 @@
 .mediaPlaceholder {
   @include flex-center;
   color: $color-text-muted;
-  opacity: 0.5;
+  opacity: 0.55;
 }
 
 .mediaName {
-  padding: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
   font-size: $font-size-xs;
   color: $color-text-secondary;
   text-align: center;
   @include truncate;
 }
 
-// Modal styles
 .modalOverlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  inset: 0;
+  background-color: rgba(8, 11, 16, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 10000;
   @include flex-center;
-  padding: $spacing-2xl;
 }
 
 .modalContent {
   position: relative;
-  max-width: 90vw;
-  max-height: 90vh;
-  @include flex-column;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   gap: $spacing-md;
-  background-color: rgba($color-background-dark, 0.85);
+  width: min(88vw, 1200px);
+  max-height: 88vh;
+}
+
+.modalImage,
+.modalVideo {
+  display: block;
+  width: 100%;
+  max-height: calc(88vh - 44px);
   border-radius: $radius-lg;
-  padding: $spacing-lg;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  object-fit: contain;
+  background-color: transparent;
+  box-shadow: none;
 }
 
 .modalClose {
-  position: absolute;
-  top: -$spacing-xl;
-  right: 0;
-  background-color: rgba(255, 255, 255, 0.1);
+  position: fixed;
+  top: $spacing-xl;
+  right: $spacing-xl;
+  width: 75px;
+  height: 75px;
+  min-width: 75px;
+  min-height: 75px;
   border: none;
-  border-radius: $radius-full;
-  width: 40px;
-  height: 40px;
-  @include flex-center;
+  border-radius: 0;
+  background-color: transparent;
+  color: $color-text-primary;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  color: white;
-  transition: all $transition-fast;
+  z-index: 10001;
+  transition:
+    transform $transition-fast,
+    color $transition-fast;
 
   &:hover {
-    background-color: rgba(255, 255, 255, 0.2);
-    transform: scale(1.1);
+    transform: scale(1.04);
+    color: $color-text-primary;
+  }
+
+  &:focus-visible {
+    @include focus-ring;
   }
 }
 
-.modalImage {
-  max-width: 100%;
-  max-height: 80vh;
-  object-fit: contain;
-  border-radius: $radius-md;
-}
-
-.modalVideo {
-  max-width: 100%;
-  max-height: 80vh;
-  border-radius: $radius-md;
-}
-
 .modalTitle {
-  color: white;
-  font-size: $font-size-base;
-  font-weight: $font-weight-medium;
+  width: 100%;
   text-align: center;
-  padding: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  @include truncate;
 }
-

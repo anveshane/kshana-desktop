@@ -1,29 +1,49 @@
 // Design Tokens for Kshana Desktop
 
-// Colors
-$color-background-dark: #0f111a;
-$color-panel-background: #161b22;
-$color-panel-border: #21262d;
-$color-accent-green: #00E676;
-$color-accent-green-dim: rgba(0, 230, 118, 0.2);
-$color-accent-cyan: #00bcd4;
-$color-accent-blue: #2196f3;
-$color-text-primary: #ffffff;
-$color-text-secondary: #8b949e;
-$color-text-muted: #6e7681;
-$color-error: #f85149;
-$color-warning: #d29922;
-$color-bg-subtle: rgba(255, 255, 255, 0.04);
+// Runtime theme colors
+$color-bg-app: var(--color-bg-app);
+$color-bg-panel: var(--color-bg-panel);
+$color-bg-panel-elevated: var(--color-bg-panel-elevated);
+$color-bg-panel-soft: var(--color-bg-panel-soft);
+$color-bg-panel-inset: var(--color-bg-panel-inset);
 
+$color-border-subtle: var(--color-border-subtle);
+$color-border-strong: var(--color-border-strong);
+
+$color-text-primary: var(--color-text-primary);
+$color-text-secondary: var(--color-text-secondary);
+$color-text-muted: var(--color-text-muted);
+
+$color-accent-primary: var(--color-accent-primary);
+$color-accent-primary-hover: var(--color-accent-primary-hover);
+$color-accent-primary-dim: var(--color-accent-primary-dim);
+$color-accent-primary-soft: var(--color-accent-primary-soft);
+
+$color-success: var(--color-success);
+$color-warning: var(--color-warning);
+$color-error: var(--color-error);
+$color-info: var(--color-info);
+
+$color-bg-subtle: var(--color-bg-subtle);
+
+// Legacy aliases kept for compatibility with existing modules
+$color-background-dark: var(--color-background-dark);
+$color-panel-background: var(--color-panel-background);
+$color-panel-border: var(--color-panel-border);
+$color-accent-green: var(--color-accent-green);
+$color-accent-cyan: var(--color-accent-cyan);
+$color-accent-blue: var(--color-accent-blue);
 
 // Status Colors
-$color-status-connected: $color-accent-green;
-$color-status-disconnected: $color-text-muted;
-$color-status-connecting: $color-warning;
+$color-status-connected: var(--color-status-connected);
+$color-status-disconnected: var(--color-status-disconnected);
+$color-status-connecting: var(--color-status-connecting);
 
 // Typography
-$font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-$font-family-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+$font-family-base: 'SF Pro Display', 'Inter', 'Segoe UI Variable',
+  'Segoe UI', system-ui, sans-serif;
+$font-family-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', Consolas,
+  monospace;
 
 $font-size-xs: 11px;
 $font-size-sm: 12px;
@@ -51,22 +71,23 @@ $spacing-2xl: 32px;
 $spacing-3xl: 48px;
 
 // Border Radius
-$radius-sm: 4px;
-$radius-md: 6px;
-$radius-lg: 8px;
-$radius-xl: 12px;
+$radius-sm: 6px;
+$radius-md: 10px;
+$radius-lg: 14px;
+$radius-xl: 18px;
 $radius-full: 9999px;
+$radius-clip: 4px;
 
 // Shadows
-$shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-$shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
-$shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
-$shadow-glow-green: 0 0 20px rgba(0, 230, 118, 0.3);
+$shadow-sm: var(--shadow-sm);
+$shadow-md: var(--shadow-md);
+$shadow-lg: var(--shadow-lg);
+$shadow-focus: var(--shadow-focus);
 
 // Transitions
 $transition-fast: 150ms ease;
-$transition-normal: 200ms ease;
-$transition-slow: 300ms ease;
+$transition-normal: 220ms ease;
+$transition-slow: 320ms ease;
 
 // Z-index
 $z-index-dropdown: 100;
@@ -74,16 +95,40 @@ $z-index-modal: 200;
 $z-index-tooltip: 300;
 
 // Layout
-$header-height: 40px;
-$status-bar-height: 28px;
+$header-height: 44px;
+$status-bar-height: 30px;
 $panel-min-width: 200px;
 $explorer-default-width: 260px;
 $chat-default-width: 340px;
 
-// Timeline specific colors
-$color-timeline-background: #0a0c12;
-$color-timeline-accent-cyan: #00bcd4;
-$color-timeline-marker-pending: rgba(0, 188, 212, 0.6);
-$color-timeline-marker-processing: rgba(0, 188, 212, 0.9);
-$color-timeline-marker-complete: rgba(0, 230, 118, 0.8);
-$color-timeline-marker-error: rgba(248, 81, 73, 0.8);
+// Timeline colors
+$color-timeline-background: var(--color-timeline-background);
+$color-timeline-ruler: var(--color-timeline-ruler);
+$color-timeline-grid: var(--color-timeline-grid);
+$color-timeline-marker-pending: var(--color-timeline-marker-pending);
+$color-timeline-marker-processing: var(--color-timeline-marker-processing);
+$color-timeline-marker-complete: var(--color-timeline-marker-complete);
+$color-timeline-marker-error: var(--color-timeline-marker-error);
+
+$color-track-main-bg: var(--color-track-main-bg);
+$color-track-overlay-bg: var(--color-track-overlay-bg);
+$color-track-text-bg: var(--color-track-text-bg);
+$color-track-audio-bg: var(--color-track-audio-bg);
+
+$color-clip-visual-bg: var(--color-clip-visual-bg);
+$color-clip-visual-border: var(--color-clip-visual-border);
+$color-clip-overlay-border: var(--color-clip-overlay-border);
+$color-clip-overlay-bg: var(--color-clip-overlay-bg);
+$color-clip-text-border: var(--color-clip-text-border);
+$color-clip-text-bg: var(--color-clip-text-bg);
+$color-clip-audio-border: var(--color-clip-audio-border);
+$color-clip-audio-bg: var(--color-clip-audio-bg);
+$color-clip-selected-border: var(--color-clip-selected-border);
+$color-clip-selected-bg: var(--color-clip-selected-bg);
+
+// Code surfaces
+$color-code-bg: var(--color-code-bg);
+$color-code-gutter-bg: var(--color-code-gutter-bg);
+$color-code-active-line: var(--color-code-active-line);
+$color-code-selection: var(--color-code-selection);
+$color-code-border: var(--color-code-border);

@@ -36,7 +36,7 @@
   text-align: left;
 
   &:hover {
-    background-color: rgba($color-text-primary, 0.05);
+    background-color: rgba(var(--color-text-primary-rgb), 0.05);
   }
 }
 

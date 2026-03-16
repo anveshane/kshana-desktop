@@ -83,7 +83,7 @@
 
   &:hover {
     color: $color-text-primary;
-    background-color: rgba($color-text-primary, 0.1);
+    background-color: rgba(var(--color-text-primary-rgb), 0.1);
   }
 
   &:focus-visible {
@@ -123,12 +123,12 @@
 
   &:hover {
     color: $color-text-primary;
-    background-color: rgba($color-text-primary, 0.05);
+    background-color: rgba(var(--color-text-primary-rgb), 0.05);
   }
 
   &.active {
-    color: $color-accent-green;
-    background-color: rgba($color-accent-green, 0.1);
+    color: $color-accent-primary;
+    background-color: rgba(var(--color-accent-primary-rgb), 0.08);
   }
 
   &:focus-visible {
@@ -161,8 +161,8 @@
 
   &:focus {
     outline: none;
-    border-color: $color-accent-green;
-    box-shadow: 0 0 0 1px rgba($color-accent-green, 0.2);
+    border-color: $color-accent-primary;
+    box-shadow: 0 0 0 1px rgba(var(--color-accent-primary-rgb), 0.18);
   }
 
   &:disabled {
@@ -177,7 +177,7 @@
 
 .actionButton {
   padding: $spacing-sm $spacing-lg;
-  background: $color-accent-green;
+  background: $color-accent-primary;
   border: none;
   border-radius: $radius-md;
   color: $color-background-dark;
@@ -189,8 +189,8 @@
   gap: $spacing-xs;
 
   &:hover:not(:disabled) {
-    background: color.adjust($color-accent-green, $lightness: 5%);
-    @include glow-effect($color-accent-green, 8px);
+    background: $color-accent-primary-hover;
+    @include glow-effect($color-accent-primary, 8px);
   }
 
   &:disabled {

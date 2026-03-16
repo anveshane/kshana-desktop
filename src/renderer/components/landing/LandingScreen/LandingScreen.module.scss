@@ -7,7 +7,7 @@
   width: 100%;
   background: radial-gradient(
       circle at 10% 0%,
-      rgba(33, 150, 243, 0.08) 0%,
+      rgba(var(--color-accent-primary-rgb), 0.08) 0%,
       rgba(15, 17, 26, 0) 35%
     ),
     $color-background-dark;
@@ -40,17 +40,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(
-    145deg,
-    rgba($color-accent-green, 0.24),
-    rgba($color-accent-cyan, 0.16)
-  );
-  border: 1px solid rgba($color-accent-green, 0.35);
+  background: rgba(var(--color-accent-primary-rgb), 0.12);
+  border: 1px solid rgba(var(--color-accent-primary-rgb), 0.24);
 }
 
 .playIcon {
-  color: $color-accent-green;
-  fill: $color-accent-green;
+  color: $color-accent-primary;
+  fill: $color-accent-primary;
 }
 
 .brandTitle {
@@ -86,10 +82,63 @@
 .sidebarFooter {
   margin-top: auto;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: $spacing-sm;
   color: $color-text-muted;
   font-size: $font-size-sm;
+}
+
+.footerMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+}
+
+.footerAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 $spacing-sm;
+  border-radius: $radius-md;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.52);
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.28);
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    color $transition-fast;
+}
+
+.footerAction {
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.18);
+  cursor: pointer;
+  font-weight: $font-weight-medium;
+
+  &:hover {
+    color: $color-text-primary;
+    background-color: rgba(var(--color-bg-panel-soft-rgb), 0.5);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.3);
+  }
+}
+
+.settingsAction {
+  @extend .footerAction;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 $spacing-md;
+  width: 100%;
+  font-weight: $font-weight-semibold;
+  gap: $spacing-sm;
+}
+
+.footerActionActive {
+  color: $color-text-primary;
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.5);
+  border-color: rgba(var(--color-accent-primary-rgb), 0.3);
 }
 
 .main {
@@ -103,6 +152,17 @@
   @include grid-background;
 }
 
+.mainLight {
+  background-image:
+    linear-gradient(rgba(var(--color-text-primary-rgb), 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--color-text-primary-rgb), 0.04) 1px, transparent 1px);
+}
+
+.mainSettings {
+  padding: 0;
+  gap: 0;
+}
+
 .hero {
   @include panel-base;
   border-radius: $radius-lg;
@@ -112,9 +172,8 @@
   min-height: 108px;
   padding: $spacing-lg;
   color: $color-text-primary;
-  background:
-    linear-gradient(90deg, rgba(10, 13, 20, 0.9), rgba(10, 13, 20, 0.5)),
-    linear-gradient(120deg, rgba($color-accent-cyan, 0.2), rgba(15, 17, 26, 0));
+  background-color: rgba(var(--color-bg-panel-elevated-rgb), 0.96);
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.65);
 }
 
 .heroTitle {
@@ -171,6 +230,13 @@
   color: $color-error;
 }
 
+.settingsSection {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .footerDivider {
   opacity: 0.5;
 }
@@ -182,10 +248,17 @@
   cursor: pointer;
   font-size: $font-size-sm;
   padding: 0;
-  
+
   &:hover {
     color: $color-text-secondary;
   }
+}
+
+.footerVersionTag {
+  color: $color-text-muted;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  letter-spacing: 0.3px;
 }
 
 @media (max-width: 1024px) {

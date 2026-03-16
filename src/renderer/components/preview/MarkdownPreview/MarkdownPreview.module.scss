@@ -85,7 +85,7 @@
 
   &:hover {
     color: $color-text-primary;
-    background-color: rgba($color-text-primary, 0.1);
+    background-color: rgba(var(--color-text-primary-rgb), 0.1);
   }
 
   &:focus-visible {
@@ -184,7 +184,7 @@
 
   // Code blocks
   pre {
-    background-color: rgba($color-background-dark, 0.8);
+    background-color: rgba(var(--color-background-dark-rgb), 0.8);
     border: 1px solid $color-panel-border;
     border-radius: $radius-sm;
     padding: $spacing-md;
@@ -203,7 +203,7 @@
   code {
     font-family: $font-family-mono;
     font-size: 0.9em;
-    background-color: rgba($color-background-dark, 0.6);
+    background-color: rgba(var(--color-background-dark-rgb), 0.6);
     padding: 2px 6px;
     border-radius: $radius-sm;
     color: $color-accent-cyan;
@@ -222,7 +222,7 @@
     transition: color $transition-fast;
 
     &:hover {
-      color: color.adjust($color-accent-green, $lightness: 10%);
+      color: $color-accent-primary-hover;
       text-decoration: underline;
     }
   }
@@ -258,7 +258,7 @@
     }
 
     th {
-      background-color: rgba($color-panel-background, 0.5);
+      background-color: rgba(var(--color-panel-background-rgb), 0.5);
       color: $color-text-primary;
       font-weight: $font-weight-semibold;
     }
@@ -276,4 +276,3 @@
     margin: $spacing-md 0;
   }
 }
-

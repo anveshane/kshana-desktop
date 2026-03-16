@@ -129,6 +129,12 @@ const projectBridge = {
   getAudioDuration(audioPath: string): Promise<number> {
     return ipcRenderer.invoke('project:get-audio-duration', audioPath);
   },
+  getAudioWaveform(
+    audioPath: string,
+    options?: { sampleCount?: number },
+  ): Promise<{ peaks: number[]; duration: number }> {
+    return ipcRenderer.invoke('project:get-audio-waveform', audioPath, options);
+  },
   generateWordCaptions(
     projectDirectory: string,
     audioPath?: string,
