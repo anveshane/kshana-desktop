@@ -62,6 +62,21 @@ import styles from './TimelinePanel.module.scss';
 const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 const modKey = isMac ? 'Cmd' : 'Ctrl';
 const AUDIO_WAVEFORM_HEIGHT = 28;
+const BASE_PIXELS_PER_SECOND = 50;
+const MAJOR_MARKER_STEPS_SECONDS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+
+function getMajorMarkerStepSeconds(zoomLevel: number): number {
+  const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoomLevel;
+  const targetSpacingPx = 95;
+
+  for (const step of MAJOR_MARKER_STEPS_SECONDS) {
+    if (step * pixelsPerSecond >= targetSpacingPx) {
+      return step;
+    }
+  }
+
+  return MAJOR_MARKER_STEPS_SECONDS[MAJOR_MARKER_STEPS_SECONDS.length - 1];
+}
 
 function downsampleWaveformPeaks(
   peaks: number[],
@@ -634,13 +649,13 @@ const formatTime = (seconds: number): string => {
 
 // Convert seconds to pixels based on zoom level
 const secondsToPixels = (seconds: number, zoomLevel: number): number => {
-  const pixelsPerSecond = 50 * zoomLevel; // Base: 50px per second
+  const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoomLevel;
   return seconds * pixelsPerSecond;
 };
 
 // Convert pixels to seconds based on zoom level
 const pixelsToSeconds = (pixels: number, zoomLevel: number): number => {
-  const pixelsPerSecond = 50 * zoomLevel;
+  const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoomLevel;
   return pixels / pixelsPerSecond;
 };
 
@@ -2238,14 +2253,45 @@ export default function TimelinePanel({
     setScrollTop(e.currentTarget.scrollTop);
   }, []);
 
-  // Handle mouse wheel zoom
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      setZoomLevel((prev) => Math.max(0.1, Math.min(5, prev * delta)));
+  // Handle mouse wheel zoom (native non-passive listener).
+  const handleWheel = useCallback((e: WheelEvent) => {
+    if (!(e.ctrlKey || e.metaKey)) {
+      return;
     }
+
+    if (e.cancelable) {
+      e.preventDefault();
+    }
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setZoomLevel((prev) => Math.max(0.1, Math.min(5, prev * delta)));
   }, []);
+
+  // Fallback for environments where touchpad pinch events are routed
+  // through React's synthetic wheel path instead of the native listener.
+  const handleReactWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented || !(e.ctrlKey || e.metaKey)) {
+      return;
+    }
+
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setZoomLevel((prev) => Math.max(0.1, Math.min(5, prev * delta)));
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const tracksElement = tracksRef.current;
+    if (!tracksElement) {
+      return undefined;
+    }
+
+    tracksElement.addEventListener('wheel', handleWheel, { passive: false });
+    return (): void => {
+      tracksElement.removeEventListener('wheel', handleWheel);
+    };
+  }, [handleWheel, isOpen]);
 
   // Handle video import - copy to videos/imported folder
   const handleImportVideo = useCallback(async () => {
@@ -2552,10 +2598,12 @@ export default function TimelinePanel({
   const displayDuration =
     totalDuration > 0 ? totalDuration + TAIL_PADDING_SECONDS : 10;
   const timelineWidth = secondsToPixels(displayDuration, zoomLevel);
-  const maxMarkerTime = Math.ceil(displayDuration / 5) * 5;
+  const markerStepSeconds = getMajorMarkerStepSeconds(zoomLevel);
+  const maxMarkerTime =
+    Math.ceil(displayDuration / markerStepSeconds) * markerStepSeconds;
 
   const timeMarkers: number[] = [];
-  for (let i = 0; i <= maxMarkerTime; i += 5) {
+  for (let i = 0; i <= maxMarkerTime; i += markerStepSeconds) {
     timeMarkers.push(i);
   }
 
@@ -2799,7 +2847,7 @@ export default function TimelinePanel({
               onScroll={handleScroll}
               onMouseDown={handleTimelineMouseDown}
               onContextMenu={handleTimelineContextMenu}
-              onWheel={handleWheel}
+              onWheel={handleReactWheel}
               role="application"
               aria-label="Timeline tracks"
               tabIndex={0}
