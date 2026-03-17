@@ -2,7 +2,8 @@ import { describe, expect, it } from '@jest/globals';
 import {
   buildDisplayOptions,
   normalizeAutoApproveSeconds,
-} from './QuestionPrompt';
+  resolveAutoApproveOption,
+} from './questionPromptUtils';
 
 describe('QuestionPrompt helpers', () => {
   it('converts auto-approve milliseconds into seconds', () => {
@@ -27,5 +28,33 @@ describe('QuestionPrompt helpers', () => {
       { label: 'Yes' },
       { label: 'No' },
     ]);
+  });
+
+  it('uses the first option as the implicit auto-approve default', () => {
+    expect(
+      resolveAutoApproveOption(
+        [{ label: 'Proceed' }, { label: 'Other' }],
+        'select',
+        false,
+      ),
+    ).toBe('Proceed');
+  });
+
+  it('does not auto-approve Other unless it is explicit', () => {
+    expect(
+      resolveAutoApproveOption(
+        [{ label: 'Other' }, { label: 'Proceed' }],
+        'select',
+        false,
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveAutoApproveOption(
+        [{ label: 'Other' }, { label: 'Proceed' }],
+        'select',
+        false,
+        'Other',
+      ),
+    ).toBe('Other');
   });
 });

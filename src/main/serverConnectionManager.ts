@@ -5,16 +5,13 @@ import type { BackendState, ServerConnectionConfig } from '../shared/backendType
 const DEFAULT_SERVER_URL = 'http://localhost:8001';
 const HEALTH_ENDPOINT = '/api/v1/health';
 const HEALTH_POLL_INTERVAL_MS = 3_000;
-const MAX_RECONNECT_DELAY_MS = 30_000;
 
 class ServerConnectionManager extends EventEmitter {
   private serverUrl: string = DEFAULT_SERVER_URL;
 
   private state: BackendState = { status: 'idle' };
 
-  private healthTimer: ReturnType<typeof setInterval> | null = null;
-
-  private reconnectAttempts = 0;
+  private healthTimer: ReturnType<typeof setTimeout> | null = null;
 
   private autoReconnect = true;
 
@@ -33,12 +30,12 @@ class ServerConnectionManager extends EventEmitter {
 
   /**
    * Connect to an external kshana-ink server.
-   * Polls the health endpoint until the server responds.
+   * Polls until the server becomes ready, then stops polling.
    */
   async connect(config: ServerConnectionConfig = { serverUrl: DEFAULT_SERVER_URL }): Promise<BackendState> {
     this.serverUrl = config.serverUrl || DEFAULT_SERVER_URL;
     this.autoReconnect = config.autoReconnect !== false;
-    this.reconnectAttempts = 0;
+    this.stopHealthPolling();
 
     // Derive port from URL for backward compat
     let port: number | undefined;
@@ -53,17 +50,17 @@ class ServerConnectionManager extends EventEmitter {
 
     const healthy = await this.checkHealth();
     if (healthy) {
-      this.reconnectAttempts = 0;
       this.updateState({ status: 'ready', serverUrl: this.serverUrl, port });
       log.info(`Connected to kshana-ink server at ${this.serverUrl}`);
-      this.startHealthPolling();
       return this.state;
     }
 
-    // Server not reachable yet — keep polling if autoReconnect
+    // Only poll while the backend is still starting. Once it reaches ready we
+    // stop background checks so long-running work cannot be marked disconnected
+    // by a later health timeout.
     if (this.autoReconnect) {
-      this.startHealthPolling();
       this.updateState({ status: 'connecting', message: 'Waiting for server...', serverUrl: this.serverUrl, port });
+      this.startHealthPolling();
     } else {
       this.updateState({ status: 'error', message: `Server not reachable at ${this.serverUrl}`, serverUrl: this.serverUrl, port });
     }
@@ -105,57 +102,44 @@ class ServerConnectionManager extends EventEmitter {
     }
   }
 
-  /**
-   * Background health polling with exponential backoff on failure.
-   */
-  private startHealthPolling() {
+  private startHealthPolling(): void {
     this.stopHealthPolling();
 
     const poll = async () => {
-      const healthy = await this.checkHealth();
-      const wasConnected = this.state.status === 'ready';
-
-      if (healthy) {
-        this.reconnectAttempts = 0;
-        if (this.state.status !== 'ready') {
-          let port: number | undefined;
-          try {
-            port = parseInt(new URL(this.serverUrl).port, 10) || undefined;
-          } catch {
-            // ignore
-          }
-          this.updateState({ status: 'ready', serverUrl: this.serverUrl, port });
-          log.info(`Connected to kshana-ink server at ${this.serverUrl}`);
-        }
-      } else if (wasConnected) {
-        // Lost connection
-        this.reconnectAttempts += 1;
-        this.updateState({
-          status: 'disconnected',
-          message: `Lost connection to server (attempt ${this.reconnectAttempts})`,
-          serverUrl: this.serverUrl,
-        });
-        log.warn(`Lost connection to kshana-ink server at ${this.serverUrl}`);
-      } else {
-        // Still trying to connect
-        this.reconnectAttempts += 1;
+      const currentState = this.state.status;
+      if (currentState !== 'connecting' && currentState !== 'starting') {
+        this.stopHealthPolling();
+        return;
       }
 
-      // Schedule next poll with backoff on failures
-      const delay = healthy
-        ? HEALTH_POLL_INTERVAL_MS
-        : Math.min(
-            HEALTH_POLL_INTERVAL_MS * Math.pow(1.5, this.reconnectAttempts),
-            MAX_RECONNECT_DELAY_MS,
-          );
+      const healthy = await this.checkHealth();
+      if (healthy) {
+        let port: number | undefined;
+        try {
+          port = parseInt(new URL(this.serverUrl).port, 10) || undefined;
+        } catch {
+          // ignore
+        }
 
-      this.healthTimer = setTimeout(poll, delay);
+        this.updateState({ status: 'ready', serverUrl: this.serverUrl, port });
+        log.info(`Connected to kshana-ink server at ${this.serverUrl}`);
+        this.stopHealthPolling();
+        return;
+      }
+
+      this.healthTimer = setTimeout(() => {
+        this.healthTimer = null;
+        void poll();
+      }, HEALTH_POLL_INTERVAL_MS);
     };
 
-    this.healthTimer = setTimeout(poll, HEALTH_POLL_INTERVAL_MS);
+    this.healthTimer = setTimeout(() => {
+      this.healthTimer = null;
+      void poll();
+    }, HEALTH_POLL_INTERVAL_MS);
   }
 
-  private stopHealthPolling() {
+  private stopHealthPolling(): void {
     if (this.healthTimer) {
       clearTimeout(this.healthTimer);
       this.healthTimer = null;

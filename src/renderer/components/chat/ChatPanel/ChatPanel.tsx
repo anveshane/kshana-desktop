@@ -40,6 +40,13 @@ import {
   extractIncomingFileOpPath,
   isAbsoluteWirePath,
 } from './chatPanelPathProtocolUtils';
+import { getDisconnectBannerMessage } from './chatPanelConnectionUtils';
+import { getImmediateAutoQuestionResponse } from './chatPanelQuestionUtils';
+import {
+  getResumedSessionUiState,
+  shouldConfigureProjectAfterConnect,
+  type RemoteSessionInfo,
+} from './chatPanelResumeUtils';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
 
@@ -825,6 +832,62 @@ export default function ChatPanel() {
     });
   }, []);
 
+  const removeQueuedOutboundActionType = useCallback((type: string): void => {
+    pendingOutboundActionsRef.current = pendingOutboundActionsRef.current.filter(
+      (payload) => {
+        try {
+          const parsed = JSON.parse(payload) as { type?: unknown };
+          return parsed.type !== type;
+        } catch {
+          return true;
+        }
+      },
+    );
+  }, []);
+
+  const fetchSessionInfo = useCallback(
+    async (
+      sessionId: string,
+      backendState: BackendState,
+    ): Promise<RemoteSessionInfo | null> => {
+      const baseUrl =
+        backendState.serverUrl ||
+        `http://localhost:${backendState.port ?? 8001}`;
+      const url = new URL(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
+        baseUrl,
+      );
+
+      try {
+        const response = await fetch(url.toString(), {
+          signal: AbortSignal.timeout(5000),
+          cache: 'no-store',
+        });
+        if (response.status === 404) {
+          return null;
+        }
+        if (!response.ok) {
+          throw new Error(`Session lookup failed: ${response.status}`);
+        }
+
+        const payload = (await response.json()) as RemoteSessionInfo;
+        if (
+          !payload ||
+          typeof payload.id !== 'string' ||
+          typeof payload.status !== 'string'
+        ) {
+          return null;
+        }
+
+        return payload;
+      } catch (error) {
+        console.warn('[ChatPanel] Failed to fetch session info:', error);
+        return null;
+      }
+    },
+    [],
+  );
+
   const syncProjectState = useCallback(
     async (
       socket?: WebSocket,
@@ -961,6 +1024,7 @@ export default function ChatPanel() {
       const snapshot = await loadChatSnapshot(targetProjectDirectory);
       resetConversationRefs();
       if (!snapshot) {
+        sessionIdRef.current = null;
         setMessages([]);
         setSessionId(null);
         setAgentStatus('idle');
@@ -997,6 +1061,7 @@ export default function ChatPanel() {
         void persistOriginalInputIfNeeded(firstUserMessage.content);
       }
 
+      sessionIdRef.current = snapshot.sessionId ?? null;
       setSessionId(snapshot.sessionId);
       setAgentStatus(resolveAgentStatus(snapshot.uiState.agentStatus));
       setAgentName(snapshot.uiState.agentName || 'Kshana');
@@ -1894,16 +1959,15 @@ export default function ChatPanel() {
                 ? data.timeout * 1000
                 : undefined;
           const defaultOption = (data.defaultOption as string) ?? undefined;
+          const effectiveAutoResponse = getImmediateAutoQuestionResponse({
+            options,
+            questionType,
+            isConfirmation,
+            autoApproveTimeoutMs,
+            defaultOption,
+          });
 
           if (question) {
-            setAgentStatus('waiting');
-            setStatusMessage('Waiting for your input');
-            window.electron.logger.logStatusChange(
-              'waiting',
-              agentName,
-              'Waiting for your input',
-            );
-
             // Log question
             const questionOptions = rawOptions
               ? rawOptions.map((opt) =>
@@ -1982,8 +2046,67 @@ export default function ChatPanel() {
 
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
-            awaitingResponseRef.current = true;
             setIsTaskRunning(false);
+
+            if (effectiveAutoResponse) {
+              void persistOriginalInputIfNeeded(
+                effectiveAutoResponse,
+                (questionOptions || []).map((option) => option.label),
+              ).catch((error) => {
+                console.warn(
+                  '[ChatPanel] Failed to persist auto-approved response:',
+                  error,
+                );
+              });
+
+              if (lastQuestionMessageIdRef.current) {
+                setMessages((prev) =>
+                  prev.map((message) =>
+                    message.id === lastQuestionMessageIdRef.current
+                      ? {
+                        ...message,
+                        meta: {
+                          ...message.meta,
+                          selectedResponse: effectiveAutoResponse,
+                        },
+                        timestamp: Date.now(),
+                      }
+                      : message,
+                  ),
+                );
+              }
+
+              window.electron.logger.logUserInput(effectiveAutoResponse);
+              setHasUserSentMessage(true);
+              awaitingResponseRef.current = false;
+              setAgentStatus('thinking');
+              setStatusMessage('Processing...');
+              window.electron.logger.logStatusChange(
+                'thinking',
+                agentName,
+                `Auto-approving question with: ${effectiveAutoResponse}`,
+              );
+              lastQuestionMessageIdRef.current = null;
+              appendMessage({
+                role: 'user',
+                type: 'message',
+                content: effectiveAutoResponse,
+              });
+              void sendClientActionRef.current({
+                type: 'user_response',
+                data: { response: effectiveAutoResponse },
+              });
+              break;
+            }
+
+            setAgentStatus('waiting');
+            setStatusMessage('Waiting for your input');
+            window.electron.logger.logStatusChange(
+              'waiting',
+              agentName,
+              'Waiting for your input',
+            );
+            awaitingResponseRef.current = true;
           }
           break;
         }
@@ -2833,10 +2956,15 @@ export default function ChatPanel() {
       appendMessage,
       appendSystemMessage,
       debouncedSetStatus,
+      fetchSessionInfo,
       getRendererErrorMessage,
+      hasQueuedOutboundActionType,
       projectDirectory,
+      removeQueuedOutboundActionType,
       resolveStopRequest,
       showNotificationBanner,
+      syncConfiguredProject,
+      syncProjectState,
     ],
   );
 
@@ -2982,18 +3110,44 @@ export default function ChatPanel() {
                   msg.role === 'system' &&
                   msg.type === 'error' &&
                   (msg.content?.includes('Connection to backend lost') ||
+                    msg.content?.includes('Chat connection interrupted') ||
                     msg.content?.includes('WebSocket connection error') ||
                     msg.content?.includes('Reconnection failed'))
                 ),
             ),
           );
+          const requestedSessionId = sessionIdRef.current;
           const hasQueuedConfigureProject =
             hasQueuedOutboundActionType('configure_project');
           void (async () => {
+            const resumedSession =
+              requestedSessionId
+                ? await fetchSessionInfo(requestedSessionId, currentState)
+                : null;
             await syncProjectState(socket, projectDirectory);
+            if (resumedSession) {
+              removeQueuedOutboundActionType('configure_project');
+            }
             flushPendingOutboundActions(socket);
-            if (!hasQueuedConfigureProject) {
+            if (
+              shouldConfigureProjectAfterConnect(
+                resumedSession,
+                hasQueuedConfigureProject,
+              )
+            ) {
               await syncConfiguredProject(socket, projectDirectory);
+            }
+            if (resumedSession) {
+              const resumedState = getResumedSessionUiState(resumedSession);
+              setAgentStatus(resumedState.agentStatus);
+              setStatusMessage(resumedState.statusMessage);
+              setIsTaskRunning(resumedState.isTaskRunning);
+              appendSystemMessage(resumedState.notice, 'status');
+              window.electron.logger.logStatusChange(
+                resumedState.agentStatus,
+                agentNameRef.current,
+                resumedState.statusMessage,
+              );
             }
             resolve(socket);
           })().catch((error) => {
@@ -3025,11 +3179,32 @@ export default function ChatPanel() {
             wsRef.current = null;
           }
           if (event.code !== 1000) {
-            appendConnectionBanner(
-              'ws_disconnected',
-              'Connection to backend lost. Attempting to reconnect...',
-            );
-            scheduleReconnect();
+            void (async () => {
+              let backendState: BackendState | null = null;
+              try {
+                backendState = await window.electron.backend.getState();
+              } catch (error) {
+                console.warn(
+                  '[ChatPanel] Failed to read backend state after socket close:',
+                  error,
+                );
+              }
+
+              window.electron.logger.logError(
+                'Chat WebSocket closed unexpectedly.',
+                {
+                  code: event.code,
+                  reason: event.reason,
+                  wasClean: event.wasClean,
+                  backendState,
+                },
+              );
+              appendConnectionBanner(
+                'ws_disconnected',
+                getDisconnectBannerMessage(backendState),
+              );
+              scheduleReconnect();
+            })();
           }
         };
 
@@ -3048,11 +3223,14 @@ export default function ChatPanel() {
       throw error;
     }
   }, [
+    appendSystemMessage,
     appendConnectionBanner,
+    fetchSessionInfo,
     flushPendingOutboundActions,
     handleServerPayload,
     hasQueuedOutboundActionType,
     projectDirectory,
+    removeQueuedOutboundActionType,
     syncConfiguredProject,
     syncProjectState,
   ]);
@@ -3535,7 +3713,11 @@ export default function ChatPanel() {
           };
           applySetupSelection(persistedPayload);
           setSetupPanelMode('hidden');
-          void configureProjectSetup(persistedPayload);
+          if (!sessionIdRef.current) {
+            void configureProjectSetup(persistedPayload);
+          } else {
+            setIsProjectSetupConfigured(true);
+          }
         } else {
           const pendingSetupDir = window.localStorage.getItem(
             PROJECT_SETUP_STORAGE_KEY,

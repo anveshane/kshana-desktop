@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react';
 import { Check, Clock, HelpCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { ChatQuestionOption } from '../../../types/chat';
+import {
+  buildDisplayOptions,
+  normalizeAutoApproveSeconds,
+  resolveAutoApproveOption,
+} from './questionPromptUtils';
 import styles from './QuestionPrompt.module.scss';
 
 /* eslint-disable react/require-default-props */
@@ -14,31 +19,6 @@ export interface QuestionPromptProps {
   isConfirmation?: boolean;
   onSelect: (response: string) => void;
   selectedResponse?: string; // If already selected
-}
-
-export function normalizeAutoApproveSeconds(
-  autoApproveTimeoutMs?: number,
-): number | null {
-  return typeof autoApproveTimeoutMs === 'number' &&
-    Number.isFinite(autoApproveTimeoutMs)
-    ? Math.ceil(autoApproveTimeoutMs / 1000)
-    : null;
-}
-
-export function buildDisplayOptions(
-  options: ChatQuestionOption[] | undefined,
-  type: 'text' | 'confirm' | 'select',
-  isConfirmation: boolean,
-): ChatQuestionOption[] {
-  if (options && options.length > 0) {
-    return options;
-  }
-
-  if (type === 'confirm' || isConfirmation) {
-    return [{ label: 'Yes' }, { label: 'No' }];
-  }
-
-  return [];
 }
 
 export default function QuestionPrompt({
@@ -58,6 +38,12 @@ export default function QuestionPrompt({
   const [remarkGfm, setRemarkGfm] = useState<any>(null);
 
   const displayOptions = buildDisplayOptions(options, type, isConfirmation);
+  const effectiveDefaultOption = resolveAutoApproveOption(
+    options,
+    type,
+    isConfirmation,
+    defaultOption,
+  );
 
   useEffect(() => {
     setTimeLeft(timeoutSeconds);
@@ -80,8 +66,8 @@ export default function QuestionPrompt({
     }
 
     if (timeLeft <= 0) {
-      if (defaultOption) {
-        onSelect(defaultOption);
+      if (effectiveDefaultOption) {
+        onSelect(effectiveDefaultOption);
       }
       return undefined;
     }
@@ -91,7 +77,13 @@ export default function QuestionPrompt({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [timeLeft, timeoutSeconds, defaultOption, onSelect, selectedResponse]);
+  }, [
+    effectiveDefaultOption,
+    timeLeft,
+    timeoutSeconds,
+    onSelect,
+    selectedResponse,
+  ]);
 
   useEffect(() => {
     if (selectedResponse || displayOptions.length === 0) {
@@ -185,10 +177,10 @@ export default function QuestionPrompt({
 
         {timeLeft !== null &&
           timeLeft > 0 &&
-          defaultOption &&
+          effectiveDefaultOption &&
           !selectedResponse && (
             <div className={styles.timer}>
-              Auto-approving in {timeLeft}s. Default: {defaultOption}
+              Auto-approving in {timeLeft}s. Default: {effectiveDefaultOption}
             </div>
           )}
       </div>

@@ -2,7 +2,22 @@ import { useEffect, useCallback } from 'react';
 import type { AppSettings } from '../../shared/settingsTypes';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 
-const CHECK_INTERVAL = 5000;
+function applyBackendState(
+  status: string | undefined,
+  setConnectionStatus: ReturnType<typeof useWorkspace>['setConnectionStatus'],
+) {
+  if (status === 'ready') {
+    setConnectionStatus('server', 'connected');
+    return;
+  }
+
+  if (status === 'connecting' || status === 'starting') {
+    setConnectionStatus('server', 'connecting');
+    return;
+  }
+
+  setConnectionStatus('server', 'disconnected');
+}
 
 export function useBackendHealth(settings: AppSettings | null) {
   const { setConnectionStatus } = useWorkspace();
@@ -12,17 +27,7 @@ export function useBackendHealth(settings: AppSettings | null) {
 
     try {
       const backendState = await window.electron.backend.getState();
-
-      if (backendState.status === 'ready') {
-        setConnectionStatus('server', 'connected');
-      } else if (
-        backendState.status === 'connecting' ||
-        backendState.status === 'starting'
-      ) {
-        setConnectionStatus('server', 'connecting');
-      } else {
-        setConnectionStatus('server', 'disconnected');
-      }
+      applyBackendState(backendState.status, setConnectionStatus);
     } catch (error) {
       console.error('Health check failed:', error);
       setConnectionStatus('server', 'disconnected');
@@ -33,8 +38,10 @@ export function useBackendHealth(settings: AppSettings | null) {
     if (!settings) return;
 
     checkHealth();
-
-    const interval = setInterval(checkHealth, CHECK_INTERVAL);
-    return () => clearInterval(interval);
+    return window.electron.backend.onStateChange((backendState) => {
+      applyBackendState(backendState.status, setConnectionStatus);
+    });
   }, [settings, checkHealth]);
 }
+
+export { applyBackendState };

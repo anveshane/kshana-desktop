@@ -199,7 +199,7 @@ export default function PreviewPanel() {
     [timelineHeight],
   );
 
-  // Check backend health periodically
+  // Sync backend health from the main process without renderer polling.
   useBackendHealth(settings);
 
   const shouldHydrateTimeline = activeTab === 'video-library' || timelineOpen;

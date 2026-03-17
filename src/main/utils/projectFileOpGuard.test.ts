@@ -49,6 +49,14 @@ describe('projectFileOpGuard', () => {
     expect(resolved).toBe('/Users/dev/project/.kshana/context/index.json');
   });
 
+  it('accepts remote-emitted relative project paths', () => {
+    const resolved = resolveAndValidateProjectPath(
+      'plans/plot.md',
+      '/Users/dev/project',
+    );
+    expect(resolved).toBe('/Users/dev/project/plans/plot.md');
+  });
+
   it('supports remote cross-os flow (windows-style emitted path -> posix project path)', () => {
     const normalized = normalizeIncomingPath(
       '\\Users\\indhicdev\\Documents\\Demo-3\\.kshana\\context\\index.json',
