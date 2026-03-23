@@ -12,9 +12,20 @@ describe('App', () => {
       value: {
         settings: {
           get: jest.fn().mockResolvedValue({
+            backendMode: 'local',
             comfyuiMode: 'inherit',
             comfyuiUrl: '',
             comfyuiTimeout: 1800,
+            llmProvider: 'lmstudio',
+            lmStudioUrl: 'http://127.0.0.1:1234',
+            lmStudioModel: 'qwen3',
+            googleApiKey: '',
+            geminiModel: 'gemini-2.5-flash',
+            openaiApiKey: '',
+            openaiBaseUrl: 'https://api.openai.com/v1',
+            openaiModel: 'gpt-4o',
+            openRouterApiKey: '',
+            openRouterModel: 'z-ai/glm-4.7-flash',
             themeId: 'studio-neutral',
           }),
           update: jest.fn(),
@@ -22,6 +33,10 @@ describe('App', () => {
         },
         backend: {
           getState: jest.fn().mockResolvedValue({ status: 'disconnected' }),
+          getConnectionInfo: jest.fn().mockResolvedValue({
+            selectedMode: 'local',
+            localBackendAvailable: true,
+          }),
           onStateChange: jest.fn(() => jest.fn()),
         },
         project: {

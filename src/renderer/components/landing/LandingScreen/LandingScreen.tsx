@@ -6,6 +6,7 @@ import { useProject } from '../../../contexts/ProjectContext';
 import { useAppSettings } from '../../../contexts/AppSettingsContext';
 import SettingsPanel from '../../SettingsPanel';
 import type { LandingProjectCard } from '../ProjectCard/ProjectCard';
+import NewProjectDialog from '../NewProjectDialog/NewProjectDialog';
 import ProjectCard from '../ProjectCard/ProjectCard';
 import RecentProjectsList from '../RecentProjectsList/RecentProjectsList';
 import { getProjectNameFromPath, sortRecentProjects } from '../projectDisplay';
@@ -20,7 +21,6 @@ const THUMBNAIL_CANDIDATES = [
   'thumbnail.png',
   'thumbnail.webp',
 ];
-const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
 const FALLBACK_APP_VERSION = 'v?.?.?';
 type LandingView = 'projects' | 'settings';
 
@@ -94,7 +94,7 @@ async function loadSingleProjectMetadata(
 
 export default function LandingScreen() {
   const { recentProjects, openProject, isLoading } = useWorkspace();
-  const { isLoading: isProjectLoading, createProject } = useProject();
+  const { isLoading: isProjectLoading } = useProject();
   const {
     themeId,
     settings,
@@ -110,6 +110,7 @@ export default function LandingScreen() {
   const [metadataByPath, setMetadataByPath] = useState<
     Record<string, ProjectMetadata>
   >({});
+  const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -147,12 +148,16 @@ export default function LandingScreen() {
 
     getVersion()
       .then((version) => {
-        if (!isMounted) return;
-        setAppVersion(version ? `v${version}` : FALLBACK_APP_VERSION);
+        if (isMounted) {
+          setAppVersion(version ? `v${version}` : FALLBACK_APP_VERSION);
+        }
+        return undefined;
       })
       .catch(() => {
-        if (!isMounted) return;
-        setAppVersion(FALLBACK_APP_VERSION);
+        if (isMounted) {
+          setAppVersion(FALLBACK_APP_VERSION);
+        }
+        return undefined;
       });
 
     return () => {
@@ -192,34 +197,10 @@ export default function LandingScreen() {
     }
   }, [openProject]);
 
-  const handleCreateNewProject = useCallback(async () => {
+  const handleCreateNewProject = useCallback(() => {
     setError(null);
-    try {
-      const selectedPath = await window.electron.project.selectDirectory();
-      if (!selectedPath) return;
-
-      const projectName = getProjectNameFromPath(selectedPath);
-      const projectDirectory =
-        (await window.electron.project.createFolder(
-          selectedPath,
-          `${projectName}.kshana`,
-        )) || `${selectedPath}/${projectName}.kshana`;
-      const created = await createProject(projectDirectory, projectName);
-      if (!created) {
-        throw new Error('Failed to initialize project in selected folder.');
-      }
-
-      try {
-        window.localStorage.setItem(PROJECT_SETUP_STORAGE_KEY, projectDirectory);
-      } catch {
-        // Ignore localStorage availability issues.
-      }
-
-      await openProject(projectDirectory);
-    } catch (err) {
-      setError(`Failed to create project: ${(err as Error).message}`);
-    }
-  }, [createProject, openProject]);
+    setIsNewProjectDialogOpen(true);
+  }, []);
 
   const handleSelectRecent = useCallback(
     async (path: string) => {
@@ -319,7 +300,9 @@ export default function LandingScreen() {
 
               {projectCards.length === 0 ? (
                 <div className={styles.emptyState}>
-                  <p>No projects yet. Create your first project to get started.</p>
+                  <p>
+                    No projects yet. Create your first project to get started.
+                  </p>
                   <button
                     type="button"
                     className={styles.newProjectButton}
@@ -358,6 +341,10 @@ export default function LandingScreen() {
           </section>
         )}
       </main>
+      <NewProjectDialog
+        isOpen={isNewProjectDialogOpen}
+        onClose={() => setIsNewProjectDialogOpen(false)}
+      />
     </div>
   );
 }

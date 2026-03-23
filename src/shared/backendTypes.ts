@@ -1,3 +1,5 @@
+import type { BackendMode } from './settingsTypes';
+
 export type BackendStatus =
   | 'idle'
   | 'connecting'
@@ -14,6 +16,7 @@ export interface BackendState {
   message?: string;
   port?: number;
   serverUrl?: string;
+  mode?: BackendMode;
 }
 
 /**
@@ -25,4 +28,21 @@ export interface ServerConnectionConfig {
   serverUrl: string;
   /** Automatically reconnect on disconnect (default: true) */
   autoReconnect?: boolean;
+}
+
+export interface BundledVersionInfo {
+  packageVersion?: string;
+  gitBranch?: string;
+  gitCommit?: string;
+  commitDate?: string;
+}
+
+export interface BackendConnectionInfo {
+  selectedMode: BackendMode;
+  effectiveServerUrl?: string;
+  cloudServerUrl?: string;
+  localServerUrl?: string;
+  localBackendAvailable: boolean;
+  bundledVersion?: BundledVersionInfo;
+  note?: string;
 }

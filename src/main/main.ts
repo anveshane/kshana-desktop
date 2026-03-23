@@ -31,10 +31,7 @@ import {
 } from './utils/projectFileOpGuard';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
-import serverConnectionManager, {
-  BackendState,
-  ServerConnectionConfig,
-} from './serverConnectionManager';
+import backendManager from './backendManager';
 import {
   AppSettings,
   getSettings,
@@ -53,6 +50,11 @@ import type {
   RemotionServerRenderProgress,
 } from '../shared/remotionTypes';
 import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
+import type {
+  BackendConnectionInfo,
+  BackendState,
+  ServerConnectionConfig,
+} from '../shared/backendTypes';
 import * as desktopLogger from './services/DesktopLogger';
 import { exportChatJsonWithDialog } from './services/chatExportService';
 import {
@@ -99,6 +101,7 @@ let appUpdateStatus: AppUpdateStatus = {
 };
 
 interface RuntimeConfig {
+  cloudServerUrl?: string;
   serverUrl?: string;
 }
 
@@ -118,7 +121,7 @@ function normalizeServerUrl(value?: string): string | undefined {
   }
 }
 
-async function getRuntimeConfigServerUrl(): Promise<string | undefined> {
+async function getRuntimeConfigCloudServerUrl(): Promise<string | undefined> {
   const candidatePaths = app.isPackaged
     ? [path.join(process.resourcesPath, 'assets', 'runtime-config.json')]
     : [path.join(__dirname, '../../assets/runtime-config.json')];
@@ -127,7 +130,9 @@ async function getRuntimeConfigServerUrl(): Promise<string | undefined> {
     try {
       const raw = await fs.readFile(configPath, 'utf-8');
       const parsed = JSON.parse(raw) as RuntimeConfig;
-      const normalized = normalizeServerUrl(parsed.serverUrl);
+      const normalized = normalizeServerUrl(
+        parsed.cloudServerUrl || parsed.serverUrl,
+      );
       if (normalized) {
         return normalized;
       }
@@ -139,8 +144,8 @@ async function getRuntimeConfigServerUrl(): Promise<string | undefined> {
   return undefined;
 }
 
-async function resolveBackendServerUrl(): Promise<string> {
-  const runtimeConfigUrl = await getRuntimeConfigServerUrl();
+async function resolveCloudBackendServerUrl(): Promise<string> {
+  const runtimeConfigUrl = await getRuntimeConfigCloudServerUrl();
   if (runtimeConfigUrl) {
     return runtimeConfigUrl;
   }
@@ -284,7 +289,7 @@ const broadcastAppUpdateStatus = (
   }
 };
 
-serverConnectionManager.on('state', (state: BackendState) => {
+backendManager.on('state', (state: BackendState) => {
   if (mainWindow) {
     mainWindow.webContents.send('backend:state', state);
   }
@@ -297,8 +302,17 @@ ipcMain.on('ipc-example', async (event, arg) => {
 });
 
 ipcMain.handle('backend:get-state', async (): Promise<BackendState> => {
-  return serverConnectionManager.status;
+  return backendManager.status;
 });
+
+ipcMain.handle(
+  'backend:get-connection-info',
+  async (): Promise<BackendConnectionInfo> => {
+    const settings = getSettings();
+    const cloudServerUrl = await resolveCloudBackendServerUrl();
+    return backendManager.getConnectionInfo(settings, cloudServerUrl);
+  },
+);
 
 ipcMain.handle(
   'backend:start',
@@ -307,13 +321,12 @@ ipcMain.handle(
     config?: ServerConnectionConfig,
   ): Promise<BackendState> => {
     try {
-      const resolvedServerUrl = await resolveBackendServerUrl();
-      return await serverConnectionManager.connect({
-        serverUrl: config?.serverUrl || resolvedServerUrl,
-        autoReconnect: config?.autoReconnect,
-      });
+      const settings = getSettings();
+      const resolvedCloudServerUrl =
+        config?.serverUrl || (await resolveCloudBackendServerUrl());
+      return await backendManager.start(settings, resolvedCloudServerUrl);
     } catch (error) {
-      log.error(`Failed to connect to server: ${(error as Error).message}`);
+      log.error(`Failed to start backend: ${(error as Error).message}`);
       return {
         status: 'error',
         message: (error as Error).message,
@@ -324,15 +337,14 @@ ipcMain.handle(
 
 ipcMain.handle(
   'backend:restart',
-  async (_event, _config?: ServerConnectionConfig) => {
+  async (_event, config?: ServerConnectionConfig) => {
     try {
-      const resolvedServerUrl = await resolveBackendServerUrl();
-      await serverConnectionManager.disconnect();
-      return await serverConnectionManager.connect({
-        serverUrl: resolvedServerUrl,
-      });
+      const settings = getSettings();
+      const resolvedCloudServerUrl =
+        config?.serverUrl || (await resolveCloudBackendServerUrl());
+      return await backendManager.restart(settings, resolvedCloudServerUrl);
     } catch (error) {
-      log.error(`Failed to reconnect to server: ${(error as Error).message}`);
+      log.error(`Failed to restart backend: ${(error as Error).message}`);
       return {
         status: 'error',
         message: (error as Error).message,
@@ -342,7 +354,7 @@ ipcMain.handle(
 );
 
 ipcMain.handle('backend:stop', async () => {
-  return serverConnectionManager.disconnect();
+  return backendManager.stop();
 });
 
 ipcMain.handle('settings:get', async (): Promise<AppSettings> => {
@@ -3025,19 +3037,18 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   desktopLogger.logSessionEnd();
-  serverConnectionManager.disconnect().catch((error) => {
-    log.error(`Failed to disconnect from server: ${(error as Error).message}`);
+  backendManager.stop().catch((error) => {
+    log.error(`Failed to stop backend: ${(error as Error).message}`);
   });
 });
 
 const bootstrapBackend = async () => {
   try {
-    const resolvedServerUrl = await resolveBackendServerUrl();
-    await serverConnectionManager.connect({
-      serverUrl: resolvedServerUrl,
-    });
+    const settings = getSettings();
+    const resolvedCloudServerUrl = await resolveCloudBackendServerUrl();
+    await backendManager.start(settings, resolvedCloudServerUrl);
   } catch (error) {
-    log.error(`Failed to connect to server: ${(error as Error).message}`);
+    log.error(`Failed to start backend: ${(error as Error).message}`);
   }
 };
 

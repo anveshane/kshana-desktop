@@ -1,7 +1,11 @@
 // Disable no-unused-vars, broken for spread args
 /* eslint no-unused-vars: off */
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
-import type { BackendState, ServerConnectionConfig } from '../shared/backendTypes';
+import type {
+  BackendConnectionInfo,
+  BackendState,
+  ServerConnectionConfig,
+} from '../shared/backendTypes';
 import type { AppSettings } from '../shared/settingsTypes';
 import type {
   FileNode,
@@ -86,6 +90,9 @@ const backendBridge = {
   },
   getState(): Promise<BackendState> {
     return ipcRenderer.invoke('backend:get-state');
+  },
+  getConnectionInfo(): Promise<BackendConnectionInfo> {
+    return ipcRenderer.invoke('backend:get-connection-info');
   },
   onStateChange(callback: (state: BackendState) => void) {
     const subscription = (_event: IpcRendererEvent, state: BackendState) => {

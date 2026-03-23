@@ -10,10 +10,23 @@ jobs:
     runs-on: macos-14
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout kshana-desktop
         uses: actions/checkout@v4
+
+      - name: Checkout kshana-ink
+        uses: actions/checkout@v4
+        with:
+          repository: anveshane/kshana-ink
+          path: kshana-ink
+          token: ${{ secrets.BACKEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -21,50 +34,38 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Prepare release/app
+      - name: Build kshana-ink
+        working-directory: kshana-ink
         run: |
-          mkdir -p release/app
-          node << 'EOF'
-          const fs = require('fs');
-          const mainPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          const appPkg = {
-            name: mainPkg.name,
-            version: mainPkg.version || '1.0.0',
-            description: mainPkg.description,
-            main: './dist/main/main.js',
-            dependencies: {}
-          };
-          if (mainPkg.dependencies) {
-            Object.keys(mainPkg.dependencies).forEach(dep => {
-              appPkg.dependencies[dep] = mainPkg.dependencies[dep];
-            });
-          }
-          fs.writeFileSync('release/app/package.json', JSON.stringify(appPkg, null, 2) + '\n');
-          console.log('Created release/app/package.json');
-          EOF
+          pnpm install --frozen-lockfile
+          pnpm build
 
-      - name: Install dependencies
+      - name: Install desktop dependencies
         run: |
           npm ci --ignore-scripts
           npx ts-node .erb/scripts/check-native-dep.js
           npm run build:dll
 
-      - name: Inject server config
+      - name: Inject cloud runtime config
+        env:
+          KSHANA_CLOUD_SERVER_URL: ${{ secrets.KSHANA_SERVER_URL }}
         run: |
           node << 'EOF'
           const fs = require('fs');
-          const url = process.env.KSHANA_SERVER_URL;
+          const url = process.env.KSHANA_CLOUD_SERVER_URL;
           if (!url) throw new Error('KSHANA_SERVER_URL is missing');
-          fs.writeFileSync('assets/runtime-config.json', JSON.stringify({ serverUrl: url }, null, 2));
+          fs.writeFileSync(
+            'assets/runtime-config.json',
+            JSON.stringify({ cloudServerUrl: url }, null, 2),
+          );
           console.log('Wrote assets/runtime-config.json');
           EOF
-        env:
-          KSHANA_SERVER_URL: ${{ secrets.KSHANA_SERVER_URL }}
 
-      - name: Build and Publish Electron app
-        run: npm run release
+      - name: Build and publish Electron app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KSHANA_INK_PATH: ${{ github.workspace }}/kshana-ink
+        run: npm run release
 
   release-windows:
     runs-on: windows-latest
@@ -72,10 +73,23 @@ jobs:
       contents: write
     env:
       NODE_OPTIONS: --max-old-space-size=4096
-    
+
     steps:
       - name: Checkout kshana-desktop
         uses: actions/checkout@v4
+
+      - name: Checkout kshana-ink
+        uses: actions/checkout@v4
+        with:
+          repository: anveshane/kshana-ink
+          path: kshana-ink
+          token: ${{ secrets.BACKEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -83,45 +97,28 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Prepare release/app
+      - name: Build kshana-ink
+        working-directory: kshana-ink
         run: |
-          New-Item -ItemType Directory -Force -Path release/app
-          $script = @'
-          const fs = require('fs');
-          const mainPkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          const appPkg = {
-            name: mainPkg.name,
-            version: mainPkg.version || '1.0.0',
-            description: mainPkg.description,
-            main: './dist/main/main.js',
-            dependencies: {}
-          };
-          if (mainPkg.dependencies) {
-            Object.keys(mainPkg.dependencies).forEach(dep => {
-              appPkg.dependencies[dep] = mainPkg.dependencies[dep];
-            });
-          }
-          fs.writeFileSync('release/app/package.json', JSON.stringify(appPkg, null, 2) + '\n');
-          console.log('Created release/app/package.json');
-          '@
-          node -e $script
+          pnpm install --frozen-lockfile
+          pnpm build
 
-      - name: Install dependencies
+      - name: Install desktop dependencies
         run: |
-          $env:NODE_OPTIONS="--max-old-space-size=4096"
           npm ci --ignore-scripts
           npx ts-node .erb/scripts/check-native-dep.js
           npm run build:dll
 
-      - name: Inject server config
+      - name: Inject cloud runtime config
         run: |
           $url = "${{ secrets.KSHANA_SERVER_URL }}"
           if (-not $url) { throw "KSHANA_SERVER_URL is missing" }
-          $json = @{ serverUrl = $url } | ConvertTo-Json
+          $json = @{ cloudServerUrl = $url } | ConvertTo-Json
           Set-Content -Path "assets/runtime-config.json" -Value $json -Encoding UTF8
           Write-Host "Wrote assets/runtime-config.json"
 
-      - name: Build and Publish Electron app
-        run: npm run release
+      - name: Build and publish Electron app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KSHANA_INK_PATH: ${{ github.workspace }}\kshana-ink
+        run: npm run release

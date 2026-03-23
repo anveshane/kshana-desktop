@@ -12,9 +12,20 @@ jest.mock('../contexts/WorkspaceContext', () => ({
 
 function TestComponent() {
   useBackendHealth({
+    backendMode: 'local',
     comfyuiMode: 'inherit',
     comfyuiUrl: '',
     comfyuiTimeout: 1800,
+    llmProvider: 'lmstudio',
+    lmStudioUrl: 'http://127.0.0.1:1234',
+    lmStudioModel: 'qwen3',
+    googleApiKey: '',
+    geminiModel: 'gemini-2.5-flash',
+    openaiApiKey: '',
+    openaiBaseUrl: 'https://api.openai.com/v1',
+    openaiModel: 'gpt-4o',
+    openRouterApiKey: '',
+    openRouterModel: 'z-ai/glm-4.7-flash',
     themeId: 'studio-neutral',
   });
   return null;

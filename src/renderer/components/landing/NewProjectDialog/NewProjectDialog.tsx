@@ -4,6 +4,8 @@ import { useProject } from '../../../contexts/ProjectContext';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import styles from './NewProjectDialog.module.scss';
 
+const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
+
 interface NewProjectDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -66,7 +68,7 @@ export default function NewProjectDialog({
     try {
       const projectDirectory = await window.electron.project.createFolder(
         workspacePath,
-        `${trimmedName}.kshana`,
+        trimmedName,
       );
 
       if (!projectDirectory) {
@@ -82,6 +84,15 @@ export default function NewProjectDialog({
       );
       if (!created) {
         throw new Error(projectError || 'Project creation failed.');
+      }
+
+      try {
+        window.localStorage.setItem(
+          PROJECT_SETUP_STORAGE_KEY,
+          projectDirectory,
+        );
+      } catch {
+        // Ignore localStorage availability issues.
       }
 
       await openProject(projectDirectory);
@@ -152,7 +163,7 @@ export default function NewProjectDialog({
 
           <div className={styles.locationRow}>
             <div className={styles.locationInfo}>
-              <span className={styles.locationLabel}>Workspace Folder</span>
+              <span className={styles.locationLabel}>Location</span>
               <span className={styles.locationPath}>
                 {workspacePath || 'No folder selected'}
               </span>
