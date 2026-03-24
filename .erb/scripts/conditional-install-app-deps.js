@@ -62,7 +62,19 @@ function runConditionalInstallAppDeps() {
     `${JSON.stringify(syncedPackageJson, null, 2)}\n`,
   );
 
-  execSync('electron-builder install-app-deps', { stdio: 'inherit' });
+  const appLockPath = path.join(appPath, 'package-lock.json');
+  try {
+    execSync('electron-builder install-app-deps', { stdio: 'inherit' });
+  } catch (firstError) {
+    // Stale integrity for `file:vendor/*.tgz` after a local repack without
+    // `prepare:app-deps`; drop lock and retry once.
+    if (fs.existsSync(appLockPath)) {
+      fs.rmSync(appLockPath, { force: true });
+      execSync('electron-builder install-app-deps', { stdio: 'inherit' });
+    } else {
+      throw firstError;
+    }
+  }
   console.log('✓ electron-builder install-app-deps completed successfully');
 }
 

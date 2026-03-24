@@ -40,29 +40,6 @@ function runNpm(
   });
 }
 
-function withLockfileDisabled<T>(callback: () => T): T {
-  const lockfilePath = path.join(webpackPaths.appPath, 'package-lock.json');
-  const backupLockfilePath = path.join(
-    webpackPaths.appPath,
-    '.package-lock.packaging-backup.json',
-  );
-
-  const hasExistingLockfile = fs.existsSync(lockfilePath);
-  if (hasExistingLockfile) {
-    fs.rmSync(backupLockfilePath, { force: true });
-    fs.renameSync(lockfilePath, backupLockfilePath);
-  }
-
-  try {
-    return callback();
-  } finally {
-    fs.rmSync(lockfilePath, { force: true });
-    if (hasExistingLockfile && fs.existsSync(backupLockfilePath)) {
-      fs.renameSync(backupLockfilePath, lockfilePath);
-    }
-  }
-}
-
 function resolveKshanaInkPath(): string {
   const configured = process.env['KSHANA_INK_PATH'];
   if (configured && configured.trim()) {
@@ -141,11 +118,14 @@ function installAppDeps(): void {
 
   fs.rmSync(webpackPaths.appNodeModulesPath, { recursive: true, force: true });
 
-  withLockfileDisabled(() => {
-    runNpm(['install', '--omit=dev', '--no-package-lock'], {
-      cwd: webpackPaths.appPath,
-      stdio: 'inherit',
-    });
+  const lockfilePath = path.join(webpackPaths.appPath, 'package-lock.json');
+  fs.rmSync(lockfilePath, { force: true });
+
+  // Fresh lockfile: `npm pack` produces a new tarball bytes each run; restoring an old
+  // lockfile reintroduces stale `integrity` for `file:vendor/*.tgz` and breaks install.
+  runNpm(['install', '--omit=dev'], {
+    cwd: webpackPaths.appPath,
+    stdio: 'inherit',
   });
 
   const installedServerCliPath = path.join(
