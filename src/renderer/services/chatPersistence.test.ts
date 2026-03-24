@@ -67,6 +67,7 @@ describe('chatPersistence', () => {
         statusMessage: 'Done',
         hasUserSentMessage: true,
         isTaskRunning: false,
+        autonomousMode: true,
       },
     });
 
@@ -103,6 +104,7 @@ describe('chatPersistence', () => {
         statusMessage: 'Ready',
         hasUserSentMessage: false,
         isTaskRunning: false,
+        autonomousMode: false,
       },
     };
 
@@ -138,6 +140,7 @@ describe('chatPersistence', () => {
         statusMessage: 'Ready',
         hasUserSentMessage: true,
         isTaskRunning: false,
+        autonomousMode: false,
       },
     });
 
@@ -159,6 +162,7 @@ describe('chatPersistence', () => {
         statusMessage: 'Ready',
         hasUserSentMessage: true,
         isTaskRunning: false,
+        autonomousMode: true,
       },
     });
 
@@ -187,5 +191,26 @@ describe('chatPersistence', () => {
     );
 
     expect(parsed).toBeNull();
+  });
+
+  it('defaults autonomous mode to false for older snapshots', () => {
+    const parsed = parseChatSnapshot(
+      JSON.stringify({
+        version: 1,
+        projectDirectory: '/tmp/project-a',
+        sessionId: 'session-a',
+        messages: [],
+        uiState: {
+          agentStatus: 'idle',
+          agentName: 'Kshana',
+          statusMessage: 'Ready',
+          hasUserSentMessage: false,
+          isTaskRunning: false,
+        },
+      }),
+      '/tmp/project-a',
+    );
+
+    expect(parsed?.uiState.autonomousMode).toBe(false);
   });
 });

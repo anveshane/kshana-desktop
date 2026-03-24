@@ -238,6 +238,11 @@ function TimelineItemComponent({
   const [imageLoading, setImageLoading] = useState<boolean>(false);
   const imageRetryCountRef = React.useRef<number>(0);
   const imageResolveAbortRef = React.useRef<AbortController | null>(null);
+  const footerLabel = item.sceneLabel || item.label;
+  const clipBadgeLabel = item.sceneLabel ? item.label : null;
+  const accessibleLabel = item.prompt
+    ? `${footerLabel}. ${item.prompt}`
+    : footerLabel;
 
   // Resolve video path from item (video and infographic both use videoPath for mp4)
   useEffect(() => {
@@ -386,10 +391,13 @@ function TimelineItemComponent({
             onItemContextMenu(e, item);
           }
         }}
-        title={item.label}
+        aria-label={accessibleLabel}
       >
         <div className={styles.scenePlaceholder} />
-        <div className={styles.sceneId}>{item.label}</div>
+        {clipBadgeLabel && (
+          <div className={styles.clipBadge}>{clipBadgeLabel}</div>
+        )}
+        <div className={styles.sceneId}>{footerLabel}</div>
       </div>
     );
   }
@@ -413,13 +421,13 @@ function TimelineItemComponent({
             onItemContextMenu(e, item);
           }
         }}
-        title={item.label}
+        aria-label={accessibleLabel}
       >
         <div className={styles.audioMetaRow}>
           <span className={styles.audioClipIcon}>
             <Music size={12} />
           </span>
-          <div className={styles.audioLabel}>{item.label}</div>
+          <div className={styles.audioLabel}>{footerLabel}</div>
         </div>
         <div className={styles.audioWaveform}>
           <AudioWaveform peaks={item.waveformPeaks} width={width} />
@@ -452,7 +460,7 @@ function TimelineItemComponent({
             onItemContextMenu(e, item);
           }
         }}
-        title={item.prompt || item.label}
+        aria-label={accessibleLabel}
       >
         <video
           src={videoPath}
@@ -460,7 +468,10 @@ function TimelineItemComponent({
           preload="metadata"
           muted
         />
-        <div className={styles.videoLabel}>{item.label}</div>
+        {clipBadgeLabel && (
+          <div className={styles.clipBadge}>{clipBadgeLabel}</div>
+        )}
+        <div className={styles.videoLabel}>{footerLabel}</div>
         {item.sourceType === 'server_timeline' && (
           <div
             className={styles.imageResizeHandle}
@@ -502,7 +513,7 @@ function TimelineItemComponent({
             onItemContextMenu(e, item);
           }
         }}
-        title={item.prompt || item.label}
+        aria-label={accessibleLabel}
       >
         <video
           src={videoPath}
@@ -510,7 +521,10 @@ function TimelineItemComponent({
           preload="metadata"
           muted
         />
-        <div className={styles.videoLabel}>{item.label}</div>
+        {clipBadgeLabel && (
+          <div className={styles.clipBadge}>{clipBadgeLabel}</div>
+        )}
+        <div className={styles.videoLabel}>{footerLabel}</div>
       </div>
     );
   }
@@ -525,10 +539,13 @@ function TimelineItemComponent({
         }
         onClick={(e) => onItemClick && onItemClick(e, item)}
         onContextMenu={(e) => onItemContextMenu && onItemContextMenu(e, item)}
-        title={item.prompt || item.label}
+        aria-label={accessibleLabel}
       >
         <div className={styles.scenePlaceholder}>Info</div>
-        <div className={styles.videoLabel}>{item.label}</div>
+        {clipBadgeLabel && (
+          <div className={styles.clipBadge}>{clipBadgeLabel}</div>
+        )}
+        <div className={styles.videoLabel}>{footerLabel}</div>
       </div>
     );
   }
@@ -551,9 +568,9 @@ function TimelineItemComponent({
             onItemContextMenu(e, item);
           }
         }}
-        title={item.label}
+        aria-label={accessibleLabel}
       >
-        <div className={styles.textOverlayLabel}>{item.label}</div>
+        <div className={styles.textOverlayLabel}>{footerLabel}</div>
       </div>
     );
   }
@@ -607,10 +624,11 @@ function TimelineItemComponent({
           onItemContextMenu(e, item);
         }
       }}
-      title={item.prompt || item.label}
+      aria-label={accessibleLabel}
     >
       {thumbnailElement}
-      <div className={styles.sceneId}>{item.label}</div>
+      {clipBadgeLabel && <div className={styles.clipBadge}>{clipBadgeLabel}</div>}
+      <div className={styles.sceneId}>{footerLabel}</div>
       {item.prompt && (
         <div className={styles.sceneDescription} title={item.prompt}>
           {item.prompt.length > 50

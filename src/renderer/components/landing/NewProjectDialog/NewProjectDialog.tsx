@@ -11,6 +11,28 @@ interface NewProjectDialogProps {
   onClose: () => void;
 }
 
+function normalizePathValue(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function joinPath(basePath: string, segment: string): string {
+  const normalizedBase = normalizePathValue(basePath);
+  const normalizedSegment = segment.replace(/^\/+/, '');
+  return `${normalizedBase}/${normalizedSegment}`;
+}
+
+async function isExistingProjectDirectory(directory: string): Promise<boolean> {
+  const normalizedDirectory = normalizePathValue(directory);
+  const hasRootProjectFile = await window.electron.project.checkFileExists(
+    joinPath(normalizedDirectory, 'project.json'),
+  );
+  const hasLegacyProjectFile = await window.electron.project.checkFileExists(
+    joinPath(normalizedDirectory, '.kshana/agent/project.json'),
+  );
+
+  return hasRootProjectFile || hasLegacyProjectFile;
+}
+
 export default function NewProjectDialog({
   isOpen,
   onClose,
@@ -53,12 +75,13 @@ export default function NewProjectDialog({
   const handleCreate = useCallback(async () => {
     const trimmedName = projectName.trim();
     const trimmedDescription = description.trim();
+    const normalizedWorkspacePath = normalizePathValue(workspacePath);
 
     if (!trimmedName) {
       setError('Project name is required.');
       return;
     }
-    if (!workspacePath) {
+    if (!normalizedWorkspacePath) {
       setError('Please select a workspace folder.');
       return;
     }
@@ -66,16 +89,32 @@ export default function NewProjectDialog({
     setError(null);
     setIsSubmitting(true);
     try {
-      const projectDirectory = await window.electron.project.createFolder(
-        workspacePath,
+      let projectDirectory = joinPath(normalizedWorkspacePath, trimmedName);
+
+      if (await isExistingProjectDirectory(normalizedWorkspacePath)) {
+        throw new Error(
+          'Selected location is already a Kshana project. Choose a parent folder instead.',
+        );
+      }
+
+      if (await isExistingProjectDirectory(projectDirectory)) {
+        throw new Error(
+          `A project named "${trimmedName}" already exists in the selected location.`,
+        );
+      }
+
+      const createdDirectory = await window.electron.project.createFolder(
+        normalizedWorkspacePath,
         trimmedName,
       );
 
-      if (!projectDirectory) {
+      if (!createdDirectory) {
         throw new Error(
           'Could not create project folder in selected workspace.',
         );
       }
+
+      projectDirectory = normalizePathValue(createdDirectory);
 
       const created = await createProject(
         projectDirectory,

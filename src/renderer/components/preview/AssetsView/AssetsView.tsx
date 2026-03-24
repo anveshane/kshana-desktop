@@ -14,8 +14,24 @@ interface MediaAsset {
   category: 'images' | 'videos' | 'infographics';
 }
 
+interface MediaDimensions {
+  width: number;
+  height: number;
+}
+
 const MEDIA_SCAN_ROOTS = ['assets', 'characters', 'settings', 'scenes'];
 const MAX_SCAN_DEPTH = 5;
+const DEFAULT_MEDIA_ASPECT_RATIO = '16 / 9';
+
+const getThumbnailAspectRatio = (
+  dimensions: MediaDimensions | undefined,
+): string => {
+  if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) {
+    return DEFAULT_MEDIA_ASPECT_RATIO;
+  }
+
+  return `${dimensions.width} / ${dimensions.height}`;
+};
 
 const normalizeMediaPath = (
   filePath: string,
@@ -41,7 +57,8 @@ const normalizeMediaPath = (
 const assetKey = (
   asset: Pick<MediaAsset, 'path' | 'category'>,
   projectDirectory: string | null,
-): string => `${asset.category}:${normalizeMediaPath(asset.path, projectDirectory)}`;
+): string =>
+  `${asset.category}:${normalizeMediaPath(asset.path, projectDirectory)}`;
 
 const mediaNameFromPath = (filePath: string): string => {
   return filePath.replace(/\\/g, '/').split('/').pop() || filePath;
@@ -101,7 +118,9 @@ const classifyScannedMedia = (
   }
 
   const normalizedPath = node.path.replace(/\\/g, '/');
-  if (!MEDIA_SCAN_ROOTS.some((segment) => normalizedPath.includes(`/${segment}/`))) {
+  if (
+    !MEDIA_SCAN_ROOTS.some((segment) => normalizedPath.includes(`/${segment}/`))
+  ) {
     return null;
   }
 
@@ -157,6 +176,39 @@ export default function AssetsView() {
   const [infographicPaths, setInfographicPaths] = useState<
     Record<string, string>
   >({});
+  const [mediaDimensions, setMediaDimensions] = useState<
+    Record<string, MediaDimensions>
+  >({});
+
+  const updateMediaDimensions = useCallback(
+    (assetPath: string, width: number, height: number) => {
+      if (
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        width <= 0 ||
+        height <= 0
+      ) {
+        return;
+      }
+
+      setMediaDimensions((prev) => {
+        const existing = prev[assetPath];
+        if (
+          existing &&
+          existing.width === width &&
+          existing.height === height
+        ) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [assetPath]: { width, height },
+        };
+      });
+    },
+    [],
+  );
 
   const loadMediaFiles = useCallback(async () => {
     if (!projectDirectory) {
@@ -192,15 +244,22 @@ export default function AssetsView() {
         );
         collectScannedMedia(projectTree, discoveredMedia, projectDirectory);
       } catch (error) {
-        console.error('[AssetsView] Failed to scan project tree for media:', error);
+        console.error(
+          '[AssetsView] Failed to scan project tree for media:',
+          error,
+        );
       }
 
-      const allMedia = Array.from(discoveredMedia.values()).sort((left, right) =>
-        left.name.localeCompare(right.name),
+      const allMedia = Array.from(discoveredMedia.values()).sort(
+        (left, right) => left.name.localeCompare(right.name),
       );
 
-      setGeneratedImages(allMedia.filter((asset) => asset.category === 'images'));
-      setGeneratedVideos(allMedia.filter((asset) => asset.category === 'videos'));
+      setGeneratedImages(
+        allMedia.filter((asset) => asset.category === 'images'),
+      );
+      setGeneratedVideos(
+        allMedia.filter((asset) => asset.category === 'videos'),
+      );
       setGeneratedInfographics(
         allMedia.filter((asset) => asset.category === 'infographics'),
       );
@@ -308,7 +367,10 @@ export default function AssetsView() {
       const paths: Record<string, string> = {};
       for (const infographic of generatedInfographics) {
         try {
-          console.log('[AssetsView] Resolving infographic path:', infographic.path);
+          console.log(
+            '[AssetsView] Resolving infographic path:',
+            infographic.path,
+          );
           const resolved = await resolveAssetPathForDisplay(
             infographic.path,
             projectDirectory,
@@ -323,7 +385,10 @@ export default function AssetsView() {
         }
       }
       setInfographicPaths(paths);
-      console.log('[AssetsView] All infographic paths resolved:', Object.keys(paths).length);
+      console.log(
+        '[AssetsView] All infographic paths resolved:',
+        Object.keys(paths).length,
+      );
     };
 
     resolvePaths();
@@ -386,12 +451,26 @@ export default function AssetsView() {
                         className={styles.mediaCard}
                         onClick={() => setSelectedImage(image)}
                       >
-                        <div className={styles.mediaThumbnail}>
+                        <div
+                          className={styles.mediaThumbnail}
+                          style={{
+                            aspectRatio: getThumbnailAspectRatio(
+                              mediaDimensions[image.path],
+                            ),
+                          }}
+                        >
                           {imageSrc ? (
                             <img
                               src={imageSrc}
                               alt={image.name}
                               className={styles.thumbnailImage}
+                              onLoad={(event) =>
+                                updateMediaDimensions(
+                                  image.path,
+                                  event.currentTarget.naturalWidth,
+                                  event.currentTarget.naturalHeight,
+                                )
+                              }
                             />
                           ) : (
                             <div className={styles.mediaPlaceholder}>
@@ -434,7 +513,14 @@ export default function AssetsView() {
                         className={styles.mediaCard}
                         onClick={() => setSelectedVideo(video)}
                       >
-                        <div className={styles.mediaThumbnail}>
+                        <div
+                          className={styles.mediaThumbnail}
+                          style={{
+                            aspectRatio: getThumbnailAspectRatio(
+                              mediaDimensions[video.path],
+                            ),
+                          }}
+                        >
                           {videoSrc ? (
                             <>
                               <video
@@ -442,6 +528,13 @@ export default function AssetsView() {
                                 className={styles.thumbnailVideo}
                                 preload="metadata"
                                 muted
+                                onLoadedMetadata={(event) =>
+                                  updateMediaDimensions(
+                                    video.path,
+                                    event.currentTarget.videoWidth,
+                                    event.currentTarget.videoHeight,
+                                  )
+                                }
                               />
                               <div className={styles.playOverlay}>
                                 <Play size={32} />
@@ -485,7 +578,11 @@ export default function AssetsView() {
                   generatedInfographics.map((infographic) => {
                     const videoSrc = infographicPaths[infographic.path];
                     if (!videoSrc) {
-                      console.warn('[AssetsView] No video src for infographic:', infographic.name, infographic.path);
+                      console.warn(
+                        '[AssetsView] No video src for infographic:',
+                        infographic.name,
+                        infographic.path,
+                      );
                     }
                     return (
                       <div
@@ -493,7 +590,14 @@ export default function AssetsView() {
                         className={styles.mediaCard}
                         onClick={() => setSelectedInfographic(infographic)}
                       >
-                        <div className={styles.mediaThumbnail}>
+                        <div
+                          className={styles.mediaThumbnail}
+                          style={{
+                            aspectRatio: getThumbnailAspectRatio(
+                              mediaDimensions[infographic.path],
+                            ),
+                          }}
+                        >
                           {videoSrc ? (
                             <>
                               <video
@@ -501,6 +605,13 @@ export default function AssetsView() {
                                 className={styles.thumbnailVideo}
                                 preload="metadata"
                                 muted
+                                onLoadedMetadata={(event) =>
+                                  updateMediaDimensions(
+                                    infographic.path,
+                                    event.currentTarget.videoWidth,
+                                    event.currentTarget.videoHeight,
+                                  )
+                                }
                               />
                               <div className={styles.playOverlay}>
                                 <Play size={32} />
@@ -585,35 +696,32 @@ export default function AssetsView() {
       )}
 
       {/* Infographic Modal */}
-      {selectedInfographic &&
-        infographicPaths[selectedInfographic.path] && (
+      {selectedInfographic && infographicPaths[selectedInfographic.path] && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => setSelectedInfographic(null)}
+        >
           <div
-            className={styles.modalOverlay}
-            onClick={() => setSelectedInfographic(null)}
+            className={styles.modalContent}
+            onClick={(e) => e.stopPropagation()}
           >
-            <div
-              className={styles.modalContent}
-              onClick={(e) => e.stopPropagation()}
+            <button
+              className={styles.modalClose}
+              onClick={() => setSelectedInfographic(null)}
+              aria-label="Close"
             >
-              <button
-                className={styles.modalClose}
-                onClick={() => setSelectedInfographic(null)}
-                aria-label="Close"
-              >
-                <X size={24} />
-              </button>
-              <video
-                src={infographicPaths[selectedInfographic.path]}
-                controls
-                autoPlay
-                className={styles.modalVideo}
-              />
-              <div className={styles.modalTitle}>
-                {selectedInfographic.name}
-              </div>
-            </div>
+              <X size={24} />
+            </button>
+            <video
+              src={infographicPaths[selectedInfographic.path]}
+              controls
+              autoPlay
+              className={styles.modalVideo}
+            />
+            <div className={styles.modalTitle}>{selectedInfographic.name}</div>
           </div>
-        )}
+        </div>
+      )}
     </>
   );
 }

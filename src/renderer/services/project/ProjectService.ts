@@ -316,6 +316,7 @@ export class ProjectService {
       const backendProject = createDefaultBackendProject({
         id: projectId,
         title: name,
+        description,
       });
       const agentState = backendProjectToDesktopAgentState(backendProject);
       await this.writeAgentState(directory, agentState);
@@ -325,11 +326,6 @@ export class ProjectService {
       // Create asset manifest
       const assetManifest = backendAssetManifestToDesktop({ assets: [] });
       await this.writeAssetManifest(directory, assetManifest);
-
-      await window.electron.project.writeFile(
-        ProjectService.buildPath(directory, backendProject.originalInputFile),
-        description?.trim() || '',
-      );
 
       this.projectDirectory = directory;
       this.currentBackendProject = backendProject;
@@ -582,6 +578,8 @@ export class ProjectService {
       return;
     }
     this.currentBackendProject.title = manifest.name;
+    this.currentBackendProject.description =
+      manifest.description?.trim() || undefined;
     this.currentBackendProject.updatedAt = Date.now();
     await this.writeJSON(
       ProjectService.buildPath(directory, PROJECT_PATHS.ROOT_MANIFEST),

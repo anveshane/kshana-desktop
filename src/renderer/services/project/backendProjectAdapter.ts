@@ -74,6 +74,7 @@ export interface BackendProjectFile {
   version: '2.0';
   id: string;
   title: string;
+  description?: string;
   originalInputFile: string;
   style: string;
   inputType: 'idea' | 'story' | 'multi_input';
@@ -367,6 +368,7 @@ function mapPhaseRecordToBackend(
 export function createDefaultBackendProject(params: {
   id: string;
   title: string;
+  description?: string;
   style?: string;
   templateId?: string;
   targetDuration?: number;
@@ -376,6 +378,7 @@ export function createDefaultBackendProject(params: {
     version: '2.0',
     id: params.id,
     title: params.title,
+    description: params.description?.trim() || undefined,
     originalInputFile: 'original_input.md',
     style: params.style ?? 'cinematic_realism',
     inputType: 'idea',
@@ -415,6 +418,7 @@ export function backendProjectToDesktopManifest(
   project: BackendProjectFile,
 ): KshanaManifest {
   const manifest = createDefaultManifest(project.id, project.title, '1.0.0');
+  manifest.description = project.description?.trim() || undefined;
   manifest.created_at = new Date(project.createdAt).toISOString();
   manifest.updated_at = new Date(project.updatedAt).toISOString();
   return manifest;

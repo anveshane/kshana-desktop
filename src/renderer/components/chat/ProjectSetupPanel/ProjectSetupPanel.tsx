@@ -21,7 +21,7 @@ export interface SetupDurationOption {
   seconds: number;
 }
 
-export type SetupStep = 'template' | 'style' | 'duration';
+export type SetupStep = 'template' | 'style' | 'duration' | 'autonomous';
 export type SetupPanelMode = 'hidden' | 'banner' | 'wizard' | 'summary';
 
 interface ProjectSetupPanelProps {
@@ -32,6 +32,7 @@ interface ProjectSetupPanelProps {
   selectedTemplateId: string | null;
   selectedStyleId: string | null;
   selectedDuration: number | null;
+  selectedAutonomousMode: boolean;
   loading: boolean;
   configuring: boolean;
   error: string | null;
@@ -40,6 +41,8 @@ interface ProjectSetupPanelProps {
   onSelectTemplate: (templateId: string) => void;
   onSelectStyle: (styleId: string) => void;
   onSelectDuration: (seconds: number) => void;
+  onSelectAutonomousMode: (enabled: boolean) => void;
+  onConfirmSetup: () => void;
   onBack: () => void;
 }
 
@@ -59,6 +62,7 @@ export default function ProjectSetupPanel({
   selectedTemplateId,
   selectedStyleId,
   selectedDuration,
+  selectedAutonomousMode,
   loading,
   configuring,
   error,
@@ -67,12 +71,15 @@ export default function ProjectSetupPanel({
   onSelectTemplate,
   onSelectStyle,
   onSelectDuration,
+  onSelectAutonomousMode,
+  onConfirmSetup,
   onBack,
 }: ProjectSetupPanelProps) {
   const [customDuration, setCustomDuration] = useState('');
 
   const selectedTemplate = useMemo(
-    () => templates.find((template) => template.id === selectedTemplateId) ?? null,
+    () =>
+      templates.find((template) => template.id === selectedTemplateId) ?? null,
     [selectedTemplateId, templates],
   );
 
@@ -91,10 +98,14 @@ export default function ProjectSetupPanel({
     return preset?.label || formatDuration(selectedDuration);
   }, [durationPresets, selectedDuration, selectedTemplateId]);
 
-  const styleOptions = selectedTemplate?.styles || [];
-  const durationOptions = selectedTemplateId
-    ? durationPresets[selectedTemplateId] || []
-    : [];
+  const styleOptions = useMemo(
+    () => selectedTemplate?.styles || [],
+    [selectedTemplate],
+  );
+  const durationOptions = useMemo(
+    () => (selectedTemplateId ? durationPresets[selectedTemplateId] || [] : []),
+    [durationPresets, selectedTemplateId],
+  );
 
   useEffect(() => {
     if (mode !== 'wizard') return undefined;
@@ -120,6 +131,13 @@ export default function ProjectSetupPanel({
         return;
       }
 
+      if (step === 'autonomous') {
+        if (index > 1) return;
+        event.preventDefault();
+        onSelectAutonomousMode(index === 1);
+        return;
+      }
+
       const target = durationOptions[index];
       if (!target) return;
       event.preventDefault();
@@ -134,6 +152,7 @@ export default function ProjectSetupPanel({
     durationOptions,
     mode,
     onSelectDuration,
+    onSelectAutonomousMode,
     onSelectStyle,
     onSelectTemplate,
     step,
@@ -192,8 +211,17 @@ export default function ProjectSetupPanel({
           <span className={styles.tag}>
             {selectedTemplate?.displayName || 'Narrative Story Video'}
           </span>
-          <span className={styles.tag}>{selectedStyle?.displayName || 'Cinematic Realism'}</span>
-          <span className={styles.tag}>{selectedDurationLabel || '2 minutes'}</span>
+          <span className={styles.tag}>
+            {selectedStyle?.displayName || 'Cinematic Realism'}
+          </span>
+          <span className={styles.tag}>
+            {selectedDurationLabel || '2 minutes'}
+          </span>
+          {selectedAutonomousMode && (
+            <span className={`${styles.tag} ${styles.autonomousTag}`}>
+              Autonomous
+            </span>
+          )}
         </div>
         {(configuring || error) && (
           <div className={styles.summaryStatus}>
@@ -227,15 +255,17 @@ export default function ProjectSetupPanel({
             </button>
           )}
           <span className={styles.wizardStep}>
-            {step === 'template' && 'Step 1 of 3'}
-            {step === 'style' && 'Step 2 of 3'}
-            {step === 'duration' && 'Step 3 of 3'}
+            {step === 'template' && 'Step 1 of 4'}
+            {step === 'style' && 'Step 2 of 4'}
+            {step === 'duration' && 'Step 3 of 4'}
+            {step === 'autonomous' && 'Step 4 of 4'}
           </span>
         </div>
         <h3 className={styles.wizardTitle}>
           {step === 'template' && 'Choose a Template'}
           {step === 'style' && 'Choose a Style'}
           {step === 'duration' && 'Choose Duration'}
+          {step === 'autonomous' && 'Autonomous Mode'}
         </h3>
       </div>
 
@@ -250,13 +280,17 @@ export default function ProjectSetupPanel({
                   type="button"
                   key={template.id}
                   className={`${styles.card} ${
-                    selectedTemplateId === template.id ? styles.cardSelected : ''
+                    selectedTemplateId === template.id
+                      ? styles.cardSelected
+                      : ''
                   }`}
                   onClick={() => onSelectTemplate(template.id)}
                   disabled={configuring}
                 >
                   <span className={styles.cardIndex}>{index + 1}</span>
-                  <span className={styles.cardName}>{template.displayName}</span>
+                  <span className={styles.cardName}>
+                    {template.displayName}
+                  </span>
                   <span className={styles.cardDescription}>
                     {template.description || 'No description'}
                   </span>
@@ -328,6 +362,52 @@ export default function ProjectSetupPanel({
                   disabled={configuring}
                 >
                   Set
+                </button>
+              </div>
+            </>
+          )}
+
+          {step === 'autonomous' && (
+            <>
+              <div className={styles.cardsGrid}>
+                <button
+                  type="button"
+                  className={`${styles.card} ${
+                    !selectedAutonomousMode ? styles.cardSelected : ''
+                  }`}
+                  onClick={() => onSelectAutonomousMode(false)}
+                  disabled={configuring}
+                >
+                  <span className={styles.cardIndex}>1</span>
+                  <span className={styles.cardName}>Manual</span>
+                  <span className={styles.cardDescription}>
+                    Pause for user decisions and keep the normal ask-user flow.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.card} ${
+                    selectedAutonomousMode ? styles.cardSelected : ''
+                  }`}
+                  onClick={() => onSelectAutonomousMode(true)}
+                  disabled={configuring}
+                >
+                  <span className={styles.cardIndex}>2</span>
+                  <span className={styles.cardName}>Autonomous</span>
+                  <span className={styles.cardDescription}>
+                    Skip the ask-user cycle and keep the workflow moving
+                    automatically.
+                  </span>
+                </button>
+              </div>
+              <div className={styles.autonomousFooter}>
+                <button
+                  type="button"
+                  className={styles.continueButton}
+                  onClick={onConfirmSetup}
+                  disabled={configuring}
+                >
+                  {configuring ? 'Configuring...' : 'Continue'}
                 </button>
               </div>
             </>

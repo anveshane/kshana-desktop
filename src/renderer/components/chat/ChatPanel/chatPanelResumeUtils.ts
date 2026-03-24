@@ -1,6 +1,7 @@
 export interface RemoteSessionInfo {
   id: string;
   status: 'idle' | 'running' | 'awaiting_input' | 'completed' | 'error';
+  autonomousMode?: boolean;
 }
 
 export function shouldConfigureProjectAfterConnect(
@@ -14,21 +15,24 @@ export function shouldConfigureProjectAfterConnect(
   return !hasQueuedConfigureProject;
 }
 
-export function getResumedSessionUiState(
-  session: RemoteSessionInfo,
-): {
+export function getResumedSessionUiState(session: RemoteSessionInfo): {
   agentStatus: 'idle' | 'thinking' | 'waiting' | 'completed' | 'error';
   statusMessage: string;
   isTaskRunning: boolean;
-  notice: string;
+  notice: string | null;
+  autonomousMode: boolean;
 } {
+  const autonomousMode = Boolean(session.autonomousMode);
+
   switch (session.status) {
     case 'running':
       return {
         agentStatus: 'thinking',
-        statusMessage: 'Reconnected to active session. Waiting for next update...',
+        statusMessage:
+          'Reconnected to active session. Waiting for next update...',
         isTaskRunning: true,
         notice: 'Reconnected to active session.',
+        autonomousMode,
       };
     case 'awaiting_input':
       return {
@@ -36,6 +40,7 @@ export function getResumedSessionUiState(
         statusMessage: 'Reconnected. Session is waiting for your input.',
         isTaskRunning: false,
         notice: 'Reconnected. Session is waiting for your input.',
+        autonomousMode,
       };
     case 'completed':
       return {
@@ -43,6 +48,7 @@ export function getResumedSessionUiState(
         statusMessage: 'Reconnected to completed session.',
         isTaskRunning: false,
         notice: 'Reconnected to completed session.',
+        autonomousMode,
       };
     case 'error':
       return {
@@ -50,13 +56,15 @@ export function getResumedSessionUiState(
         statusMessage: 'Reconnected to session in error state.',
         isTaskRunning: false,
         notice: 'Reconnected to session in error state.',
+        autonomousMode,
       };
     default:
       return {
         agentStatus: 'idle',
-        statusMessage: 'Reconnected to existing session.',
+        statusMessage: 'Ready',
         isTaskRunning: false,
-        notice: 'Reconnected to existing session.',
+        notice: null,
+        autonomousMode,
       };
   }
 }

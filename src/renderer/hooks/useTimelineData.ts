@@ -32,6 +32,7 @@ export interface TimelineItem {
   endTime: number;
   duration: number;
   label: string;
+  sceneLabel?: string;
   prompt?: string;
   expandedPrompt?: string;
   placementNumber?: number;
@@ -259,6 +260,35 @@ function getTimelineSegments(
   return timeline.segments.filter(isValidSegmentRange);
 }
 
+function extractSceneLabel(segment: ServerTimelineSegment): string | undefined {
+  const candidates = [segment.id?.trim(), segment.label?.trim()].filter(
+    (value): value is string => Boolean(value),
+  );
+
+  const matchedLabel = candidates
+    .map((candidate) => {
+      const shotMatch = candidate.match(/segment[_-](\d+)[_-]shot[_-]\d+/i);
+      if (shotMatch) {
+        return `Scene ${parseInt(shotMatch[1] || '0', 10) + 1}`;
+      }
+
+      const segmentMatch = candidate.match(/^segment[_-](\d+)$/i);
+      if (segmentMatch) {
+        return `Scene ${parseInt(segmentMatch[1] || '0', 10) + 1}`;
+      }
+
+      const sceneMatch = candidate.match(/\bscene[\s_-]*(\d+)\b/i);
+      if (sceneMatch) {
+        return `Scene ${parseInt(sceneMatch[1] || '0', 10)}`;
+      }
+
+      return null;
+    })
+    .find((value): value is string => Boolean(value));
+
+  return matchedLabel || undefined;
+}
+
 export function getTimelineFileState(
   content: string | null,
 ): TimelineFileState {
@@ -319,6 +349,7 @@ export function buildServerTimelineItems({
     const startTime = segment.startTime!;
     const endTime = segment.endTime!;
     const label = segment.label?.trim() || segment.id || 'Segment';
+    const sceneLabel = extractSceneLabel(segment);
     const segmentId = segment.id?.trim() || `segment-${startTime}-${endTime}`;
     const fillStatus = segment.fillStatus ?? 'empty';
     const resolvedVisual = resolveSegmentVisual(segment, assets);
@@ -331,6 +362,7 @@ export function buildServerTimelineItems({
         endTime,
         duration: endTime - startTime,
         label,
+        sceneLabel,
         segmentId,
         sourceType: 'server_timeline' as const,
         imagePath:
@@ -342,7 +374,10 @@ export function buildServerTimelineItems({
       } satisfies TimelineItem;
     }
 
-    return createPlaceholderItem(startTime, endTime, segmentId, label);
+    return {
+      ...createPlaceholderItem(startTime, endTime, segmentId, label),
+      sceneLabel,
+    };
   });
 
   return applySegmentTimingOverridesToItems(items, segmentOverrides).sort(

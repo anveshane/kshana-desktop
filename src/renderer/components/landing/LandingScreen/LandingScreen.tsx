@@ -70,6 +70,7 @@ async function loadSingleProjectMetadata(
     if (manifestContent) {
       const project = safeJsonParse<BackendProjectFile>(manifestContent);
       metadata.manifestName = project.title;
+      metadata.description = project.description ?? null;
     }
   } catch {
     // Ignore malformed or missing project metadata.

@@ -92,6 +92,7 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
   const [videoPath, setVideoPath] = useState<string>('');
   const [hasPreviewFrame, setHasPreviewFrame] = useState(false);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const [thumbnailAspectRatio, setThumbnailAspectRatio] = useState('16 / 9');
 
   useEffect(() => {
     if (shouldLoadThumbnail) {
@@ -126,6 +127,7 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
     setVideoPath('');
     setHasPreviewFrame(false);
     setThumbnailFailed(false);
+    setThumbnailAspectRatio('16 / 9');
   }, [artifact.artifact_id, artifact.file_path]);
 
   useEffect(() => {
@@ -160,7 +162,12 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
     return () => {
       isCancelled = true;
     };
-  }, [artifact.artifact_id, artifact.file_path, projectDirectory, shouldLoadThumbnail]);
+  }, [
+    artifact.artifact_id,
+    artifact.file_path,
+    projectDirectory,
+    shouldLoadThumbnail,
+  ]);
 
   const primePreviewFrame = useCallback((video: HTMLVideoElement) => {
     const previewTime = getVideoCardPreviewTime(video.duration);
@@ -186,6 +193,9 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
     if (!video || !videoPath) return undefined;
 
     const handleLoadedMetadata = () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        setThumbnailAspectRatio(`${video.videoWidth} / ${video.videoHeight}`);
+      }
       primePreviewFrame(video);
     };
     const handleLoadedData = () => {
@@ -228,7 +238,10 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
       className={styles.videoCard}
       onMouseEnter={() => setShouldLoadThumbnail(true)}
     >
-      <div className={styles.videoThumbnail}>
+      <div
+        className={styles.videoThumbnail}
+        style={{ aspectRatio: thumbnailAspectRatio }}
+      >
         {(!videoPath || thumbnailFailed || !hasPreviewFrame) && (
           <div className={styles.videoThumbnailPlaceholder}>
             <Film size={24} className={styles.videoThumbnailPlaceholderIcon} />
@@ -370,7 +383,6 @@ export default function VideoLibraryView({
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const lastPlaybackTimeRef = useRef(0);
-
   // Use production-grade playback controller instead of manual state management
   const { currentItem, currentItemIndex } = usePlaybackController(
     timelineItems,
@@ -1790,18 +1802,14 @@ export default function VideoLibraryView({
                       </p>
                     </div>
                   ) : (
-                    <div
-                      className={`${styles.scenePlaceholder} ${
-                        resolvedSceneImagePath ? styles.hasBackgroundImage : ''
-                      }`}
-                      style={
-                        resolvedSceneImagePath
-                          ? {
-                              backgroundImage: `url("${resolvedSceneImagePath}")`,
-                            }
-                          : undefined
-                      }
-                    >
+                    <div className={styles.scenePlaceholder}>
+                      {resolvedSceneImagePath && (
+                        <img
+                          src={resolvedSceneImagePath}
+                          alt={currentItem?.label || 'Scene preview'}
+                          className={styles.playerImage}
+                        />
+                      )}
                       {currentItem &&
                         (currentItem.type === 'image' ||
                           currentItem.type === 'placeholder') &&

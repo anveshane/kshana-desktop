@@ -17,17 +17,20 @@ export function isCancelAckStatus(
   );
 }
 
-export function failExecutingToolCalls(
+export function settleExecutingToolCalls(
   messages: ChatMessage[],
   activeEntries: ActiveToolCallEntry[],
-  reason: string,
+  status: 'completed' | 'error',
+  result: unknown,
   now: number = Date.now(),
 ): ChatMessage[] {
   if (messages.length === 0) {
     return messages;
   }
 
-  const activeMessageIds = new Set(activeEntries.map((entry) => entry.messageId));
+  const activeMessageIds = new Set(
+    activeEntries.map((entry) => entry.messageId),
+  );
   const activeStartTimes = new Map(
     activeEntries.map((entry) => [entry.messageId, entry.startTime]),
   );
@@ -48,10 +51,25 @@ export function failExecutingToolCalls(
       timestamp: now,
       meta: {
         ...(message.meta || {}),
-        status: 'error',
-        result: reason,
+        status,
+        result,
         duration: Math.max(0, now - startedAt),
       },
     };
   });
+}
+
+export function failExecutingToolCalls(
+  messages: ChatMessage[],
+  activeEntries: ActiveToolCallEntry[],
+  reason: string,
+  now: number = Date.now(),
+): ChatMessage[] {
+  return settleExecutingToolCalls(
+    messages,
+    activeEntries,
+    'error',
+    reason,
+    now,
+  );
 }

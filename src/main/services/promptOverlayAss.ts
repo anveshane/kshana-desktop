@@ -5,6 +5,11 @@ export interface PromptOverlayCue {
   text: string;
 }
 
+interface AssResolution {
+  width: number;
+  height: number;
+}
+
 const DEFAULT_MAX_LINE_LENGTH = 56;
 const DEFAULT_MAX_LINES = 4;
 
@@ -107,12 +112,13 @@ export function wrapPromptTextForAss(
 
 export function buildAssFromPromptOverlayCues(
   cues: PromptOverlayCue[],
+  resolution: AssResolution = { width: 1920, height: 1080 },
 ): string {
   const header = [
     '[Script Info]',
     'ScriptType: v4.00+',
-    'PlayResX: 1920',
-    'PlayResY: 1080',
+    `PlayResX: ${resolution.width}`,
+    `PlayResY: ${resolution.height}`,
     'WrapStyle: 2',
     'ScaledBorderAndShadow: yes',
     '',
@@ -125,7 +131,9 @@ export function buildAssFromPromptOverlayCues(
   ];
 
   const events = cues
-    .filter((cue) => Number.isFinite(cue.startTime) && Number.isFinite(cue.endTime))
+    .filter(
+      (cue) => Number.isFinite(cue.startTime) && Number.isFinite(cue.endTime),
+    )
     .filter((cue) => cue.endTime > cue.startTime)
     .map((cue) => ({
       startTime: cue.startTime,

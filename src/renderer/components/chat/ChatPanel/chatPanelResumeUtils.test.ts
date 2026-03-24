@@ -29,9 +29,27 @@ describe('chatPanelResumeUtils', () => {
       }),
     ).toEqual({
       agentStatus: 'thinking',
-      statusMessage: 'Reconnected to active session. Waiting for next update...',
+      statusMessage:
+        'Reconnected to active session. Waiting for next update...',
       isTaskRunning: true,
       notice: 'Reconnected to active session.',
+      autonomousMode: false,
+    });
+  });
+
+  it('surfaces autonomous mode from resumed sessions', () => {
+    expect(
+      getResumedSessionUiState({
+        id: 'session-2',
+        status: 'idle',
+        autonomousMode: true,
+      }),
+    ).toEqual({
+      agentStatus: 'idle',
+      statusMessage: 'Ready',
+      isTaskRunning: false,
+      notice: null,
+      autonomousMode: true,
     });
   });
 });

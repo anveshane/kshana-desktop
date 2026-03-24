@@ -190,6 +190,39 @@ describe('useTimelineData server timeline helpers', () => {
     ]);
   });
 
+  it('derives a scene label for shot segments', () => {
+    const items = buildServerTimelineItems({
+      timeline: {
+        version: '1.0',
+        totalDuration: 6,
+        segments: [
+          {
+            id: 'segment_0_shot_2',
+            label: 'Shot 2: medium_wide',
+            startTime: 0,
+            endTime: 6,
+            fillStatus: 'filled',
+            layers: [
+              {
+                type: 'visual',
+                filePath: 'assets/videos/scene-1-shot-2.mp4',
+              },
+            ],
+          },
+        ],
+      },
+      assets: [],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'segment_0_shot_2',
+        label: 'Shot 2: medium_wide',
+        sceneLabel: 'Scene 1',
+      }),
+    ]);
+  });
+
   it('includes segment timing overrides in the default timeline state', () => {
     expect(DEFAULT_TIMELINE_STATE.segment_timing_overrides).toEqual({});
   });

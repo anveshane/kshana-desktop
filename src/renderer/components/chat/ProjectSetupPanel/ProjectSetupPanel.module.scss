@@ -77,6 +77,11 @@
   font-size: $font-size-xs;
 }
 
+.autonomousTag {
+  border-color: rgba(var(--color-success-rgb), 0.34);
+  background: rgba(var(--color-success-rgb), 0.12);
+}
+
 .summaryStatus {
   display: inline-flex;
   align-items: center;
@@ -217,6 +222,16 @@
 .customSet {
   @include button-primary;
   height: 30px;
+}
+
+.autonomousFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.continueButton {
+  @include button-primary;
+  min-width: 120px;
 }
 
 .loading {

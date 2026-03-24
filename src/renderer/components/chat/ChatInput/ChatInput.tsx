@@ -9,6 +9,7 @@ interface ChatInputProps {
   placeholder?: string;
   hintText?: string;
   questionMode?: boolean;
+  onQuestionInteraction?: () => void;
   onSend: (message: string) => void;
   onStop?: () => void;
 }
@@ -24,6 +25,7 @@ export default function ChatInput({
   placeholder = 'Describe your story, ask for a storyboard, or request assets…',
   hintText,
   questionMode = false,
+  onQuestionInteraction,
   onSend,
   onStop,
 }: ChatInputProps) {
@@ -98,7 +100,12 @@ export default function ChatInput({
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => {
+            if (questionMode) {
+              onQuestionInteraction?.();
+            }
+            setValue(event.target.value);
+          }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           rows={rows}

@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   failExecutingToolCalls,
   isCancelAckStatus,
+  settleExecutingToolCalls,
   type ActiveToolCallEntry,
 } from './chatPanelStopUtils';
 import type { ChatMessage } from '../../../types/chat';
@@ -67,5 +68,42 @@ describe('chatPanelStopUtils', () => {
     expect(updated[1]?.meta?.result).toBe('Cancelled due to project switch');
     expect(updated[1]?.meta?.duration).toBe(700);
     expect(updated[2]).toEqual(messages[2]);
+  });
+
+  it('marks lingering executing tool calls as completed', () => {
+    const now = 1_700_000_000_000;
+    const messages: ChatMessage[] = [
+      {
+        id: 'tool',
+        role: 'system',
+        type: 'tool_call',
+        content: '',
+        timestamp: now - 900,
+        meta: {
+          toolName: 'generate_content',
+          status: 'executing',
+        },
+      },
+    ];
+
+    const activeEntries: ActiveToolCallEntry[] = [
+      {
+        messageId: 'tool',
+        startTime: now - 600,
+        toolName: 'generate_content',
+      },
+    ];
+
+    const updated = settleExecutingToolCalls(
+      messages,
+      activeEntries,
+      'completed',
+      'Waiting for your input.',
+      now,
+    );
+
+    expect(updated[0]?.meta?.status).toBe('completed');
+    expect(updated[0]?.meta?.result).toBe('Waiting for your input.');
+    expect(updated[0]?.meta?.duration).toBe(600);
   });
 });

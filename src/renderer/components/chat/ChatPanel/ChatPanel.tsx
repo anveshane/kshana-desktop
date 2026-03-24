@@ -34,6 +34,7 @@ import ProjectSetupPanel, {
 import {
   failExecutingToolCalls,
   isCancelAckStatus,
+  settleExecutingToolCalls,
 } from './chatPanelStopUtils';
 import {
   applyDesktopRemotionQueryParams,
@@ -76,6 +77,7 @@ interface ProjectSetupPersisted {
   templateId: string;
   style: string;
   duration: number;
+  autonomousMode?: boolean;
 }
 
 interface TemplateCatalogResponse {
@@ -99,6 +101,7 @@ interface ConfigureProjectPayload {
   templateId: string;
   style: string;
   duration: number;
+  autonomousMode: boolean;
   projectDir: string;
   projectName?: string;
 }
@@ -211,6 +214,10 @@ const normalizeNotificationLevel = (
   return 'info';
 };
 
+const isReconnectStatusMessage = (content: string): boolean => {
+  return content.startsWith('Reconnected');
+};
+
 export default function ChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connectionState, setConnectionState] =
@@ -240,6 +247,9 @@ export default function ChatPanel() {
   );
   const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
   const [selectedDuration, setSelectedDuration] = useState<number | null>(null);
+  const [autonomousModeEnabled, setAutonomousModeEnabled] = useState(false);
+  const [questionTimerCancelledForId, setQuestionTimerCancelledForId] =
+    useState<string | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [isLoadingSetupCatalog, setIsLoadingSetupCatalog] = useState(false);
   const [isConfiguringProjectSetup, setIsConfiguringProjectSetup] =
@@ -298,6 +308,7 @@ export default function ChatPanel() {
   const hasUserSentMessageRef = useRef(false);
   const isTaskRunningRef = useRef(false);
   const isStopPendingRef = useRef(false);
+  const autonomousModeRef = useRef(false);
   const supportsProjectStateSyncRef = useRef(true);
   const stopRequestRef = useRef<{
     promise: Promise<boolean>;
@@ -341,6 +352,31 @@ export default function ChatPanel() {
 
   const appendSystemMessage = useCallback(
     (content: string, type = 'status') => {
+      if (type === 'status' && isReconnectStatusMessage(content)) {
+        setMessages((prev) => {
+          const filtered = prev.filter(
+            (message) =>
+              !(
+                message.role === 'system' &&
+                message.type === 'status' &&
+                isReconnectStatusMessage(message.content)
+              ),
+          );
+
+          return [
+            ...filtered,
+            {
+              id: makeId(),
+              role: 'system',
+              type,
+              content,
+              timestamp: Date.now(),
+            },
+          ];
+        });
+        return;
+      }
+
       // Dedupe progress messages - update last matching one within recent history
       if (DEDUPE_TYPES.includes(type)) {
         setMessages((prev) => {
@@ -389,6 +425,7 @@ export default function ChatPanel() {
     hasUserSentMessageRef.current = hasUserSentMessage;
     isTaskRunningRef.current = isTaskRunning;
     isStopPendingRef.current = isStopPending;
+    autonomousModeRef.current = autonomousModeEnabled;
     sessionIdRef.current = sessionId;
   }, [
     messages,
@@ -400,6 +437,7 @@ export default function ChatPanel() {
     hasUserSentMessage,
     isTaskRunning,
     isStopPending,
+    autonomousModeEnabled,
     sessionId,
   ]);
 
@@ -508,6 +546,7 @@ export default function ChatPanel() {
         templateId: config.templateId,
         style: config.style,
         duration: config.duration,
+        autonomousMode: config.autonomousMode,
       };
 
       try {
@@ -539,7 +578,10 @@ export default function ChatPanel() {
           typeof parsed.style === 'string' &&
           typeof parsed.duration === 'number'
         ) {
-          return parsed;
+          return {
+            ...parsed,
+            autonomousMode: Boolean(parsed.autonomousMode),
+          };
         }
       } catch {
         // Ignore malformed or missing setup files.
@@ -555,6 +597,7 @@ export default function ChatPanel() {
 
       const normalizedConfig: ConfigureProjectPayload = {
         ...config,
+        autonomousMode: Boolean(config.autonomousMode),
         projectName:
           config.projectName ?? getProjectNameFromDirectory(config.projectDir),
       };
@@ -621,6 +664,7 @@ export default function ChatPanel() {
         templateId: template.id,
         style,
         duration,
+        autonomousMode: false,
         projectDir: projectDirectory,
         projectName: getProjectNameFromDirectory(projectDirectory),
       };
@@ -633,8 +677,39 @@ export default function ChatPanel() {
       setSelectedTemplateId(config.templateId);
       setSelectedStyleId(config.style);
       setSelectedDuration(config.duration);
+      setAutonomousModeEnabled(config.autonomousMode);
     },
     [],
+  );
+
+  const buildSetupPayload = useCallback(
+    (overrides: Partial<ConfigureProjectPayload> = {}): ConfigureProjectPayload | null => {
+      if (
+        !projectDirectory ||
+        !selectedTemplateId ||
+        !selectedStyleId ||
+        !selectedDuration
+      ) {
+        return null;
+      }
+
+      return {
+        templateId: selectedTemplateId,
+        style: selectedStyleId,
+        duration: selectedDuration,
+        autonomousMode: autonomousModeEnabled,
+        projectDir: projectDirectory,
+        projectName: getProjectNameFromDirectory(projectDirectory),
+        ...overrides,
+      };
+    },
+    [
+      autonomousModeEnabled,
+      projectDirectory,
+      selectedDuration,
+      selectedStyleId,
+      selectedTemplateId,
+    ],
   );
 
   const handleSelectTemplate = useCallback(
@@ -654,6 +729,7 @@ export default function ChatPanel() {
       setSelectedTemplateId(templateId);
       setSelectedStyleId(style);
       setSelectedDuration(duration);
+      setAutonomousModeEnabled(false);
       setSetupStep('style');
     },
     [projectDirectory, setupDurationPresets, setupTemplates],
@@ -670,26 +746,27 @@ export default function ChatPanel() {
         return;
       }
 
-      const payload: ConfigureProjectPayload = {
-        templateId: selectedTemplateId,
-        style: selectedStyleId,
-        duration,
-        projectDir: projectDirectory,
-        projectName: getProjectNameFromDirectory(projectDirectory),
-      };
-
       setSelectedDuration(duration);
       setSetupPanelMode('wizard');
-      setSetupStep('duration');
-      void configureProjectSetup(payload);
+      setSetupStep('autonomous');
     },
-    [
-      configureProjectSetup,
-      projectDirectory,
-      selectedStyleId,
-      selectedTemplateId,
-    ],
+    [projectDirectory, selectedStyleId, selectedTemplateId],
   );
+
+  const handleSelectAutonomousMode = useCallback((enabled: boolean) => {
+    setAutonomousModeEnabled(enabled);
+  }, []);
+
+  const handleConfirmSetup = useCallback(() => {
+    const payload = buildSetupPayload();
+    if (!payload) {
+      return;
+    }
+
+    setSetupPanelMode('wizard');
+    setSetupStep('autonomous');
+    configureProjectSetup(payload).catch(() => undefined);
+  }, [buildSetupPayload, configureProjectSetup]);
 
   const handleSetupBack = useCallback(() => {
     if (setupStep === 'style') {
@@ -698,6 +775,10 @@ export default function ChatPanel() {
     }
     if (setupStep === 'duration') {
       setSetupStep('style');
+      return;
+    }
+    if (setupStep === 'autonomous') {
+      setSetupStep('duration');
     }
   }, [setupStep]);
 
@@ -748,6 +829,32 @@ export default function ChatPanel() {
     lastAssistantIdRef.current = null;
   }, []);
 
+  const settleActiveToolCalls = useCallback(
+    (status: 'completed' | 'error', result: string) => {
+      const now = Date.now();
+      const activeEntries = Array.from(activeToolCallsRef.current.values());
+      const updated = settleExecutingToolCalls(
+        messagesRef.current,
+        activeEntries,
+        status,
+        result,
+        now,
+      );
+
+      if (updated === messagesRef.current) {
+        return;
+      }
+
+      messagesRef.current = updated;
+      setMessages(updated);
+      activeToolCallsRef.current.clear();
+      toolCallSequenceRef.current.clear();
+      setIsStreaming(false);
+      lastAssistantIdRef.current = null;
+    },
+    [],
+  );
+
   const getRendererErrorMessage = useCallback(
     (error: unknown, fallback: string): string => {
       if (
@@ -774,6 +881,7 @@ export default function ChatPanel() {
       phaseDisplayName: phaseDisplayNameRef.current,
       hasUserSentMessage: hasUserSentMessageRef.current,
       isTaskRunning: isTaskRunningRef.current,
+      autonomousMode: autonomousModeRef.current,
     };
   }, []);
 
@@ -948,6 +1056,7 @@ export default function ChatPanel() {
             templateId: persistedSetup.templateId,
             style: persistedSetup.style,
             duration: persistedSetup.duration,
+            autonomousMode: Boolean(persistedSetup.autonomousMode),
             projectDir: targetProjectDirectory,
             projectName: getProjectNameFromDirectory(targetProjectDirectory),
           },
@@ -1035,6 +1144,7 @@ export default function ChatPanel() {
         setHasUserSentMessage(false);
         setIsTaskRunning(false);
         setIsStopPending(false);
+        setAutonomousModeEnabled(false);
         setNotificationBanner(null);
         setSessionTimer({
           visible: false,
@@ -1071,6 +1181,7 @@ export default function ChatPanel() {
       setHasUserSentMessage(Boolean(snapshot.uiState.hasUserSentMessage));
       setIsTaskRunning(Boolean(snapshot.uiState.isTaskRunning));
       setIsStopPending(false);
+      setAutonomousModeEnabled(Boolean(snapshot.uiState.autonomousMode));
       setNotificationBanner(null);
       setSessionTimer({
         visible: false,
@@ -1101,6 +1212,7 @@ export default function ChatPanel() {
     setHasUserSentMessage(false);
     setIsTaskRunning(false);
     setIsStopPending(false);
+    setAutonomousModeEnabled(false);
     setNotificationBanner(null);
     setSessionTimer({
       visible: false,
@@ -3142,7 +3254,10 @@ export default function ChatPanel() {
               setAgentStatus(resumedState.agentStatus);
               setStatusMessage(resumedState.statusMessage);
               setIsTaskRunning(resumedState.isTaskRunning);
-              appendSystemMessage(resumedState.notice, 'status');
+              setAutonomousModeEnabled(resumedState.autonomousMode);
+              if (resumedState.notice) {
+                appendSystemMessage(resumedState.notice, 'status');
+              }
               window.electron.logger.logStatusChange(
                 resumedState.agentStatus,
                 agentNameRef.current,
@@ -3333,6 +3448,36 @@ export default function ChatPanel() {
   useEffect(() => {
     sendClientActionRef.current = sendClientAction;
   }, [sendClientAction]);
+
+  const handleToggleAutonomousMode = useCallback(async () => {
+    const nextEnabled = !autonomousModeEnabled;
+    setAutonomousModeEnabled(nextEnabled);
+
+    const nextSetup = buildSetupPayload({ autonomousMode: nextEnabled });
+    if (nextSetup) {
+      persistProjectSetup(nextSetup).catch(() => undefined);
+    }
+
+    if (!sessionIdRef.current) {
+      return;
+    }
+
+    await sendClientAction({
+      type: 'set_autonomous',
+      sessionId: sessionIdRef.current,
+      data: { enabled: nextEnabled },
+    });
+    showNotificationBanner(
+      `Autonomous mode ${nextEnabled ? 'enabled' : 'disabled'}.`,
+      'info',
+    );
+  }, [
+    autonomousModeEnabled,
+    buildSetupPayload,
+    persistProjectSetup,
+    sendClientAction,
+    showNotificationBanner,
+  ]);
 
   const sendResponse = useCallback(
     async (content: string) => {
@@ -3666,6 +3811,7 @@ export default function ChatPanel() {
     setSelectedTemplateId(null);
     setSelectedStyleId(null);
     setSelectedDuration(null);
+    setAutonomousModeEnabled(false);
 
     if (!projectDirectory) {
       resetConversationRefs();
@@ -3679,6 +3825,7 @@ export default function ChatPanel() {
       setHasUserSentMessage(false);
       setIsTaskRunning(false);
       setIsStopPending(false);
+      setAutonomousModeEnabled(false);
       setNotificationBanner(null);
       setSessionTimer({
         visible: false,
@@ -3708,6 +3855,7 @@ export default function ChatPanel() {
             templateId: persistedSetup.templateId,
             style: persistedSetup.style,
             duration: persistedSetup.duration,
+            autonomousMode: Boolean(persistedSetup.autonomousMode),
             projectDir: projectDirectory,
             projectName: getProjectNameFromDirectory(projectDirectory),
           };
@@ -3827,6 +3975,27 @@ export default function ChatPanel() {
     return null;
   }, [messages]);
 
+  useEffect(() => {
+    if (!activeQuestion) {
+      setQuestionTimerCancelledForId(null);
+      return;
+    }
+
+    setQuestionTimerCancelledForId((prev) =>
+      prev === activeQuestion.id ? prev : null,
+    );
+  }, [activeQuestion]);
+
+  const handleQuestionInteraction = useCallback(() => {
+    if (!activeQuestion) {
+      return;
+    }
+
+    setQuestionTimerCancelledForId((prev) =>
+      prev === activeQuestion.id ? prev : activeQuestion.id,
+    );
+  }, [activeQuestion]);
+
   const activeTodos = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
@@ -3847,6 +4016,52 @@ export default function ChatPanel() {
 
   const showDockedTodoPrompt =
     setupPanelMode === 'hidden' && !activeQuestion && !!activeTodos;
+
+  useEffect(() => {
+    if (isTaskRunning) {
+      return;
+    }
+
+    const hasExecutingToolCall = messages.some(
+      (message) =>
+        message.type === 'tool_call' &&
+        (message.meta?.status === 'executing' ||
+          message.meta?.status === 'started'),
+    );
+
+    if (!hasExecutingToolCall) {
+      return;
+    }
+
+    if (agentStatus === 'error') {
+      settleActiveToolCalls('error', statusMessage || 'Run ended with an error.');
+      return;
+    }
+
+    const completionMessage = activeQuestion
+      ? 'Waiting for your input.'
+      : statusMessage || 'Run finished.';
+    settleActiveToolCalls('completed', completionMessage);
+  }, [
+    activeQuestion,
+    agentStatus,
+    isTaskRunning,
+    messages,
+    settleActiveToolCalls,
+    statusMessage,
+  ]);
+
+  useEffect(() => {
+    if (isTaskRunning || !sessionTimer.running) {
+      return;
+    }
+
+    setSessionTimer((prev) => ({
+      ...prev,
+      running: false,
+      completed: prev.completed || agentStatus === 'completed',
+    }));
+  }, [agentStatus, isTaskRunning, sessionTimer.running]);
   // Never show legacy greeting messages.
   const filteredMessages = useMemo(() => {
     return messages.filter(
@@ -3920,6 +4135,18 @@ export default function ChatPanel() {
         <span className={styles.headerTitle}>Kshana Assistant</span>
         <button
           type="button"
+          className={`${styles.autonomousButton} ${
+            autonomousModeEnabled ? styles.autonomousButtonActive : ''
+          }`}
+          onClick={handleToggleAutonomousMode}
+          title="Toggle autonomous mode"
+          aria-pressed={autonomousModeEnabled}
+          disabled={!sessionId || !isProjectSetupConfigured}
+        >
+          <span>AUTO</span>
+        </button>
+        <button
+          type="button"
           className={styles.exportButton}
           onClick={handleExportChat}
           title="Export chat history as JSON"
@@ -3979,6 +4206,7 @@ export default function ChatPanel() {
         selectedTemplateId={selectedTemplateId}
         selectedStyleId={selectedStyleId}
         selectedDuration={selectedDuration}
+        selectedAutonomousMode={autonomousModeEnabled}
         loading={isLoadingSetupCatalog}
         configuring={isConfiguringProjectSetup}
         error={setupError}
@@ -3987,19 +4215,25 @@ export default function ChatPanel() {
         onSelectTemplate={handleSelectTemplate}
         onSelectStyle={handleSelectStyle}
         onSelectDuration={handleSelectDuration}
+        onSelectAutonomousMode={handleSelectAutonomousMode}
+        onConfirmSetup={handleConfirmSetup}
         onBack={handleSetupBack}
       />
 
       {showDockedTodoPrompt && (
-        <TodoPrompt todos={activeTodos} />
+        <TodoPrompt todos={activeTodos} isRunning={isTaskRunning} />
       )}
 
-      {setupPanelMode === 'hidden' && activeQuestion && (
+        {setupPanelMode === 'hidden' && activeQuestion && (
         <QuestionPrompt
           question={activeQuestion.question}
           options={activeQuestion.options}
           type={activeQuestion.type}
-          autoApproveTimeoutMs={activeQuestion.autoApproveTimeoutMs}
+          autoApproveTimeoutMs={
+            questionTimerCancelledForId === activeQuestion.id
+              ? undefined
+              : activeQuestion.autoApproveTimeoutMs
+          }
           isConfirmation={activeQuestion.isConfirmation}
           defaultOption={activeQuestion.defaultOption}
           onSelect={sendResponse}
@@ -4017,6 +4251,7 @@ export default function ChatPanel() {
         placeholder={chatInputPlaceholder}
         hintText={chatInputHint}
         questionMode={!!activeQuestion && setupPanelMode === 'hidden'}
+        onQuestionInteraction={handleQuestionInteraction}
         onSend={sendMessage}
         onStop={stopTask}
       />

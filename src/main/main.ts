@@ -316,10 +316,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'backend:start',
-  async (
-    _event,
-    config?: ServerConnectionConfig,
-  ): Promise<BackendState> => {
+  async (_event, config?: ServerConnectionConfig): Promise<BackendState> => {
     try {
       const settings = getSettings();
       const resolvedCloudServerUrl =
@@ -495,7 +492,12 @@ ipcMain.handle(
     _event,
     projectDirectory: string,
     audioPath?: string,
-  ): Promise<{ success: boolean; outputPath?: string; words?: unknown[]; error?: string }> => {
+  ): Promise<{
+    success: boolean;
+    outputPath?: string;
+    words?: unknown[];
+    error?: string;
+  }> => {
     const result = await generateWordCaptions(projectDirectory, audioPath);
     if (result.success && result.outputPath) {
       fileSystemManager.emit('file-change', {
@@ -535,7 +537,9 @@ ipcMain.handle(
 ipcMain.handle(
   'project:watch-infographic-placements',
   async (_event, infographicPlacementsDir: string) => {
-    await fileSystemManager.watchInfographicPlacements(infographicPlacementsDir);
+    await fileSystemManager.watchInfographicPlacements(
+      infographicPlacementsDir,
+    );
   },
 );
 
@@ -563,11 +567,14 @@ ipcMain.handle(
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Manifest not found';
-      console.warn('[Main][refresh-assets] Failed to trigger manifest refresh', {
-        source: 'ipc_refresh_assets',
-        manifestPath,
-        error: message,
-      });
+      console.warn(
+        '[Main][refresh-assets] Failed to trigger manifest refresh',
+        {
+          source: 'ipc_refresh_assets',
+          manifestPath,
+          error: message,
+        },
+      );
       return { success: false, error: message };
     }
   },
@@ -654,11 +661,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:read-file-guarded',
-  async (
-    _event,
-    filePath: string,
-    meta?: FileOpMeta,
-  ): Promise<string> => {
+  async (_event, filePath: string, meta?: FileOpMeta): Promise<string> => {
     const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -691,11 +694,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:read-file-buffer-guarded',
-  async (
-    _event,
-    filePath: string,
-    meta?: FileOpMeta,
-  ): Promise<string> => {
+  async (_event, filePath: string, meta?: FileOpMeta): Promise<string> => {
     const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -783,7 +782,8 @@ ipcMain.handle(
     projectDir: string,
   ): Promise<Array<{ path: string; content: string; isBinary: boolean }>> => {
     const kshanaDir = path.join(projectDir, '.kshana');
-    const results: Array<{ path: string; content: string; isBinary: boolean }> = [];
+    const results: Array<{ path: string; content: string; isBinary: boolean }> =
+      [];
     const TEXT_EXTS = new Set([
       '.json',
       '.md',
@@ -798,7 +798,12 @@ ipcMain.handle(
       '.html',
       '.xml',
     ]);
-    const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', '__pycache__']);
+    const SKIP_DIRS = new Set([
+      'node_modules',
+      '.git',
+      '.cache',
+      '__pycache__',
+    ]);
     const MAX_TEXT_BYTES = 5 * 1024 * 1024;
     let skippedNonText = 0;
     let skippedOversized = 0;
@@ -847,7 +852,7 @@ ipcMain.handle(
 
     log.info(
       `[project:read-all-files] Read ${results.length} text files from ${kshanaDir} ` +
-      `(skipped non-text: ${skippedNonText}, skipped oversized: ${skippedOversized})`,
+        `(skipped non-text: ${skippedNonText}, skipped oversized: ${skippedOversized})`,
     );
     return results;
   },
@@ -879,7 +884,12 @@ ipcMain.handle(
       '.html',
       '.xml',
     ]);
-    const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', '__pycache__']);
+    const SKIP_DIRS = new Set([
+      'node_modules',
+      '.git',
+      '.cache',
+      '__pycache__',
+    ]);
     const MAX_TEXT_BYTES = 5 * 1024 * 1024;
     const normalizedRoot = path.resolve(projectDir);
 
@@ -939,11 +949,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:list-directory',
-  async (
-    _event,
-    dirPath: string,
-    meta?: FileOpMeta,
-  ): Promise<string[]> => {
+  async (_event, dirPath: string, meta?: FileOpMeta): Promise<string[]> => {
     const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -1346,7 +1352,9 @@ ipcMain.handle(
         activeProjectRoot,
       );
 
-      await fs.mkdir(path.dirname(resolvedDestinationPath), { recursive: true });
+      await fs.mkdir(path.dirname(resolvedDestinationPath), {
+        recursive: true,
+      });
       await fs.copyFile(resolvedSourcePath, resolvedDestinationPath);
     } catch (error) {
       throwFileOpError({
@@ -1397,10 +1405,7 @@ ipcMain.handle('project:save-video-file', async () => {
 
 ipcMain.handle(
   'project:export-chat-json',
-  async (
-    _event,
-    payload: ChatExportPayload,
-  ): Promise<ChatExportResult> => {
+  async (_event, payload: ChatExportPayload): Promise<ChatExportResult> => {
     const targetWindow = mainWindow;
     if (!targetWindow) {
       return { success: false, error: 'Main window is not available' };
@@ -1428,7 +1433,8 @@ ipcMain.handle(
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
     console.log('[Export:CapCut] Starting CapCut export...');
     try {
-      const projectName = projectDirectory.split(/[/\\]/).filter(Boolean).pop() || 'Project';
+      const projectName =
+        projectDirectory.split(/[/\\]/).filter(Boolean).pop() || 'Project';
       const result = await generateCapcutProject(
         projectName,
         timelineItems,
@@ -1439,11 +1445,13 @@ ipcMain.handle(
         promptOverlayCues,
       );
 
-      console.log('[Export:CapCut] Exported successfully to:', result.outputDir);
+      console.log(
+        '[Export:CapCut] Exported successfully to:',
+        result.outputDir,
+      );
       return { success: true, outputPath: result.outputDir };
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Unknown error';
+      const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('[Export:CapCut] Failed:', message);
       return { success: false, error: message };
     }
@@ -1461,7 +1469,10 @@ if (app.isPackaged) {
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
 configureAudioWaveformExtractor(ffmpegPath);
-log.info('[FFmpeg] Paths configured:', { ffmpeg: ffmpegPath, ffprobe: ffprobePath });
+log.info('[FFmpeg] Paths configured:', {
+  ffmpeg: ffmpegPath,
+  ffprobe: ffprobePath,
+});
 
 interface TimelineItem {
   type: 'image' | 'video' | 'placeholder';
@@ -1494,6 +1505,11 @@ interface TextOverlayCue {
   endTime: number;
   text: string;
   words: TextOverlayWord[];
+}
+
+interface RenderResolution {
+  width: number;
+  height: number;
 }
 
 const VIDEO_WATERMARK_TEXT = 'kshana';
@@ -1574,12 +1590,94 @@ function escapeDrawtextValue(input: string): string {
     .replace(/[\r\n]+/g, ' ');
 }
 
-function buildAssFromTextOverlayCues(cues: TextOverlayCue[]): string {
+function parseAspectRatioValue(value: unknown): RenderResolution | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const match = value.trim().match(/^(\d+)\s*:\s*(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const widthRatio = Number(match[1]);
+  const heightRatio = Number(match[2]);
+  if (
+    !Number.isFinite(widthRatio) ||
+    !Number.isFinite(heightRatio) ||
+    widthRatio <= 0 ||
+    heightRatio <= 0
+  ) {
+    return null;
+  }
+
+  if (widthRatio >= heightRatio) {
+    return {
+      width: 1920,
+      height: Math.round((1920 * heightRatio) / widthRatio),
+    };
+  }
+
+  return {
+    width: Math.round((1920 * widthRatio) / heightRatio),
+    height: 1920,
+  };
+}
+
+async function getProjectRenderResolution(
+  projectDirectory: string,
+): Promise<RenderResolution> {
+  const fallback = { width: 1920, height: 1080 };
+  const manifestPath = path.join(projectDirectory, 'kshana.json');
+
+  try {
+    const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+    const parsed = JSON.parse(manifestContent) as {
+      settings?: {
+        resolution?: { width?: unknown; height?: unknown };
+        aspect_ratio?: unknown;
+      };
+    };
+
+    const width = parsed.settings?.resolution?.width;
+    const height = parsed.settings?.resolution?.height;
+    if (
+      typeof width === 'number' &&
+      typeof height === 'number' &&
+      Number.isFinite(width) &&
+      Number.isFinite(height) &&
+      width > 0 &&
+      height > 0
+    ) {
+      return {
+        width: Math.round(width),
+        height: Math.round(height),
+      };
+    }
+
+    const derived = parseAspectRatioValue(parsed.settings?.aspect_ratio);
+    if (derived) {
+      return derived;
+    }
+  } catch (error) {
+    console.warn(
+      '[VideoComposition] Failed to read project render resolution:',
+      error,
+    );
+  }
+
+  return fallback;
+}
+
+function buildAssFromTextOverlayCues(
+  cues: TextOverlayCue[],
+  resolution: RenderResolution = { width: 1920, height: 1080 },
+): string {
   const header = [
     '[Script Info]',
     'ScriptType: v4.00+',
-    'PlayResX: 1920',
-    'PlayResY: 1080',
+    `PlayResX: ${resolution.width}`,
+    `PlayResY: ${resolution.height}`,
     'WrapStyle: 2',
     'ScaledBorderAndShadow: yes',
     '',
@@ -1592,7 +1690,9 @@ function buildAssFromTextOverlayCues(cues: TextOverlayCue[]): string {
   ];
 
   const events = cues
-    .filter((cue) => Number.isFinite(cue.startTime) && Number.isFinite(cue.endTime))
+    .filter(
+      (cue) => Number.isFinite(cue.startTime) && Number.isFinite(cue.endTime),
+    )
     .filter((cue) => cue.endTime > cue.startTime)
     .sort((a, b) => a.startTime - b.startTime)
     .map((cue) => {
@@ -1641,7 +1741,9 @@ async function burnWordCaptionsIntoVideo(
       fontsDirExists = true;
       console.log(`[VideoComposition] Fonts directory validated: ${fontsDir}`);
     } catch (error) {
-      console.warn(`[VideoComposition] Fonts directory not accessible: ${fontsDir}`);
+      console.warn(
+        `[VideoComposition] Fonts directory not accessible: ${fontsDir}`,
+      );
     }
 
     if (fontsDirExists) {
@@ -1667,8 +1769,8 @@ async function burnWordCaptionsIntoVideo(
 
     // Strategy 4: Try with original Windows backslashes (heavily escaped)
     const heavyEscapedPath = assPath
-      .replace(/\\/g, '\\\\\\\\')  // Each backslash becomes 4 backslashes
-      .replace(/:/g, '\\\\:');       // Each colon gets escaped with 2 backslashes
+      .replace(/\\/g, '\\\\\\\\') // Each backslash becomes 4 backslashes
+      .replace(/:/g, '\\\\:'); // Each colon gets escaped with 2 backslashes
     strategies.push({
       filter: `subtitles=${heavyEscapedPath}`,
       description: 'subtitles filter (Windows backslash escaping)',
@@ -1842,10 +1944,19 @@ ipcMain.handle(
     const tempDir = path.join(projectDirectory, '.kshana', 'temp');
     await fs.mkdir(tempDir, { recursive: true });
     console.log('[VideoComposition] Temp directory:', tempDir);
+    const renderResolution = await getProjectRenderResolution(projectDirectory);
+    const { width: outputWidth, height: outputHeight } = renderResolution;
+    const scaleAndPadFilter = `scale=${outputWidth}:${outputHeight}:force_original_aspect_ratio=decrease,pad=${outputWidth}:${outputHeight}:(ow-iw)/2:(oh-ih)/2`;
+    console.log(
+      '[VideoComposition] Using render resolution:',
+      renderResolution,
+    );
 
     const segmentFiles: string[] = [];
     const cleanupFiles: string[] = [];
-    const normalizedOverlayItems: Array<OverlayItem & { absolutePath: string }> = [];
+    const normalizedOverlayItems: Array<
+      OverlayItem & { absolutePath: string }
+    > = [];
     const placeholderFontPath = await findAvailableSystemFont();
 
     if (!placeholderFontPath) {
@@ -1904,7 +2015,9 @@ ipcMain.handle(
       ): Promise<void> =>
         new Promise<void>((resolve, reject) => {
           ffmpeg()
-            .input(`color=c=black:s=1920x1080:d=${duration}`)
+            .input(
+              `color=c=black:s=${outputWidth}x${outputHeight}:d=${duration}`,
+            )
             .inputOptions(['-f lavfi'])
             .outputOptions(outputOptions)
             .output(segmentPath)
@@ -2084,7 +2197,8 @@ ipcMain.handle(
                 '-preset medium',
                 '-crf 23',
                 '-pix_fmt yuv420p',
-                '-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+                '-vf',
+                scaleAndPadFilter,
                 '-t',
                 item.duration.toString(), // Limit to segment duration
               ])
@@ -2180,7 +2294,8 @@ ipcMain.handle(
                 '-preset medium',
                 '-crf 23',
                 '-pix_fmt yuv420p',
-                '-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+                '-vf',
+                scaleAndPadFilter,
               ])
               .output(segmentPath)
               .on('start', (commandLine) => {
@@ -2486,7 +2601,10 @@ ipcMain.handle(
           tempDir,
           'composed-video-prompts.mp4',
         );
-        const assContent = buildAssFromPromptOverlayCues(promptOverlayCues);
+        const assContent = buildAssFromPromptOverlayCues(
+          promptOverlayCues,
+          renderResolution,
+        );
         await fs.writeFile(promptAssPath, assContent, 'utf-8');
         cleanupFiles.push(promptAssPath);
 
@@ -2500,7 +2618,8 @@ ipcMain.handle(
           overlayedOutputPath = promptOverlayOutputPath;
         } catch (error) {
           console.warn(
-            `[VideoComposition] Prompt overlay burn failed, proceeding without prompt overlays: ${error instanceof Error ? error.message : 'Unknown error'
+            `[VideoComposition] Prompt overlay burn failed, proceeding without prompt overlays: ${
+              error instanceof Error ? error.message : 'Unknown error'
             }`,
           );
         }
@@ -2514,7 +2633,10 @@ ipcMain.handle(
           tempDir,
           'composed-video-captions.mp4',
         );
-        const assContent = buildAssFromTextOverlayCues(textOverlayCues);
+        const assContent = buildAssFromTextOverlayCues(
+          textOverlayCues,
+          renderResolution,
+        );
         await fs.writeFile(assPath, assContent, 'utf-8');
         cleanupFiles.push(assPath);
 
@@ -2528,7 +2650,8 @@ ipcMain.handle(
           finalOutputPath = captionedOutputPath;
         } catch (error) {
           console.warn(
-            `[VideoComposition] Word caption burn failed, proceeding without captions: ${error instanceof Error ? error.message : 'Unknown error'
+            `[VideoComposition] Word caption burn failed, proceeding without captions: ${
+              error instanceof Error ? error.message : 'Unknown error'
             }`,
           );
         }
@@ -2902,9 +3025,7 @@ const checkForAppUpdates = async () => {
     broadcastAppUpdateStatus({
       phase: 'error',
       message:
-        error instanceof Error
-          ? error.message
-          : 'Unable to check for updates',
+        error instanceof Error ? error.message : 'Unable to check for updates',
     });
   }
 };
