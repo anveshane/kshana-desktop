@@ -33,6 +33,12 @@ export default function ChatInput({
   const [rows, setRows] = useState(MIN_ROWS);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const notifyQuestionInteraction = () => {
+    if (questionMode) {
+      onQuestionInteraction?.();
+    }
+  };
+
   useEffect(() => {
     if (textareaRef.current) {
       // Reset height to calculate scroll height
@@ -63,6 +69,8 @@ export default function ChatInput({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    notifyQuestionInteraction();
+
     if (event.key === 'Enter') {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const isModifierPressed = isMac ? event.metaKey : event.ctrlKey;
@@ -101,11 +109,11 @@ export default function ChatInput({
           ref={textareaRef}
           value={value}
           onChange={(event) => {
-            if (questionMode) {
-              onQuestionInteraction?.();
-            }
+            notifyQuestionInteraction();
             setValue(event.target.value);
           }}
+          onFocus={notifyQuestionInteraction}
+          onClick={notifyQuestionInteraction}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           rows={rows}

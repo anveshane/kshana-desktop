@@ -48,6 +48,7 @@ import {
   shouldConfigureProjectAfterConnect,
   type RemoteSessionInfo,
 } from './chatPanelResumeUtils';
+import useQuestionTimerCancellation from './useQuestionTimerCancellation';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
 
@@ -3975,26 +3976,12 @@ export default function ChatPanel() {
     return null;
   }, [messages]);
 
-  useEffect(() => {
-    if (!activeQuestion) {
-      setQuestionTimerCancelledForId(null);
-      return;
-    }
-
-    setQuestionTimerCancelledForId((prev) =>
-      prev === activeQuestion.id ? prev : null,
-    );
-  }, [activeQuestion]);
-
-  const handleQuestionInteraction = useCallback(() => {
-    if (!activeQuestion) {
-      return;
-    }
-
-    setQuestionTimerCancelledForId((prev) =>
-      prev === activeQuestion.id ? prev : activeQuestion.id,
-    );
-  }, [activeQuestion]);
+  const { cancelActiveQuestionTimer, effectiveAutoApproveTimeoutMs } =
+    useQuestionTimerCancellation({
+      activeQuestion,
+      questionTimerCancelledForId,
+      setQuestionTimerCancelledForId,
+    });
 
   const activeTodos = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -4229,11 +4216,7 @@ export default function ChatPanel() {
           question={activeQuestion.question}
           options={activeQuestion.options}
           type={activeQuestion.type}
-          autoApproveTimeoutMs={
-            questionTimerCancelledForId === activeQuestion.id
-              ? undefined
-              : activeQuestion.autoApproveTimeoutMs
-          }
+          autoApproveTimeoutMs={effectiveAutoApproveTimeoutMs}
           isConfirmation={activeQuestion.isConfirmation}
           defaultOption={activeQuestion.defaultOption}
           onSelect={sendResponse}
@@ -4251,7 +4234,7 @@ export default function ChatPanel() {
         placeholder={chatInputPlaceholder}
         hintText={chatInputHint}
         questionMode={!!activeQuestion && setupPanelMode === 'hidden'}
-        onQuestionInteraction={handleQuestionInteraction}
+        onQuestionInteraction={cancelActiveQuestionTimer}
         onSend={sendMessage}
         onStop={stopTask}
       />

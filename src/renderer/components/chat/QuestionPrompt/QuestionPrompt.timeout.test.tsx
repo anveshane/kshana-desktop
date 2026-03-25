@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, jest } from '@jest/globals';
 import QuestionPrompt from './QuestionPrompt';
 
@@ -17,9 +17,7 @@ describe('QuestionPrompt auto-approve', () => {
       />,
     );
 
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await act(async () => {});
     act(() => {
       jest.advanceTimersByTime(1000);
     });
@@ -43,9 +41,7 @@ describe('QuestionPrompt auto-approve', () => {
       />,
     );
 
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await act(async () => {});
     act(() => {
       jest.advanceTimersByTime(1000);
     });
@@ -67,14 +63,88 @@ describe('QuestionPrompt auto-approve', () => {
       />,
     );
 
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await act(async () => {});
     act(() => {
       jest.advanceTimersByTime(1000);
     });
 
     expect(onSelect).not.toHaveBeenCalled();
     jest.useRealTimers();
+  });
+
+  it('stops auto-submit when the timeout is removed mid-countdown', async () => {
+    jest.useFakeTimers();
+    const onSelect = jest.fn();
+
+    const { queryByText, rerender } = render(
+      <QuestionPrompt
+        question="Continue?"
+        options={[{ label: 'Proceed' }, { label: 'Other' }]}
+        type="select"
+        autoApproveTimeoutMs={2000}
+        onSelect={onSelect}
+      />,
+    );
+
+    await act(async () => {});
+    act(() => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    rerender(
+      <QuestionPrompt
+        question="Continue?"
+        options={[{ label: 'Proceed' }, { label: 'Other' }]}
+        type="select"
+        onSelect={onSelect}
+      />,
+    );
+
+    expect(queryByText(/Auto-approving in/i)).toBeNull();
+
+    act(() => {
+      jest.advanceTimersByTime(2000);
+    });
+
+    expect(onSelect).not.toHaveBeenCalled();
+    jest.useRealTimers();
+  });
+
+  it('submits immediately when an option is clicked', async () => {
+    const onSelect = jest.fn();
+
+    const { findByRole } = render(
+      <QuestionPrompt
+        question="Continue?"
+        options={[{ label: 'Proceed' }, { label: 'Other' }]}
+        type="select"
+        autoApproveTimeoutMs={5000}
+        onSelect={onSelect}
+      />,
+    );
+
+    await act(async () => {});
+    fireEvent.click(await findByRole('button', { name: /Proceed/i }));
+
+    expect(onSelect).toHaveBeenCalledWith('Proceed');
+  });
+
+  it('submits immediately when a numeric shortcut is pressed', async () => {
+    const onSelect = jest.fn();
+
+    render(
+      <QuestionPrompt
+        question="Continue?"
+        options={[{ label: 'Proceed' }, { label: 'Other' }]}
+        type="select"
+        autoApproveTimeoutMs={5000}
+        onSelect={onSelect}
+      />,
+    );
+
+    await act(async () => {});
+    fireEvent.keyDown(window, { key: '2' });
+
+    expect(onSelect).toHaveBeenCalledWith('Other');
   });
 });
