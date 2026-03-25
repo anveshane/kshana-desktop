@@ -405,8 +405,9 @@
   font-size: $font-size-sm;
   color: $color-text-secondary;
   line-height: 1.6;
-  white-space: normal;
+  white-space: pre-wrap;
   word-wrap: break-word;
+  margin: 0;
   
   :global {
     p {
@@ -425,6 +426,22 @@
       font-size: 0.9em;
     }
   }
+}
+
+.streamingProgressBar {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(var(--color-text-primary-rgb), 0.12);
+  overflow: hidden;
+  margin-bottom: $spacing-sm;
+}
+
+.streamingProgressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, $color-accent-blue, $color-accent-cyan);
+  transition: width 120ms ease-out;
 }
 
 // CLI-style display
@@ -577,4 +594,3 @@
   max-width: 100%;
   overflow: hidden;
 }
-

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Download, Trash2 } from 'lucide-react';
 import type { BackendState } from '../../../../shared/backendTypes';
 import type { AppSettings } from '../../../../shared/settingsTypes';
@@ -48,6 +48,13 @@ import {
   shouldConfigureProjectAfterConnect,
   type RemoteSessionInfo,
 } from './chatPanelResumeUtils';
+import {
+  findActiveToolCallEntry,
+  normalizeComparableChatText,
+  normalizeTodoUpdatePayload,
+  isProgressLikeToolStreamingContent,
+  shouldSuppressAgentResponse,
+} from './chatPanelStreamUtils';
 import useQuestionTimerCancellation from './useQuestionTimerCancellation';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
@@ -172,10 +179,6 @@ const getProjectNameFromDirectory = (value: string): string => {
   );
 };
 
-const normalizeComparableChatText = (value: string): string => {
-  return value.trim().replace(/\r\n/g, '\n');
-};
-
 const ORIGINAL_INPUT_FILE = 'original_input.md';
 
 const normalizeHttpUrl = (value?: string): string | null => {
@@ -272,6 +275,7 @@ export default function ChatPanel() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const lastAssistantIdRef = useRef<string | null>(null);
+  const lastFinalizedAssistantStreamTextRef = useRef<string>('');
   const connectingRef = useRef(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -330,6 +334,7 @@ export default function ChatPanel() {
 
   const resetConversationRefs = useCallback(() => {
     lastAssistantIdRef.current = null;
+    lastFinalizedAssistantStreamTextRef.current = '';
     awaitingResponseRef.current = false;
     activeToolCallsRef.current.clear();
     toolCallSequenceRef.current.clear();
@@ -828,6 +833,7 @@ export default function ChatPanel() {
     toolCallSequenceRef.current.clear();
     setIsStreaming(false);
     lastAssistantIdRef.current = null;
+    lastFinalizedAssistantStreamTextRef.current = '';
   }, []);
 
   const settleActiveToolCalls = useCallback(
@@ -852,6 +858,7 @@ export default function ChatPanel() {
       toolCallSequenceRef.current.clear();
       setIsStreaming(false);
       lastAssistantIdRef.current = null;
+      lastFinalizedAssistantStreamTextRef.current = '';
     },
     [],
   );
@@ -1244,6 +1251,8 @@ export default function ChatPanel() {
       // Normalize stream_chunk to agent_text for comparison
       const normalizedType = type === 'stream_chunk' ? 'agent_text' : type;
 
+      lastFinalizedAssistantStreamTextRef.current = '';
+
       setMessages((prev) => {
         // If we're streaming and have an active message, ALWAYS append to it
         // This matches CLI behavior where chunks accumulate smoothly
@@ -1348,6 +1357,43 @@ export default function ChatPanel() {
           );
         }
 
+        // Skip creating a standalone bubble for single non-word characters (e.g. "." coordinator signals)
+        const contentForNoiseCheck = (content || '').trim();
+        if (
+          contentForNoiseCheck.length === 1 &&
+          !/\w/.test(contentForNoiseCheck)
+        ) {
+          return prev;
+        }
+
+        // If the very last message is a non-empty assistant text bubble from the same agent,
+        // treat this new chunk as a continuation — append rather than create a new bubble.
+        // This handles fragmented streaming where the backend sends multiple sessions for one response.
+        const lastMessageForContinuation = prev[prev.length - 1];
+        if (
+          isStreamingType &&
+          lastMessageForContinuation &&
+          lastMessageForContinuation.role === 'assistant' &&
+          lastMessageForContinuation.type !== 'tool_call' &&
+          lastMessageForContinuation.type !== 'agent_question' &&
+          (lastMessageForContinuation.type === 'agent_text' ||
+            lastMessageForContinuation.type === 'agent_response') &&
+          lastMessageForContinuation.content &&
+          lastMessageForContinuation.content.trim().length > 0
+        ) {
+          lastAssistantIdRef.current = lastMessageForContinuation.id;
+          setIsStreaming(true);
+          return prev.map((msg) =>
+            msg.id === lastMessageForContinuation.id
+              ? {
+                ...msg,
+                content: `${msg.content}${trimmedContent}`,
+                timestamp: Date.now(),
+              }
+              : msg,
+          );
+        }
+
         // Create new message for new stream
         const id = makeId();
         lastAssistantIdRef.current = id;
@@ -1364,6 +1410,93 @@ export default function ChatPanel() {
           },
         ];
       });
+    },
+    [],
+  );
+
+  const finalizeAssistantStream = useCallback((finalText?: string) => {
+    const activeAssistantId = lastAssistantIdRef.current;
+    if (!activeAssistantId) {
+      if (finalText !== undefined) {
+        lastFinalizedAssistantStreamTextRef.current =
+          normalizeComparableChatText(finalText);
+      }
+      setIsStreaming(false);
+      return;
+    }
+
+    const activeMessage = messagesRef.current.find(
+      (message) =>
+        message.id === activeAssistantId &&
+        message.role === 'assistant' &&
+        message.type !== 'tool_call',
+    );
+
+    const resolvedFinalText =
+      finalText !== undefined
+        ? finalText
+        : activeMessage
+          ? activeMessage.content
+          : '';
+
+    lastFinalizedAssistantStreamTextRef.current =
+      normalizeComparableChatText(resolvedFinalText);
+    lastAssistantIdRef.current = null;
+    setIsStreaming(false);
+
+    // Remove the active message if it never received any content (empty ghost bubble)
+    if (activeAssistantId && (!activeMessage || !activeMessage.content.trim())) {
+      setMessages((prev) =>
+        prev.filter((msg) => msg.id !== activeAssistantId),
+      );
+    }
+  }, []);
+
+  const updateToolStreamingMessage = useCallback(
+    (
+      toolCallId: string | undefined,
+      toolName: string | undefined,
+      content: string,
+      reset: boolean,
+    ): boolean => {
+      const activeEntry = findActiveToolCallEntry(
+        activeToolCallsRef.current,
+        toolCallId,
+        toolName,
+      );
+
+      if (!activeEntry) {
+        return false;
+      }
+
+      setMessages((prev) =>
+        prev.map((message) => {
+          if (message.id !== activeEntry.entry.messageId) {
+            return message;
+          }
+
+          const previousStreamingContent =
+            typeof message.meta?.streamingContent === 'string'
+              ? (message.meta.streamingContent as string)
+              : '';
+          const nextStreamingContent = reset
+            ? content
+            : `${previousStreamingContent}${content}`;
+
+          return {
+            ...message,
+            meta: {
+              ...(message.meta || {}),
+              toolCallId: toolCallId || activeEntry.key,
+              toolName: toolName || activeEntry.entry.toolName,
+              streamingContent: nextStreamingContent,
+            },
+            timestamp: Date.now(),
+          };
+        }),
+      );
+
+      return true;
     },
     [],
   );
@@ -1639,13 +1772,60 @@ export default function ChatPanel() {
           break;
         }
         case 'stream_chunk': {
-          // kshana-ink stream_chunk: { content, done }
-          // This represents thinking/reasoning that happens BEFORE tool calls start
+          // kshana-ink stream_chunk:
+          // - assistant streaming: { content, done, agentName? }
+          // - tool streaming: { content, done, toolCallId?, toolName?, reset?, agentName? }
           const content = (data.content as string) ?? '';
           const done = (data.done as boolean) ?? false;
+          const toolCallId =
+            typeof data.toolCallId === 'string' ? data.toolCallId : undefined;
+          const toolName =
+            typeof data.toolName === 'string' ? data.toolName : undefined;
+          const reset = Boolean(data.reset);
 
           // Skip empty chunks
           if (!content && !done) {
+            break;
+          }
+
+          if (toolCallId || toolName) {
+            // Tool streams: only progress-like content goes to the tool card.
+            // All other tool streaming (like long-form generation text) flows to
+            // the main assistant stream for better UX (matches web behavior).
+            const isProgressLike = isProgressLikeToolStreamingContent(content);
+
+            if (isProgressLike || reset) {
+              const updated = updateToolStreamingMessage(
+                toolCallId,
+                toolName,
+                isProgressLike ? content : '',
+                Boolean(reset),
+              );
+
+              if (!updated) {
+                console.warn(
+                  '[ChatPanel] Dropping tool progress chunk with no active tool target',
+                  { toolCallId, toolName },
+                );
+              }
+            } else {
+              // Non-progress tool content streams to assistant message (like plot outlines)
+              appendAssistantChunk(content, 'stream_chunk', agentName);
+            }
+
+            if (done) {
+              const activeAssistant = lastAssistantIdRef.current
+                ? messagesRef.current.find(
+                    (message) =>
+                      message.id === lastAssistantIdRef.current &&
+                      message.role === 'assistant',
+                  )
+                : null;
+              const finalizedText = activeAssistant
+                ? `${activeAssistant.content}${content}`
+                : content;
+              finalizeAssistantStream(finalizedText);
+            }
             break;
           }
 
@@ -1694,15 +1874,22 @@ export default function ChatPanel() {
           appendAssistantChunk(content, 'stream_chunk', agentName);
 
           if (done) {
-            setIsStreaming(false);
-            // Clear the ref so next stream starts fresh
-            lastAssistantIdRef.current = null;
+            const activeAssistant = lastAssistantIdRef.current
+              ? messagesRef.current.find(
+                (message) =>
+                  message.id === lastAssistantIdRef.current &&
+                  message.role === 'assistant',
+              )
+              : null;
+            const finalizedText = activeAssistant
+              ? `${activeAssistant.content}${content}`
+              : content;
+            finalizeAssistantStream(finalizedText);
           }
           break;
         }
         case 'stream_end': {
-          lastAssistantIdRef.current = null;
-          setIsStreaming(false);
+          finalizeAssistantStream();
           setAgentStatus('idle');
           break;
         }
@@ -1818,6 +2005,44 @@ export default function ChatPanel() {
               });
             }
 
+            // For content-generation tools, also render the result as an assistant message
+            // so it appears in the natural chat flow (tool card remains for reference)
+            if (
+              toolStatus === 'completed' &&
+              cleanedResult &&
+              typeof cleanedResult === 'object' &&
+              'content' in cleanedResult &&
+              typeof cleanedResult.content === 'string' &&
+              cleanedResult.content.trim()
+            ) {
+              // Only render if this is a content-generation tool (not read/update/system tools)
+              const isContentGenerationTool =
+                toolName.includes('generate') ||
+                toolName.includes('create_content') ||
+                toolName.includes('write_content');
+
+              if (isContentGenerationTool) {
+                // Don't duplicate if we already streamed this exact content
+                const resultContent = cleanedResult.content.trim();
+                const alreadyStreamed = messagesRef.current.some(
+                  (msg) =>
+                    msg.role === 'assistant' &&
+                    (msg.type === 'agent_text' || msg.type === 'stream_chunk') &&
+                    normalizeComparableChatText(msg.content) ===
+                      normalizeComparableChatText(resultContent),
+                );
+
+                if (!alreadyStreamed) {
+                  appendMessage({
+                    role: 'assistant',
+                    type: 'agent_text',
+                    content: resultContent,
+                    author: agentName,
+                  });
+                }
+              }
+            }
+
             // Check for phase transitions in update_project results
             if (
               toolName === 'update_project' &&
@@ -1854,6 +2079,8 @@ export default function ChatPanel() {
               }
             }
           } else if (toolStatus === 'started') {
+            finalizeAssistantStream();
+
             const now = Date.now();
             const sequence =
               (toolCallSequenceRef.current.get(toolName) ?? 0) + 1;
@@ -1905,6 +2132,18 @@ export default function ChatPanel() {
             // Replace last assistant message if it exists (could be agent_text or stream_chunk)
             // to avoid duplicates
             setMessages((prev) => {
+              if (
+                shouldSuppressAgentResponse({
+                  output,
+                  status: responseStatus,
+                  lastFinalizedStreamText:
+                    lastFinalizedAssistantStreamTextRef.current,
+                  messages: prev,
+                })
+              ) {
+                return prev;
+              }
+
               // Find the last assistant message that's not a question or tool call
               let lastAssistantIdx = -1;
               for (let i = prev.length - 1; i >= 0; i--) {
@@ -1922,11 +2161,8 @@ export default function ChatPanel() {
                 }
               }
 
-              if (
-                lastAssistantIdx >= 0 &&
-                lastAssistantIdRef.current === prev[lastAssistantIdx].id
-              ) {
-                // Update existing message
+              if (lastAssistantIdx >= 0) {
+                // Update existing message in place — avoids a duplicate bubble
                 return prev.map((msg, idx) =>
                   idx === lastAssistantIdx
                     ? {
@@ -1940,32 +2176,7 @@ export default function ChatPanel() {
                 );
               }
 
-              const mirrorsExistingQuestion = prev.some((msg) => {
-                if (msg.type !== 'agent_question') {
-                  return false;
-                }
-
-                return (
-                  normalizeComparableChatText(msg.content) === normalizedOutput
-                );
-              });
-              if (mirrorsExistingQuestion) {
-                return prev;
-              }
-
-              // Check if output already exists in messages to avoid duplicates
-              const existingMessage = prev.find(
-                (msg) =>
-                  msg.role === 'assistant' &&
-                  normalizeComparableChatText(msg.content) === normalizedOutput &&
-                  msg.type === 'agent_response',
-              );
-              if (existingMessage) {
-                // Already have this exact message, don't create duplicate
-                return prev;
-              }
-
-              // Create new message only if we don't have a matching one
+              // No recent assistant message at all — create one
               const id = makeId();
               lastAssistantIdRef.current = id;
               return [
@@ -1980,6 +2191,7 @@ export default function ChatPanel() {
                 },
               ];
             });
+            lastFinalizedAssistantStreamTextRef.current = normalizedOutput;
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
           }
@@ -2225,37 +2437,40 @@ export default function ChatPanel() {
         }
         case 'todo_update': {
           // kshana-ink todo_update: { todos }
-          const todos = data.todos as Array<any>;
-          if (todos?.length) {
-            // Log todo update
-            window.electron.logger.logTodoUpdate(
-              todos.map((t) => ({
-                content: t.content || t.id,
-                status: t.status,
-              })),
-            );
+          const todos = normalizeTodoUpdatePayload(
+            (data.todos as Array<Record<string, unknown>> | undefined) ?? [],
+          );
 
-            if (lastTodoMessageIdRef.current) {
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === lastTodoMessageIdRef.current
-                    ? {
-                      ...msg,
-                      meta: { ...msg.meta, todos },
-                      timestamp: Date.now(),
-                    }
-                    : msg,
-                ),
-              );
-            } else {
-              const messageId = appendMessage({
-                role: 'system',
-                type: 'todo_update',
-                content: '',
-                meta: { todos },
-              });
-              lastTodoMessageIdRef.current = messageId;
-            }
+          window.electron.logger.logTodoUpdate(
+            todos.map((todo) => ({
+              content:
+                (typeof todo.content === 'string' && todo.content) ||
+                (typeof todo.id === 'string' ? todo.id : 'todo'),
+              status:
+                typeof todo.status === 'string' ? todo.status : 'pending',
+            })),
+          );
+
+          if (lastTodoMessageIdRef.current) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === lastTodoMessageIdRef.current
+                  ? {
+                    ...msg,
+                    meta: { ...msg.meta, todos },
+                    timestamp: Date.now(),
+                  }
+                  : msg,
+              ),
+            );
+          } else {
+            const messageId = appendMessage({
+              role: 'system',
+              type: 'todo_update',
+              content: '',
+              meta: { todos },
+            });
+            lastTodoMessageIdRef.current = messageId;
           }
           break;
         }
@@ -3070,6 +3285,7 @@ export default function ChatPanel() {
       appendSystemMessage,
       debouncedSetStatus,
       fetchSessionInfo,
+      finalizeAssistantStream,
       getRendererErrorMessage,
       hasQueuedOutboundActionType,
       projectDirectory,
@@ -3078,6 +3294,7 @@ export default function ChatPanel() {
       showNotificationBanner,
       syncConfiguredProject,
       syncProjectState,
+      updateToolStreamingMessage,
     ],
   );
 
@@ -3991,11 +4208,7 @@ export default function ChatPanel() {
       }
 
       const todos = (message.meta?.todos as Array<any> | undefined) || [];
-      if (todos.length === 0) {
-        continue;
-      }
-
-      return todos;
+      return todos.length > 0 ? todos : null;
     }
 
     return null;
@@ -4055,7 +4268,11 @@ export default function ChatPanel() {
       (msg) =>
         !(msg.type === 'greeting' && msg.role === 'system') &&
         msg.type !== 'agent_question' &&
-        msg.type !== 'todo_update',
+        msg.type !== 'todo_update' &&
+        msg.type !== 'status' &&
+        msg.type !== 'progress' &&
+        msg.type !== 'comfyui_progress' &&
+        msg.type !== 'notification',
     );
   }, [messages]);
 
@@ -4118,7 +4335,7 @@ export default function ChatPanel() {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <Bot size={18} className={styles.headerIcon} />
+        {createElement(Bot as any, { size: 18, className: styles.headerIcon })}
         <span className={styles.headerTitle}>Kshana Assistant</span>
         <button
           type="button"
@@ -4139,7 +4356,7 @@ export default function ChatPanel() {
           title="Export chat history as JSON"
           aria-label="Export chat history as JSON"
         >
-          <Download size={14} />
+          {createElement(Download as any, { size: 14 })}
           <span>Export Chat</span>
         </button>
         <button
@@ -4148,7 +4365,7 @@ export default function ChatPanel() {
           onClick={clearChat}
           title="Clear chat"
         >
-          <Trash2 size={14} />
+          {createElement(Trash2 as any, { size: 14 })}
           <span>Clear</span>
         </button>
       </div>

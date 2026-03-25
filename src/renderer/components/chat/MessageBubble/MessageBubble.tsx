@@ -7,6 +7,7 @@ import MessageActions from '../MessageActions';
 import ToolCallCard from '../ToolCallCard';
 import TodoDisplay from '../TodoDisplay';
 import type { TodoItem } from '../TodoDisplay';
+import SceneCard, { tryParseSceneData } from '../SceneCard';
 import styles from './MessageBubble.module.scss';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 
@@ -305,17 +306,26 @@ export default function MessageBubble({
               </>
             )}
           </div>
-        ) : (
-          <ReactMarkdown
-            remarkPlugins={remarkGfm ? [remarkGfm] : []}
-            components={MarkdownComponents}
-          >
-            {message.content ||
-              (message.role === 'assistant' && isStreaming
-                ? '*Thinking...*'
-                : message.content)}
-          </ReactMarkdown>
-        )}
+        ) : (() => {
+          // Try to render as a structured scene card if the content is scene JSON
+          if (!isStreaming && message.content) {
+            const sceneData = tryParseSceneData(message.content);
+            if (sceneData) {
+              return <SceneCard data={sceneData} />;
+            }
+          }
+          return (
+            <ReactMarkdown
+              remarkPlugins={remarkGfm ? [remarkGfm] : []}
+              components={MarkdownComponents}
+            >
+              {message.content ||
+                (message.role === 'assistant' && isStreaming
+                  ? '*Thinking...*'
+                  : message.content)}
+            </ReactMarkdown>
+          );
+        })()}
       </div>
     </div>
   );
