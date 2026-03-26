@@ -58,7 +58,7 @@
   padding: $spacing-xs $spacing-sm;
   background-color: rgba(var(--color-accent-primary-rgb), 0.12);
   border: 1px solid rgba(var(--color-accent-primary-rgb), 0.3);
-  border-radius: $radius-sm 0 0 $radius-sm;
+  border-radius: $radius-sm;
   color: $color-accent-primary;
   font-size: $font-size-xs;
   font-weight: $font-weight-medium;
@@ -80,30 +80,6 @@
   }
 }
 
-.exportDropdownToggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: $spacing-xs 6px;
-  background-color: rgba(var(--color-accent-primary-rgb), 0.12);
-  border: 1px solid rgba(var(--color-accent-primary-rgb), 0.3);
-  border-left: none;
-  border-radius: 0 $radius-sm $radius-sm 0;
-  color: $color-accent-primary;
-  cursor: pointer;
-  transition: all $transition-fast;
-
-  &:hover:not(:disabled) {
-    background-color: rgba(var(--color-accent-primary-rgb), 0.18);
-    border-color: rgba(var(--color-accent-primary-rgb), 0.45);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-}
-
 .exportDropdownMenu {
   position: absolute;
   top: calc(100% + 4px);
@@ -115,6 +91,95 @@
   box-shadow: $shadow-md;
   z-index: 100;
   overflow: hidden;
+}
+
+.exportSection {
+  padding: $spacing-sm $spacing-md;
+  border-bottom: 1px solid rgba(var(--color-panel-border-rgb), 0.5);
+}
+
+.exportSectionTitle {
+  margin: 0 0 $spacing-sm;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.exportOptionGroup {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+
+  & + & {
+    margin-top: $spacing-sm;
+  }
+}
+
+.exportOptionLabel {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+}
+
+.exportOptionRow {
+  display: flex;
+  gap: $spacing-xs;
+}
+
+.choiceChip {
+  flex: 1;
+  padding: $spacing-xs $spacing-sm;
+  border-radius: $radius-sm;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.42);
+  background-color: rgba(var(--color-bg-panel-soft-rgb), 0.42);
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    color $transition-fast;
+
+  &:hover {
+    border-color: rgba(var(--color-accent-primary-rgb), 0.4);
+    color: $color-text-primary;
+  }
+}
+
+.choiceChipActive {
+  border-color: rgba(var(--color-accent-primary-rgb), 0.56);
+  background-color: rgba(var(--color-accent-primary-rgb), 0.16);
+  color: $color-accent-primary;
+}
+
+.exportConfirmButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: $spacing-xs $spacing-sm;
+  margin-top: $spacing-sm;
+  border: 1px solid rgba(var(--color-accent-primary-rgb), 0.38);
+  border-radius: $radius-sm;
+  background-color: rgba(var(--color-accent-primary-rgb), 0.12);
+  color: $color-accent-primary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    opacity $transition-fast;
+
+  &:hover:not(:disabled) {
+    background-color: rgba(var(--color-accent-primary-rgb), 0.18);
+    border-color: rgba(var(--color-accent-primary-rgb), 0.5);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 .exportDropdownItem {

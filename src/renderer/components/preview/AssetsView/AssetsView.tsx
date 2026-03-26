@@ -14,24 +14,8 @@ interface MediaAsset {
   category: 'images' | 'videos' | 'infographics';
 }
 
-interface MediaDimensions {
-  width: number;
-  height: number;
-}
-
 const MEDIA_SCAN_ROOTS = ['assets', 'characters', 'settings', 'scenes'];
 const MAX_SCAN_DEPTH = 5;
-const DEFAULT_MEDIA_ASPECT_RATIO = '16 / 9';
-
-const getThumbnailAspectRatio = (
-  dimensions: MediaDimensions | undefined,
-): string => {
-  if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) {
-    return DEFAULT_MEDIA_ASPECT_RATIO;
-  }
-
-  return `${dimensions.width} / ${dimensions.height}`;
-};
 
 const normalizeMediaPath = (
   filePath: string,
@@ -176,39 +160,6 @@ export default function AssetsView() {
   const [infographicPaths, setInfographicPaths] = useState<
     Record<string, string>
   >({});
-  const [mediaDimensions, setMediaDimensions] = useState<
-    Record<string, MediaDimensions>
-  >({});
-
-  const updateMediaDimensions = useCallback(
-    (assetPath: string, width: number, height: number) => {
-      if (
-        !Number.isFinite(width) ||
-        !Number.isFinite(height) ||
-        width <= 0 ||
-        height <= 0
-      ) {
-        return;
-      }
-
-      setMediaDimensions((prev) => {
-        const existing = prev[assetPath];
-        if (
-          existing &&
-          existing.width === width &&
-          existing.height === height
-        ) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          [assetPath]: { width, height },
-        };
-      });
-    },
-    [],
-  );
 
   const loadMediaFiles = useCallback(async () => {
     if (!projectDirectory) {
@@ -451,26 +402,12 @@ export default function AssetsView() {
                         className={styles.mediaCard}
                         onClick={() => setSelectedImage(image)}
                       >
-                        <div
-                          className={styles.mediaThumbnail}
-                          style={{
-                            aspectRatio: getThumbnailAspectRatio(
-                              mediaDimensions[image.path],
-                            ),
-                          }}
-                        >
+                        <div className={styles.mediaThumbnail}>
                           {imageSrc ? (
                             <img
                               src={imageSrc}
                               alt={image.name}
                               className={styles.thumbnailImage}
-                              onLoad={(event) =>
-                                updateMediaDimensions(
-                                  image.path,
-                                  event.currentTarget.naturalWidth,
-                                  event.currentTarget.naturalHeight,
-                                )
-                              }
                             />
                           ) : (
                             <div className={styles.mediaPlaceholder}>
@@ -513,14 +450,7 @@ export default function AssetsView() {
                         className={styles.mediaCard}
                         onClick={() => setSelectedVideo(video)}
                       >
-                        <div
-                          className={styles.mediaThumbnail}
-                          style={{
-                            aspectRatio: getThumbnailAspectRatio(
-                              mediaDimensions[video.path],
-                            ),
-                          }}
-                        >
+                        <div className={styles.mediaThumbnail}>
                           {videoSrc ? (
                             <>
                               <video
@@ -528,13 +458,6 @@ export default function AssetsView() {
                                 className={styles.thumbnailVideo}
                                 preload="metadata"
                                 muted
-                                onLoadedMetadata={(event) =>
-                                  updateMediaDimensions(
-                                    video.path,
-                                    event.currentTarget.videoWidth,
-                                    event.currentTarget.videoHeight,
-                                  )
-                                }
                               />
                               <div className={styles.playOverlay}>
                                 <Play size={32} />
@@ -590,14 +513,7 @@ export default function AssetsView() {
                         className={styles.mediaCard}
                         onClick={() => setSelectedInfographic(infographic)}
                       >
-                        <div
-                          className={styles.mediaThumbnail}
-                          style={{
-                            aspectRatio: getThumbnailAspectRatio(
-                              mediaDimensions[infographic.path],
-                            ),
-                          }}
-                        >
+                        <div className={styles.mediaThumbnail}>
                           {videoSrc ? (
                             <>
                               <video
@@ -605,13 +521,6 @@ export default function AssetsView() {
                                 className={styles.thumbnailVideo}
                                 preload="metadata"
                                 muted
-                                onLoadedMetadata={(event) =>
-                                  updateMediaDimensions(
-                                    infographic.path,
-                                    event.currentTarget.videoWidth,
-                                    event.currentTarget.videoHeight,
-                                  )
-                                }
                               />
                               <div className={styles.playOverlay}>
                                 <Play size={32} />

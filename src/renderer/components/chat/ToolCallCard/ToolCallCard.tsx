@@ -2,6 +2,7 @@ import { createElement, useEffect, useState } from 'react';
 import { CheckCircle2, XCircle, AlertCircle, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import styles from './ToolCallCard.module.scss';
+import SceneCard, { tryParseSceneData } from '../SceneCard';
 
 export type ToolCallStatus =
   | 'executing'
@@ -531,6 +532,9 @@ export default function ToolCallCard({
   const isExecuting = status === 'executing';
   const trimmedStreamingContent = streamingContent?.trim() ?? '';
   const showStreamingContent = isExecuting && trimmedStreamingContent.length > 0;
+  const streamingSceneData = showStreamingContent
+    ? tryParseSceneData(trimmedStreamingContent)
+    : null;
   const streamingPercent = showStreamingContent
     ? getStreamingPercent(trimmedStreamingContent)
     : null;
@@ -625,6 +629,11 @@ export default function ToolCallCard({
     }
   }
 
+  const resultSceneData =
+    resultDisplay && toolName === 'generate_content'
+      ? tryParseSceneData(resultDisplay)
+      : null;
+
   const borderClass = isExecuting
     ? styles.borderExecuting
     : isError
@@ -683,7 +692,9 @@ export default function ToolCallCard({
               <div className={styles.streamingLabel}>
                 {isProgressStreaming ? 'Progress' : 'Live output'}
               </div>
-              {isProgressStreaming ? (
+              {streamingSceneData ? (
+                <SceneCard data={streamingSceneData} />
+              ) : isProgressStreaming ? (
                 <div>
                   <div className={styles.streamingProgressBar}>
                     <div
@@ -794,9 +805,11 @@ export default function ToolCallCard({
               )}
               {resultDisplay && (
                 <div className={styles.cliResultContent}>
-                  {typeof result === 'object' &&
-                  result !== null &&
-                  'content' in result ? (
+                  {resultSceneData ? (
+                    <SceneCard data={resultSceneData} />
+                  ) : typeof result === 'object' &&
+                    result !== null &&
+                    'content' in result ? (
                     <ReactMarkdown>{resultDisplay}</ReactMarkdown>
                   ) : (
                     <pre className={styles.cliResultPre}>{resultDisplay}</pre>

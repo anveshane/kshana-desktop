@@ -1624,6 +1624,32 @@ function parseAspectRatioValue(value: unknown): RenderResolution | null {
   };
 }
 
+type ExportAspectRatio = '16:9' | '9:16';
+type ExportQuality = 'standard' | 'high';
+
+interface ExportRenderOptions {
+  aspectRatio: ExportAspectRatio;
+  quality: ExportQuality;
+}
+
+function resolveExportRenderResolution(
+  options: ExportRenderOptions,
+): RenderResolution {
+  if (options.aspectRatio === '9:16') {
+    if (options.quality === 'high') {
+      return { width: 1080, height: 1920 };
+    }
+
+    return { width: 720, height: 1280 };
+  }
+
+  if (options.quality === 'high') {
+    return { width: 1920, height: 1080 };
+  }
+
+  return { width: 1280, height: 720 };
+}
+
 async function getProjectRenderResolution(
   projectDirectory: string,
 ): Promise<RenderResolution> {
@@ -1932,6 +1958,7 @@ ipcMain.handle(
     overlayItems?: OverlayItem[],
     textOverlayCues?: TextOverlayCue[],
     promptOverlayCues?: PromptOverlayCue[],
+    exportOptions?: ExportRenderOptions,
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
     console.log('[VideoComposition] Starting video composition...');
     console.log('[VideoComposition] Timeline items:', timelineItems.length);
@@ -1944,7 +1971,9 @@ ipcMain.handle(
     const tempDir = path.join(projectDirectory, '.kshana', 'temp');
     await fs.mkdir(tempDir, { recursive: true });
     console.log('[VideoComposition] Temp directory:', tempDir);
-    const renderResolution = await getProjectRenderResolution(projectDirectory);
+    const renderResolution = exportOptions
+      ? resolveExportRenderResolution(exportOptions)
+      : await getProjectRenderResolution(projectDirectory);
     const { width: outputWidth, height: outputHeight } = renderResolution;
     const scaleAndPadFilter = `scale=${outputWidth}:${outputHeight}:force_original_aspect_ratio=decrease,pad=${outputWidth}:${outputHeight}:(ow-iw)/2:(oh-ih)/2`;
     console.log(

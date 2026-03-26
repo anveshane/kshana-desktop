@@ -322,6 +322,10 @@ const projectBridge = {
     }>,
     textOverlayCues?: TextOverlayCue[],
     promptOverlayCues?: PromptOverlayCue[],
+    exportOptions?: {
+      aspectRatio: '16:9' | '9:16';
+      quality: 'standard' | 'high';
+    },
   ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
     return ipcRenderer.invoke(
       'project:compose-timeline-video',
@@ -331,6 +335,7 @@ const projectBridge = {
       overlayItems,
       textOverlayCues,
       promptOverlayCues,
+      exportOptions,
     );
   },
   exportCapcut(

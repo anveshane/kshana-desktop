@@ -284,7 +284,10 @@ function latestAssetPathForScene(
 ): string | undefined {
   const matches =
     assets?.assets.filter(
-      (asset) => asset.type === type && asset.scene_number === sceneNumber,
+      (asset) =>
+        asset.type === type &&
+        asset.scene_number === sceneNumber &&
+        asset.metadata?.['shot_number'] === undefined,
     ) ?? [];
 
   if (matches.length === 0) return undefined;

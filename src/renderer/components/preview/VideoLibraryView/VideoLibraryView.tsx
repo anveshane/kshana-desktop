@@ -11,7 +11,6 @@ import {
   Calendar,
   Pause,
   Download,
-  ChevronDown,
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
@@ -47,6 +46,13 @@ import {
 import styles from './VideoLibraryView.module.scss';
 
 const PREVIEW_WATERMARK_TEXT = 'kshana';
+type ExportAspectRatio = '16:9' | '9:16';
+type ExportQuality = 'standard' | 'high';
+
+interface ExportRenderOptions {
+  aspectRatio: ExportAspectRatio;
+  quality: ExportQuality;
+}
 
 function normalizeVideoSourcePath(path: string): string {
   const trimmed = path.trim();
@@ -92,7 +98,6 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
   const [videoPath, setVideoPath] = useState<string>('');
   const [hasPreviewFrame, setHasPreviewFrame] = useState(false);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
-  const [thumbnailAspectRatio, setThumbnailAspectRatio] = useState('16 / 9');
 
   useEffect(() => {
     if (shouldLoadThumbnail) {
@@ -127,7 +132,6 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
     setVideoPath('');
     setHasPreviewFrame(false);
     setThumbnailFailed(false);
-    setThumbnailAspectRatio('16 / 9');
   }, [artifact.artifact_id, artifact.file_path]);
 
   useEffect(() => {
@@ -193,9 +197,6 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
     if (!video || !videoPath) return undefined;
 
     const handleLoadedMetadata = () => {
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        setThumbnailAspectRatio(`${video.videoWidth} / ${video.videoHeight}`);
-      }
       primePreviewFrame(video);
     };
     const handleLoadedData = () => {
@@ -238,10 +239,7 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
       className={styles.videoCard}
       onMouseEnter={() => setShouldLoadThumbnail(true)}
     >
-      <div
-        className={styles.videoThumbnail}
-        style={{ aspectRatio: thumbnailAspectRatio }}
-      >
+      <div className={styles.videoThumbnail}>
         {(!videoPath || thumbnailFailed || !hasPreviewFrame) && (
           <div className={styles.videoThumbnailPlaceholder}>
             <Film size={24} className={styles.videoThumbnailPlaceholderIcon} />
@@ -381,6 +379,10 @@ export default function VideoLibraryView({
   const [isDownloading, setIsDownloading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportAspectRatio, setExportAspectRatio] =
+    useState<ExportAspectRatio | null>(null);
+  const [exportQuality, setExportQuality] =
+    useState<ExportQuality | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const lastPlaybackTimeRef = useRef(0);
   // Use production-grade playback controller instead of manual state management
@@ -1452,13 +1454,29 @@ export default function VideoLibraryView({
     };
   }, [projectDirectory, timelineItems, overlayItems, textOverlayCues]);
 
+  const handleOpenExportChooser = useCallback(() => {
+    if (
+      !projectDirectory ||
+      timelineItems.length === 0 ||
+      isDownloading ||
+      isExporting
+    ) {
+      return;
+    }
+
+    setExportAspectRatio(null);
+    setExportQuality(null);
+    setShowExportMenu(true);
+  }, [isDownloading, isExporting, projectDirectory, timelineItems.length]);
+
   // Handle video download
-  const handleDownloadVideo = useCallback(async () => {
+  const handleDownloadVideo = useCallback(async (options: ExportRenderOptions) => {
     if (!projectDirectory || timelineItems.length === 0 || isDownloading) {
       return;
     }
 
     setIsDownloading(true);
+    setShowExportMenu(false);
 
     try {
       console.log('[VideoDownload] Starting video download process...');
@@ -1488,6 +1506,7 @@ export default function VideoLibraryView({
         }>,
         textOverlayCues?: TextOverlayCue[],
         promptOverlayCues?: PromptOverlayCue[],
+        exportOptions?: ExportRenderOptions,
       ) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
 
       const result = await composeVideo(
@@ -1497,6 +1516,7 @@ export default function VideoLibraryView({
         data.overlayItemsData,
         data.textOverlayCues,
         data.promptOverlayCues,
+        options,
       );
 
       if (!result.success) {
@@ -1634,6 +1654,17 @@ export default function VideoLibraryView({
     }
   }, [projectDirectory, timelineItems, isExporting, resolveExportData]);
 
+  const handleConfirmMp4Export = useCallback(() => {
+    if (!exportAspectRatio || !exportQuality) {
+      return;
+    }
+
+    void handleDownloadVideo({
+      aspectRatio: exportAspectRatio,
+      quality: exportQuality,
+    });
+  }, [exportAspectRatio, exportQuality, handleDownloadVideo]);
+
   // Show empty state if no project
   if (!projectDirectory) {
     return (
@@ -1668,11 +1699,11 @@ export default function VideoLibraryView({
             <button
               type="button"
               className={styles.downloadButton}
-              onClick={handleDownloadVideo}
+              onClick={handleOpenExportChooser}
               disabled={
                 isDownloading || isExporting || timelineItems.length === 0
               }
-              title="Download complete timeline video as MP4"
+              title="Choose export settings and download MP4"
             >
               <Download size={16} />
               {isDownloading
@@ -1681,28 +1712,67 @@ export default function VideoLibraryView({
                   ? 'Exporting...'
                   : 'Download'}
             </button>
-            <button
-              type="button"
-              className={styles.exportDropdownToggle}
-              onClick={() => setShowExportMenu((prev) => !prev)}
-              disabled={
-                isDownloading || isExporting || timelineItems.length === 0
-              }
-              title="Export options"
-            >
-              <ChevronDown size={14} />
-            </button>
             {showExportMenu && (
               <div className={styles.exportDropdownMenu}>
-                <button
-                  type="button"
-                  className={styles.exportDropdownItem}
-                  onClick={handleDownloadVideo}
-                  disabled={isDownloading || isExporting}
-                >
-                  <Download size={14} />
-                  Export as MP4
-                </button>
+                <div className={styles.exportSection}>
+                  <div className={styles.exportSectionTitle}>Export MP4</div>
+                  <div className={styles.exportOptionGroup}>
+                    <span className={styles.exportOptionLabel}>Aspect ratio</span>
+                    <div className={styles.exportOptionRow}>
+                      <button
+                        type="button"
+                        className={`${styles.choiceChip} ${exportAspectRatio === '16:9' ? styles.choiceChipActive : ''}`}
+                        onClick={() => setExportAspectRatio('16:9')}
+                        disabled={isDownloading || isExporting}
+                      >
+                        16:9
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.choiceChip} ${exportAspectRatio === '9:16' ? styles.choiceChipActive : ''}`}
+                        onClick={() => setExportAspectRatio('9:16')}
+                        disabled={isDownloading || isExporting}
+                      >
+                        9:16
+                      </button>
+                    </div>
+                  </div>
+                  <div className={styles.exportOptionGroup}>
+                    <span className={styles.exportOptionLabel}>Quality</span>
+                    <div className={styles.exportOptionRow}>
+                      <button
+                        type="button"
+                        className={`${styles.choiceChip} ${exportQuality === 'standard' ? styles.choiceChipActive : ''}`}
+                        onClick={() => setExportQuality('standard')}
+                        disabled={isDownloading || isExporting}
+                      >
+                        Standard
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.choiceChip} ${exportQuality === 'high' ? styles.choiceChipActive : ''}`}
+                        onClick={() => setExportQuality('high')}
+                        disabled={isDownloading || isExporting}
+                      >
+                        High
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.exportConfirmButton}
+                    onClick={handleConfirmMp4Export}
+                    disabled={
+                      isDownloading ||
+                      isExporting ||
+                      exportAspectRatio === null ||
+                      exportQuality === null
+                    }
+                  >
+                    <Download size={14} />
+                    Export MP4
+                  </button>
+                </div>
                 <button
                   type="button"
                   className={styles.exportDropdownItem}
