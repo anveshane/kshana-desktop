@@ -130,7 +130,10 @@ describe('NewProjectDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
 
     await waitFor(() => {
-      expect(mockCreateFolder).toHaveBeenCalledWith('/projects', 'demo');
+      expect(mockCreateFolder).toHaveBeenCalledWith('/projects', 'demo', {
+        source: 'renderer',
+        intent: 'new_project_parent',
+      });
     });
     expect(mockCreateProject).toHaveBeenCalledWith(
       '/projects/demo',

@@ -25,6 +25,7 @@ import {
 } from './utils/audioWaveform';
 import {
   assertCanonicalProjectContainment,
+  isSafeNewProjectFolderSegment,
   normalizeIncomingPath,
   ProjectFileOpGuardError,
   resolveAndValidateProjectPath,
@@ -174,6 +175,8 @@ type GuardedFileOp =
 interface FileOpMeta {
   opId?: string | null;
   source?: 'agent_ws' | 'renderer';
+  /** When set with source renderer, create-folder validates under basePath only (new project wizard). */
+  intent?: 'new_project_parent';
 }
 
 interface FileOpErrorContext {
@@ -1219,11 +1222,32 @@ ipcMain.handle(
     relativePath: string,
     meta?: FileOpMeta,
   ): Promise<string | null> => {
-    const activeProjectRoot = resolveBootstrapValidationRoot(
-      fileSystemManager.getActiveProjectRoot(),
-      path.isAbsolute(basePath) ? basePath : null,
-      meta,
-    );
+    const absoluteBase = path.isAbsolute(basePath) ? path.resolve(basePath) : null;
+    let activeProjectRoot: string | null;
+    if (
+      meta?.source === 'renderer' &&
+      meta?.intent === 'new_project_parent'
+    ) {
+      if (!absoluteBase) {
+        throw createIpcFileOpError(
+          'INVALID_FILE_PATH',
+          'New project creation requires an absolute parent folder path.',
+        );
+      }
+      if (!isSafeNewProjectFolderSegment(relativePath)) {
+        throw createIpcFileOpError(
+          'INVALID_FILE_PATH',
+          'Invalid project folder name.',
+        );
+      }
+      activeProjectRoot = absoluteBase;
+    } else {
+      activeProjectRoot = resolveBootstrapValidationRoot(
+        fileSystemManager.getActiveProjectRoot(),
+        absoluteBase,
+        meta,
+      );
+    }
     const combinedPath = path.join(basePath, relativePath);
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;

@@ -49,10 +49,8 @@ import {
   type RemoteSessionInfo,
 } from './chatPanelResumeUtils';
 import {
-  findActiveToolCallEntry,
   normalizeComparableChatText,
   normalizeTodoUpdatePayload,
-  isProgressLikeToolStreamingContent,
   shouldSuppressAgentResponse,
 } from './chatPanelStreamUtils';
 import useQuestionTimerCancellation from './useQuestionTimerCancellation';
@@ -1254,15 +1252,22 @@ export default function ChatPanel() {
       lastFinalizedAssistantStreamTextRef.current = '';
 
       setMessages((prev) => {
+        const hasToolCallAfterIndex = (messageIndex: number) =>
+          messageIndex >= 0 &&
+          prev.slice(messageIndex + 1).some((msg) => msg.type === 'tool_call');
+
         // If we're streaming and have an active message, ALWAYS append to it
         // This matches CLI behavior where chunks accumulate smoothly
         if (isStreamingType && lastAssistantIdRef.current) {
-          const existingMessage = prev.find(
+          const existingIndex = prev.findIndex(
             (msg) => msg.id === lastAssistantIdRef.current,
           );
+          const existingMessage =
+            existingIndex >= 0 ? prev[existingIndex] : undefined;
 
           if (
             existingMessage &&
+            !hasToolCallAfterIndex(existingIndex) &&
             existingMessage.role === 'assistant' &&
             existingMessage.type !== 'tool_call' && // Don't append to tool calls
             (existingMessage.type === 'agent_text' ||
@@ -1307,6 +1312,7 @@ export default function ChatPanel() {
             const msg = prev[i];
             if (
               msg.role === 'assistant' &&
+              !hasToolCallAfterIndex(i) &&
               msg.content &&
               msg.type === normalizedType &&
               msg.content.substring(0, 100) === contentHash
@@ -1451,55 +1457,6 @@ export default function ChatPanel() {
       );
     }
   }, []);
-
-  const updateToolStreamingMessage = useCallback(
-    (
-      toolCallId: string | undefined,
-      toolName: string | undefined,
-      content: string,
-      reset: boolean,
-    ): boolean => {
-      const activeEntry = findActiveToolCallEntry(
-        activeToolCallsRef.current,
-        toolCallId,
-        toolName,
-      );
-
-      if (!activeEntry) {
-        return false;
-      }
-
-      setMessages((prev) =>
-        prev.map((message) => {
-          if (message.id !== activeEntry.entry.messageId) {
-            return message;
-          }
-
-          const previousStreamingContent =
-            typeof message.meta?.streamingContent === 'string'
-              ? (message.meta.streamingContent as string)
-              : '';
-          const nextStreamingContent = reset
-            ? content
-            : `${previousStreamingContent}${content}`;
-
-          return {
-            ...message,
-            meta: {
-              ...(message.meta || {}),
-              toolCallId: toolCallId || activeEntry.key,
-              toolName: toolName || activeEntry.entry.toolName,
-              streamingContent: nextStreamingContent,
-            },
-            timestamp: Date.now(),
-          };
-        }),
-      );
-
-      return true;
-    },
-    [],
-  );
 
   const disconnectWebSocket = useCallback(() => {
     if (wsRef.current) {
@@ -1789,42 +1746,28 @@ export default function ChatPanel() {
           }
 
           if (toolCallId || toolName) {
-            // Tool streams: only progress-like content goes to the tool card.
-            // All other tool streaming (like long-form generation text) flows to
-            // the main assistant stream for better UX (matches web behavior).
-            const isProgressLike = isProgressLikeToolStreamingContent(content);
-
-            if (isProgressLike || reset) {
-              const updated = updateToolStreamingMessage(
-                toolCallId,
-                toolName,
-                isProgressLike ? content : '',
-                Boolean(reset),
-              );
-
-              if (!updated) {
-                console.warn(
-                  '[ChatPanel] Dropping tool progress chunk with no active tool target',
-                  { toolCallId, toolName },
-                );
-              }
-            } else {
-              // Non-progress tool content streams to assistant message (like plot outlines)
+            // Keep stream text in assistant bubbles below the tool row — not in the tool card.
+            if (reset) {
+              finalizeAssistantStream();
+            }
+            if (content.trim()) {
               appendAssistantChunk(content, 'stream_chunk', agentName);
             }
 
             if (done) {
-              const activeAssistant = lastAssistantIdRef.current
-                ? messagesRef.current.find(
-                    (message) =>
-                      message.id === lastAssistantIdRef.current &&
-                      message.role === 'assistant',
-                  )
-                : null;
-              const finalizedText = activeAssistant
-                ? `${activeAssistant.content}${content}`
-                : content;
-              finalizeAssistantStream(finalizedText);
+              if (lastAssistantIdRef.current) {
+                const activeAssistant = messagesRef.current.find(
+                  (message) =>
+                    message.id === lastAssistantIdRef.current &&
+                    message.role === 'assistant',
+                );
+                const finalizedText = activeAssistant
+                  ? `${activeAssistant.content}${content}`
+                  : undefined;
+                finalizeAssistantStream(finalizedText);
+              } else {
+                finalizeAssistantStream();
+              }
             }
             break;
           }
@@ -3294,7 +3237,6 @@ export default function ChatPanel() {
       showNotificationBanner,
       syncConfiguredProject,
       syncProjectState,
-      updateToolStreamingMessage,
     ],
   );
 

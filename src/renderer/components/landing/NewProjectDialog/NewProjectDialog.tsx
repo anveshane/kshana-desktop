@@ -106,6 +106,7 @@ export default function NewProjectDialog({
       const createdDirectory = await window.electron.project.createFolder(
         normalizedWorkspacePath,
         trimmedName,
+        { source: 'renderer', intent: 'new_project_parent' },
       );
 
       if (!createdDirectory) {

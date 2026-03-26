@@ -56,6 +56,7 @@ interface PromptOverlayCue {
 interface FileOpMeta {
   opId?: string | null;
   source?: 'agent_ws' | 'renderer';
+  intent?: 'new_project_parent';
 }
 
 type AppUpdatePhase =

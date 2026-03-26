@@ -158,6 +158,23 @@ export function resolveAndValidateProjectPath(
   );
 }
 
+/**
+ * Single path segment for a new project folder name (no traversal or nesting).
+ */
+export function isSafeNewProjectFolderSegment(segment: string): boolean {
+  const trimmed = segment.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed.includes('/') || trimmed.includes('\\')) {
+    return false;
+  }
+  if (trimmed === '.' || trimmed === '..') {
+    return false;
+  }
+  return true;
+}
+
 function isPathWithinRoot(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));

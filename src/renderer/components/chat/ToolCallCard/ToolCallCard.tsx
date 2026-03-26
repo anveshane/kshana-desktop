@@ -77,23 +77,6 @@ function getStreamingPercent(content: string): number | null {
   return Math.max(0, Math.min(100, percent));
 }
 
-function isProgressLikeStreamingContent(content: string): boolean {
-  if (!content.trim()) {
-    return false;
-  }
-
-  return (
-    /step\s+\d+\/\d+/i.test(content) ||
-    /\b\d+%/.test(content) ||
-    /processing node/i.test(content) ||
-    /loading workflow/i.test(content) ||
-    /waiting for comfyui/i.test(content) ||
-    /queued/i.test(content) ||
-    /execution started/i.test(content) ||
-    /complete!?/i.test(content)
-  );
-}
-
 function formatToolCall(name: string, args?: Record<string, unknown>): string {
   if (!args || Object.keys(args).length === 0) {
     return `${name}()`;
@@ -538,8 +521,6 @@ export default function ToolCallCard({
   const streamingPercent = showStreamingContent
     ? getStreamingPercent(trimmedStreamingContent)
     : null;
-  const isProgressStreaming =
-    showStreamingContent && isProgressLikeStreamingContent(trimmedStreamingContent);
 
   const [isExpanded, setIsExpanded] = useState(() => shouldToolStartExpanded());
 
@@ -689,28 +670,23 @@ export default function ToolCallCard({
 
           {showStreamingContent && (
             <div className={styles.streamingContent}>
-              <div className={styles.streamingLabel}>
-                {isProgressStreaming ? 'Progress' : 'Live output'}
-              </div>
+              <div className={styles.streamingLabel}>Live output</div>
               {streamingSceneData ? (
                 <SceneCard data={streamingSceneData} />
-              ) : isProgressStreaming ? (
-                <div>
-                  <div className={styles.streamingProgressBar}>
-                    <div
-                      className={styles.streamingProgressFill}
-                      style={{
-                        width:
-                          streamingPercent !== null ? `${streamingPercent}%` : '0%',
-                      }}
-                    />
-                  </div>
+              ) : (
+                <>
+                  {streamingPercent !== null && (
+                    <div className={styles.streamingProgressBar}>
+                      <div
+                        className={styles.streamingProgressFill}
+                        style={{ width: `${streamingPercent}%` }}
+                      />
+                    </div>
+                  )}
                   <pre className={styles.streamingPre}>
                     {trimmedStreamingContent}
                   </pre>
-                </div>
-              ) : (
-                <pre className={styles.streamingPre}>{trimmedStreamingContent}</pre>
+                </>
               )}
             </div>
           )}

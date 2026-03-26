@@ -147,6 +147,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       }
 
       setState((prev) => ({ ...prev, isLoading: true }));
+      let directoryWatchStarted: string | null = null;
       try {
         const exists = await window.electron.project.checkFileExists(path);
         if (!exists) {
@@ -186,6 +187,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
         // Start watching the directory
         await window.electron.project.watchDirectory(path);
+        directoryWatchStarted = path;
 
         // Add to recent projects
         await window.electron.project.addRecent(path);
@@ -207,6 +209,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           projectName,
         });
       } catch (error) {
+        if (directoryWatchStarted) {
+          await window.electron.project
+            .unwatchDirectory(directoryWatchStarted)
+            .catch(() => undefined);
+        }
         setState((prev) => ({ ...prev, isLoading: false }));
         throw error;
       }

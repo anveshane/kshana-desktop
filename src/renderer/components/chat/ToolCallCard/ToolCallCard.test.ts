@@ -17,7 +17,7 @@ describe('ToolCallCard', () => {
       }) as any,
     );
 
-    expect(screen.getByText('Progress')).toBeTruthy();
+    expect(screen.getByText('Live output')).toBeTruthy();
     expect(screen.getByText(/Loading workflow/)).toBeTruthy();
     expect(screen.getByText(/Queued \(1 job ahead\)/)).toBeTruthy();
   });
@@ -31,7 +31,7 @@ describe('ToolCallCard', () => {
       }) as any,
     );
 
-    expect(screen.getByText('Progress')).toBeTruthy();
+    expect(screen.getByText('Live output')).toBeTruthy();
     expect(screen.getByText(/Step 4\/9 \(44%\)/)).toBeTruthy();
     expect(screen.getByText(/Processing node 3/)).toBeTruthy();
   });

@@ -145,24 +145,3 @@ export function shouldSuppressAgentResponse({
     return false;
   });
 }
-
-/**
- * Tool streaming often includes both:
- * - progress-like status lines (safe/low-noise to show live)
- * - long-form partial generations (high-noise; usually duplicates the final tool result)
- *
- * Desktop: we only want to render the former inside the tool card.
- */
-export function isProgressLikeToolStreamingContent(content: string): boolean {
-  if (!content.trim()) return false;
-  return (
-    /step\s+\d+\/\d+/i.test(content) ||
-    /\b\d+%/.test(content) ||
-    /processing node/i.test(content) ||
-    /loading workflow/i.test(content) ||
-    /waiting for comfyui/i.test(content) ||
-    /queued/i.test(content) ||
-    /execution started/i.test(content) ||
-    /complete!?/i.test(content)
-  );
-}
