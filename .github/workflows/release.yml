@@ -15,11 +15,11 @@ jobs:
       - name: Checkout kshana-desktop
         uses: actions/checkout@v4
 
-      - name: Checkout kshana-ink
+      - name: Checkout kshana-core
         uses: actions/checkout@v4
         with:
-          repository: anveshane/kshana-ink
-          path: kshana-ink
+          repository: anveshane/kshana-core
+          path: kshana-core
           token: ${{ secrets.BACKEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 1
 
@@ -34,8 +34,8 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Build kshana-ink
-        working-directory: kshana-ink
+      - name: Build kshana-core
+        working-directory: kshana-core
         run: |
           pnpm install --frozen-lockfile
           pnpm build
@@ -64,7 +64,7 @@ jobs:
       - name: Build and publish Electron app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KSHANA_INK_PATH: ${{ github.workspace }}/kshana-ink
+          KSHANA_INK_PATH: ${{ github.workspace }}/kshana-core
         run: npm run release
 
   release-windows:
@@ -78,11 +78,11 @@ jobs:
       - name: Checkout kshana-desktop
         uses: actions/checkout@v4
 
-      - name: Checkout kshana-ink
+      - name: Checkout kshana-core
         uses: actions/checkout@v4
         with:
-          repository: anveshane/kshana-ink
-          path: kshana-ink
+          repository: anveshane/kshana-core
+          path: kshana-core
           token: ${{ secrets.BACKEND_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 1
 
@@ -97,8 +97,8 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Build kshana-ink
-        working-directory: kshana-ink
+      - name: Build kshana-core
+        working-directory: kshana-core
         run: |
           pnpm install --frozen-lockfile
           pnpm build
@@ -120,5 +120,5 @@ jobs:
       - name: Build and publish Electron app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KSHANA_INK_PATH: ${{ github.workspace }}\kshana-ink
+          KSHANA_INK_PATH: ${{ github.workspace }}\kshana-core
         run: npm run release
