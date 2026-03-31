@@ -1,0 +1,132 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 8, 12, 0.7);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: $z-index-modal;
+}
+
+.dialog {
+  width: min(520px, 92vw);
+  @include panel-base;
+  border-radius: $radius-xl;
+  box-shadow: $shadow-lg;
+  padding: $spacing-xl;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-lg;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+}
+
+.title {
+  margin: 0;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  color: $color-text-primary;
+}
+
+.closeButton {
+  @include button-ghost;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.message {
+  margin: 0;
+  color: $color-text-secondary;
+  font-size: $font-size-base;
+  line-height: 1.5;
+}
+
+.projectName {
+  color: $color-text-primary;
+  font-weight: $font-weight-semibold;
+}
+
+.input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid $color-panel-border;
+  color: $color-text-primary;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-base;
+  font-family: $font-family-base;
+
+  &:focus {
+    border-color: rgba(var(--color-accent-primary-rgb), 0.4);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(var(--color-accent-primary-rgb), 0.14);
+  }
+}
+
+.warning {
+  margin: 0;
+  color: $color-text-muted;
+  font-size: $font-size-sm;
+}
+
+.error {
+  margin: 0;
+  color: $color-error;
+  font-size: $font-size-sm;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: $spacing-sm;
+}
+
+.cancelButton {
+  @include button-secondary;
+}
+
+.confirmButton {
+  @include button-primary;
+}
+
+.dangerButton {
+  border: 1px solid rgba(255, 107, 107, 0.24);
+  background: rgba(217, 45, 32, 0.18);
+  color: #ffd4ce;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    transform $transition-fast;
+
+  &:hover:not(:disabled) {
+    background: rgba(217, 45, 32, 0.3);
+    border-color: rgba(255, 107, 107, 0.38);
+    transform: translateY(-1px);
+  }
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
+}

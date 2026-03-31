@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, Pencil, Trash2 } from 'lucide-react';
 import { formatRelativeTime, shortenPath, toFileUrl } from '../projectDisplay';
 import styles from './ProjectCard.module.scss';
 
@@ -16,9 +16,16 @@ export interface LandingProjectCard {
 interface ProjectCardProps {
   project: LandingProjectCard;
   onOpen: (path: string) => void;
+  onRename: (project: LandingProjectCard) => void;
+  onDelete: (project: LandingProjectCard) => void;
 }
 
-export default function ProjectCard({ project, onOpen }: ProjectCardProps) {
+export default function ProjectCard({
+  project,
+  onOpen,
+  onRename,
+  onDelete,
+}: ProjectCardProps) {
   const [imageFailed, setImageFailed] = useState(false);
   const thumbnailUrl = useMemo(() => {
     if (!project.thumbnailPath || imageFailed) {
@@ -45,13 +52,32 @@ export default function ProjectCard({ project, onOpen }: ProjectCardProps) {
   }, [project.characterCount, project.sceneCount]);
 
   return (
-    <button
-      type="button"
-      className={styles.card}
-      onClick={() => onOpen(project.path)}
-      title={project.path}
-    >
+    <div className={styles.card} title={project.path}>
       <div className={styles.media}>
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={styles.actionButton}
+            aria-label={`Rename ${project.name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRename(project);
+            }}
+          >
+            <Pencil size={14} />
+          </button>
+          <button
+            type="button"
+            className={`${styles.actionButton} ${styles.dangerAction}`}
+            aria-label={`Delete ${project.name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete(project);
+            }}
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
         {thumbnailUrl ? (
           <img
             src={thumbnailUrl}
@@ -65,18 +91,24 @@ export default function ProjectCard({ project, onOpen }: ProjectCardProps) {
             <span>Agentic Workspace</span>
           </div>
         )}
-        <div className={styles.overlay}>
-          <h3 className={styles.title}>{project.name}</h3>
-          {project.description && (
-            <p className={styles.description}>{project.description}</p>
-          )}
-          {stats && <p className={styles.stats}>{stats}</p>}
-          <p className={styles.meta}>
-            {shortenPath(project.path)} ·{' '}
-            {formatRelativeTime(project.lastOpened)}
-          </p>
-        </div>
+        <button
+          type="button"
+          className={styles.openButton}
+          onClick={() => onOpen(project.path)}
+        >
+          <div className={styles.overlay}>
+            <h3 className={styles.title}>{project.name}</h3>
+            {project.description && (
+              <p className={styles.description}>{project.description}</p>
+            )}
+            {stats && <p className={styles.stats}>{stats}</p>}
+            <p className={styles.meta}>
+              {shortenPath(project.path)} ·{' '}
+              {formatRelativeTime(project.lastOpened)}
+            </p>
+          </div>
+        </button>
       </div>
-    </button>
+    </div>
   );
 }

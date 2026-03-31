@@ -8,10 +8,13 @@ import SettingsPanel from '../../SettingsPanel';
 import type { LandingProjectCard } from '../ProjectCard/ProjectCard';
 import NewProjectDialog from '../NewProjectDialog/NewProjectDialog';
 import ProjectCard from '../ProjectCard/ProjectCard';
+import DeleteProjectDialog from '../ProjectActionDialog/DeleteProjectDialog';
+import RenameProjectDialog from '../ProjectActionDialog/RenameProjectDialog';
 import RecentProjectsList from '../RecentProjectsList/RecentProjectsList';
 import { getProjectNameFromPath, sortRecentProjects } from '../projectDisplay';
 import styles from './LandingScreen.module.scss';
 import type { BackendProjectFile } from '../../../services/project/backendProjectAdapter';
+import type { RecentProject } from '../../../../shared/fileSystemTypes';
 
 const THUMBNAIL_CANDIDATES = [
   '.kshana/ui/thumbnail.jpg',
@@ -30,6 +33,11 @@ interface ProjectMetadata {
   sceneCount?: number | null;
   characterCount?: number | null;
   thumbnailPath?: string | null;
+}
+
+interface PendingProjectAction {
+  path: string;
+  name: string;
 }
 
 function joinPath(basePath: string, segment: string): string {
@@ -94,7 +102,8 @@ async function loadSingleProjectMetadata(
 }
 
 export default function LandingScreen() {
-  const { recentProjects, openProject, isLoading } = useWorkspace();
+  const { recentProjects, openProject, isLoading, refreshRecentProjects } =
+    useWorkspace();
   const { isLoading: isProjectLoading } = useProject();
   const {
     themeId,
@@ -112,6 +121,16 @@ export default function LandingScreen() {
     Record<string, ProjectMetadata>
   >({});
   const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<PendingProjectAction | null>(
+    null,
+  );
+  const [deleteTarget, setDeleteTarget] = useState<PendingProjectAction | null>(
+    null,
+  );
+  const [projectActionError, setProjectActionError] = useState<string | null>(
+    null,
+  );
+  const [isProjectActionPending, setIsProjectActionPending] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -214,6 +233,88 @@ export default function LandingScreen() {
     },
     [openProject],
   );
+
+  const handleRenameRequest = useCallback(
+    (project: LandingProjectCard | RecentProject) => {
+      setError(null);
+      setProjectActionError(null);
+      setDeleteTarget(null);
+      setRenameTarget({
+        path: project.path,
+        name: project.name || getProjectNameFromPath(project.path),
+      });
+    },
+    [],
+  );
+
+  const handleDeleteRequest = useCallback(
+    (project: LandingProjectCard | RecentProject) => {
+      setError(null);
+      setProjectActionError(null);
+      setRenameTarget(null);
+      setDeleteTarget({
+        path: project.path,
+        name: project.name || getProjectNameFromPath(project.path),
+      });
+    },
+    [],
+  );
+
+  const closeProjectActionDialogs = useCallback(() => {
+    if (isProjectActionPending) {
+      return;
+    }
+    setRenameTarget(null);
+    setDeleteTarget(null);
+    setProjectActionError(null);
+  }, [isProjectActionPending]);
+
+  const handleConfirmRename = useCallback(
+    async (nextName: string) => {
+      if (!renameTarget) {
+        return;
+      }
+      const trimmedName = nextName.trim();
+      if (!trimmedName) {
+        setProjectActionError('Project name is required.');
+        return;
+      }
+
+      setProjectActionError(null);
+      setIsProjectActionPending(true);
+      try {
+        await window.electron.project.renameProject(
+          renameTarget.path,
+          trimmedName,
+        );
+        await refreshRecentProjects();
+        setRenameTarget(null);
+      } catch (err) {
+        setProjectActionError((err as Error).message);
+      } finally {
+        setIsProjectActionPending(false);
+      }
+    },
+    [refreshRecentProjects, renameTarget],
+  );
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deleteTarget) {
+      return;
+    }
+
+    setProjectActionError(null);
+    setIsProjectActionPending(true);
+    try {
+      await window.electron.project.deleteProject(deleteTarget.path);
+      await refreshRecentProjects();
+      setDeleteTarget(null);
+    } catch (err) {
+      setProjectActionError((err as Error).message);
+    } finally {
+      setIsProjectActionPending(false);
+    }
+  }, [deleteTarget, refreshRecentProjects]);
 
   return (
     <div className={styles.container}>
@@ -321,6 +422,8 @@ export default function LandingScreen() {
                       key={project.path}
                       project={project}
                       onOpen={handleSelectRecent}
+                      onRename={handleRenameRequest}
+                      onDelete={handleDeleteRequest}
                     />
                   ))}
                 </div>
@@ -345,6 +448,22 @@ export default function LandingScreen() {
       <NewProjectDialog
         isOpen={isNewProjectDialogOpen}
         onClose={() => setIsNewProjectDialogOpen(false)}
+      />
+      <RenameProjectDialog
+        isOpen={renameTarget !== null}
+        projectName={renameTarget?.name || ''}
+        error={projectActionError}
+        isSubmitting={isProjectActionPending}
+        onClose={closeProjectActionDialogs}
+        onConfirm={handleConfirmRename}
+      />
+      <DeleteProjectDialog
+        isOpen={deleteTarget !== null}
+        projectName={deleteTarget?.name || ''}
+        error={projectActionError}
+        isSubmitting={isProjectActionPending}
+        onClose={closeProjectActionDialogs}
+        onConfirm={handleConfirmDelete}
       />
     </div>
   );

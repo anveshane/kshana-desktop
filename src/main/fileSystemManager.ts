@@ -24,6 +24,11 @@ interface FileSystemStore {
   recentProjects: RecentProject[];
 }
 
+interface BackendProjectManifest {
+  title?: string;
+  [key: string]: unknown;
+}
+
 class FileSystemManager extends EventEmitter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private watcher: any = null;
@@ -470,11 +475,70 @@ class FileSystemManager extends EventEmitter {
     this.store.set('recentProjects', updated);
   }
 
+  removeRecentProject(projectPath: string): void {
+    const recentProjects = this.getRecentProjects();
+    const filtered = recentProjects.filter((project) => project.path !== projectPath);
+    if (filtered.length !== recentProjects.length) {
+      this.store.set('recentProjects', filtered);
+    }
+  }
+
+  replaceRecentProjectPath(
+    oldPath: string,
+    newPath: string,
+    newName?: string,
+  ): void {
+    const recentProjects = this.getRecentProjects();
+    const updated = recentProjects.map((project) =>
+      project.path === oldPath
+        ? {
+            ...project,
+            path: newPath,
+            name: newName || path.basename(newPath),
+          }
+        : project,
+    );
+    this.store.set('recentProjects', updated);
+  }
+
   async rename(oldPath: string, newName: string): Promise<string> {
     const dir = path.dirname(oldPath);
     const newPath = path.join(dir, newName);
     await fs.promises.rename(oldPath, newPath);
     return newPath;
+  }
+
+  async renameProject(projectPath: string, newName: string): Promise<string> {
+    const trimmedName = newName.trim();
+    if (!trimmedName) {
+      throw new Error('Project name is required.');
+    }
+
+    const parentDir = path.dirname(projectPath);
+    const renamedPath = path.join(parentDir, trimmedName);
+
+    if (renamedPath === projectPath) {
+      await this.updateProjectManifestTitle(renamedPath, trimmedName);
+      this.replaceRecentProjectPath(projectPath, renamedPath, trimmedName);
+      return renamedPath;
+    }
+
+    try {
+      await fs.promises.stat(renamedPath);
+      throw new Error(
+        `A project named "${trimmedName}" already exists in this location.`,
+      );
+    } catch (error: unknown) {
+      const err = error as { code?: string };
+      if (err.code && err.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+
+    await fs.promises.rename(projectPath, renamedPath);
+    await this.updateProjectManifestTitle(renamedPath, trimmedName);
+    this.replaceRecentProjectPath(projectPath, renamedPath, trimmedName);
+    return renamedPath;
   }
 
   async delete(targetPath: string): Promise<void> {
@@ -484,6 +548,11 @@ class FileSystemManager extends EventEmitter {
     } else {
       await fs.promises.unlink(targetPath);
     }
+  }
+
+  async deleteProject(projectPath: string): Promise<void> {
+    await this.delete(projectPath);
+    this.removeRecentProject(projectPath);
   }
 
   async move(sourcePath: string, destDir: string): Promise<string> {
@@ -517,6 +586,37 @@ class FileSystemManager extends EventEmitter {
         await fs.promises.copyFile(srcPath, destPath);
       }
     }
+  }
+
+  private async updateProjectManifestTitle(
+    projectPath: string,
+    title: string,
+  ): Promise<void> {
+    const manifestPath = path.join(projectPath, 'project.json');
+    let manifestRaw: string;
+    try {
+      manifestRaw = await fs.promises.readFile(manifestPath, 'utf-8');
+    } catch (error: unknown) {
+      const err = error as { code?: string };
+      if (err.code === 'ENOENT') {
+        return;
+      }
+      throw error;
+    }
+
+    let manifest: BackendProjectManifest;
+    try {
+      manifest = JSON.parse(manifestRaw) as BackendProjectManifest;
+    } catch {
+      return;
+    }
+
+    manifest.title = title;
+    await fs.promises.writeFile(
+      manifestPath,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      'utf-8',
+    );
   }
 
   async revealInFinder(targetPath: string): Promise<void> {

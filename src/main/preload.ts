@@ -294,6 +294,15 @@ const projectBridge = {
   addRecent(projectPath: string): Promise<void> {
     return ipcRenderer.invoke('project:add-recent', projectPath);
   },
+  removeRecent(projectPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:remove-recent', projectPath);
+  },
+  renameProject(projectPath: string, newName: string): Promise<string> {
+    return ipcRenderer.invoke('project:rename-project', projectPath, newName);
+  },
+  deleteProject(projectPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:delete-project', projectPath);
+  },
   getResourcesPath(): Promise<string> {
     return ipcRenderer.invoke('project:get-resources-path');
   },

@@ -6,6 +6,12 @@ export interface ActiveToolCallTrackerEntry {
   toolName: string;
 }
 
+const MEDIA_TOOL_CARD_STREAM_NAMES = new Set([
+  'generate_image',
+  'generate_video',
+  'generate_video_from_image',
+]);
+
 export const normalizeComparableChatText = (value: string): string => {
   return value.trim().replace(/\r\n/g, '\n');
 };
@@ -92,6 +98,26 @@ export function findActiveToolCallEntry(
   }
 
   return null;
+}
+
+export function shouldStreamToToolCallCard(toolName?: string): boolean {
+  if (!toolName) {
+    return false;
+  }
+
+  return MEDIA_TOOL_CARD_STREAM_NAMES.has(toolName);
+}
+
+export function mergeToolStreamingContent(
+  currentContent: unknown,
+  nextChunk: string,
+  options?: { reset?: boolean },
+): string {
+  if (options?.reset) {
+    return nextChunk;
+  }
+
+  return `${typeof currentContent === 'string' ? currentContent : ''}${nextChunk}`;
 }
 
 interface ShouldSuppressAgentResponseArgs {

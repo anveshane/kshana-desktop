@@ -629,6 +629,24 @@ ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {
   fileSystemManager.addRecentProject(projectPath);
 });
 
+ipcMain.handle('project:remove-recent', async (_event, projectPath: string) => {
+  fileSystemManager.removeRecentProject(projectPath);
+});
+
+ipcMain.handle(
+  'project:rename-project',
+  async (_event, projectPath: string, newName: string): Promise<string> => {
+    return fileSystemManager.renameProject(projectPath, newName);
+  },
+);
+
+ipcMain.handle(
+  'project:delete-project',
+  async (_event, projectPath: string): Promise<void> => {
+    await fileSystemManager.deleteProject(projectPath);
+  },
+);
+
 ipcMain.handle('project:get-resources-path', async () => {
   // Get the path to resources (where test_image and test_video are packaged)
   // In development: __dirname/../../ (points to kshana-desktop directory)

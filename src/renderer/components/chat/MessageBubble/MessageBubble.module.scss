@@ -270,6 +270,16 @@
   line-height: 1.5;
 }
 
+.sceneContent {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.sceneSupplementaryText {
+  color: $color-text-primary;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

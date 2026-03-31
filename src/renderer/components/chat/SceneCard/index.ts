@@ -1,1 +1,6 @@
-export { default, tryParseSceneData } from './SceneCard';
+export {
+  default,
+  isDuplicateSceneSummary,
+  parseSceneContent,
+  tryParseSceneData,
+} from './SceneCard';

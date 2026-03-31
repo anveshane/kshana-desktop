@@ -2,7 +2,10 @@ import { createElement, useEffect, useState } from 'react';
 import { CheckCircle2, XCircle, AlertCircle, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import styles from './ToolCallCard.module.scss';
-import SceneCard, { tryParseSceneData } from '../SceneCard';
+import SceneCard, {
+  isDuplicateSceneSummary,
+  parseSceneContent,
+} from '../SceneCard';
 
 export type ToolCallStatus =
   | 'executing'
@@ -515,8 +518,8 @@ export default function ToolCallCard({
   const isExecuting = status === 'executing';
   const trimmedStreamingContent = streamingContent?.trim() ?? '';
   const showStreamingContent = isExecuting && trimmedStreamingContent.length > 0;
-  const streamingSceneData = showStreamingContent
-    ? tryParseSceneData(trimmedStreamingContent)
+  const streamingSceneContent = showStreamingContent
+    ? parseSceneContent(trimmedStreamingContent)
     : null;
   const streamingPercent = showStreamingContent
     ? getStreamingPercent(trimmedStreamingContent)
@@ -610,9 +613,9 @@ export default function ToolCallCard({
     }
   }
 
-  const resultSceneData =
+  const resultSceneContent =
     resultDisplay && toolName === 'generate_content'
-      ? tryParseSceneData(resultDisplay)
+      ? parseSceneContent(resultDisplay)
       : null;
 
   const borderClass = isExecuting
@@ -671,8 +674,21 @@ export default function ToolCallCard({
           {showStreamingContent && (
             <div className={styles.streamingContent}>
               <div className={styles.streamingLabel}>Live output</div>
-              {streamingSceneData ? (
-                <SceneCard data={streamingSceneData} />
+              {streamingSceneContent ? (
+                <>
+                  <SceneCard data={streamingSceneContent.sceneData} />
+                  {streamingSceneContent.remainingText &&
+                    !isDuplicateSceneSummary(
+                      streamingSceneContent.remainingText,
+                      streamingSceneContent.sceneData,
+                    ) && (
+                      <div className={styles.resultContentMarkdown}>
+                        <ReactMarkdown>
+                          {streamingSceneContent.remainingText}
+                        </ReactMarkdown>
+                      </div>
+                    )}
+                </>
               ) : (
                 <>
                   {streamingPercent !== null && (
@@ -781,8 +797,21 @@ export default function ToolCallCard({
               )}
               {resultDisplay && (
                 <div className={styles.cliResultContent}>
-                  {resultSceneData ? (
-                    <SceneCard data={resultSceneData} />
+                  {resultSceneContent ? (
+                    <>
+                      <SceneCard data={resultSceneContent.sceneData} />
+                      {resultSceneContent.remainingText &&
+                        !isDuplicateSceneSummary(
+                          resultSceneContent.remainingText,
+                          resultSceneContent.sceneData,
+                        ) && (
+                          <div className={styles.resultContentMarkdown}>
+                            <ReactMarkdown>
+                              {resultSceneContent.remainingText}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                    </>
                   ) : typeof result === 'object' &&
                     result !== null &&
                     'content' in result ? (

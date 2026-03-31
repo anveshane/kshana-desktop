@@ -346,6 +346,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     () => ({
       ...state,
       openProject,
+      refreshRecentProjects,
       registerProjectSwitchGuard,
       closeProject,
       selectFile,
@@ -360,6 +361,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     [
       state,
       openProject,
+      refreshRecentProjects,
       registerProjectSwitchGuard,
       closeProject,
       selectFile,

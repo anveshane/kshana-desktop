@@ -49,8 +49,11 @@ import {
   type RemoteSessionInfo,
 } from './chatPanelResumeUtils';
 import {
+  findActiveToolCallEntry,
+  mergeToolStreamingContent,
   normalizeComparableChatText,
   normalizeTodoUpdatePayload,
+  shouldStreamToToolCallCard,
   shouldSuppressAgentResponse,
 } from './chatPanelStreamUtils';
 import useQuestionTimerCancellation from './useQuestionTimerCancellation';
@@ -350,6 +353,38 @@ export default function ChatPanel() {
         return updated;
       });
       return id;
+    },
+    [],
+  );
+
+  const updateToolCallStreamingContent = useCallback(
+    (
+      messageId: string,
+      content: string,
+      options?: { reset?: boolean },
+    ) => {
+      setMessages((prev) =>
+        prev.map((message) => {
+          if (message.id !== messageId) {
+            return message;
+          }
+
+          const existingContent =
+            typeof message.meta?.streamingContent === 'string'
+              ? message.meta.streamingContent
+              : '';
+          const nextContent = mergeToolStreamingContent(existingContent, content, options);
+
+          return {
+            ...message,
+            meta: {
+              ...(message.meta || {}),
+              streamingContent: nextContent,
+            },
+            timestamp: Date.now(),
+          };
+        }),
+      );
     },
     [],
   );
@@ -1746,27 +1781,47 @@ export default function ChatPanel() {
           }
 
           if (toolCallId || toolName) {
-            // Keep stream text in assistant bubbles below the tool row — not in the tool card.
-            if (reset) {
+            if (shouldStreamToToolCallCard(toolName)) {
               finalizeAssistantStream();
-            }
-            if (content.trim()) {
-              appendAssistantChunk(content, 'stream_chunk', agentName);
-            }
 
-            if (done) {
-              if (lastAssistantIdRef.current) {
-                const activeAssistant = messagesRef.current.find(
-                  (message) =>
-                    message.id === lastAssistantIdRef.current &&
-                    message.role === 'assistant',
-                );
-                const finalizedText = activeAssistant
-                  ? `${activeAssistant.content}${content}`
-                  : undefined;
-                finalizeAssistantStream(finalizedText);
-              } else {
+              const activeToolCall = findActiveToolCallEntry(
+                activeToolCallsRef.current,
+                toolCallId,
+                toolName,
+              );
+
+              if (activeToolCall) {
+                updateToolCallStreamingContent(activeToolCall.entry.messageId, content, {
+                  reset,
+                });
+              }
+
+              if (done) {
                 finalizeAssistantStream();
+              }
+            } else {
+              // Keep stream text in assistant bubbles below the tool row — not in the tool card.
+              if (reset) {
+                finalizeAssistantStream();
+              }
+              if (content.trim()) {
+                appendAssistantChunk(content, 'stream_chunk', agentName);
+              }
+
+              if (done) {
+                if (lastAssistantIdRef.current) {
+                  const activeAssistant = messagesRef.current.find(
+                    (message) =>
+                      message.id === lastAssistantIdRef.current &&
+                      message.role === 'assistant',
+                  );
+                  const finalizedText = activeAssistant
+                    ? `${activeAssistant.content}${content}`
+                    : undefined;
+                  finalizeAssistantStream(finalizedText);
+                } else {
+                  finalizeAssistantStream();
+                }
               }
             }
             break;

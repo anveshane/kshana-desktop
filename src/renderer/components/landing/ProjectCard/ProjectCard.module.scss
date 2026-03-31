@@ -21,12 +21,75 @@
     border-color: rgba(var(--color-accent-primary-rgb), 0.24);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
   }
+
+  &:hover .actions,
+  &:focus-within .actions {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
 }
 
 .media {
   position: relative;
   aspect-ratio: 16 / 9;
   background: linear-gradient(140deg, #343434 0%, #242424 48%, #1e1e1e 100%);
+}
+
+.openButton {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.actions {
+  position: absolute;
+  top: $spacing-sm;
+  right: $spacing-sm;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity $transition-fast,
+    transform $transition-fast;
+}
+
+.actionButton {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(8, 12, 19, 0.76);
+  color: rgba(255, 255, 255, 0.9);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    transform $transition-fast;
+
+  &:hover {
+    background: rgba(8, 12, 19, 0.92);
+    border-color: rgba(255, 255, 255, 0.3);
+    transform: translateY(-1px);
+  }
+}
+
+.dangerAction:hover {
+  border-color: rgba(255, 107, 107, 0.42);
+  color: #ffd4ce;
 }
 
 .thumbnail {

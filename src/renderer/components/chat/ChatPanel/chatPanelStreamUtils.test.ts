@@ -2,8 +2,10 @@ import { describe, expect, it } from '@jest/globals';
 import type { ChatMessage } from '../../../types/chat';
 import {
   findActiveToolCallEntry,
+  mergeToolStreamingContent,
   normalizeComparableChatText,
   normalizeTodoUpdatePayload,
+  shouldStreamToToolCallCard,
   shouldSuppressAgentResponse,
 } from './chatPanelStreamUtils';
 
@@ -107,6 +109,27 @@ describe('chatPanelStreamUtils', () => {
       key: 'tool-1',
       entry: { messageId: 'message-1', startTime: 1, toolName: 'scan_assets' },
     });
+  });
+
+  it('routes media generation stream chunks into the tool card', () => {
+    expect(shouldStreamToToolCallCard('generate_image')).toBe(true);
+    expect(shouldStreamToToolCallCard('generate_video_from_image')).toBe(true);
+    expect(shouldStreamToToolCallCard('generate_video')).toBe(true);
+    expect(shouldStreamToToolCallCard('generate_content')).toBe(false);
+  });
+
+  it('resets media tool streaming content when the backend requests a reset', () => {
+    expect(
+      mergeToolStreamingContent('Loading workflow...\nQueued (1 job ahead)', 'Uploading source image...', {
+        reset: true,
+      }),
+    ).toBe('Uploading source image...');
+  });
+
+  it('appends media tool streaming chunks when no reset is requested', () => {
+    expect(
+      mergeToolStreamingContent('Loading workflow...\n', 'Queued (1 job ahead)'),
+    ).toBe('Loading workflow...\nQueued (1 job ahead)');
   });
 
   it('normalizes chat text with cross-platform newlines', () => {

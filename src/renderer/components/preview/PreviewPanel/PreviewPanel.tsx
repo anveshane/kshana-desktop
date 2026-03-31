@@ -6,12 +6,7 @@ import {
   useMemo,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import {
-  ChevronUp,
-  FolderKanban,
-  Clapperboard,
-  FileCode2,
-} from 'lucide-react';
+import { ChevronUp, FolderKanban, Clapperboard, FileCode2 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { TimelineDataProvider } from '../../../contexts/TimelineDataContext';
@@ -36,16 +31,10 @@ export default function PreviewPanel() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [totalDuration, setTotalDuration] = useState(0);
-  const playbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
+  const [, setTotalDuration] = useState(0);
 
-  const {
-    projectDirectory,
-    pendingFileNavigation,
-    clearFileNavigation,
-  } = useWorkspace();
+  const { projectDirectory, pendingFileNavigation, clearFileNavigation } =
+    useWorkspace();
   const { settings } = useAppSettings();
 
   const tabs = useMemo(
@@ -146,34 +135,6 @@ export default function PreviewPanel() {
       setActiveVersions(versions);
     }
   }, [timelineState?.active_versions]);
-
-  // Playback loop - advance playbackTime when playing
-  // Includes bounds checking to stop at totalDuration
-  useEffect(() => {
-    if (isPlaying && !isDragging) {
-      playbackIntervalRef.current = setInterval(() => {
-        setPlaybackTime((prev) => {
-          const next = prev + 0.1; // Update every 100ms (0.1 seconds)
-          // Stop playback when reaching the end of timeline
-          if (totalDuration > 0 && next >= totalDuration) {
-            setIsPlaying(false);
-            return totalDuration;
-          }
-          return next;
-        });
-      }, 100);
-    } else if (playbackIntervalRef.current) {
-      clearInterval(playbackIntervalRef.current);
-      playbackIntervalRef.current = null;
-    }
-
-    return () => {
-      if (playbackIntervalRef.current) {
-        clearInterval(playbackIntervalRef.current);
-        playbackIntervalRef.current = null;
-      }
-    };
-  }, [isPlaying, isDragging, totalDuration]);
 
   // Handle timeline resize
   const handleTimelineResize = useCallback(
@@ -319,7 +280,6 @@ export default function PreviewPanel() {
           </>
         )}
       </div>
-
     </div>
   );
 }
