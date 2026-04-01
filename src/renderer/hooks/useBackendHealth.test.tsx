@@ -15,6 +15,7 @@ function TestComponent() {
     backendMode: 'local',
     comfyuiMode: 'inherit',
     comfyuiUrl: '',
+    comfyCloudApiKey: '',
     comfyuiTimeout: 1800,
     llmProvider: 'lmstudio',
     lmStudioUrl: 'http://127.0.0.1:1234',

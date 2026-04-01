@@ -16,6 +16,7 @@ const baseSettings = {
   backendMode: 'local' as const,
   comfyuiMode: 'inherit' as const,
   comfyuiUrl: '',
+  comfyCloudApiKey: '',
   comfyuiTimeout: 1800,
   llmProvider: 'lmstudio' as const,
   lmStudioUrl: 'http://127.0.0.1:1234',
@@ -69,5 +70,17 @@ describe('settingsManager theme normalization', () => {
     expect(normalized.llmProvider).toBe('openrouter');
     expect(normalized.openRouterApiKey).toBe('sk-or-v1-test');
     expect('preferredLocalPort' in normalized).toBe(false);
+  });
+
+  it('preserves the Comfy Cloud API key', () => {
+    const normalized = normalizeSettings({
+      ...baseSettings,
+      comfyuiMode: 'custom',
+      comfyuiUrl: 'https://cloud.comfy.org',
+      comfyCloudApiKey: 'cloud-test-key',
+    });
+
+    expect(normalized.comfyuiUrl).toBe('https://cloud.comfy.org');
+    expect(normalized.comfyCloudApiKey).toBe('cloud-test-key');
   });
 });

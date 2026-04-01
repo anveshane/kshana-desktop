@@ -28,6 +28,7 @@ const emptySettings: AppSettings = {
   backendMode: 'local',
   comfyuiMode: 'inherit',
   comfyuiUrl: '',
+  comfyCloudApiKey: '',
   comfyuiTimeout: 1800,
   llmProvider: 'lmstudio',
   lmStudioUrl: 'http://127.0.0.1:1234',
@@ -67,6 +68,7 @@ function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
     llmProvider,
     comfyuiMode: comfyuiUrl ? 'custom' : 'inherit',
     comfyuiUrl,
+    comfyCloudApiKey: next.comfyCloudApiKey ?? '',
     lmStudioUrl: next.lmStudioUrl?.trim() || emptySettings.lmStudioUrl,
     lmStudioModel: next.lmStudioModel?.trim() || emptySettings.lmStudioModel,
     googleApiKey: next.googleApiKey ?? '',
@@ -220,6 +222,7 @@ export default function SettingsPanel({
       backendMode: normalized.backendMode,
       comfyuiMode: normalized.comfyuiUrl ? 'custom' : 'inherit',
       comfyuiUrl: normalized.comfyuiUrl,
+      comfyCloudApiKey: normalized.comfyCloudApiKey,
       llmProvider: normalized.llmProvider,
       lmStudioUrl: normalized.lmStudioUrl,
       lmStudioModel: normalized.lmStudioModel,
@@ -481,6 +484,24 @@ export default function SettingsPanel({
                         placeholder="http://localhost:8000"
                       />
                     </label>
+
+                    <label className={styles.label}>
+                      Comfy Cloud API Key
+                      <input
+                        type="password"
+                        className={styles.input}
+                        value={form.comfyCloudApiKey}
+                        onChange={(event) =>
+                          handleInput('comfyCloudApiKey', event.target.value)
+                        }
+                        placeholder="Only used for https://cloud.comfy.org"
+                      />
+                    </label>
+                    <p className={styles.infoText}>
+                      This key is only used when the ComfyUI URL points to
+                      `https://cloud.comfy.org`. Local and self-hosted ComfyUI
+                      connections ignore it.
+                    </p>
 
                     <fieldset className={styles.fieldset}>
                       <legend>LLM Provider</legend>

@@ -223,6 +223,10 @@ const isReconnectStatusMessage = (content: string): boolean => {
   return content.startsWith('Reconnected');
 };
 
+const isNoRunningTaskCancelMessage = (message?: string): boolean => {
+  return typeof message === 'string' && /no running task to cancel/i.test(message);
+};
+
 export default function ChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connectionState, setConnectionState] =
@@ -839,8 +843,13 @@ export default function ChatPanel() {
       if (success) {
         setIsTaskRunning(false);
       } else {
-        setIsTaskRunning(true);
         const message = errorMessage || 'Failed to stop task.';
+        const noRunningTask = isNoRunningTaskCancelMessage(message);
+        setIsTaskRunning(!noRunningTask);
+        if (noRunningTask) {
+          setAgentStatus('idle');
+          setStatusMessage('Ready');
+        }
         appendSystemMessage(message, 'error');
       }
 
@@ -1804,7 +1813,10 @@ export default function ChatPanel() {
               if (reset) {
                 finalizeAssistantStream();
               }
-              if (content.trim()) {
+              // Preserve whitespace-only chunks for text-generating tools.
+              // Markdown streams often split headings, list markers, spaces, and
+              // blank lines into separate chunks; trimming here corrupts the live view.
+              if (content.length > 0) {
                 appendAssistantChunk(content, 'stream_chunk', agentName);
               }
 

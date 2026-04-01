@@ -19,6 +19,8 @@ export interface AppSettings {
   comfyuiMode: ComfyUIMode;
   /** URL of the ComfyUI server the user wants to use. */
   comfyuiUrl: string;
+  /** Comfy Cloud API key used when comfyuiUrl points at cloud.comfy.org. */
+  comfyCloudApiKey: string;
   /** Fixed internally at 1800 seconds; not user-editable in UI. */
   comfyuiTimeout: number;
   /** LLM provider used by the bundled local backend. */

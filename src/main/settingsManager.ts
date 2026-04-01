@@ -21,6 +21,7 @@ const defaults: AppSettings = {
   backendMode: 'local',
   comfyuiMode: 'inherit',
   comfyuiUrl: '',
+  comfyCloudApiKey: '',
   comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
   llmProvider: 'lmstudio',
   lmStudioUrl: DEFAULT_LM_STUDIO_URL,
@@ -93,6 +94,7 @@ function normalizeString(value: unknown, fallback = ''): string {
 
 function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   const comfyuiUrl = normalizeComfyUIUrl(value?.comfyuiUrl);
+  const comfyCloudApiKey = normalizeString(value?.comfyCloudApiKey);
   const explicitMode = normalizeComfyUIMode(value?.comfyuiMode);
   const themeId = normalizeThemeId(value?.themeId);
   const backendMode = normalizeBackendMode(value?.backendMode);
@@ -135,6 +137,7 @@ function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings
     backendMode,
     comfyuiMode: normalizedMode,
     comfyuiUrl: normalizedMode === 'custom' ? comfyuiUrl : '',
+    comfyCloudApiKey,
     comfyuiTimeout: FIXED_COMFYUI_TIMEOUT_SECONDS,
     llmProvider,
     lmStudioUrl,

@@ -106,6 +106,8 @@ export interface BackendProjectFile {
   productionCompletedAt?: number;
   lastCheckpointAt?: number;
   targetDuration?: number;
+  duration?: number;
+  autonomousMode?: boolean;
 }
 
 export interface BackendAssetManifest {

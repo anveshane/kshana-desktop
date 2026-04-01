@@ -7,6 +7,7 @@ const baseSettings = {
   backendMode: 'local' as const,
   comfyuiMode: 'inherit' as const,
   comfyuiUrl: '',
+  comfyCloudApiKey: '',
   comfyuiTimeout: 1800,
   llmProvider: 'lmstudio' as const,
   lmStudioUrl: 'http://127.0.0.1:1234',
@@ -85,6 +86,7 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByText('Connection'));
 
     expect(screen.getByLabelText('ComfyUI URL')).toBeInTheDocument();
+    expect(screen.getByLabelText('Comfy Cloud API Key')).toBeInTheDocument();
     expect(screen.getByText('LM Studio')).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Cloud'));

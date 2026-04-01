@@ -11,6 +11,7 @@ import type { AppSettings } from '../shared/settingsTypes';
 const HEALTH_ENDPOINT = '/api/v1/health';
 const DEFAULT_COMFYUI_URL = 'http://localhost:8000';
 const DEFAULT_OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+const COMFY_CLOUD_HOST = 'cloud.comfy.org';
 
 async function allocateLoopbackPort(): Promise<number> {
   return new Promise((resolve) => {
@@ -65,18 +66,33 @@ function getComfyUiUrl(settings: AppSettings): string {
   return DEFAULT_COMFYUI_URL;
 }
 
+function isComfyCloudUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname.toLowerCase() === COMFY_CLOUD_HOST;
+  } catch {
+    return false;
+  }
+}
+
 function withV1Suffix(url: string): string {
   return /\/v1\/?$/.test(url) ? url : `${url.replace(/\/$/, '')}/v1`;
 }
 
-function buildLocalBackendEnv(settings: AppSettings, port: number): NodeJS.ProcessEnv {
+export function buildLocalBackendEnv(settings: AppSettings, port: number): NodeJS.ProcessEnv {
+  const comfyUiUrl = getComfyUiUrl(settings);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     KSHANA_HOST: '127.0.0.1',
     KSHANA_PUBLIC_HOST: '127.0.0.1',
     KSHANA_PORT: String(port),
-    COMFYUI_BASE_URL: getComfyUiUrl(settings),
+    COMFYUI_BASE_URL: comfyUiUrl,
   };
+
+  if (isComfyCloudUrl(comfyUiUrl) && settings.comfyCloudApiKey.trim()) {
+    env['COMFY_CLOUD_API_KEY'] = settings.comfyCloudApiKey.trim();
+  } else {
+    delete env['COMFY_CLOUD_API_KEY'];
+  }
 
   const projectDir = normalizePathValue(settings.projectDir);
   if (projectDir) {
