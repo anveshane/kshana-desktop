@@ -27,6 +27,7 @@ import {
   createDefaultBackendProject,
   desktopAgentStateToBackendProject,
   desktopAssetManifestToBackend,
+  normalizeBackendProjectForWrite,
   type BackendAssetManifest,
   type BackendProjectFile,
 } from './backendProjectAdapter';
@@ -597,20 +598,23 @@ export class ProjectService {
     directory: string,
     state: AgentProjectFile,
   ): Promise<void> {
-    if (!this.currentBackendProject) {
-      this.currentBackendProject = createDefaultBackendProject({
+    const latestBackendProject =
+      (await this.readBackendProject(directory)) ??
+      this.currentBackendProject ??
+      createDefaultBackendProject({
         id: state.id,
         title: state.title,
       });
-    }
+
     const nextProject = desktopAgentStateToBackendProject(
       state,
-      this.currentBackendProject,
+      latestBackendProject,
     );
-    this.currentBackendProject = nextProject;
+    const normalizedProject = normalizeBackendProjectForWrite(nextProject);
+    this.currentBackendProject = normalizedProject;
     await this.writeJSON(
       ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_PROJECT),
-      nextProject,
+      normalizedProject,
     );
   }
 

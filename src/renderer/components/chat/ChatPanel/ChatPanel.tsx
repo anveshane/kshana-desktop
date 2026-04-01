@@ -74,7 +74,6 @@ const OUTBOUND_ACTION_QUEUE_CAP = 200;
 const CONNECTION_BANNER_DEDUPE_MS = 5000;
 const STOP_ACK_TIMEOUT_MS = 12000;
 const SETTINGS_RECONNECT_DEBOUNCE_MS = 400;
-const PROJECT_SETUP_FILE = 'project-setup.json';
 const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
 const DEFAULT_SETUP_TEMPLATE_ID = 'narrative';
 const DEFAULT_SETUP_STYLE_ID = 'cinematic_realism';
@@ -580,55 +579,47 @@ export default function ChatPanel() {
     setupTemplates,
   ]);
 
-  const persistProjectSetup = useCallback(
-    async (config: ConfigureProjectPayload): Promise<void> => {
-      if (!projectDirectory) return;
-
-      const payload: ProjectSetupPersisted = {
-        version: 1,
-        templateId: config.templateId,
-        style: config.style,
-        duration: config.duration,
-        autonomousMode: config.autonomousMode,
-      };
-
-      try {
-        await window.electron.project.writeFile(
-          `${projectDirectory}/${PROJECT_SETUP_FILE}`,
-          JSON.stringify(payload, null, 2),
-        );
-      } catch (error) {
-        console.warn('[ChatPanel] Failed to persist project setup:', error);
-      }
-    },
-    [projectDirectory],
-  );
-
   const loadPersistedSetupForDirectory = useCallback(
     async (
       targetProjectDirectory: string,
     ): Promise<ProjectSetupPersisted | null> => {
       try {
         const content = await window.electron.project.readFile(
-          `${targetProjectDirectory}/${PROJECT_SETUP_FILE}`,
+          `${targetProjectDirectory}/project.json`,
         );
-        if (!content) return null;
-        const parsed = JSON.parse(content) as ProjectSetupPersisted;
-        if (
-          parsed &&
-          parsed.version === 1 &&
-          typeof parsed.templateId === 'string' &&
-          typeof parsed.style === 'string' &&
-          typeof parsed.duration === 'number'
-        ) {
-          return {
-            ...parsed,
-            autonomousMode: Boolean(parsed.autonomousMode),
-          };
+        if (content) {
+          const parsed = JSON.parse(content) as Partial<{
+            templateId: unknown;
+            style: unknown;
+            duration: unknown;
+            targetDuration: unknown;
+            autonomousMode: unknown;
+          }>;
+          const duration =
+            typeof parsed.targetDuration === 'number'
+              ? parsed.targetDuration
+              : parsed.duration;
+          if (
+            parsed &&
+            typeof parsed.templateId === 'string' &&
+            parsed.templateId.trim().length > 0 &&
+            typeof parsed.style === 'string' &&
+            parsed.style.trim().length > 0 &&
+            typeof duration === 'number'
+          ) {
+            return {
+              version: 1,
+              templateId: parsed.templateId,
+              style: parsed.style,
+              duration,
+              autonomousMode: Boolean(parsed.autonomousMode),
+            };
+          }
         }
       } catch {
-        // Ignore malformed or missing setup files.
+        // Ignore malformed project.json
       }
+
       return null;
     },
     [],
@@ -653,7 +644,6 @@ export default function ChatPanel() {
           type: 'configure_project',
           data: normalizedConfig,
         });
-        await persistProjectSetup(normalizedConfig);
       } catch (error) {
         setSetupError(
           `Failed to configure project setup: ${
@@ -663,7 +653,7 @@ export default function ChatPanel() {
         setIsConfiguringProjectSetup(false);
       }
     },
-    [persistProjectSetup, projectDirectory],
+    [projectDirectory],
   );
 
   const openSetupWizard = useCallback(async () => {
@@ -3680,11 +3670,6 @@ export default function ChatPanel() {
     const nextEnabled = !autonomousModeEnabled;
     setAutonomousModeEnabled(nextEnabled);
 
-    const nextSetup = buildSetupPayload({ autonomousMode: nextEnabled });
-    if (nextSetup) {
-      persistProjectSetup(nextSetup).catch(() => undefined);
-    }
-
     if (!sessionIdRef.current) {
       return;
     }
@@ -3700,8 +3685,6 @@ export default function ChatPanel() {
     );
   }, [
     autonomousModeEnabled,
-    buildSetupPayload,
-    persistProjectSetup,
     sendClientAction,
     showNotificationBanner,
   ]);

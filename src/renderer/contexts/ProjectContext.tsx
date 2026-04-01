@@ -593,6 +593,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
               '[ProjectContext] Reloading project due to file change:',
               filePath,
             );
+            // openProject() returns a cached result for MIN_OPEN_INTERVAL_MS; backend/chat
+            // writes to project.json must bypass that or the UI keeps stale setup/phase.
+            projectService.invalidateCache();
             const result = await projectService.openProject(projectDirectory);
             if (result.success) {
               const project = result.data;

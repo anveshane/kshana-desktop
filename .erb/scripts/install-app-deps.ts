@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
+import { rimrafSync } from 'rimraf';
 import webpackPaths from '../configs/webpack.paths';
 
 interface PackResult {
@@ -116,7 +117,13 @@ function installAppDeps(): void {
   const tarballRelativePath = path.relative(webpackPaths.appPath, tarballPath);
   syncReleaseAppPackage(mainPackagePath, tarballRelativePath);
 
-  fs.rmSync(webpackPaths.appNodeModulesPath, { recursive: true, force: true });
+  // `fs.rmSync` can leave ENOTEMPTY on large trees (watchers, antivirus). rimraf matches clean.js.
+  rimrafSync(webpackPaths.appNodeModulesPath);
+  if (fs.existsSync(webpackPaths.appNodeModulesPath)) {
+    throw new Error(
+      `Could not remove ${webpackPaths.appNodeModulesPath}. Quit Kshana, IDEs, and terminals using release/app, then retry.`,
+    );
+  }
 
   const lockfilePath = path.join(webpackPaths.appPath, 'package-lock.json');
   fs.rmSync(lockfilePath, { force: true });
