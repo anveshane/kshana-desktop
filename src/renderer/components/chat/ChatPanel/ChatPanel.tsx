@@ -868,6 +868,72 @@ export default function ChatPanel() {
     lastFinalizedAssistantStreamTextRef.current = '';
   }, []);
 
+  const finalizeAssistantStream = useCallback((finalText?: string) => {
+    const activeAssistantId = lastAssistantIdRef.current;
+    if (!activeAssistantId) {
+      if (finalText !== undefined) {
+        lastFinalizedAssistantStreamTextRef.current =
+          normalizeComparableChatText(finalText);
+      }
+      setIsStreaming(false);
+      return;
+    }
+
+    const activeMessage = messagesRef.current.find(
+      (message) =>
+        message.id === activeAssistantId &&
+        message.role === 'assistant' &&
+        message.type !== 'tool_call',
+    );
+
+    const resolvedFinalText =
+      finalText !== undefined
+        ? finalText
+        : activeMessage
+          ? activeMessage.content
+          : '';
+
+    lastFinalizedAssistantStreamTextRef.current =
+      normalizeComparableChatText(resolvedFinalText);
+    lastAssistantIdRef.current = null;
+    setIsStreaming(false);
+
+    // Remove the active message if it never received any content (empty ghost bubble)
+    if (activeAssistantId && (!activeMessage || !activeMessage.content.trim())) {
+      setMessages((prev) =>
+        prev.filter((msg) => msg.id !== activeAssistantId),
+      );
+    }
+  }, []);
+
+  const markExecutionInterrupted = useCallback(
+    (statusText: string, toolReason: string, systemMessage?: string) => {
+      finalizeAssistantStream();
+      failActiveToolCalls(toolReason);
+
+      const pending = stopRequestRef.current;
+      if (pending) {
+        clearTimeout(pending.timeoutId);
+        stopRequestRef.current = null;
+        pending.resolve(false);
+      }
+
+      setIsStopPending(false);
+      setIsTaskRunning(false);
+      setAgentStatus('waiting');
+      setStatusMessage(statusText);
+      setSessionTimer((prev) => ({
+        ...prev,
+        running: false,
+      }));
+
+      if (systemMessage) {
+        appendSystemMessage(systemMessage, 'status');
+      }
+    },
+    [appendSystemMessage, failActiveToolCalls, finalizeAssistantStream],
+  );
+
   const settleActiveToolCalls = useCallback(
     (status: 'completed' | 'error', result: string) => {
       const now = Date.now();
@@ -1453,44 +1519,6 @@ export default function ChatPanel() {
     },
     [],
   );
-
-  const finalizeAssistantStream = useCallback((finalText?: string) => {
-    const activeAssistantId = lastAssistantIdRef.current;
-    if (!activeAssistantId) {
-      if (finalText !== undefined) {
-        lastFinalizedAssistantStreamTextRef.current =
-          normalizeComparableChatText(finalText);
-      }
-      setIsStreaming(false);
-      return;
-    }
-
-    const activeMessage = messagesRef.current.find(
-      (message) =>
-        message.id === activeAssistantId &&
-        message.role === 'assistant' &&
-        message.type !== 'tool_call',
-    );
-
-    const resolvedFinalText =
-      finalText !== undefined
-        ? finalText
-        : activeMessage
-          ? activeMessage.content
-          : '';
-
-    lastFinalizedAssistantStreamTextRef.current =
-      normalizeComparableChatText(resolvedFinalText);
-    lastAssistantIdRef.current = null;
-    setIsStreaming(false);
-
-    // Remove the active message if it never received any content (empty ghost bubble)
-    if (activeAssistantId && (!activeMessage || !activeMessage.content.trim())) {
-      setMessages((prev) =>
-        prev.filter((msg) => msg.id !== activeAssistantId),
-      );
-    }
-  }, []);
 
   const disconnectWebSocket = useCallback(() => {
     if (wsRef.current) {
@@ -2567,10 +2595,11 @@ export default function ChatPanel() {
             const retryMessage =
               `Transient network issue while contacting the model: ${errorMsg}. ` +
               'Please retry your last step.';
-            appendSystemMessage(retryMessage, 'status');
-            setAgentStatus('waiting');
-            setStatusMessage('Connection issue. Ready to retry.');
-            setIsTaskRunning(false);
+            markExecutionInterrupted(
+              'Connection issue. Ready to retry.',
+              errorMsg,
+              retryMessage,
+            );
             window.electron.logger.logError(
               errorMsg,
               data as Record<string, unknown>,
@@ -2583,9 +2612,15 @@ export default function ChatPanel() {
             break;
           }
           appendSystemMessage(errorMsg, 'error');
+          finalizeAssistantStream();
+          failActiveToolCalls(errorMsg);
           setAgentStatus('error');
           setStatusMessage(errorMsg);
           setIsTaskRunning(false);
+          setSessionTimer((prev) => ({
+            ...prev,
+            running: false,
+          }));
           window.electron.logger.logError(
             errorMsg,
             data as Record<string, unknown>,
@@ -3291,6 +3326,7 @@ export default function ChatPanel() {
       projectDirectory,
       removeQueuedOutboundActionType,
       resolveStopRequest,
+      markExecutionInterrupted,
       showNotificationBanner,
       syncConfiguredProject,
       syncProjectState,
@@ -3496,6 +3532,12 @@ export default function ChatPanel() {
           clearTimeout(timeout);
           connectingRef.current = false;
           console.error('[ChatPanel] WebSocket error:', error);
+          if (isTaskRunningRef.current || isStopPendingRef.current) {
+            markExecutionInterrupted(
+              'Connection lost. Reconnecting...',
+              'Execution interrupted because the chat connection dropped.',
+            );
+          }
           appendConnectionBanner(
             'ws_connection_error',
             'WebSocket connection error. Check if backend is running.',
@@ -3531,6 +3573,12 @@ export default function ChatPanel() {
                   backendState,
                 },
               );
+              if (isTaskRunningRef.current || isStopPendingRef.current) {
+                markExecutionInterrupted(
+                  'Connection lost. Reconnecting...',
+                  'Execution interrupted because the backend connection closed.',
+                );
+              }
               appendConnectionBanner(
                 'ws_disconnected',
                 getDisconnectBannerMessage(backendState),
@@ -3561,6 +3609,7 @@ export default function ChatPanel() {
     flushPendingOutboundActions,
     handleServerPayload,
     hasQueuedOutboundActionType,
+    markExecutionInterrupted,
     projectDirectory,
     removeQueuedOutboundActionType,
     syncConfiguredProject,
