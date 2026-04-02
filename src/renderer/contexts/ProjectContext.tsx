@@ -144,6 +144,9 @@ interface ProjectActions {
   /** Add an asset to the asset manifest */
   addAsset: (assetInfo: AssetInfo) => Promise<boolean>;
 
+  /** Remove an asset from the asset manifest */
+  removeAsset: (assetId: string) => Promise<boolean>;
+
   /** Explicitly refresh the asset manifest from disk */
   refreshAssetManifest: () => Promise<void>;
 
@@ -1400,6 +1403,36 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     [projectDirectory, state.assetManifest],
   );
 
+  const removeAsset = useCallback(
+    async (assetId: string): Promise<boolean> => {
+      const currentManifest = state.assetManifest;
+      if (!currentManifest) {
+        return false;
+      }
+
+      const nextAssetManifest = {
+        ...currentManifest,
+        assets: currentManifest.assets.filter((asset) => asset.id !== assetId),
+      };
+
+      if (nextAssetManifest.assets.length === currentManifest.assets.length) {
+        return false;
+      }
+
+      const result = await projectService.updateAssetManifest(nextAssetManifest);
+      if (!result.success) {
+        return false;
+      }
+
+      setState((prev) => ({
+        ...prev,
+        assetManifest: nextAssetManifest,
+      }));
+      return true;
+    },
+    [state.assetManifest],
+  );
+
   const subscribeImageProjection = useCallback(
     (listener: (snapshot: ImageProjectionSnapshot) => void) => {
       if (!isImageSyncV2Enabled || !imageSyncEngineRef.current) {
@@ -1560,6 +1593,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateVideoSplitOverrides,
       updateSegmentTimingOverrides,
       addAsset,
+      removeAsset,
       refreshAssetManifest,
       subscribeImageProjection,
       getImageProjectionSnapshot,
@@ -1585,6 +1619,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateVideoSplitOverrides,
       updateSegmentTimingOverrides,
       addAsset,
+      removeAsset,
       refreshAssetManifest,
       subscribeImageProjection,
       getImageProjectionSnapshot,

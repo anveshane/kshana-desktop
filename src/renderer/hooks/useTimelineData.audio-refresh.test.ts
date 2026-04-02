@@ -1,5 +1,4 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import type { FileNode } from '../../shared/fileSystemTypes';
 import {
   attachWaveformPeaksToAudioFiles,
   collectAudioFilesWithDuration,
@@ -45,33 +44,16 @@ describe('useTimelineData audio refresh helpers', () => {
   });
 
   it('falls back to transcript duration when audio duration probing fails', async () => {
-    const files: FileNode = {
-      name: 'audio',
-      path: '/project/.kshana/agent/audio',
-      type: 'directory',
-      children: [
-        {
-          name: 'ok.mp3',
-          path: '/project/.kshana/agent/audio/ok.mp3',
-          type: 'file',
-          extension: '.mp3',
-        },
-        {
-          name: 'broken.wav',
-          path: '/project/.kshana/agent/audio/broken.wav',
-          type: 'file',
-          extension: '.wav',
-        },
-      ],
-    };
-
     const getAudioDuration = jest.fn(async (audioPath: string) => {
       if (audioPath.endsWith('/ok.mp3')) return 12;
       throw new Error('ffprobe failed');
     });
 
     const result = await collectAudioFilesWithDuration({
-      files,
+      audioFiles: [
+        { path: 'assets/audio/ok.mp3', duration: 0 },
+        { path: 'assets/audio/broken.wav', duration: 0 },
+      ],
       projectDirectory: '/project',
       transcriptDuration: 7,
       getAudioDuration,

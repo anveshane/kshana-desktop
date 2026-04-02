@@ -21,6 +21,7 @@ import { debugRendererDebug } from '../utils/debugLogger';
 
 export interface TimelineItem {
   id: string;
+  assetId?: string;
   type:
     | 'image'
     | 'video'
@@ -69,6 +70,7 @@ export interface TimelineDataWithRefresh extends TimelineData {
 }
 
 export interface TimelineAudioFile {
+  assetId?: string;
   path: string;
   duration: number;
   waveformPeaks?: number[];
@@ -119,6 +121,29 @@ function getAudioLabelFromPath(audioPath: string): string {
   const fileName = audioPath.split(/[\\/]/).pop() ?? '';
   const label = fileName.replace(/\.[^.]+$/, '').trim();
   return label || 'Audio Track';
+}
+
+function isManifestAudioAsset(asset: AssetInfo): boolean {
+  return (
+    asset.type === 'scene_dialogue_audio' ||
+    asset.type === 'scene_music' ||
+    asset.type === 'scene_sfx' ||
+    asset.type === 'scene_audio_mix' ||
+    asset.type === 'final_audio'
+  );
+}
+
+function collectManifestAudioFiles(assets: AssetInfo[]): TimelineAudioFile[] {
+  return assets
+    .filter(
+      (asset) =>
+        isManifestAudioAsset(asset) && isSupportedAudioFileName(asset.path),
+    )
+    .map((asset) => ({
+      assetId: asset.id,
+      path: asset.path,
+      duration: 0,
+    }));
 }
 
 function isValidSegmentRange(segment: ServerTimelineSegment): boolean {
@@ -386,44 +411,47 @@ export function buildServerTimelineItems({
 }
 
 export async function collectAudioFilesWithDuration({
-  files,
+  audioFiles,
   projectDirectory,
   transcriptDuration,
   getAudioDuration,
 }: {
-  files: FileNode;
+  audioFiles: TimelineAudioFile[];
   projectDirectory: string;
   transcriptDuration: number;
   getAudioDuration: (audioPath: string) => Promise<number>;
 }): Promise<TimelineAudioFile[]> {
-  const audioEntries = (files.children ?? []).filter(
-    (file): file is FileNode & { type: 'file'; name: string } =>
-      file.type === 'file' && isSupportedAudioFileName(file.name),
-  );
-
-  const audioPaths = audioEntries.map(
-    (file) => `${PROJECT_PATHS.AGENT_AUDIO}/${file.name}`,
-  );
-
   const durationResults = await Promise.allSettled(
-    audioPaths.map(async (audioPath) => {
-      const fullAudioPath = `${projectDirectory}/${audioPath}`;
+    audioFiles.map(async (audioFile) => {
+      const fullAudioPath = `${projectDirectory}/${audioFile.path}`;
       const duration = await getAudioDuration(fullAudioPath);
       return duration;
     }),
   );
 
-  return audioPaths.map((audioPath, index) => {
+  return audioFiles.map((audioFile, index) => {
     const durationResult = durationResults[index];
     const duration =
       durationResult?.status === 'fulfilled'
         ? durationResult.value
         : transcriptDuration || 0;
     return {
-      path: audioPath,
+      ...audioFile,
       duration,
     };
   });
+}
+
+function collectScannedAudioFiles(files: FileNode): TimelineAudioFile[] {
+  const audioEntries = (files.children ?? []).filter(
+    (file): file is FileNode & { type: 'file'; name: string } =>
+      file.type === 'file' && isSupportedAudioFileName(file.name),
+  );
+
+  return audioEntries.map((file) => ({
+    path: `${PROJECT_PATHS.AGENT_AUDIO}/${file.name}`,
+    duration: 0,
+  }));
 }
 
 export async function attachWaveformPeaksToAudioFiles({
@@ -569,8 +597,20 @@ export function useTimelineData(
     try {
       const audioDir = `${projectDirectory}/${PROJECT_PATHS.AGENT_AUDIO}`;
       const files = await window.electron.project.readTree(audioDir, 1);
+      const manifestAudioFiles = collectManifestAudioFiles(
+        assetManifest?.assets ?? [],
+      );
+      const scannedAudioFiles = collectScannedAudioFiles(files);
+      const mergedAudioFiles = Array.from(
+        new Map(
+          [...scannedAudioFiles, ...manifestAudioFiles].map((audioFile) => [
+            audioFile.path,
+            audioFile,
+          ]),
+        ).values(),
+      );
       const nextAudioFiles = await collectAudioFilesWithDuration({
-        files,
+        audioFiles: mergedAudioFiles,
         projectDirectory,
         transcriptDuration,
         getAudioDuration: (audioPath: string) =>
@@ -615,10 +655,13 @@ export function useTimelineData(
         '[useTimelineData] Audio directory not found or error loading:',
         error,
       );
-      setAudioFiles([]);
+      const manifestAudioFiles = collectManifestAudioFiles(
+        assetManifest?.assets ?? [],
+      );
+      setAudioFiles(manifestAudioFiles);
       setIsAudioLoading(false);
     }
-  }, [projectDirectory, isLoaded, transcriptDuration]);
+  }, [projectDirectory, isLoaded, transcriptDuration, assetManifest]);
 
   useEffect(() => {
     void loadTimelineFile();
@@ -784,10 +827,6 @@ export function useTimelineData(
   }, [timelineFileState, serverSegments]);
 
   const calculatedTotalDuration = useMemo(() => {
-    if (timelineFileState.source !== 'server_timeline') {
-      return 0;
-    }
-
     const maxAudioDuration =
       audioFiles.length > 0
         ? Math.max(...audioFiles.map((audioFile) => audioFile.duration || 0))
@@ -806,19 +845,18 @@ export function useTimelineData(
   }, [audioFiles, serverTimelineDuration, transcriptDuration, wordCaptionCues]);
 
   const timelineItems = useMemo(() => {
-    if (timelineFileState.source !== 'server_timeline') {
-      return [];
-    }
-
     const visualItems =
-      calculatedTotalDuration > 0
-        ? fillGapsWithPlaceholders(baseTimelineItems, calculatedTotalDuration)
-        : [...baseTimelineItems];
+      timelineFileState.source === 'server_timeline'
+        ? calculatedTotalDuration > 0
+          ? fillGapsWithPlaceholders(baseTimelineItems, calculatedTotalDuration)
+          : [...baseTimelineItems]
+        : [];
     const items = [...visualItems];
 
     audioFiles.forEach((audioFile, index) => {
       items.push({
-        id: `audio-${index}`,
+        id: audioFile.assetId ?? `audio-${index}`,
+        assetId: audioFile.assetId,
         type: 'audio',
         startTime: 0,
         endTime: audioFile.duration || calculatedTotalDuration,

@@ -8,11 +8,13 @@ interface TimelineContextMenuProps {
   canGenerateWordCaptions?: boolean;
   isGeneratingWordCaptions?: boolean;
   showVideoEditActions?: boolean;
+  showDeleteAudioAction?: boolean;
   onUndo?: () => void;
   onAddTimelineInstruction: () => void;
   onGenerateWordCaptions?: () => void;
   onSplitClip?: () => void;
   onTrimLeftToPlayhead?: () => void;
+  onDeleteAudio?: () => void;
   onClose: () => void;
 }
 
@@ -23,11 +25,13 @@ export default function TimelineContextMenu({
   canGenerateWordCaptions = false,
   isGeneratingWordCaptions = false,
   showVideoEditActions = false,
+  showDeleteAudioAction = false,
   onUndo,
   onAddTimelineInstruction,
   onGenerateWordCaptions,
   onSplitClip,
   onTrimLeftToPlayhead,
+  onDeleteAudio,
   onClose,
 }: TimelineContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -135,6 +139,20 @@ export default function TimelineContextMenu({
             disabled={!onTrimLeftToPlayhead}
           >
             Trim Left to Playhead
+          </button>
+        </>
+      )}
+
+      {showDeleteAudioAction && (
+        <>
+          <div className={styles.divider} />
+          <button
+            type="button"
+            className={`${styles.menuItem} ${styles.destructive} ${!onDeleteAudio ? styles.disabled : ''}`}
+            onClick={() => handleAction(onDeleteAudio)}
+            disabled={!onDeleteAudio}
+          >
+            Delete Audio
           </button>
         </>
       )}

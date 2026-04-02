@@ -65,6 +65,15 @@ const AUDIO_WAVEFORM_HEIGHT = 28;
 const BASE_PIXELS_PER_SECOND = 50;
 const MAJOR_MARKER_STEPS_SECONDS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
 
+function buildImportedAudioAssetId(fileName: string): string {
+  const slug = fileName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return `imported-audio-${slug || 'track'}-${Date.now()}`;
+}
+
 function getMajorMarkerStepSeconds(zoomLevel: number): number {
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoomLevel;
   const targetSpacingPx = 95;
@@ -812,6 +821,8 @@ export default function TimelinePanel({
     updateVideoSplitOverrides,
     updateSegmentTimingOverrides,
     addAsset,
+    removeAsset,
+    refreshAssetManifest,
   } = useProject();
 
   // Use unified timeline data from context (single source of truth for TimelinePanel + VideoLibraryView)
@@ -1666,6 +1677,48 @@ export default function TimelinePanel({
     audioTimelineItems,
   ]);
 
+  const handleDeleteAudioFromContextMenu = useCallback(async () => {
+    if (!projectDirectory || contextMenuState?.item?.type !== 'audio') {
+      return;
+    }
+
+    const audioItem = contextMenuState.item;
+    if (!audioItem.audioPath) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `Delete "${audioItem.label}" from this project? This will remove the audio file.`,
+    );
+    if (!shouldDelete) {
+      return;
+    }
+
+    try {
+      await window.electron.project.delete(
+        `${projectDirectory}/${audioItem.audioPath}`,
+      );
+
+      if (audioItem.assetId) {
+        await removeAsset(audioItem.assetId);
+      }
+
+      await Promise.all([refreshAssetManifest(), refreshAudioFiles()]);
+      setCaptionGenerationMessage(`Deleted audio track "${audioItem.label}".`);
+    } catch (error) {
+      console.error('[TimelinePanel] Failed to delete audio:', error);
+      setCaptionGenerationMessage('Failed to delete audio track.');
+    } finally {
+      setContextMenuState(null);
+    }
+  }, [
+    contextMenuState,
+    projectDirectory,
+    removeAsset,
+    refreshAssetManifest,
+    refreshAudioFiles,
+  ]);
+
   const canGenerateWordCaptions = audioTimelineItems.length > 0;
 
   // Handle playhead drag start
@@ -2404,12 +2457,36 @@ export default function TimelinePanel({
 
   // Handle audio import from file
   const handleImportAudioFromFile = useCallback(async () => {
-    await importAudioFromFileToProject({
+    const importedAudio = await importAudioFromFileToProject({
       projectDirectory,
       projectBridge: window.electron.project,
-      refreshAudioFiles,
     });
-  }, [projectDirectory, refreshAudioFiles]);
+
+    if (!importedAudio) {
+      return;
+    }
+
+    const assetInfo = createAssetInfo(
+      buildImportedAudioAssetId(importedAudio.fileName),
+      'final_audio',
+      importedAudio.relativePath,
+      1,
+      {
+        metadata: {
+          imported: true,
+          original_file_name: importedAudio.fileName,
+          source_path: importedAudio.sourcePath,
+        },
+      },
+    );
+
+    const saved = await addAsset(assetInfo);
+    if (!saved) {
+      console.error('Failed to save imported audio to asset manifest');
+    }
+
+    await Promise.all([refreshAssetManifest(), refreshAudioFiles()]);
+  }, [projectDirectory, addAsset, refreshAssetManifest, refreshAudioFiles]);
 
   // YouTube audio import removed - can be re-added later if needed
   const handleImportAudioFromYouTube = useCallback(
@@ -3063,6 +3140,7 @@ export default function TimelinePanel({
               canGenerateWordCaptions={canGenerateWordCaptions}
               isGeneratingWordCaptions={isGeneratingWordCaptions}
               showVideoEditActions={isPlacementVideoContextTarget}
+              showDeleteAudioAction={contextMenuState.item?.type === 'audio'}
               onUndo={handleUndoFromContextMenu}
               onAddTimelineInstruction={
                 handleAddTimelineInstructionFromContextMenu
@@ -3074,6 +3152,7 @@ export default function TimelinePanel({
                   : undefined
               }
               onTrimLeftToPlayhead={undefined}
+              onDeleteAudio={handleDeleteAudioFromContextMenu}
               onClose={closeContextMenu}
             />
           )}
