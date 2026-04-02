@@ -1,6 +1,7 @@
 export interface RemoteSessionInfo {
   id: string;
   status: 'idle' | 'running' | 'awaiting_input' | 'completed' | 'error';
+  configured?: boolean;
   autonomousMode?: boolean;
 }
 
@@ -9,7 +10,7 @@ export function shouldConfigureProjectAfterConnect(
   hasQueuedConfigureProject: boolean,
 ): boolean {
   if (session) {
-    return false;
+    return !session.configured && !hasQueuedConfigureProject;
   }
 
   return !hasQueuedConfigureProject;

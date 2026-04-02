@@ -6,13 +6,25 @@ import {
 } from './chatPanelResumeUtils';
 
 describe('chatPanelResumeUtils', () => {
-  it('skips configure_project when reconnecting to an existing session', () => {
+  it('skips configure_project when reconnecting to an already configured session', () => {
     const session: RemoteSessionInfo = {
       id: 'session-1',
       status: 'running',
+      configured: true,
     };
 
     expect(shouldConfigureProjectAfterConnect(session, false)).toBe(false);
+    expect(shouldConfigureProjectAfterConnect(session, true)).toBe(false);
+  });
+
+  it('reconfigures project when reconnecting to an unconfigured session', () => {
+    const session: RemoteSessionInfo = {
+      id: 'session-1',
+      status: 'idle',
+      configured: false,
+    };
+
+    expect(shouldConfigureProjectAfterConnect(session, false)).toBe(true);
     expect(shouldConfigureProjectAfterConnect(session, true)).toBe(false);
   });
 
