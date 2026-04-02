@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
+import { useAgent } from '../../../contexts/AgentContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
 import { type TimelineItem } from '../../../hooks/useTimelineData';
 import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
@@ -54,8 +55,13 @@ import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
 import VersionSelector from '../VersionSelector';
 import AudioImportModal from './AudioImportModal';
+import ShotRegenerateModal from './ShotRegenerateModal';
 import TimelineContextMenu from './TimelineContextMenu';
 import { importAudioFromFileToProject } from './importAudio';
+import {
+  buildShotRegenerateMessage,
+  isServerTimelineShotItem,
+} from './timelineShotRegenerate';
 import { getAudioBlockWidthPx } from './timelineAudioSizing';
 import styles from './TimelinePanel.module.scss';
 
@@ -805,6 +811,7 @@ export default function TimelinePanel({
   onActiveVersionsChange,
 }: TimelinePanelProps) {
   const { projectDirectory } = useWorkspace();
+  const agentContext = useAgent();
   const {
     isLoaded,
     isLoading,
@@ -1048,6 +1055,11 @@ export default function TimelinePanel({
     number | null
   >(null);
   const [isAudioModalOpen, setIsAudioModalOpen] = useState(false);
+  const [regenerateShotItem, setRegenerateShotItem] = useState<TimelineItem | null>(
+    null,
+  );
+  const [isSubmittingShotRegenerate, setIsSubmittingShotRegenerate] =
+    useState(false);
   const [contextMenuState, setContextMenuState] =
     useState<TimelineContextMenuState | null>(null);
   const [isGeneratingWordCaptions, setIsGeneratingWordCaptions] =
@@ -1608,13 +1620,43 @@ export default function TimelinePanel({
     [openContextMenuAtPointer],
   );
 
-  const handleAddTimelineInstructionFromContextMenu = useCallback(() => {
-    if (!contextMenuState) return;
+  const handleRegenerateShotFromContextMenu = useCallback(() => {
+    const contextItem = contextMenuState?.item;
+    if (!isServerTimelineShotItem(contextItem)) {
+      return;
+    }
 
-    setMarkerPromptPosition(contextMenuState.positionSeconds);
-    setMarkerPromptOpen(true);
+    setRegenerateShotItem(contextItem);
     setContextMenuState(null);
   }, [contextMenuState]);
+
+  const handleCloseRegenerateShotModal = useCallback(() => {
+    if (isSubmittingShotRegenerate) {
+      return;
+    }
+
+    setRegenerateShotItem(null);
+  }, [isSubmittingShotRegenerate]);
+
+  const handleSubmitRegenerateShot = useCallback(
+    async (prompt: string) => {
+      if (!regenerateShotItem || !agentContext?.sendTask) {
+        return;
+      }
+
+      setIsSubmittingShotRegenerate(true);
+
+      try {
+        await agentContext.sendTask(
+          buildShotRegenerateMessage(regenerateShotItem, prompt),
+        );
+        setRegenerateShotItem(null);
+      } finally {
+        setIsSubmittingShotRegenerate(false);
+      }
+    },
+    [agentContext, regenerateShotItem],
+  );
 
   const handleUndoFromContextMenu = useCallback(() => {
     undoLastTimelineEdit();
@@ -2514,6 +2556,11 @@ export default function TimelinePanel({
     );
   }, [contextMenuState]);
 
+  const isServerTimelineShotContextTarget = useMemo(
+    () => isServerTimelineShotItem(contextMenuState?.item),
+    [contextMenuState],
+  );
+
   const canSplitContextTarget = useMemo(() => {
     if (!contextMenuState?.item || !isPlacementVideoContextTarget) return false;
 
@@ -3139,12 +3186,11 @@ export default function TimelinePanel({
               canUndo={canUndo}
               canGenerateWordCaptions={canGenerateWordCaptions}
               isGeneratingWordCaptions={isGeneratingWordCaptions}
+              showRegenerateShotAction={isServerTimelineShotContextTarget}
               showVideoEditActions={isPlacementVideoContextTarget}
               showDeleteAudioAction={contextMenuState.item?.type === 'audio'}
               onUndo={handleUndoFromContextMenu}
-              onAddTimelineInstruction={
-                handleAddTimelineInstructionFromContextMenu
-              }
+              onRegenerateShot={handleRegenerateShotFromContextMenu}
               onGenerateWordCaptions={handleGenerateWordCaptions}
               onSplitClip={
                 isPlacementVideoContextTarget && canSplitContextTarget
@@ -3171,6 +3217,14 @@ export default function TimelinePanel({
               }}
             />
           )}
+
+          <ShotRegenerateModal
+            item={regenerateShotItem}
+            isOpen={regenerateShotItem !== null}
+            isSubmitting={isSubmittingShotRegenerate}
+            onClose={handleCloseRegenerateShotModal}
+            onSubmit={handleSubmitRegenerateShot}
+          />
 
           <AudioImportModal
             isOpen={isAudioModalOpen}

@@ -1,0 +1,187 @@
+@import '../../../styles/tokens';
+@import '../../../styles/mixins';
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-lg;
+}
+
+.modal {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  background-color: $color-panel-background;
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-lg;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: $spacing-md;
+  padding: $spacing-lg;
+  border-bottom: 1px solid $color-panel-border;
+}
+
+.titleWrap {
+  min-width: 0;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(var(--color-text-primary-rgb), 0.08);
+  color: $color-text-secondary;
+  font-size: 10px;
+  font-weight: $font-weight-semibold;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: $spacing-sm 0 4px;
+  font-size: $font-size-xl;
+  line-height: 1.25;
+  color: $color-text-primary;
+}
+
+.meta {
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+}
+
+.closeButton {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: $radius-sm;
+  background: transparent;
+  color: $color-text-secondary;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background-color: rgba(var(--color-text-primary-rgb), 0.1);
+    color: $color-text-primary;
+  }
+}
+
+.content {
+  padding: $spacing-lg;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+  overflow-y: auto;
+  @include custom-scrollbar;
+}
+
+.contextCard {
+  padding: $spacing-md;
+  border-radius: $radius-md;
+  background: rgba(var(--color-text-primary-rgb), 0.04);
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.18);
+}
+
+.contextLabel {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: $font-weight-semibold;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: $color-text-muted;
+}
+
+.contextValue {
+  font-family: $font-family-mono;
+  font-size: 12px;
+  line-height: 1.5;
+  color: $color-text-secondary;
+  word-break: break-all;
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  border-radius: $radius-md;
+  border: 1px solid $color-panel-border;
+  background: $color-background-dark;
+  color: $color-text-primary;
+  padding: $spacing-md;
+  font-family: $font-family-base;
+  font-size: $font-size-sm;
+  line-height: 1.55;
+  @include custom-scrollbar;
+
+  &:focus {
+    outline: none;
+    border-color: $color-accent-primary;
+    box-shadow: 0 0 0 2px rgba(var(--color-accent-primary-rgb), 0.18);
+  }
+
+  &::placeholder {
+    color: $color-text-muted;
+  }
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+.suggestButton,
+.submitButton {
+  min-width: 88px;
+  border-radius: $radius-sm;
+  padding: $spacing-sm $spacing-lg;
+  border: none;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-fast;
+}
+
+.suggestButton {
+  margin-right: auto;
+  background: rgba(var(--color-text-primary-rgb), 0.06);
+  color: $color-text-muted;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.2);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.submitButton {
+  background: $color-accent-primary;
+  color: $color-background-dark;
+
+  &:hover:not(:disabled) {
+    background-color: $color-accent-primary-hover;
+  }
+}

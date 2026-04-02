@@ -34,11 +34,15 @@ export interface TimelineItem {
   duration: number;
   label: string;
   sceneLabel?: string;
+  sceneNumber?: number;
+  shotNumber?: number;
   prompt?: string;
   expandedPrompt?: string;
   placementNumber?: number;
   segmentId?: string;
   sourceType?: 'server_timeline';
+  mediaTypeContext?: 'image' | 'video';
+  mediaPathContext?: string;
   imagePath?: string;
   videoPath?: string;
   audioPath?: string;
@@ -187,6 +191,44 @@ function getLayerMetadataFilePath(
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function getMetadataString(
+  metadata: Record<string, unknown> | undefined,
+  ...keys: string[]
+): string | null {
+  if (!metadata) return null;
+
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function getMetadataNumber(
+  metadata: Record<string, unknown> | undefined,
+  ...keys: string[]
+): number | null {
+  if (!metadata) return null;
+
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
 function getFirstVisualLayer(
   segment: ServerTimelineSegment,
 ): ServerTimelineLayer | undefined {
@@ -199,6 +241,74 @@ function findAssetByArtifactId(
 ): AssetInfo | undefined {
   if (!artifactId) return undefined;
   return assets.find((asset) => asset.id === artifactId);
+}
+
+function extractShotIdentity(
+  segment: ServerTimelineSegment,
+  asset: AssetInfo | undefined,
+): { sceneNumber?: number; shotNumber?: number } {
+  const visualLayer = getFirstVisualLayer(segment);
+  const metadata = isObjectRecord(visualLayer?.metadata)
+    ? visualLayer.metadata
+    : undefined;
+  const assetMetadata = isObjectRecord(asset?.metadata) ? asset.metadata : undefined;
+
+  const candidates = [segment.id?.trim(), segment.label?.trim()].filter(
+    (value): value is string => Boolean(value),
+  );
+
+  const shotMatch = candidates
+    .map((candidate) =>
+      candidate.match(
+        /segment[_-](\d+)[_-]shot[_-](\d+)|scene[\s_-]*(\d+)[^\d]+shot[\s_-]*(\d+)/i,
+      ),
+    )
+    .find((value): value is RegExpMatchArray => Boolean(value));
+
+  const fromSegmentScene =
+    shotMatch?.[1] !== undefined
+      ? Number.parseInt(shotMatch[1], 10) + 1
+      : shotMatch?.[3] !== undefined
+        ? Number.parseInt(shotMatch[3], 10)
+        : undefined;
+  const fromSegmentShot =
+    shotMatch?.[2] !== undefined
+      ? Number.parseInt(shotMatch[2], 10)
+      : shotMatch?.[4] !== undefined
+        ? Number.parseInt(shotMatch[4], 10)
+        : undefined;
+
+  const sceneNumber =
+    getMetadataNumber(metadata, 'sceneNumber', 'scene_number', 'placementNumber') ??
+    getMetadataNumber(assetMetadata, 'sceneNumber', 'scene_number', 'placementNumber') ??
+    asset?.scene_number ??
+    fromSegmentScene;
+  const shotNumber =
+    getMetadataNumber(metadata, 'shotNumber', 'shot_number') ??
+    getMetadataNumber(assetMetadata, 'shotNumber', 'shot_number') ??
+    fromSegmentShot;
+
+  return {
+    sceneNumber: sceneNumber ?? undefined,
+    shotNumber: shotNumber ?? undefined,
+  };
+}
+
+function extractShotPrompt(
+  segment: ServerTimelineSegment,
+  asset: AssetInfo | undefined,
+): string | undefined {
+  const visualLayer = getFirstVisualLayer(segment);
+  const metadata = isObjectRecord(visualLayer?.metadata)
+    ? visualLayer.metadata
+    : undefined;
+  const assetMetadata = isObjectRecord(asset?.metadata) ? asset.metadata : undefined;
+
+  return (
+    getMetadataString(metadata, 'prompt', 'shot_prompt', 'image_prompt') ??
+    getMetadataString(assetMetadata, 'prompt', 'shot_prompt', 'image_prompt') ??
+    undefined
+  );
 }
 
 function resolveSegmentVisual(
@@ -378,6 +488,10 @@ export function buildServerTimelineItems({
     const segmentId = segment.id?.trim() || `segment-${startTime}-${endTime}`;
     const fillStatus = segment.fillStatus ?? 'empty';
     const resolvedVisual = resolveSegmentVisual(segment, assets);
+    const visualLayer = getFirstVisualLayer(segment);
+    const asset = findAssetByArtifactId(visualLayer?.artifactId, assets);
+    const { sceneNumber, shotNumber } = extractShotIdentity(segment, asset);
+    const prompt = extractShotPrompt(segment, asset);
 
     if (fillStatus === 'filled' && resolvedVisual) {
       return {
@@ -388,8 +502,13 @@ export function buildServerTimelineItems({
         duration: endTime - startTime,
         label,
         sceneLabel,
+        sceneNumber,
+        shotNumber,
+        prompt,
         segmentId,
         sourceType: 'server_timeline' as const,
+        mediaTypeContext: resolvedVisual.type,
+        mediaPathContext: resolvedVisual.path,
         imagePath:
           resolvedVisual.type === 'image' ? resolvedVisual.path : undefined,
         videoPath:

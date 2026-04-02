@@ -7,10 +7,11 @@ interface TimelineContextMenuProps {
   canUndo?: boolean;
   canGenerateWordCaptions?: boolean;
   isGeneratingWordCaptions?: boolean;
+  showRegenerateShotAction?: boolean;
   showVideoEditActions?: boolean;
   showDeleteAudioAction?: boolean;
   onUndo?: () => void;
-  onAddTimelineInstruction: () => void;
+  onRegenerateShot?: () => void;
   onGenerateWordCaptions?: () => void;
   onSplitClip?: () => void;
   onTrimLeftToPlayhead?: () => void;
@@ -24,10 +25,11 @@ export default function TimelineContextMenu({
   canUndo = false,
   canGenerateWordCaptions = false,
   isGeneratingWordCaptions = false,
+  showRegenerateShotAction = false,
   showVideoEditActions = false,
   showDeleteAudioAction = false,
   onUndo,
-  onAddTimelineInstruction,
+  onRegenerateShot,
   onGenerateWordCaptions,
   onSplitClip,
   onTrimLeftToPlayhead,
@@ -98,13 +100,15 @@ export default function TimelineContextMenu({
       </button>
       <div className={styles.divider} />
 
-      <button
-        type="button"
-        className={styles.menuItem}
-        onClick={() => handleAction(onAddTimelineInstruction)}
-      >
-        Add Timeline Instruction
-      </button>
+      {showRegenerateShotAction && (
+        <button
+          type="button"
+          className={styles.menuItem}
+          onClick={() => handleAction(onRegenerateShot)}
+        >
+          Regenerate Shot
+        </button>
+      )}
 
       <button
         type="button"

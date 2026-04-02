@@ -56,6 +56,10 @@ import {
   shouldStreamToToolCallCard,
   shouldSuppressAgentResponse,
 } from './chatPanelStreamUtils';
+import {
+  getPostToolUiState,
+  getRemoteFsReconnectMessage,
+} from './chatPanelToolStatusUtils';
 import useQuestionTimerCancellation from './useQuestionTimerCancellation';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
@@ -1932,8 +1936,6 @@ export default function ChatPanel() {
           const toolCallId = (data.toolCallId as string) || '';
 
           if (toolStatus === 'completed' || toolStatus === 'error') {
-            debouncedSetStatus('thinking', 'Processing...');
-
             // Clean thinking/reasoning content from result if it exists
             let cleanedResult = result ?? error;
             const cleanThinkingTags = (text: string): string => {
@@ -1955,6 +1957,18 @@ export default function ChatPanel() {
             } else if (typeof cleanedResult === 'string') {
               cleanedResult = cleanThinkingTags(cleanedResult);
             }
+
+            const reconnectMessage =
+              getRemoteFsReconnectMessage(
+                typeof cleanedResult === 'string'
+                  ? cleanedResult
+                  : (
+                    cleanedResult as { error?: unknown; message?: unknown } | null
+                  )?.error ??
+                    (
+                      cleanedResult as { error?: unknown; message?: unknown } | null
+                    )?.message,
+              );
 
             const now = Date.now();
             let duration = (data.duration as number) ?? 0;
@@ -2031,6 +2045,32 @@ export default function ChatPanel() {
                   duration,
                 },
               });
+            }
+
+            const hasActiveQuestion = messagesRef.current.some(
+              (message) => message.type === 'agent_question',
+            );
+            const nextUiState = getPostToolUiState({
+              toolStatus: toolStatus === 'error' ? 'error' : 'completed',
+              currentAgentStatus: agentStatusRef.current,
+              isTaskRunning: isTaskRunningRef.current,
+              hasActiveQuestion,
+              hasOtherActiveTools: activeToolCallsRef.current.size > 0,
+              toolMessage:
+                reconnectMessage ??
+                (typeof cleanedResult === 'string' && cleanedResult.trim()
+                  ? cleanedResult
+                  : toolStatus === 'error'
+                    ? `${toolName} failed`
+                    : undefined),
+            });
+            if (nextUiState) {
+              setAgentStatus(nextUiState.agentStatus);
+              setStatusMessage(nextUiState.statusMessage);
+              setIsTaskRunning(nextUiState.isTaskRunning);
+            }
+            if (reconnectMessage) {
+              appendSystemMessage(reconnectMessage, 'error');
             }
 
             // For content-generation tools, also render the result as an assistant message
@@ -2610,6 +2650,10 @@ export default function ChatPanel() {
               'Connection issue. Ready to retry.',
             );
             break;
+          }
+          const reconnectMessage = getRemoteFsReconnectMessage(errorMsg);
+          if (reconnectMessage) {
+            appendSystemMessage(reconnectMessage, 'error');
           }
           appendSystemMessage(errorMsg, 'error');
           finalizeAssistantStream();

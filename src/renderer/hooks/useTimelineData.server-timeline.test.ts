@@ -223,6 +223,96 @@ describe('useTimelineData server timeline helpers', () => {
     ]);
   });
 
+  it('extracts shot metadata and prompt text for server timeline shot items', () => {
+    const items = buildServerTimelineItems({
+      timeline: {
+        version: '1.0',
+        totalDuration: 6,
+        segments: [
+          {
+            id: 'segment_2_shot_1',
+            label: 'Shot 1: close_up',
+            startTime: 0,
+            endTime: 6,
+            fillStatus: 'filled',
+            layers: [
+              {
+                type: 'visual',
+                artifactId: 'img_scene_3_shot_1',
+                metadata: {
+                  prompt:
+                    'A tight close-up with dramatic rim light and shallow depth of field.',
+                },
+              },
+            ],
+          },
+        ],
+      },
+      assets: [
+        {
+          id: 'img_scene_3_shot_1',
+          type: 'scene_image',
+          path: 'assets/images/scene-3-shot-1.png',
+          scene_number: 3,
+          version: 1,
+          created_at: 1,
+          metadata: {
+            shot_number: 1,
+          },
+        },
+      ],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'segment_2_shot_1',
+        segmentId: 'segment_2_shot_1',
+        sceneNumber: 3,
+        shotNumber: 1,
+        prompt:
+          'A tight close-up with dramatic rim light and shallow depth of field.',
+        mediaTypeContext: 'image',
+        mediaPathContext: 'assets/images/scene-3-shot-1.png',
+      }),
+    ]);
+  });
+
+  it('preserves shot identity when prompt metadata is missing', () => {
+    const items = buildServerTimelineItems({
+      timeline: {
+        version: '1.0',
+        totalDuration: 4,
+        segments: [
+          {
+            id: 'segment_1_shot_4',
+            label: 'Shot 4: insert',
+            startTime: 0,
+            endTime: 4,
+            fillStatus: 'filled',
+            layers: [
+              {
+                type: 'visual',
+                filePath: 'assets/videos/scene-2-shot-4.mp4',
+              },
+            ],
+          },
+        ],
+      },
+      assets: [],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'segment_1_shot_4',
+        sceneNumber: 2,
+        shotNumber: 4,
+        prompt: undefined,
+        mediaTypeContext: 'video',
+        mediaPathContext: 'assets/videos/scene-2-shot-4.mp4',
+      }),
+    ]);
+  });
+
   it('includes segment timing overrides in the default timeline state', () => {
     expect(DEFAULT_TIMELINE_STATE.segment_timing_overrides).toEqual({});
   });
