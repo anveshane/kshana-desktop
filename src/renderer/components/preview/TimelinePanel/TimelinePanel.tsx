@@ -37,6 +37,7 @@ import {
   buildUpdatedVideoSplitOverride,
   snapToSecond,
 } from '../../../utils/timelineImageEditing';
+import { getThumbnailPreviewTime } from '../../../utils/videoPreview';
 import type { TimelineMarker } from '../../../types/projectState';
 import type {
   KshanaTimelineMarker,
@@ -110,7 +111,11 @@ function downsampleWaveformPeaks(
     );
 
     let bucketPeak = 0;
-    for (let sampleIndex = startIndex; sampleIndex < endIndex; sampleIndex += 1) {
+    for (
+      let sampleIndex = startIndex;
+      sampleIndex < endIndex;
+      sampleIndex += 1
+    ) {
       bucketPeak = Math.max(bucketPeak, peaks[sampleIndex] ?? 0);
     }
 
@@ -120,13 +125,7 @@ function downsampleWaveformPeaks(
   return downsampled;
 }
 
-function AudioWaveform({
-  peaks,
-  width,
-}: {
-  peaks?: number[];
-  width: number;
-}) {
+function AudioWaveform({ peaks, width }: { peaks?: number[]; width: number }) {
   const waveformBars = useMemo(() => {
     if (!peaks?.length) {
       return [];
@@ -176,26 +175,28 @@ function AudioWaveform({
       preserveAspectRatio="none"
       aria-hidden="true"
     >
-      {waveformBars.map(({ x, y, barHeight, dotRadius, dotY, showPeakDot }, index) => (
-        <g key={`waveform-bar-${index}`}>
-          <rect
-            className={styles.audioWaveformBar}
-            x={x}
-            y={y}
-            width={2}
-            height={barHeight}
-            rx={0.75}
-          />
-          {showPeakDot ? (
-            <circle
-              className={styles.audioWaveformPeakDot}
-              cx={x + 1}
-              cy={dotY}
-              r={dotRadius}
+      {waveformBars.map(
+        ({ x, y, barHeight, dotRadius, dotY, showPeakDot }, index) => (
+          <g key={`waveform-bar-${index}`}>
+            <rect
+              className={styles.audioWaveformBar}
+              x={x}
+              y={y}
+              width={2}
+              height={barHeight}
+              rx={0.75}
             />
-          ) : null}
-        </g>
-      ))}
+            {showPeakDot ? (
+              <circle
+                className={styles.audioWaveformPeakDot}
+                cx={x + 1}
+                cy={dotY}
+                r={dotRadius}
+              />
+            ) : null}
+          </g>
+        ),
+      )}
     </svg>
   );
 }
@@ -248,7 +249,9 @@ function TimelineItemComponent({
   onItemContextMenu,
   isEditing = false,
 }: TimelineItemComponentProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoPath, setVideoPath] = useState<string | null>(null);
+  const [hasVideoPreviewFrame, setHasVideoPreviewFrame] = useState(false);
   const [imagePath, setImagePath] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState<boolean>(false);
   const imageRetryCountRef = React.useRef<number>(0);
@@ -265,6 +268,7 @@ function TimelineItemComponent({
       (item.type === 'video' || item.type === 'infographic') &&
       item.videoPath
     ) {
+      setHasVideoPreviewFrame(false);
       resolveAssetPathForDisplay(item.videoPath, projectDirectory).then(
         (resolved) => {
           setVideoPath(resolved);
@@ -272,8 +276,64 @@ function TimelineItemComponent({
       );
     } else {
       setVideoPath(null);
+      setHasVideoPreviewFrame(false);
     }
   }, [item.type, item.videoPath, projectDirectory]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!videoPath || !video) {
+      return undefined;
+    }
+
+    setHasVideoPreviewFrame(false);
+
+    const primePreviewFrame = () => {
+      const previewTime = getThumbnailPreviewTime(video.duration);
+      if (!Number.isFinite(previewTime) || previewTime <= 0) {
+        setHasVideoPreviewFrame(true);
+        return;
+      }
+
+      if (Math.abs((video.currentTime || 0) - previewTime) < 0.04) {
+        setHasVideoPreviewFrame(true);
+        return;
+      }
+
+      try {
+        video.currentTime = previewTime;
+      } catch {
+        setHasVideoPreviewFrame(true);
+      }
+    };
+
+    const handleLoadedMetadata = () => {
+      primePreviewFrame();
+    };
+    const handleLoadedData = () => {
+      setHasVideoPreviewFrame(true);
+    };
+    const handleSeeked = () => {
+      setHasVideoPreviewFrame(true);
+      video.pause();
+    };
+    const handleError = () => {
+      setHasVideoPreviewFrame(false);
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('loadeddata', handleLoadedData);
+    video.addEventListener('seeked', handleSeeked);
+    video.addEventListener('error', handleError);
+    video.load();
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('seeked', handleSeeked);
+      video.removeEventListener('error', handleError);
+    };
+  }, [videoPath]);
 
   // Resolve image path from timeline item only (projection-backed in v2).
   useEffect(() => {
@@ -477,11 +537,17 @@ function TimelineItemComponent({
         }}
         aria-label={accessibleLabel}
       >
+        {!hasVideoPreviewFrame && (
+          <div className={styles.scenePlaceholder}>Video</div>
+        )}
         <video
+          ref={videoRef}
           src={videoPath}
           className={styles.videoThumbnail}
           preload="metadata"
           muted
+          playsInline
+          style={{ visibility: hasVideoPreviewFrame ? 'visible' : 'hidden' }}
         />
         {clipBadgeLabel && (
           <div className={styles.clipBadge}>{clipBadgeLabel}</div>
@@ -530,11 +596,17 @@ function TimelineItemComponent({
         }}
         aria-label={accessibleLabel}
       >
+        {!hasVideoPreviewFrame && (
+          <div className={styles.scenePlaceholder}>Info</div>
+        )}
         <video
+          ref={videoRef}
           src={videoPath}
           className={styles.videoThumbnail}
           preload="metadata"
           muted
+          playsInline
+          style={{ visibility: hasVideoPreviewFrame ? 'visible' : 'hidden' }}
         />
         {clipBadgeLabel && (
           <div className={styles.clipBadge}>{clipBadgeLabel}</div>
@@ -642,7 +714,9 @@ function TimelineItemComponent({
       aria-label={accessibleLabel}
     >
       {thumbnailElement}
-      {clipBadgeLabel && <div className={styles.clipBadge}>{clipBadgeLabel}</div>}
+      {clipBadgeLabel && (
+        <div className={styles.clipBadge}>{clipBadgeLabel}</div>
+      )}
       <div className={styles.sceneId}>{footerLabel}</div>
       {item.prompt && (
         <div className={styles.sceneDescription} title={item.prompt}>
@@ -842,6 +916,8 @@ export default function TimelinePanel({
     timelineSource,
     error: timelineError,
     isTimelineLoading,
+    normalizationSummary,
+    isNormalizedFromCorruption,
   } = useTimelineDataContext();
 
   // Initialize zoom level from timeline state
@@ -1055,9 +1131,8 @@ export default function TimelinePanel({
     number | null
   >(null);
   const [isAudioModalOpen, setIsAudioModalOpen] = useState(false);
-  const [regenerateShotItem, setRegenerateShotItem] = useState<TimelineItem | null>(
-    null,
-  );
+  const [regenerateShotItem, setRegenerateShotItem] =
+    useState<TimelineItem | null>(null);
   const [isSubmittingShotRegenerate, setIsSubmittingShotRegenerate] =
     useState(false);
   const [contextMenuState, setContextMenuState] =
@@ -2381,14 +2456,17 @@ export default function TimelinePanel({
 
   // Fallback for environments where touchpad pinch events are routed
   // through React's synthetic wheel path instead of the native listener.
-  const handleReactWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    if (e.defaultPrevented || !(e.ctrlKey || e.metaKey)) {
-      return;
-    }
+  const handleReactWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (e.defaultPrevented || !(e.ctrlKey || e.metaKey)) {
+        return;
+      }
 
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoomLevel((prev) => Math.max(0.1, Math.min(5, prev * delta)));
-  }, []);
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      setZoomLevel((prev) => Math.max(0.1, Math.min(5, prev * delta)));
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!isOpen) {
@@ -2803,18 +2881,24 @@ export default function TimelinePanel({
     } => track !== null,
   );
 
+  const normalizationMessage =
+    normalizationSummary.droppedCount > 0
+      ? `Some timeline segments were unavailable (${normalizationSummary.droppedCount} dropped)`
+      : isNormalizedFromCorruption
+        ? `Recovered timeline from stale restore data (${normalizationSummary.repairedCount} repaired)`
+        : null;
+
   const timelineStateMessage = timelineError
     ? timelineError
     : isTimelineLoading
       ? 'Loading local timeline'
-      : captionGenerationMessage ||
-        'Timeline ready';
+      : normalizationMessage || captionGenerationMessage || 'Timeline ready';
 
   const timelineStateClass = timelineError
     ? styles.stateError
     : isTimelineLoading
       ? styles.stateLoading
-      : captionGenerationMessage
+      : normalizationMessage || captionGenerationMessage
         ? styles.stateInfo
         : styles.stateReady;
 

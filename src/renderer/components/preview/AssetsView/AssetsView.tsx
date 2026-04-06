@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Image as ImageIcon, Video, X, Play, ImagePlus } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
@@ -160,8 +160,43 @@ export default function AssetsView() {
   const [infographicPaths, setInfographicPaths] = useState<
     Record<string, string>
   >({});
+  const refreshInFlightRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
+  const fileChangeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const currentLoadIdRef = useRef(0);
 
-  const loadMediaFiles = useCallback(async () => {
+  const hasAnyAssetsRef = useRef(false);
+
+  useEffect(() => {
+    hasAnyAssetsRef.current =
+      generatedImages.length > 0 ||
+      generatedVideos.length > 0 ||
+      generatedInfographics.length > 0;
+  }, [generatedImages.length, generatedVideos.length, generatedInfographics.length]);
+
+  const areMediaListsEqual = (
+    left: MediaAsset[],
+    right: MediaAsset[],
+  ): boolean => {
+    if (left.length !== right.length) {
+      return false;
+    }
+
+    return left.every((asset, index) => {
+      const other = right[index];
+      return (
+        other &&
+        asset.name === other.name &&
+        asset.path === other.path &&
+        asset.type === other.type &&
+        asset.category === other.category
+      );
+    });
+  };
+
+  const loadMediaFiles = useCallback(async (options?: { background?: boolean }) => {
     if (!projectDirectory) {
       setGeneratedImages([]);
       setGeneratedVideos([]);
@@ -169,7 +204,22 @@ export default function AssetsView() {
       return;
     }
 
-    setIsLoadingMedia(true);
+    if (refreshInFlightRef.current) {
+      pendingRefreshRef.current = true;
+      return;
+    }
+
+    refreshInFlightRef.current = true;
+    const loadId = currentLoadIdRef.current + 1;
+    currentLoadIdRef.current = loadId;
+
+    const shouldShowLoading =
+      !options?.background && !hasAnyAssetsRef.current;
+
+    if (shouldShowLoading) {
+      setIsLoadingMedia(true);
+    }
+
     try {
       const discoveredMedia = new Map<string, MediaAsset>();
 
@@ -205,22 +255,47 @@ export default function AssetsView() {
         (left, right) => left.name.localeCompare(right.name),
       );
 
-      setGeneratedImages(
-        allMedia.filter((asset) => asset.category === 'images'),
+      const nextGeneratedImages = allMedia.filter(
+        (asset) => asset.category === 'images',
       );
-      setGeneratedVideos(
-        allMedia.filter((asset) => asset.category === 'videos'),
+      const nextGeneratedVideos = allMedia.filter(
+        (asset) => asset.category === 'videos',
       );
-      setGeneratedInfographics(
-        allMedia.filter((asset) => asset.category === 'infographics'),
+      const nextGeneratedInfographics = allMedia.filter(
+        (asset) => asset.category === 'infographics',
+      );
+
+      if (currentLoadIdRef.current !== loadId) {
+        return;
+      }
+
+      setGeneratedImages((prev) =>
+        areMediaListsEqual(prev, nextGeneratedImages)
+          ? prev
+          : nextGeneratedImages,
+      );
+      setGeneratedVideos((prev) =>
+        areMediaListsEqual(prev, nextGeneratedVideos)
+          ? prev
+          : nextGeneratedVideos,
+      );
+      setGeneratedInfographics((prev) =>
+        areMediaListsEqual(prev, nextGeneratedInfographics)
+          ? prev
+          : nextGeneratedInfographics,
       );
     } catch (err) {
       console.error('Failed to load media files:', err);
-      setGeneratedImages([]);
-      setGeneratedVideos([]);
-      setGeneratedInfographics([]);
     } finally {
-      setIsLoadingMedia(false);
+      if (currentLoadIdRef.current === loadId && shouldShowLoading) {
+        setIsLoadingMedia(false);
+      }
+      refreshInFlightRef.current = false;
+
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        void loadMediaFiles({ background: true });
+      }
     }
   }, [assetManifest, projectDirectory]);
 
@@ -239,11 +314,21 @@ export default function AssetsView() {
         normalizedPath.endsWith('/assets/manifest.json');
 
       if (isRelevantMediaChange) {
-        void loadMediaFiles();
+        if (fileChangeDebounceRef.current) {
+          clearTimeout(fileChangeDebounceRef.current);
+        }
+        fileChangeDebounceRef.current = setTimeout(() => {
+          fileChangeDebounceRef.current = null;
+          void loadMediaFiles({ background: true });
+        }, 250);
       }
     });
 
     return () => {
+      if (fileChangeDebounceRef.current) {
+        clearTimeout(fileChangeDebounceRef.current);
+        fileChangeDebounceRef.current = null;
+      }
       unsubscribe();
     };
   }, [loadMediaFiles]);

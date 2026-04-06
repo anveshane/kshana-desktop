@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+  buildNormalizedServerTimelineData,
   buildServerTimelineItems,
   getTimelineFileState,
 } from './useTimelineData';
@@ -315,5 +316,133 @@ describe('useTimelineData server timeline helpers', () => {
 
   it('includes segment timing overrides in the default timeline state', () => {
     expect(DEFAULT_TIMELINE_STATE.segment_timing_overrides).toEqual({});
+  });
+
+  it('repairs a mismatched active video path from the manifest asset in memory', () => {
+    const result = buildNormalizedServerTimelineData({
+      timeline: {
+        version: '1.1',
+        totalDuration: 4,
+        segments: [
+          {
+            id: 'segment_0_shot_3',
+            label: 'Scene 1 Shot 3: Medium wide pan to diner',
+            startTime: 0,
+            endTime: 4,
+            fillStatus: 'filled',
+            layers: [
+              {
+                type: 'visual',
+                artifactId: 'vid_scene_1_shot_3',
+                filePath: 'assets/videos/Scene2_shot1_video_wrong.mp4',
+              },
+            ],
+          },
+        ],
+      },
+      assets: [
+        {
+          id: 'vid_scene_1_shot_3',
+          type: 'scene_video',
+          path: 'assets/videos/Scene1_shot3_video_correct.mp4',
+          scene_number: 1,
+          version: 1,
+          created_at: 1,
+          metadata: {
+            shot_number: 3,
+          },
+        },
+      ],
+    });
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        type: 'video',
+        videoPath: 'assets/videos/Scene1_shot3_video_correct.mp4',
+      }),
+    ]);
+    expect(result.isNormalizedFromCorruption).toBe(true);
+    expect(result.normalizationSummary).toEqual({
+      repairedCount: 1,
+      droppedCount: 0,
+    });
+    expect(result.validationIssues).toEqual([
+      expect.objectContaining({
+        segmentId: 'segment_0_shot_3',
+        code: 'recovered_from_manifest',
+      }),
+    ]);
+  });
+
+  it('renders image-only artifact segments as images and drops invalid cross-shot videos', () => {
+    const result = buildNormalizedServerTimelineData({
+      timeline: {
+        version: '1.1',
+        totalDuration: 8,
+        segments: [
+          {
+            id: 'segment_1_shot_2',
+            label: 'Scene 2 Shot 2: Close-up',
+            startTime: 0,
+            endTime: 4,
+            fillStatus: 'filled',
+            layers: [
+              {
+                type: 'visual',
+                artifactId: 'img_scene_2_shot_2',
+              },
+            ],
+          },
+          {
+            id: 'segment_1_shot_3',
+            label: 'Scene 2 Shot 3: Booth',
+            startTime: 4,
+            endTime: 8,
+            fillStatus: 'filled',
+            layers: [
+              {
+                type: 'visual',
+                filePath: 'assets/videos/Scene4_shot1_video_wrong.mp4',
+              },
+            ],
+          },
+        ],
+      },
+      assets: [
+        {
+          id: 'img_scene_2_shot_2',
+          type: 'scene_image',
+          path: 'assets/images/scene-2-shot-2.png',
+          scene_number: 2,
+          version: 1,
+          created_at: 1,
+          metadata: {
+            shot_number: 2,
+          },
+        },
+      ],
+    });
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        id: 'segment_1_shot_2',
+        type: 'image',
+        imagePath: 'assets/images/scene-2-shot-2.png',
+      }),
+      expect.objectContaining({
+        id: 'segment_1_shot_3',
+        type: 'placeholder',
+      }),
+    ]);
+    expect(result.normalizationSummary).toEqual({
+      repairedCount: 0,
+      droppedCount: 1,
+    });
+    expect(result.validationIssues).toEqual([
+      expect.objectContaining({
+        segmentId: 'segment_1_shot_3',
+        code: 'dropped_invalid_visual',
+      }),
+    ]);
   });
 });

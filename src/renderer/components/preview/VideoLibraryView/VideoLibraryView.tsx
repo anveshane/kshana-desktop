@@ -29,6 +29,10 @@ import {
   buildTimelineExportItem,
   sanitizePromptOverlayText,
 } from '../../../utils/promptOverlayExport';
+import {
+  getThumbnailPreviewTime,
+  getVisibleVideoTime,
+} from '../../../utils/videoPreview';
 import type { Artifact } from '../../../types/projectState';
 import type { SceneRef } from '../../../types/kshana/entities';
 import type { SceneVersions } from '../../../types/kshana/timeline';
@@ -78,11 +82,6 @@ interface VideoCardProps {
   artifact: Artifact;
   formatDate: (dateString: string) => string;
   projectDirectory: string | null;
-}
-
-function getVideoCardPreviewTime(duration: number | undefined): number {
-  if (!Number.isFinite(duration) || (duration ?? 0) <= 0) return 0;
-  return Math.max(0, Math.min((duration ?? 0) * 0.12, (duration ?? 0) - 0.05));
 }
 
 function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
@@ -168,7 +167,7 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
   ]);
 
   const primePreviewFrame = useCallback((video: HTMLVideoElement) => {
-    const previewTime = getVideoCardPreviewTime(video.duration);
+    const previewTime = getThumbnailPreviewTime(video.duration);
     if (!Number.isFinite(previewTime) || previewTime <= 0) {
       setHasPreviewFrame(true);
       return;
@@ -1142,8 +1141,13 @@ export default function VideoLibraryView({
       const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
       const timelinePlaybackTime =
         clipTransitionTimeRef.current ?? lastPlaybackTimeRef.current;
-      const videoTime =
+      const rawVideoTime =
         sourceOffset + (timelinePlaybackTime - currentVideo.startTime);
+      const videoTime = getVisibleVideoTime({
+        desiredTime: rawVideoTime,
+        sourceOffset,
+        clipDuration: currentVideo.duration,
+      });
       if (
         videoTime >= sourceOffset &&
         videoTime < sourceOffset + currentVideo.duration
@@ -1172,8 +1176,13 @@ export default function VideoLibraryView({
       const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
       const timelinePlaybackTime =
         clipTransitionTimeRef.current ?? lastPlaybackTimeRef.current;
-      const videoTime =
+      const rawVideoTime =
         sourceOffset + (timelinePlaybackTime - currentVideo.startTime);
+      const videoTime = getVisibleVideoTime({
+        desiredTime: rawVideoTime,
+        sourceOffset,
+        clipDuration: currentVideo.duration,
+      });
       if (
         videoTime >= sourceOffset &&
         videoTime < sourceOffset + currentVideo.duration

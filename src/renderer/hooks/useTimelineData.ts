@@ -71,6 +71,21 @@ export interface TimelineDataWithRefresh extends TimelineData {
   error: string | null;
   isTimelineLoading: boolean;
   isAudioLoading: boolean;
+  validationIssues: TimelineValidationIssue[];
+  normalizationSummary: {
+    repairedCount: number;
+    droppedCount: number;
+  };
+  isNormalizedFromCorruption: boolean;
+}
+
+export interface TimelineValidationIssue {
+  segmentId: string;
+  code:
+    | 'recovered_from_manifest'
+    | 'dropped_invalid_visual'
+    | 'missing_visual';
+  message: string;
 }
 
 export interface TimelineAudioFile {
@@ -88,6 +103,7 @@ interface ServerTimelineLayer {
   type?: string;
   artifactId?: string;
   filePath?: string;
+  label?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -111,6 +127,21 @@ interface TimelineFileState {
   source: 'server_timeline' | 'none';
   timeline: ServerTimelineDocument | null;
   error: string | null;
+}
+
+interface TimelineIdentity {
+  sceneNumber?: number;
+  shotNumber?: number;
+}
+
+interface NormalizedServerTimelineData {
+  items: TimelineItem[];
+  validationIssues: TimelineValidationIssue[];
+  normalizationSummary: {
+    repairedCount: number;
+    droppedCount: number;
+  };
+  isNormalizedFromCorruption: boolean;
 }
 
 function isSupportedAudioFileName(fileName: string): boolean {
@@ -229,6 +260,38 @@ function getMetadataNumber(
   return null;
 }
 
+function parseIdentityFromText(value: string | undefined): TimelineIdentity {
+  if (!value) {
+    return {};
+  }
+
+  const directMatch =
+    value.match(
+      /segment[_-](\d+)[_-]shot[_-](\d+)|scene[\s_-]*(\d+)[^\d]+shot[\s_-]*(\d+)/i,
+    ) ?? null;
+  if (!directMatch) {
+    return {};
+  }
+
+  const sceneNumber =
+    directMatch[1] !== undefined
+      ? Number.parseInt(directMatch[1], 10) + 1
+      : directMatch[3] !== undefined
+        ? Number.parseInt(directMatch[3], 10)
+        : undefined;
+  const shotNumber =
+    directMatch[2] !== undefined
+      ? Number.parseInt(directMatch[2], 10)
+      : directMatch[4] !== undefined
+        ? Number.parseInt(directMatch[4], 10)
+        : undefined;
+
+  return {
+    sceneNumber: Number.isFinite(sceneNumber) ? sceneNumber : undefined,
+    shotNumber: Number.isFinite(shotNumber) ? shotNumber : undefined,
+  };
+}
+
 function getFirstVisualLayer(
   segment: ServerTimelineSegment,
 ): ServerTimelineLayer | undefined {
@@ -241,6 +304,127 @@ function findAssetByArtifactId(
 ): AssetInfo | undefined {
   if (!artifactId) return undefined;
   return assets.find((asset) => asset.id === artifactId);
+}
+
+function getSegmentDeclaredIdentity(
+  segment: ServerTimelineSegment,
+): TimelineIdentity {
+  const visualLayer = getFirstVisualLayer(segment);
+  const metadata = isObjectRecord(visualLayer?.metadata)
+    ? visualLayer.metadata
+    : undefined;
+  const textIdentity = [segment.id?.trim(), segment.label?.trim()]
+    .map((candidate) => parseIdentityFromText(candidate))
+    .find(
+      (identity) =>
+        identity.sceneNumber !== undefined && identity.shotNumber !== undefined,
+    );
+
+  return {
+    sceneNumber:
+      getMetadataNumber(metadata, 'sceneNumber', 'scene_number') ??
+      textIdentity?.sceneNumber,
+    shotNumber:
+      getMetadataNumber(metadata, 'shotNumber', 'shot_number') ??
+      textIdentity?.shotNumber,
+  };
+}
+
+function getLayerIdentity(
+  layer: ServerTimelineLayer | undefined,
+  asset?: AssetInfo,
+  explicitPath?: string,
+): TimelineIdentity {
+  const metadata = isObjectRecord(layer?.metadata) ? layer.metadata : undefined;
+  const metadataIdentity = {
+    sceneNumber: getMetadataNumber(
+      metadata,
+      'sceneNumber',
+      'scene_number',
+      'placementNumber',
+    ),
+    shotNumber: getMetadataNumber(metadata, 'shotNumber', 'shot_number'),
+  };
+
+  if (
+    metadataIdentity.sceneNumber !== null &&
+    metadataIdentity.shotNumber !== null
+  ) {
+    return {
+      sceneNumber: metadataIdentity.sceneNumber ?? undefined,
+      shotNumber: metadataIdentity.shotNumber ?? undefined,
+    };
+  }
+
+  const assetMetadata = isObjectRecord(asset?.metadata) ? asset.metadata : undefined;
+  const assetMetadataIdentity = {
+    sceneNumber:
+      getMetadataNumber(
+        assetMetadata,
+        'sceneNumber',
+        'scene_number',
+        'placementNumber',
+      ) ??
+      asset?.scene_number,
+    shotNumber: getMetadataNumber(assetMetadata, 'shotNumber', 'shot_number'),
+  };
+  if (
+    assetMetadataIdentity.sceneNumber !== null &&
+    assetMetadataIdentity.sceneNumber !== undefined &&
+    assetMetadataIdentity.shotNumber !== null &&
+    assetMetadataIdentity.shotNumber !== undefined
+  ) {
+    return {
+      sceneNumber: assetMetadataIdentity.sceneNumber,
+      shotNumber: assetMetadataIdentity.shotNumber,
+    };
+  }
+
+  const textCandidates = [
+    explicitPath,
+    layer?.filePath,
+    asset?.path,
+    layer?.artifactId,
+    layer?.label,
+  ];
+  for (const candidate of textCandidates) {
+    const identity = parseIdentityFromText(candidate);
+    if (
+      identity.sceneNumber !== undefined &&
+      identity.shotNumber !== undefined
+    ) {
+      return identity;
+    }
+  }
+
+  return {
+    sceneNumber: assetMetadataIdentity.sceneNumber ?? undefined,
+    shotNumber: assetMetadataIdentity.shotNumber ?? undefined,
+  };
+}
+
+function isIdentityCompatible(
+  segmentIdentity: TimelineIdentity,
+  candidateIdentity: TimelineIdentity,
+): boolean {
+  if (
+    segmentIdentity.sceneNumber === undefined ||
+    segmentIdentity.shotNumber === undefined
+  ) {
+    return true;
+  }
+
+  if (
+    candidateIdentity.sceneNumber === undefined ||
+    candidateIdentity.shotNumber === undefined
+  ) {
+    return true;
+  }
+
+  return (
+    segmentIdentity.sceneNumber === candidateIdentity.sceneNumber &&
+    segmentIdentity.shotNumber === candidateIdentity.shotNumber
+  );
 }
 
 function extractShotIdentity(
@@ -343,6 +527,132 @@ function resolveSegmentVisual(
   }
 
   return null;
+}
+
+export function buildNormalizedServerTimelineData({
+  timeline,
+  assets,
+  segmentOverrides = {},
+}: {
+  timeline: ServerTimelineDocument | null;
+  assets: AssetInfo[];
+  segmentOverrides?: Record<string, SegmentTimingOverride>;
+}): NormalizedServerTimelineData {
+  const validationIssues: TimelineValidationIssue[] = [];
+  let repairedCount = 0;
+  let droppedCount = 0;
+
+  const items = getTimelineSegments(timeline).map((segment) => {
+    const startTime = segment.startTime!;
+    const endTime = segment.endTime!;
+    const label = segment.label?.trim() || segment.id || 'Segment';
+    const sceneLabel = extractSceneLabel(segment);
+    const segmentId = segment.id?.trim() || `segment-${startTime}-${endTime}`;
+    const fillStatus = segment.fillStatus ?? 'empty';
+    const visualLayer = getFirstVisualLayer(segment);
+    const asset = findAssetByArtifactId(visualLayer?.artifactId, assets);
+    const { sceneNumber, shotNumber } = extractShotIdentity(segment, asset);
+    const prompt = extractShotPrompt(segment, asset);
+    const segmentIdentity = getSegmentDeclaredIdentity(segment);
+    const activePath = visualLayer?.filePath?.trim();
+    const activeType = activePath ? detectMediaTypeFromPath(activePath) : null;
+    const activeIdentity = getLayerIdentity(visualLayer, asset, activePath);
+    const activePathMatches =
+      activeType !== null && isIdentityCompatible(segmentIdentity, activeIdentity);
+    const assetType = detectMediaTypeFromAsset(asset);
+    const assetPath = asset?.path?.trim();
+    const assetMatches =
+      assetType !== null &&
+      Boolean(assetPath) &&
+      isIdentityCompatible(
+        segmentIdentity,
+        getLayerIdentity(visualLayer, asset, assetPath),
+      );
+    const metadataFilePath = getLayerMetadataFilePath(visualLayer);
+    const metadataType = metadataFilePath
+      ? detectMediaTypeFromPath(metadataFilePath)
+      : null;
+    const metadataMatches =
+      metadataType !== null &&
+      isIdentityCompatible(
+        segmentIdentity,
+        getLayerIdentity(visualLayer, asset, metadataFilePath ?? undefined),
+      );
+
+    let resolvedVisual: { type: 'image' | 'video'; path: string } | null = null;
+    if (activeType && activePathMatches && activePath) {
+      resolvedVisual = { type: activeType, path: activePath };
+    } else if (assetType && assetMatches && assetPath) {
+      resolvedVisual = { type: assetType, path: assetPath };
+      if (fillStatus === 'filled' && activeType && activePath && activePath !== assetPath) {
+        repairedCount += 1;
+        validationIssues.push({
+          segmentId,
+          code: 'recovered_from_manifest',
+          message: `Recovered ${label} from manifest-backed asset data after stale active media mismatch.`,
+        });
+      }
+    } else if (metadataType && metadataFilePath && metadataMatches) {
+      resolvedVisual = { type: metadataType, path: metadataFilePath };
+    }
+
+    if (fillStatus === 'filled' && resolvedVisual) {
+      return {
+        id: segmentId,
+        type: resolvedVisual.type,
+        startTime,
+        endTime,
+        duration: endTime - startTime,
+        label,
+        sceneLabel,
+        sceneNumber,
+        shotNumber,
+        prompt,
+        segmentId,
+        sourceType: 'server_timeline' as const,
+        mediaTypeContext: resolvedVisual.type,
+        mediaPathContext: resolvedVisual.path,
+        imagePath:
+          resolvedVisual.type === 'image' ? resolvedVisual.path : undefined,
+        videoPath:
+          resolvedVisual.type === 'video' ? resolvedVisual.path : undefined,
+        sourceStartTime: startTime,
+        sourceEndTime: endTime,
+      } satisfies TimelineItem;
+    }
+
+    if (fillStatus === 'filled') {
+      droppedCount += 1;
+      validationIssues.push({
+        segmentId,
+        code:
+          activeType && activePath && !activePathMatches
+            ? 'dropped_invalid_visual'
+            : 'missing_visual',
+        message:
+          activeType && activePath && !activePathMatches
+            ? `${label} referenced media from a different scene or shot and was dropped at runtime.`
+            : `${label} is marked filled but has no usable active visual.`,
+      });
+    }
+
+    return {
+      ...createPlaceholderItem(startTime, endTime, segmentId, label),
+      sceneLabel,
+    };
+  });
+
+  return {
+    items: applySegmentTimingOverridesToItems(items, segmentOverrides).sort(
+      (a, b) => a.startTime - b.startTime,
+    ),
+    validationIssues,
+    normalizationSummary: {
+      repairedCount,
+      droppedCount,
+    },
+    isNormalizedFromCorruption: repairedCount > 0 || droppedCount > 0,
+  };
 }
 
 function createPlaceholderItem(
@@ -480,53 +790,11 @@ export function buildServerTimelineItems({
   assets: AssetInfo[];
   segmentOverrides?: Record<string, SegmentTimingOverride>;
 }): TimelineItem[] {
-  const items = getTimelineSegments(timeline).map((segment) => {
-    const startTime = segment.startTime!;
-    const endTime = segment.endTime!;
-    const label = segment.label?.trim() || segment.id || 'Segment';
-    const sceneLabel = extractSceneLabel(segment);
-    const segmentId = segment.id?.trim() || `segment-${startTime}-${endTime}`;
-    const fillStatus = segment.fillStatus ?? 'empty';
-    const resolvedVisual = resolveSegmentVisual(segment, assets);
-    const visualLayer = getFirstVisualLayer(segment);
-    const asset = findAssetByArtifactId(visualLayer?.artifactId, assets);
-    const { sceneNumber, shotNumber } = extractShotIdentity(segment, asset);
-    const prompt = extractShotPrompt(segment, asset);
-
-    if (fillStatus === 'filled' && resolvedVisual) {
-      return {
-        id: segmentId,
-        type: resolvedVisual.type,
-        startTime,
-        endTime,
-        duration: endTime - startTime,
-        label,
-        sceneLabel,
-        sceneNumber,
-        shotNumber,
-        prompt,
-        segmentId,
-        sourceType: 'server_timeline' as const,
-        mediaTypeContext: resolvedVisual.type,
-        mediaPathContext: resolvedVisual.path,
-        imagePath:
-          resolvedVisual.type === 'image' ? resolvedVisual.path : undefined,
-        videoPath:
-          resolvedVisual.type === 'video' ? resolvedVisual.path : undefined,
-        sourceStartTime: startTime,
-        sourceEndTime: endTime,
-      } satisfies TimelineItem;
-    }
-
-    return {
-      ...createPlaceholderItem(startTime, endTime, segmentId, label),
-      sceneLabel,
-    };
-  });
-
-  return applySegmentTimingOverridesToItems(items, segmentOverrides).sort(
-    (a, b) => a.startTime - b.startTime,
-  );
+  return buildNormalizedServerTimelineData({
+    timeline,
+    assets,
+    segmentOverrides,
+  }).items;
 }
 
 export async function collectAudioFilesWithDuration({
@@ -874,10 +1142,18 @@ export function useTimelineData(
 
   const baseTimelineItems = useMemo(() => {
     if (timelineFileState.source !== 'server_timeline') {
-      return [];
+      return {
+        items: [],
+        validationIssues: [],
+        normalizationSummary: {
+          repairedCount: 0,
+          droppedCount: 0,
+        },
+        isNormalizedFromCorruption: false,
+      } satisfies NormalizedServerTimelineData;
     }
 
-    return buildServerTimelineItems({
+    return buildNormalizedServerTimelineData({
       timeline: timelineFileState.timeline,
       assets: assetManifest?.assets ?? [],
       segmentOverrides: timelineState.segment_timing_overrides ?? {},
@@ -967,8 +1243,8 @@ export function useTimelineData(
     const visualItems =
       timelineFileState.source === 'server_timeline'
         ? calculatedTotalDuration > 0
-          ? fillGapsWithPlaceholders(baseTimelineItems, calculatedTotalDuration)
-          : [...baseTimelineItems]
+          ? fillGapsWithPlaceholders(baseTimelineItems.items, calculatedTotalDuration)
+          : [...baseTimelineItems.items]
         : [];
     const items = [...visualItems];
 
@@ -1007,5 +1283,8 @@ export function useTimelineData(
     error,
     isTimelineLoading,
     isAudioLoading,
+    validationIssues: baseTimelineItems.validationIssues,
+    normalizationSummary: baseTimelineItems.normalizationSummary,
+    isNormalizedFromCorruption: baseTimelineItems.isNormalizedFromCorruption,
   };
 }

@@ -21,8 +21,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function sanitizeNestedProjectMetadata(
+  value: unknown,
+  expectedProjectDirectory: string,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      sanitizeNestedProjectMetadata(item, expectedProjectDirectory),
+    );
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const sanitizedEntries = Object.entries(value).map(([key, nestedValue]) => {
+    if (
+      (key === 'projectDirectory' || key === 'project_directory') &&
+      typeof nestedValue === 'string' &&
+      nestedValue.trim() &&
+      nestedValue !== expectedProjectDirectory
+    ) {
+      return [key, expectedProjectDirectory];
+    }
+
+    return [
+      key,
+      sanitizeNestedProjectMetadata(nestedValue, expectedProjectDirectory),
+    ];
+  });
+
+  return Object.fromEntries(sanitizedEntries);
+}
+
 function normalizePersistedMessage(
   value: unknown,
+  expectedProjectDirectory: string,
 ): PersistedChatMessage | null {
   if (!isRecord(value)) {
     return null;
@@ -54,7 +88,12 @@ function normalizePersistedMessage(
     content,
     timestamp,
     author: typeof value.author === 'string' ? value.author : undefined,
-    meta: isRecord(value.meta) ? value.meta : undefined,
+    meta: isRecord(value.meta)
+      ? (sanitizeNestedProjectMetadata(
+          value.meta,
+          expectedProjectDirectory,
+        ) as Record<string, unknown>)
+      : undefined,
   };
 }
 
@@ -168,7 +207,9 @@ export function parseChatSnapshot(
     typeof parsed.sessionId === 'string' ? parsed.sessionId : null;
   const messages = Array.isArray(parsed.messages)
     ? parsed.messages
-        .map(normalizePersistedMessage)
+        .map((message) =>
+          normalizePersistedMessage(message, expectedProjectDirectory),
+        )
         .filter((message): message is PersistedChatMessage => message !== null)
     : [];
 

@@ -213,4 +213,42 @@ describe('chatPersistence', () => {
 
     expect(parsed?.uiState.autonomousMode).toBe(false);
   });
+
+  it('sanitizes nested foreign project paths in restored message metadata', () => {
+    const parsed = parseChatSnapshot(
+      JSON.stringify({
+        version: 1,
+        projectDirectory: '/tmp/project-a',
+        sessionId: 'session-a',
+        messages: [
+          {
+            id: '1',
+            role: 'system',
+            type: 'tool_call',
+            content: '',
+            timestamp: 1,
+            meta: {
+              result: {
+                project_directory: '/Users/other/Documents/Kshana/project-a',
+                nested: {
+                  projectDirectory: '/Users/other/Documents/Kshana/project-a',
+                },
+              },
+            },
+          },
+        ],
+        uiState: {},
+      }),
+      '/tmp/project-a',
+    );
+
+    expect(parsed?.messages[0]?.meta).toEqual({
+      result: {
+        project_directory: '/tmp/project-a',
+        nested: {
+          projectDirectory: '/tmp/project-a',
+        },
+      },
+    });
+  });
 });
