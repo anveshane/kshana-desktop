@@ -445,4 +445,71 @@ describe('useTimelineData server timeline helpers', () => {
       }),
     ]);
   });
+
+  it('prefers a matching manifest video over a stale image-backed active layer', () => {
+    const result = buildNormalizedServerTimelineData({
+      timeline: {
+        version: '1.1',
+        totalDuration: 8,
+        segments: [
+          {
+            id: 'segment_0_shot_1',
+            label: 'Scene 1 Shot 1: Exterior to interior establishing',
+            startTime: 0,
+            endTime: 4,
+            fillStatus: 'filled',
+            layers: [
+              {
+                type: 'visual',
+                artifactId: 'img_scene_1_shot_1',
+                filePath: 'assets/images/Scene1_shot1_stale.png',
+              },
+            ],
+          },
+        ],
+      },
+      assets: [
+        {
+          id: 'img_scene_1_shot_1',
+          type: 'scene_image',
+          path: 'assets/images/Scene1_shot1_stale.png',
+          scene_number: 1,
+          version: 3,
+          created_at: 3,
+          metadata: {
+            shot_number: 1,
+          },
+        },
+        {
+          id: 'vid_scene_1_shot_1',
+          type: 'scene_video',
+          path: 'assets/videos/Scene1_shot1_video.mp4',
+          scene_number: 1,
+          version: 2,
+          created_at: 2,
+          metadata: {
+            shot_number: 1,
+          },
+        },
+      ],
+    });
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        id: 'segment_0_shot_1',
+        type: 'video',
+        videoPath: 'assets/videos/Scene1_shot1_video.mp4',
+      }),
+    ]);
+    expect(result.normalizationSummary).toEqual({
+      repairedCount: 1,
+      droppedCount: 0,
+    });
+    expect(result.validationIssues).toEqual([
+      expect.objectContaining({
+        segmentId: 'segment_0_shot_1',
+        code: 'video_preferred_over_image',
+      }),
+    ]);
+  });
 });

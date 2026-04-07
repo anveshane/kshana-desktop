@@ -84,7 +84,8 @@ export interface TimelineValidationIssue {
   code:
     | 'recovered_from_manifest'
     | 'dropped_invalid_visual'
-    | 'missing_visual';
+    | 'missing_visual'
+    | 'video_preferred_over_image';
   message: string;
 }
 
@@ -304,6 +305,54 @@ function findAssetByArtifactId(
 ): AssetInfo | undefined {
   if (!artifactId) return undefined;
   return assets.find((asset) => asset.id === artifactId);
+}
+
+function hasCompleteIdentity(identity: TimelineIdentity): boolean {
+  return (
+    identity.sceneNumber !== undefined && identity.shotNumber !== undefined
+  );
+}
+
+function findBestMatchingManifestAsset(
+  segmentIdentity: TimelineIdentity,
+  assets: AssetInfo[],
+  preferredType?: 'image' | 'video',
+): AssetInfo | undefined {
+  if (!hasCompleteIdentity(segmentIdentity)) {
+    return undefined;
+  }
+
+  const matchingAssets = assets.filter((asset) => {
+    const mediaType = detectMediaTypeFromAsset(asset);
+    if (!mediaType) {
+      return false;
+    }
+    if (preferredType && mediaType !== preferredType) {
+      return false;
+    }
+
+    return isIdentityCompatible(
+      segmentIdentity,
+      getLayerIdentity(undefined, asset, asset.path),
+    );
+  });
+
+  if (matchingAssets.length === 0) {
+    return undefined;
+  }
+
+  return matchingAssets.sort((left, right) => {
+    const leftType = detectMediaTypeFromAsset(left);
+    const rightType = detectMediaTypeFromAsset(right);
+
+    if (leftType !== rightType) {
+      return leftType === 'video' ? -1 : 1;
+    }
+    if (left.version !== right.version) {
+      return right.version - left.version;
+    }
+    return right.created_at - left.created_at;
+  })[0];
 }
 
 function getSegmentDeclaredIdentity(
@@ -551,9 +600,19 @@ export function buildNormalizedServerTimelineData({
     const fillStatus = segment.fillStatus ?? 'empty';
     const visualLayer = getFirstVisualLayer(segment);
     const asset = findAssetByArtifactId(visualLayer?.artifactId, assets);
+    const segmentIdentity = getSegmentDeclaredIdentity(segment);
+    const preferredVideoAsset = findBestMatchingManifestAsset(
+      segmentIdentity,
+      assets,
+      'video',
+    );
+    const preferredImageAsset = findBestMatchingManifestAsset(
+      segmentIdentity,
+      assets,
+      'image',
+    );
     const { sceneNumber, shotNumber } = extractShotIdentity(segment, asset);
     const prompt = extractShotPrompt(segment, asset);
-    const segmentIdentity = getSegmentDeclaredIdentity(segment);
     const activePath = visualLayer?.filePath?.trim();
     const activeType = activePath ? detectMediaTypeFromPath(activePath) : null;
     const activeIdentity = getLayerIdentity(visualLayer, asset, activePath);
@@ -580,7 +639,28 @@ export function buildNormalizedServerTimelineData({
       );
 
     let resolvedVisual: { type: 'image' | 'video'; path: string } | null = null;
-    if (activeType && activePathMatches && activePath) {
+    if (activeType === 'video' && activePathMatches && activePath) {
+      resolvedVisual = { type: 'video', path: activePath };
+    } else if (preferredVideoAsset?.path?.trim()) {
+      resolvedVisual = {
+        type: 'video',
+        path: preferredVideoAsset.path.trim(),
+      };
+      if (fillStatus === 'filled' && activePath !== resolvedVisual.path) {
+        repairedCount += 1;
+        validationIssues.push({
+          segmentId,
+          code:
+            activeType === 'image'
+              ? 'video_preferred_over_image'
+              : 'recovered_from_manifest',
+          message:
+            activeType === 'image'
+              ? `Recovered ${label} by preferring the matching manifest video over a stale image-backed active layer.`
+              : `Recovered ${label} from manifest-backed asset data after stale active media mismatch.`,
+        });
+      }
+    } else if (activeType && activePathMatches && activePath) {
       resolvedVisual = { type: activeType, path: activePath };
     } else if (assetType && assetMatches && assetPath) {
       resolvedVisual = { type: assetType, path: assetPath };
@@ -592,6 +672,11 @@ export function buildNormalizedServerTimelineData({
           message: `Recovered ${label} from manifest-backed asset data after stale active media mismatch.`,
         });
       }
+    } else if (preferredImageAsset?.path?.trim()) {
+      resolvedVisual = {
+        type: 'image',
+        path: preferredImageAsset.path.trim(),
+      };
     } else if (metadataType && metadataFilePath && metadataMatches) {
       resolvedVisual = { type: metadataType, path: metadataFilePath };
     }

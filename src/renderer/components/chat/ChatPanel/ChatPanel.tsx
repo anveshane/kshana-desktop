@@ -3751,6 +3751,18 @@ export default function ChatPanel() {
               setStatusMessage(resumedState.statusMessage);
               setIsTaskRunning(resumedState.isTaskRunning);
               setAutonomousModeEnabled(resumedState.autonomousMode);
+              setSessionTimer({
+                visible:
+                  typeof resumedSession.elapsedMs === 'number' &&
+                  Number.isFinite(resumedSession.elapsedMs),
+                elapsedMs:
+                  typeof resumedSession.elapsedMs === 'number' &&
+                  Number.isFinite(resumedSession.elapsedMs)
+                    ? resumedSession.elapsedMs
+                    : 0,
+                running: resumedSession.status === 'running',
+                completed: Boolean(resumedSession.completed),
+              });
               if (resumedState.notice) {
                 appendSystemMessage(resumedState.notice, 'status');
               }

@@ -3,6 +3,8 @@ export interface RemoteSessionInfo {
   status: 'idle' | 'running' | 'awaiting_input' | 'completed' | 'error';
   configured?: boolean;
   autonomousMode?: boolean;
+  elapsedMs?: number;
+  completed?: boolean;
 }
 
 export function shouldConfigureProjectAfterConnect(
