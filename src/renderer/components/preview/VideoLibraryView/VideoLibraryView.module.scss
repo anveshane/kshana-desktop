@@ -226,6 +226,17 @@
   flex-shrink: 0;
 }
 
+.warningBanner {
+  margin: $spacing-md $spacing-md 0;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid rgba(var(--color-warning-rgb), 0.25);
+  background: rgba(var(--color-warning-rgb), 0.1);
+  color: $color-warning;
+  font-size: $font-size-xs;
+  line-height: 1.5;
+  border-radius: $radius-md;
+}
+
 .videoGrid {
   padding: $spacing-md;
   display: flex;

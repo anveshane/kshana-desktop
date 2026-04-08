@@ -336,7 +336,7 @@ const projectBridge = {
       aspectRatio: '16:9' | '9:16';
       quality: 'standard' | 'high';
     },
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+  ): Promise<{ success: boolean; outputPath?: string; duration?: number; error?: string }> {
     return ipcRenderer.invoke(
       'project:compose-timeline-video',
       timelineItems,

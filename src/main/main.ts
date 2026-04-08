@@ -1472,7 +1472,7 @@ ipcMain.handle(
     overlayItems?: ExportOverlayItem[],
     textOverlayCues?: ExportTextOverlayCue[],
     promptOverlayCues?: ExportPromptOverlayCue[],
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
+  ): Promise<{ success: boolean; outputPath?: string; duration?: number; error?: string }> => {
     console.log('[Export:CapCut] Starting CapCut export...');
     try {
       const projectName =
@@ -2001,7 +2001,7 @@ ipcMain.handle(
     textOverlayCues?: TextOverlayCue[],
     promptOverlayCues?: PromptOverlayCue[],
     exportOptions?: ExportRenderOptions,
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
+  ): Promise<{ success: boolean; outputPath?: string; duration?: number; error?: string }> => {
     console.log('[VideoComposition] Starting video composition...');
     console.log('[VideoComposition] Timeline items:', timelineItems.length);
 
@@ -2752,7 +2752,11 @@ ipcMain.handle(
       console.log(
         '[VideoComposition] Video composition completed successfully!',
       );
-      return { success: true, outputPath: finalOutputPath };
+      return {
+        success: true,
+        outputPath: finalOutputPath,
+        duration: timelineItems.reduce((sum, item) => sum + (item.duration || 0), 0),
+      };
     } catch (error) {
       console.error('[VideoComposition] Error during composition:', error);
       // Clean up temporary files on error

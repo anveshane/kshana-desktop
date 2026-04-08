@@ -1,10 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Image as ImageIcon, Video, X, Play, ImagePlus } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { FileNode, getFileType } from '../../../../shared/fileSystemTypes';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
+import {
+  buildProjectAbsolutePath,
+  getFinalVideoStateWarning,
+  getManifestFinalVideoAsset,
+} from '../../../services/project/finalVideoValidation';
 import styles from './AssetsView.module.scss';
 
 interface MediaAsset {
@@ -143,7 +148,7 @@ const collectScannedMedia = (
 
 export default function AssetsView() {
   const { projectDirectory } = useWorkspace();
-  const { assetManifest } = useProject();
+  const { assetManifest, agentState } = useProject();
 
   const [generatedImages, setGeneratedImages] = useState<MediaAsset[]>([]);
   const [generatedVideos, setGeneratedVideos] = useState<MediaAsset[]>([]);
@@ -166,6 +171,33 @@ export default function AssetsView() {
     null,
   );
   const currentLoadIdRef = useRef(0);
+  const [validFinalVideoPaths, setValidFinalVideoPaths] = useState<Set<string> | null>(
+    null,
+  );
+  const manifestFinalVideoAsset = useMemo(
+    () => getManifestFinalVideoAsset(agentState, assetManifest),
+    [agentState, assetManifest],
+  );
+  const finalVideoWarning = useMemo(
+    () =>
+      getFinalVideoStateWarning(
+        agentState,
+        assetManifest,
+        projectDirectory,
+        manifestFinalVideoAsset && validFinalVideoPaths
+          ? validFinalVideoPaths.has(
+              normalizeMediaPath(manifestFinalVideoAsset.path, projectDirectory),
+            )
+          : undefined,
+      ),
+    [
+      agentState,
+      assetManifest,
+      projectDirectory,
+      manifestFinalVideoAsset,
+      validFinalVideoPaths,
+    ],
+  );
 
   const hasAnyAssetsRef = useRef(false);
 
@@ -175,6 +207,49 @@ export default function AssetsView() {
       generatedVideos.length > 0 ||
       generatedInfographics.length > 0;
   }, [generatedImages.length, generatedVideos.length, generatedInfographics.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const verifyFinalVideos = async () => {
+      if (!projectDirectory || !assetManifest?.assets?.length) {
+        if (!cancelled) {
+          setValidFinalVideoPaths(new Set());
+        }
+        return;
+      }
+
+      const finalVideoAssets = assetManifest.assets.filter(
+        (asset) => asset.type === 'final_video',
+      );
+      const nextValidPaths = new Set<string>();
+
+      await Promise.all(
+        finalVideoAssets.map(async (asset) => {
+          const absolutePath = buildProjectAbsolutePath(
+            projectDirectory,
+            asset.path,
+          );
+          if (
+            await window.electron.project.checkFileExists(absolutePath)
+          ) {
+            nextValidPaths.add(
+              normalizeMediaPath(asset.path, projectDirectory),
+            );
+          }
+        }),
+      );
+
+      if (!cancelled) {
+        setValidFinalVideoPaths(nextValidPaths);
+      }
+    };
+
+    void verifyFinalVideos();
+    return () => {
+      cancelled = true;
+    };
+  }, [assetManifest, projectDirectory]);
 
   const areMediaListsEqual = (
     left: MediaAsset[],
@@ -224,6 +299,14 @@ export default function AssetsView() {
       const discoveredMedia = new Map<string, MediaAsset>();
 
       for (const asset of assetManifest?.assets || []) {
+        if (
+          asset.type === 'final_video' &&
+          !validFinalVideoPaths?.has(
+            normalizeMediaPath(asset.path, projectDirectory),
+          )
+        ) {
+          continue;
+        }
         const category = inferCategoryFromManifest(asset.path, asset.type);
         if (!category) {
           continue;
@@ -254,14 +337,21 @@ export default function AssetsView() {
       const allMedia = Array.from(discoveredMedia.values()).sort(
         (left, right) => left.name.localeCompare(right.name),
       );
+      const filteredMedia = allMedia.filter((asset) => {
+        const normalizedPath = normalizeMediaPath(asset.path, projectDirectory);
+        if (!normalizedPath.includes('assets/final_video/')) {
+          return true;
+        }
+        return validFinalVideoPaths?.has(normalizedPath) ?? false;
+      });
 
-      const nextGeneratedImages = allMedia.filter(
+      const nextGeneratedImages = filteredMedia.filter(
         (asset) => asset.category === 'images',
       );
-      const nextGeneratedVideos = allMedia.filter(
+      const nextGeneratedVideos = filteredMedia.filter(
         (asset) => asset.category === 'videos',
       );
-      const nextGeneratedInfographics = allMedia.filter(
+      const nextGeneratedInfographics = filteredMedia.filter(
         (asset) => asset.category === 'infographics',
       );
 
@@ -297,7 +387,7 @@ export default function AssetsView() {
         void loadMediaFiles({ background: true });
       }
     }
-  }, [assetManifest, projectDirectory]);
+  }, [assetManifest, projectDirectory, validFinalVideoPaths]);
 
   useEffect(() => {
     void loadMediaFiles();
@@ -452,6 +542,9 @@ export default function AssetsView() {
   if (!isLoadingMedia && !hasAnyAssets) {
     return (
       <div className={styles.container}>
+        {finalVideoWarning ? (
+          <div className={styles.warningBanner}>{finalVideoWarning}</div>
+        ) : null}
         <div className={styles.emptyState}>
           <ImageIcon size={48} className={styles.emptyIcon} />
           <h3>No Generated Assets Yet</h3>
@@ -464,6 +557,9 @@ export default function AssetsView() {
   return (
     <>
       <div className={styles.container}>
+        {finalVideoWarning ? (
+          <div className={styles.warningBanner}>{finalVideoWarning}</div>
+        ) : null}
         <div className={styles.content}>
           {/* Generated Images Section */}
           {(generatedImages.length > 0 || isLoadingMedia) && (

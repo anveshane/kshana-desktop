@@ -3,6 +3,7 @@ export function applyDesktopRemotionQueryParams(
   desktopVersion?: string | null,
 ): void {
   url.searchParams.set('desktop_remotion', '1');
+  url.searchParams.set('desktop_assembly', '1');
 
   const normalizedVersion = desktopVersion?.trim();
   if (!normalizedVersion) {

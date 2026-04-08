@@ -30,6 +30,11 @@ import {
   sanitizePromptOverlayText,
 } from '../../../utils/promptOverlayExport';
 import {
+  buildProjectAbsolutePath,
+  getFinalVideoStateWarning,
+  getManifestFinalVideoAsset,
+} from '../../../services/project/finalVideoValidation';
+import {
   getThumbnailPreviewTime,
   getVisibleVideoTime,
 } from '../../../utils/videoPreview';
@@ -294,7 +299,68 @@ export default function VideoLibraryView({
   projectScenes = [],
 }: VideoLibraryViewProps) {
   const { projectDirectory } = useWorkspace();
-  const { isLoading, assetManifest } = useProject();
+  const { isLoading, assetManifest, agentState } = useProject();
+  const [validFinalVideoIds, setValidFinalVideoIds] = useState<Set<string> | null>(
+    null,
+  );
+  const manifestFinalVideoAsset = useMemo(
+    () => getManifestFinalVideoAsset(agentState, assetManifest),
+    [agentState, assetManifest],
+  );
+  const finalVideoWarning = useMemo(
+    () =>
+      getFinalVideoStateWarning(
+        agentState,
+        assetManifest,
+        projectDirectory,
+        manifestFinalVideoAsset && validFinalVideoIds
+          ? validFinalVideoIds.has(manifestFinalVideoAsset.id)
+          : undefined,
+      ),
+    [agentState, assetManifest, projectDirectory, manifestFinalVideoAsset, validFinalVideoIds],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const verifyFinalVideos = async () => {
+      if (!projectDirectory || !assetManifest?.assets?.length) {
+        if (!cancelled) {
+          setValidFinalVideoIds(new Set());
+        }
+        return;
+      }
+
+      const assets = assetManifest.assets.filter(
+        (asset) => asset.type === 'final_video',
+      );
+      const validIds = new Set<string>();
+
+      await Promise.all(
+        assets.map(async (asset) => {
+          const absolutePath = buildProjectAbsolutePath(
+            projectDirectory,
+            asset.path,
+          );
+          if (
+            !(await window.electron.project.checkFileExists(absolutePath))
+          ) {
+            return;
+          }
+          validIds.add(asset.id);
+        }),
+      );
+
+      if (!cancelled) {
+        setValidFinalVideoIds(validIds);
+      }
+    };
+
+    void verifyFinalVideos();
+    return () => {
+      cancelled = true;
+    };
+  }, [assetManifest, projectDirectory]);
 
   // Create scene folder map
   const sceneFoldersByNumber = useMemo(() => {
@@ -333,7 +399,9 @@ export default function VideoLibraryView({
     if (!assetManifest?.assets) return [];
     return assetManifest.assets
       .filter(
-        (asset) => asset.type === 'scene_video' || asset.type === 'final_video',
+        (asset) =>
+          asset.type === 'scene_video' ||
+          (asset.type === 'final_video' && validFinalVideoIds?.has(asset.id)),
       )
       .map((asset) => {
         let createdAt: string;
@@ -358,7 +426,7 @@ export default function VideoLibraryView({
           },
         };
       });
-  }, [assetManifest]);
+  }, [assetManifest, validFinalVideoIds]);
 
   // Refs must be declared before usePlaybackController hook
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -1984,6 +2052,9 @@ export default function VideoLibraryView({
       <div className={styles.content}>
         {/* Left Sidebar - Video Grid */}
         <div className={styles.sidebar}>
+          {finalVideoWarning ? (
+            <div className={styles.warningBanner}>{finalVideoWarning}</div>
+          ) : null}
           {videoArtifacts.length === 0 ? (
             <div className={styles.emptyState}>
               <Film size={32} className={styles.emptyIcon} />

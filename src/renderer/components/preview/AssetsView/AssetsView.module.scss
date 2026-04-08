@@ -7,6 +7,17 @@
   background-color: $color-bg-app;
 }
 
+.warningBanner {
+  margin: $spacing-lg $spacing-xl 0;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid rgba(var(--color-warning-rgb), 0.25);
+  background: rgba(var(--color-warning-rgb), 0.1);
+  color: $color-warning;
+  font-size: $font-size-xs;
+  line-height: 1.5;
+  border-radius: $radius-md;
+}
+
 .content {
   flex: 1;
   overflow-y: auto;

@@ -48,6 +48,12 @@ import {
   extractIncomingFileOpPath,
   isAbsoluteWirePath,
 } from './chatPanelPathProtocolUtils';
+import {
+  assembleRemoteFinalVideo,
+  type TimelineAssemblyProgress,
+  type TimelineAssemblyRequest,
+  type TimelineAssemblyResult,
+} from './remoteFinalVideoAssembly';
 import { getDisconnectBannerMessage } from './chatPanelConnectionUtils';
 import { getImmediateAutoQuestionResponse } from './chatPanelQuestionUtils';
 import {
@@ -2949,6 +2955,116 @@ export default function ChatPanel() {
               });
               appendSystemMessage(
                 `Desktop Remotion render failed: ${errorMessage}`,
+                'error',
+              );
+            });
+          break;
+        }
+        case 'timeline_assembly_request': {
+          const request = data as Partial<TimelineAssemblyRequest>;
+          const requestId =
+            typeof request.requestId === 'string'
+              ? request.requestId.trim()
+              : '';
+          if (!requestId) {
+            console.warn(
+              '[ChatPanel] timeline_assembly_request missing requestId',
+              payload,
+            );
+            break;
+          }
+
+          const sendProgress = (progress: TimelineAssemblyProgress) => {
+            const ws = wsRef.current;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+              return;
+            }
+            ws.send(
+              JSON.stringify({
+                type: 'timeline_assembly_progress',
+                data: progress,
+              }),
+            );
+          };
+
+          const sendResult = (result: TimelineAssemblyResult) => {
+            const ws = wsRef.current;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+              return;
+            }
+            ws.send(
+              JSON.stringify({
+                type: 'timeline_assembly_result',
+                data: result,
+              }),
+            );
+          };
+
+          if (!projectDirectory) {
+            sendResult({
+              requestId,
+              status: 'failed',
+              error:
+                'No active project selected on desktop for timeline assembly.',
+            });
+            break;
+          }
+
+          const requestPayload: TimelineAssemblyRequest = {
+            requestId,
+            projectDir:
+              typeof request.projectDir === 'string'
+                ? request.projectDir
+                : projectDirectory,
+            timelineItems: Array.isArray(request.timelineItems)
+              ? request.timelineItems
+              : [],
+            audioPath:
+              typeof request.audioPath === 'string'
+                ? request.audioPath
+                : undefined,
+            overlayItems: Array.isArray(request.overlayItems)
+              ? request.overlayItems
+              : undefined,
+            textOverlayCues: Array.isArray(request.textOverlayCues)
+              ? request.textOverlayCues
+              : undefined,
+            promptOverlayCues: Array.isArray(request.promptOverlayCues)
+              ? request.promptOverlayCues
+              : undefined,
+            outputIntent: 'final_video',
+            outputName:
+              typeof request.outputName === 'string'
+                ? request.outputName
+                : 'final_video',
+          };
+
+          void assembleRemoteFinalVideo(
+            projectDirectory,
+            requestPayload,
+            sendProgress,
+          )
+            .then((result) => {
+              sendResult(result);
+              if (result.status !== 'completed') {
+                appendSystemMessage(
+                  `Desktop final assembly failed: ${result.error || 'Unknown error'}`,
+                  'error',
+                );
+              }
+            })
+            .catch((error: unknown) => {
+              const errorMessage = getRendererErrorMessage(
+                error,
+                'Desktop final assembly failed.',
+              );
+              sendResult({
+                requestId,
+                status: 'failed',
+                error: errorMessage,
+              });
+              appendSystemMessage(
+                `Desktop final assembly failed: ${errorMessage}`,
                 'error',
               );
             });
