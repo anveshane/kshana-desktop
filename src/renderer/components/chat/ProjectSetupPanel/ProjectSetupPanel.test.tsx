@@ -72,6 +72,95 @@ function renderPanel() {
 }
 
 describe('ProjectSetupPanel', () => {
+  it('renders preview images for template and style selection cards', () => {
+    const props = {
+      onOpenWizard: jest.fn(),
+      onEditSetup: jest.fn(),
+      onSelectTemplate: jest.fn(),
+      onSelectStyle: jest.fn(),
+      onSelectDuration: jest.fn(),
+      onSelectAutonomousMode: jest.fn(),
+      onConfirmSetup: jest.fn(),
+      onBack: jest.fn(),
+    };
+    const baseProps = {
+      mode: 'wizard' as const,
+      templates,
+      durationPresets,
+      selectedTemplateId: 'narrative',
+      selectedStyleId: 'cinematic_realism',
+      selectedDuration: 120,
+      selectedAutonomousMode: false,
+      loading: false,
+      configuring: false,
+      error: null,
+      onOpenWizard: props.onOpenWizard,
+      onEditSetup: props.onEditSetup,
+      onSelectTemplate: props.onSelectTemplate,
+      onSelectStyle: props.onSelectStyle,
+      onSelectDuration: props.onSelectDuration,
+      onSelectAutonomousMode: props.onSelectAutonomousMode,
+      onConfirmSetup: props.onConfirmSetup,
+      onBack: props.onBack,
+    };
+
+    const { rerender } = render(
+      <ProjectSetupPanel
+        step="template"
+        mode={baseProps.mode}
+        templates={baseProps.templates}
+        durationPresets={baseProps.durationPresets}
+        selectedTemplateId={baseProps.selectedTemplateId}
+        selectedStyleId={baseProps.selectedStyleId}
+        selectedDuration={baseProps.selectedDuration}
+        selectedAutonomousMode={baseProps.selectedAutonomousMode}
+        loading={baseProps.loading}
+        configuring={baseProps.configuring}
+        error={baseProps.error}
+        onOpenWizard={baseProps.onOpenWizard}
+        onEditSetup={baseProps.onEditSetup}
+        onSelectTemplate={baseProps.onSelectTemplate}
+        onSelectStyle={baseProps.onSelectStyle}
+        onSelectDuration={baseProps.onSelectDuration}
+        onSelectAutonomousMode={baseProps.onSelectAutonomousMode}
+        onConfirmSetup={baseProps.onConfirmSetup}
+        onBack={baseProps.onBack}
+      />,
+    );
+
+    expect(
+      screen.getByRole('img', { name: 'Narrative Story Video preview' }),
+    ).not.toBeNull();
+
+    rerender(
+      <ProjectSetupPanel
+        step="style"
+        mode={baseProps.mode}
+        templates={baseProps.templates}
+        durationPresets={baseProps.durationPresets}
+        selectedTemplateId={baseProps.selectedTemplateId}
+        selectedStyleId={baseProps.selectedStyleId}
+        selectedDuration={baseProps.selectedDuration}
+        selectedAutonomousMode={baseProps.selectedAutonomousMode}
+        loading={baseProps.loading}
+        configuring={baseProps.configuring}
+        error={baseProps.error}
+        onOpenWizard={baseProps.onOpenWizard}
+        onEditSetup={baseProps.onEditSetup}
+        onSelectTemplate={baseProps.onSelectTemplate}
+        onSelectStyle={baseProps.onSelectStyle}
+        onSelectDuration={baseProps.onSelectDuration}
+        onSelectAutonomousMode={baseProps.onSelectAutonomousMode}
+        onConfirmSetup={baseProps.onConfirmSetup}
+        onBack={baseProps.onBack}
+      />,
+    );
+
+    expect(
+      screen.getByRole('img', { name: 'Cinematic Realism preview' }),
+    ).not.toBeNull();
+  });
+
   it('renders the autonomous setup step with a continue action', () => {
     const props = renderPanel();
 

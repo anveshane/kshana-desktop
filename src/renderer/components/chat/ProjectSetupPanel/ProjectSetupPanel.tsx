@@ -1,5 +1,26 @@
+import type { ReactElement } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, RefreshCw, Settings2, Sparkles } from 'lucide-react';
+import styleAnimePreview from '../../../../../assets/previews/style_anime.png';
+import styleCinematicDocumentaryPreview from '../../../../../assets/previews/style_cinematic_documentary.png';
+import styleCinematicRealismPreview from '../../../../../assets/previews/style_cinematic_realism.png';
+import styleCinematicShortPreview from '../../../../../assets/previews/style_cinematic_short.png';
+import styleInfomercialClassicPreview from '../../../../../assets/previews/style_infomercial_classic.png';
+import styleLifestylePreview from '../../../../../assets/previews/style_lifestyle.png';
+import styleLoFiPreview from '../../../../../assets/previews/style_lo_fi.png';
+import styleMinimalCleanPreview from '../../../../../assets/previews/style_minimal_clean.png';
+import styleNatureDocumentaryPreview from '../../../../../assets/previews/style_nature_documentary.png';
+import styleNewsStylePreview from '../../../../../assets/previews/style_news_style.png';
+import styleProfessionalProductPreview from '../../../../../assets/previews/style_professional_product.png';
+import styleStylized3dPreview from '../../../../../assets/previews/style_stylized_3d.png';
+import styleTechSleekPreview from '../../../../../assets/previews/style_tech_sleek.png';
+import styleViralAestheticPreview from '../../../../../assets/previews/style_viral_aesthetic.png';
+import styleWatercolorPreview from '../../../../../assets/previews/style_watercolor.png';
+import templateDocumentaryPreview from '../../../../../assets/previews/template_documentary.png';
+import templateGraphicNovelPreview from '../../../../../assets/previews/template_graphic_novel.png';
+import templateInfomercialPreview from '../../../../../assets/previews/template_infomercial.png';
+import templateNarrativePreview from '../../../../../assets/previews/template_narrative.png';
+import templateShortPreview from '../../../../../assets/previews/template_short.png';
 import styles from './ProjectSetupPanel.module.scss';
 
 export interface SetupStyleOption {
@@ -20,6 +41,32 @@ export interface SetupDurationOption {
   label: string;
   seconds: number;
 }
+
+const TEMPLATE_PREVIEW_SRC: Record<string, string> = {
+  documentary: templateDocumentaryPreview,
+  graphic_novel: templateGraphicNovelPreview,
+  infomercial: templateInfomercialPreview,
+  narrative: templateNarrativePreview,
+  short: templateShortPreview,
+};
+
+const STYLE_PREVIEW_SRC: Record<string, string> = {
+  anime: styleAnimePreview,
+  cinematic_documentary: styleCinematicDocumentaryPreview,
+  cinematic_realism: styleCinematicRealismPreview,
+  cinematic_short: styleCinematicShortPreview,
+  infomercial_classic: styleInfomercialClassicPreview,
+  lifestyle: styleLifestylePreview,
+  lo_fi: styleLoFiPreview,
+  minimal_clean: styleMinimalCleanPreview,
+  nature_documentary: styleNatureDocumentaryPreview,
+  news_style: styleNewsStylePreview,
+  professional_product: styleProfessionalProductPreview,
+  stylized_3d: styleStylized3dPreview,
+  tech_sleek: styleTechSleekPreview,
+  viral_aesthetic: styleViralAestheticPreview,
+  watercolor: styleWatercolorPreview,
+};
 
 export type SetupStep = 'template' | 'style' | 'duration' | 'autonomous';
 export type SetupPanelMode = 'hidden' | 'banner' | 'wizard' | 'summary';
@@ -52,6 +99,29 @@ function formatDuration(seconds: number): string {
     return `${minutes} minute${minutes === 1 ? '' : 's'}`;
   }
   return `${seconds} seconds`;
+}
+
+function renderCardPreview(
+  previewSrc: string | undefined,
+  label: string,
+): ReactElement {
+  if (previewSrc) {
+    return (
+      <div className={styles.cardPreview}>
+        <img
+          src={previewSrc}
+          alt={`${label} preview`}
+          className={styles.cardPreviewImage}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${styles.cardPreview} ${styles.cardPreviewPlaceholder}`}>
+      <span>{label}</span>
+    </div>
+  );
 }
 
 export default function ProjectSetupPanel({
@@ -287,13 +357,19 @@ export default function ProjectSetupPanel({
                   onClick={() => onSelectTemplate(template.id)}
                   disabled={configuring}
                 >
-                  <span className={styles.cardIndex}>{index + 1}</span>
-                  <span className={styles.cardName}>
-                    {template.displayName}
-                  </span>
-                  <span className={styles.cardDescription}>
-                    {template.description || 'No description'}
-                  </span>
+                  {renderCardPreview(
+                    TEMPLATE_PREVIEW_SRC[template.id],
+                    template.displayName,
+                  )}
+                  <div className={styles.cardContent}>
+                    <span className={styles.cardIndex}>{index + 1}</span>
+                    <span className={styles.cardName}>
+                      {template.displayName}
+                    </span>
+                    <span className={styles.cardDescription}>
+                      {template.description || 'No description'}
+                    </span>
+                  </div>
                 </button>
               ))}
             </div>
@@ -311,11 +387,17 @@ export default function ProjectSetupPanel({
                   onClick={() => onSelectStyle(style.id)}
                   disabled={configuring}
                 >
-                  <span className={styles.cardIndex}>{index + 1}</span>
-                  <span className={styles.cardName}>{style.displayName}</span>
-                  <span className={styles.cardDescription}>
-                    {style.description || 'No description'}
-                  </span>
+                  {renderCardPreview(
+                    STYLE_PREVIEW_SRC[style.id],
+                    style.displayName,
+                  )}
+                  <div className={styles.cardContent}>
+                    <span className={styles.cardIndex}>{index + 1}</span>
+                    <span className={styles.cardName}>{style.displayName}</span>
+                    <span className={styles.cardDescription}>
+                      {style.description || 'No description'}
+                    </span>
+                  </div>
                 </button>
               ))}
             </div>
