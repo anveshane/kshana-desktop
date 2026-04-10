@@ -9,7 +9,7 @@ const baseSettings = {
   comfyuiUrl: '',
   comfyCloudApiKey: '',
   comfyuiTimeout: 1800,
-  llmProvider: 'lmstudio' as const,
+  llmProvider: 'openai' as const,
   lmStudioUrl: 'http://127.0.0.1:1234',
   lmStudioModel: 'qwen3',
   googleApiKey: '',
@@ -87,7 +87,8 @@ describe('SettingsPanel', () => {
 
     expect(screen.getByLabelText('ComfyUI URL')).toBeInTheDocument();
     expect(screen.getByLabelText('Comfy Cloud API Key')).toBeInTheDocument();
-    expect(screen.getByText('LM Studio')).toBeInTheDocument();
+    expect(screen.getByText('OpenAI-Compatible')).toBeInTheDocument();
+    expect(screen.queryByText('LM Studio')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Cloud'));
 

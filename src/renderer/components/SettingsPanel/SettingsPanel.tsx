@@ -30,7 +30,7 @@ const emptySettings: AppSettings = {
   comfyuiUrl: '',
   comfyCloudApiKey: '',
   comfyuiTimeout: 1800,
-  llmProvider: 'lmstudio',
+  llmProvider: 'openai',
   lmStudioUrl: 'http://127.0.0.1:1234',
   lmStudioModel: 'qwen3',
   googleApiKey: '',
@@ -43,11 +43,18 @@ const emptySettings: AppSettings = {
   themeId: 'studio-neutral',
 };
 
+function withV1Suffix(url: string): string {
+  return /\/v1\/?$/.test(url) ? url : `${url.replace(/\/$/, '')}/v1`;
+}
+
 function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
   const next = input ?? emptySettings;
   const comfyuiUrl = (next.comfyuiUrl || '').trim();
   const backendMode = next.backendMode === 'cloud' ? 'cloud' : 'local';
-  const llmProvider = next.llmProvider === 'openrouter' ? 'openai' : next.llmProvider;
+  const llmProvider =
+    next.llmProvider === 'openrouter' || next.llmProvider === 'lmstudio'
+      ? 'openai'
+      : next.llmProvider;
   const openaiApiKey =
     llmProvider === 'openai' && next.llmProvider === 'openrouter'
       ? next.openRouterApiKey || next.openaiApiKey
@@ -55,11 +62,15 @@ function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
   const openaiBaseUrl =
     llmProvider === 'openai' && next.llmProvider === 'openrouter'
       ? 'https://openrouter.ai/api/v1'
-      : next.openaiBaseUrl;
+      : llmProvider === 'openai' && next.llmProvider === 'lmstudio'
+        ? withV1Suffix(next.lmStudioUrl || emptySettings.lmStudioUrl)
+        : next.openaiBaseUrl;
   const openaiModel =
     llmProvider === 'openai' && next.llmProvider === 'openrouter'
       ? next.openRouterModel || next.openaiModel
-      : next.openaiModel;
+      : llmProvider === 'openai' && next.llmProvider === 'lmstudio'
+        ? next.lmStudioModel || next.openaiModel
+        : next.openaiModel;
 
   return {
     ...emptySettings,
@@ -506,43 +517,10 @@ export default function SettingsPanel({
                     <fieldset className={styles.fieldset}>
                       <legend>LLM Provider</legend>
                       <div className={styles.radios}>
-                        {renderProviderToggle('lmstudio', 'LM Studio')}
                         {renderProviderToggle('gemini', 'Gemini')}
                         {renderProviderToggle('openai', 'OpenAI-Compatible')}
                       </div>
                     </fieldset>
-
-                    {form.llmProvider === 'lmstudio' && (
-                      <>
-                        <label className={styles.label}>
-                          LM Studio URL
-                          <input
-                            type="url"
-                            className={styles.input}
-                            value={form.lmStudioUrl}
-                            onChange={(event) =>
-                              handleInput('lmStudioUrl', event.target.value)
-                            }
-                            placeholder="http://127.0.0.1:1234"
-                            required
-                          />
-                        </label>
-
-                        <label className={styles.label}>
-                          LM Studio Model ID
-                          <input
-                            type="text"
-                            className={styles.input}
-                            value={form.lmStudioModel}
-                            onChange={(event) =>
-                              handleInput('lmStudioModel', event.target.value)
-                            }
-                            placeholder="qwen3"
-                            required
-                          />
-                        </label>
-                      </>
-                    )}
 
                     {form.llmProvider === 'gemini' && (
                       <>
@@ -556,7 +534,6 @@ export default function SettingsPanel({
                               handleInput('googleApiKey', event.target.value)
                             }
                             placeholder="AIza..."
-                            required
                           />
                         </label>
 
@@ -570,7 +547,6 @@ export default function SettingsPanel({
                               handleInput('geminiModel', event.target.value)
                             }
                             placeholder="gemini-2.5-flash"
-                            required
                           />
                         </label>
                       </>
@@ -588,7 +564,6 @@ export default function SettingsPanel({
                               handleInput('openaiApiKey', event.target.value)
                             }
                             placeholder="sk-..."
-                            required
                           />
                         </label>
 
@@ -602,7 +577,6 @@ export default function SettingsPanel({
                               handleInput('openaiBaseUrl', event.target.value)
                             }
                             placeholder="https://api.openai.com/v1"
-                            required
                           />
                         </label>
 
@@ -616,7 +590,6 @@ export default function SettingsPanel({
                               handleInput('openaiModel', event.target.value)
                             }
                             placeholder="gpt-4o"
-                            required
                           />
                         </label>
                         <p className={styles.infoText}>
