@@ -47,7 +47,7 @@ function resolveKshanaInkPath(): string {
     return path.resolve(configured);
   }
 
-  return path.resolve(webpackPaths.rootPath, '../kshana-ink');
+  return path.resolve(webpackPaths.rootPath, '../kshana-core');
 }
 
 function syncReleaseAppPackage(mainPackagePath: string, tarballRelativePath: string) {
@@ -67,7 +67,7 @@ function syncReleaseAppPackage(mainPackagePath: string, tarballRelativePath: str
     main: './dist/main/main.js',
     dependencies: {
       ...(mainPackage.dependencies || {}),
-      'kshana-ink': `file:${tarballRelativePath}`,
+      'kshana-core': `file:${tarballRelativePath}`,
     },
   };
 
@@ -95,7 +95,7 @@ function packKshanaInk(kshanaInkPath: string): string {
 
   const [result] = JSON.parse(rawOutput) as PackResult[];
   if (!result?.filename) {
-    throw new Error('npm pack did not return a tarball filename for kshana-ink');
+    throw new Error('npm pack did not return a tarball filename for kshana-core');
   }
 
   return path.join(vendorPath, result.filename);
@@ -110,7 +110,7 @@ function installAppDeps(): void {
   }
 
   if (!fs.existsSync(kshanaInkPath)) {
-    throw new Error(`kshana-ink repo not found at ${kshanaInkPath}`);
+    throw new Error(`kshana-core repo not found at ${kshanaInkPath}`);
   }
 
   const tarballPath = packKshanaInk(kshanaInkPath);
@@ -137,7 +137,7 @@ function installAppDeps(): void {
 
   const installedServerCliPath = path.join(
     webpackPaths.appNodeModulesPath,
-    'kshana-ink',
+    'kshana-core',
     'dist',
     'server',
     'cli.cjs',
@@ -145,11 +145,11 @@ function installAppDeps(): void {
 
   if (!fs.existsSync(installedServerCliPath)) {
     throw new Error(
-      `Installed kshana-ink server entry not found at ${installedServerCliPath}`,
+      `Installed kshana-core server entry not found at ${installedServerCliPath}`,
     );
   }
 
-  console.log(`✓ Installed app dependencies with bundled kshana-ink`);
+  console.log(`✓ Installed app dependencies with bundled kshana-core`);
   console.log(`✓ Verified bundled server entry at ${installedServerCliPath}`);
 }
 

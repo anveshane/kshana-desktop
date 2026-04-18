@@ -29,7 +29,7 @@ class ServerConnectionManager extends EventEmitter {
   }
 
   /**
-   * Connect to an external kshana-ink server.
+   * Connect to an external kshana-core server.
    * Polls until the server becomes ready, then stops polling.
    */
   async connect(config: ServerConnectionConfig = { serverUrl: DEFAULT_SERVER_URL }): Promise<BackendState> {
@@ -46,12 +46,12 @@ class ServerConnectionManager extends EventEmitter {
     }
 
     this.updateState({ status: 'connecting', serverUrl: this.serverUrl, port });
-    log.info(`Connecting to kshana-ink server at ${this.serverUrl}`);
+    log.info(`Connecting to kshana-core server at ${this.serverUrl}`);
 
     const healthy = await this.checkHealth();
     if (healthy) {
       this.updateState({ status: 'ready', serverUrl: this.serverUrl, port });
-      log.info(`Connected to kshana-ink server at ${this.serverUrl}`);
+      log.info(`Connected to kshana-core server at ${this.serverUrl}`);
       return this.state;
     }
 
@@ -74,7 +74,7 @@ class ServerConnectionManager extends EventEmitter {
   async disconnect(): Promise<BackendState> {
     this.stopHealthPolling();
     this.updateState({ status: 'stopped', serverUrl: this.serverUrl });
-    log.info('Disconnected from kshana-ink server');
+    log.info('Disconnected from kshana-core server');
     return this.state;
   }
 
@@ -122,7 +122,7 @@ class ServerConnectionManager extends EventEmitter {
         }
 
         this.updateState({ status: 'ready', serverUrl: this.serverUrl, port });
-        log.info(`Connected to kshana-ink server at ${this.serverUrl}`);
+        log.info(`Connected to kshana-core server at ${this.serverUrl}`);
         this.stopHealthPolling();
         return;
       }

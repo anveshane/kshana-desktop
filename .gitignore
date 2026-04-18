@@ -288,5 +288,5 @@ src/node_modules  → release/app/node_modules
 
 .kshana
 
-# kshana-ink version tracking (generated file)
-release/app/.kshana-ink-version.json
+# kshana-core version tracking (generated file)
+release/app/.kshana-core-version.json

@@ -190,7 +190,7 @@ class LocalBackendManager extends EventEmitter {
   }
 
   private getDevRepoPath(): string {
-    return path.resolve(__dirname, '../../../kshana-ink');
+    return path.resolve(__dirname, '../../../kshana-core');
   }
 
   private getVersionMetadataCandidates(): string[] {
@@ -198,7 +198,7 @@ class LocalBackendManager extends EventEmitter {
     const devRepoPath = this.getDevRepoPath();
 
     return app.isPackaged
-      ? [path.join(packagedAppPath, '.kshana-ink-version.json')]
+      ? [path.join(packagedAppPath, '.kshana-core-version.json')]
       : [path.join(devRepoPath, 'package.json')];
   }
 
@@ -208,7 +208,7 @@ class LocalBackendManager extends EventEmitter {
       process.resourcesPath,
       'app.asar.unpacked',
       'node_modules',
-      'kshana-ink',
+      'kshana-core',
       'dist',
       'server',
       'cli.cjs',
@@ -255,8 +255,8 @@ class LocalBackendManager extends EventEmitter {
     const entryPath = this.resolveEntryPath();
     if (!entryPath) {
       const devHint = app.isPackaged
-        ? 'Bundled kshana-ink runtime is missing from the packaged app.'
-        : 'Build ../kshana-ink so dist/server/cli.cjs exists before starting the desktop app.';
+        ? 'Bundled kshana-core runtime is missing from the packaged app.'
+        : 'Build ../kshana-core so dist/server/cli.cjs exists before starting the desktop app.';
       const errorMessage = `Local backend entry not found. ${devHint}`;
       this.updateState({ status: 'error', message: errorMessage });
       throw new Error(errorMessage);
@@ -298,10 +298,10 @@ class LocalBackendManager extends EventEmitter {
     this.child = child;
 
     child.stdout.on('data', (data) => {
-      log.info(`[kshana-ink] ${data.toString().trimEnd()}`);
+      log.info(`[kshana-core] ${data.toString().trimEnd()}`);
     });
     child.stderr.on('data', (data) => {
-      log.error(`[kshana-ink] ${data.toString().trimEnd()}`);
+      log.error(`[kshana-core] ${data.toString().trimEnd()}`);
     });
     child.on('error', (error) => {
       log.error(`[LocalBackend] Process error: ${error.message}`);

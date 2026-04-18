@@ -280,7 +280,7 @@ export default function SettingsPanel({
   const statusSupportText = isCurrentLocalMode
     ? backendState?.status === 'error'
       ? 'Review the local provider settings below, then try Save & Restart again. You can switch to Cloud if you need to continue immediately.'
-      : 'The app is currently using the local kshana-ink server on localhost with the provider settings shown below.'
+      : 'The app is currently using the local kshana-core server on localhost with the provider settings shown below.'
     : 'The app is currently using the managed cloud backend shipped with this build.';
   const submitLabel = isLocalMode
     ? isSavingConnection

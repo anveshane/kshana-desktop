@@ -1731,12 +1731,12 @@ export default function ChatPanel() {
   );
 
   /**
-   * Handle server payload from kshana-ink WebSocket.
-   * kshana-ink messages have the format: { type, sessionId, timestamp, data: {...} }
+   * Handle server payload from kshana-core WebSocket.
+   * kshana-core messages have the format: { type, sessionId, timestamp, data: {...} }
    */
   const handleServerPayload = useCallback(
     (payload: Record<string, unknown>) => {
-      // Extract data from kshana-ink message format
+      // Extract data from kshana-core message format
       const data = (payload.data as Record<string, unknown>) ?? payload;
       const messageType = payload.type as string;
       const payloadSessionId =
@@ -1831,7 +1831,7 @@ export default function ChatPanel() {
 
       switch (messageType) {
         case 'status': {
-          // kshana-ink status: { status: 'connected' | 'ready' | 'busy' | 'completed' | 'error', message?: string, agentName?: string }
+          // kshana-core status: { status: 'connected' | 'ready' | 'busy' | 'completed' | 'error', message?: string, agentName?: string }
           const statusMsg =
             (data.message as string) ??
             (data.status as string) ??
@@ -1928,7 +1928,7 @@ export default function ChatPanel() {
           break;
         }
         case 'progress': {
-          // kshana-ink progress: { iteration, maxIterations, status }
+          // kshana-core progress: { iteration, maxIterations, status }
           const { iteration, maxIterations, status: progressStatus } = data;
           const percent = maxIterations
             ? Math.round(
@@ -1946,7 +1946,7 @@ export default function ChatPanel() {
           break;
         }
         case 'stream_chunk': {
-          // kshana-ink stream_chunk:
+          // kshana-core stream_chunk:
           // - assistant streaming: { content, done, agentName? }
           // - tool streaming: { content, done, toolCallId?, toolName?, reset?, agentName? }
           const content = (data.content as string) ?? '';
@@ -2349,7 +2349,7 @@ export default function ChatPanel() {
           break;
         }
         case 'agent_response': {
-          // kshana-ink agent_response: { output, status }
+          // kshana-core agent_response: { output, status }
           const output = (data.output as string) ?? '';
           const responseStatus = data.status as string;
           if (output) {
@@ -2482,7 +2482,7 @@ export default function ChatPanel() {
           break;
         }
         case 'agent_question': {
-          // kshana-ink agent_question: { question, options?, timeout?, defaultOption?, questionType? }
+          // kshana-core agent_question: { question, options?, timeout?, defaultOption?, questionType? }
           // options can be string[] or Array<{ label: string; description?: string }>
           const question = (data.question as string) ?? '';
           const rawOptions = data.options as
@@ -2667,7 +2667,7 @@ export default function ChatPanel() {
           break;
         }
         case 'todo_update': {
-          // kshana-ink todo_update: { todos }
+          // kshana-core todo_update: { todos }
           const todos = normalizeTodoUpdatePayload(
             (data.todos as Array<Record<string, unknown>> | undefined) ?? [],
           );

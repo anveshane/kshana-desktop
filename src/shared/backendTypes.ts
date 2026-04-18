@@ -20,11 +20,11 @@ export interface BackendState {
 }
 
 /**
- * Configuration for connecting to an external kshana-ink server.
+ * Configuration for connecting to an external kshana-core server.
  * All LLM / provider config now lives on the server side.
  */
 export interface ServerConnectionConfig {
-  /** Full base URL of the kshana-ink server, e.g. "http://localhost:8001" */
+  /** Full base URL of the kshana-core server, e.g. "http://localhost:8001" */
   serverUrl: string;
   /** Automatically reconnect on disconnect (default: true) */
   autoReconnect?: boolean;

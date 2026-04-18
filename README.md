@@ -1,8 +1,8 @@
 # Kshana Desktop
 
-Electron desktop application for Kshana. The app bundles the `kshana-ink` TypeScript backend and can run in two modes:
+Electron desktop application for Kshana. The app bundles the `kshana-core` TypeScript backend and can run in two modes:
 
-- `Local`: starts the bundled `kshana-ink` server on an internal localhost port
+- `Local`: starts the bundled `kshana-core` server on an internal localhost port
 - `Cloud`: connects to a release-configured remote backend
 
 The renderer always talks to a backend over HTTP/WebSocket. In local mode, the desktop app starts that backend itself as a child process.
@@ -11,21 +11,21 @@ The renderer always talks to a backend over HTTP/WebSocket. In local mode, the d
 
 - Node.js 20+
 - npm
-- sibling `kshana-ink` repo at `../kshana-ink`
+- sibling `kshana-core` repo at `../kshana-core`
 - ComfyUI if you want local image/video generation
 - LM Studio, Gemini, or OpenAI-compatible credentials if you want local LLM-backed generation
 
 Notes:
 
 - The product no longer depends on a Python backend.
-- Local packaging can still rebuild native Node modules used by `kshana-ink`, so build machines may still need a working native toolchain.
+- Local packaging can still rebuild native Node modules used by `kshana-core`, so build machines may still need a working native toolchain.
 
 ## Development
 
-### 1. Build `kshana-ink`
+### 1. Build `kshana-core`
 
 ```bash
-cd ../kshana-ink
+cd ../kshana-core
 pnpm install
 pnpm build
 ```
@@ -46,10 +46,10 @@ npm run start
 In development:
 
 - `Cloud` mode connects to the configured cloud URL
-- `Local` mode starts `../kshana-ink/dist/server/cli.cjs` automatically
+- `Local` mode starts `../kshana-core/dist/server/cli.cjs` automatically
 - the local backend chooses a free loopback port automatically
 
-You do not need to run `kshana-ink` separately for the normal desktop local flow. You only need `pnpm build` in the sibling repo.
+You do not need to run `kshana-core` separately for the normal desktop local flow. You only need `pnpm build` in the sibling repo.
 
 ## Settings
 
@@ -57,7 +57,7 @@ The Connection settings are mode-aware:
 
 - `Local`
   - lets you configure ComfyUI and provider settings
-  - starts bundled `kshana-ink` on localhost
+  - starts bundled `kshana-core` on localhost
 - `Cloud`
   - connects to the release-configured cloud backend
   - shows connection info only
@@ -72,16 +72,16 @@ Local mode currently supports:
 
 ### How bundling works
 
-`kshana-ink` is bundled as a package artifact, not as a symlink.
+`kshana-core` is bundled as a package artifact, not as a symlink.
 
 Current flow:
 
-1. `verify:kshana-ink`
-   - checks that `../kshana-ink` exists
+1. `verify:kshana-core`
+   - checks that `../kshana-core` exists
    - checks that the built server entry exists
-   - writes `release/app/.kshana-ink-version.json`
+   - writes `release/app/.kshana-core-version.json`
 2. `prepare:app-deps`
-   - runs `npm pack` in `../kshana-ink`
+   - runs `npm pack` in `../kshana-core`
    - writes the tarball into `release/app/vendor`
    - rewrites `release/app/package.json` to depend on that tarball
    - runs a production `npm install` in `release/app`
@@ -90,7 +90,7 @@ Current flow:
 4. `electron-builder build`
    - packages `release/app` into the final installers
 
-This avoids the old `file:../kshana-ink` symlink problem inside packaged Electron apps.
+This avoids the old `file:../kshana-core` symlink problem inside packaged Electron apps.
 
 ### Local packaging
 
@@ -128,7 +128,7 @@ npm run release
 
 ### Local mode
 
-- desktop starts bundled `kshana-ink`
+- desktop starts bundled `kshana-core`
 - desktop waits for `/api/v1/health`
 - renderer connects over WebSocket/HTTP to the localhost backend
 
@@ -139,7 +139,7 @@ npm run release
 
 ## Bundled Backend Assets
 
-The packaged `kshana-ink` artifact includes:
+The packaged `kshana-core` artifact includes:
 
 - `dist/`
 - `prompts/`
@@ -181,13 +181,13 @@ The outer project folder does not need a `.kshana` extension.
 
 ## Known Build Caveats
 
-- `kshana-ink` still includes some native modules such as `sharp`
+- `kshana-core` still includes some native modules such as `sharp`
 - packaging may trigger Electron/native rebuild steps depending on dependency state
 - local build machines should use a current Node/npm toolchain compatible with the Electron version in this repo
 
 ## WebSocket API
 
-The `kshana-ink` backend exposes a WebSocket API at `/api/v1/ws/chat`.
+The `kshana-core` backend exposes a WebSocket API at `/api/v1/ws/chat`.
 
 ### Client → Server
 

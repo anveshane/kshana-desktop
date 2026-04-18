@@ -16,7 +16,7 @@ function resolveKshanaInkPath(): string {
     return path.resolve(configured);
   }
 
-  return path.resolve(webpackPaths.rootPath, '../kshana-ink');
+  return path.resolve(webpackPaths.rootPath, '../kshana-core');
 }
 
 function runGit(repoPath: string, command: string): string | undefined {
@@ -39,19 +39,19 @@ function verifyKshanaInk(): void {
   const packageJsonPath = path.join(kshanaInkPath, 'package.json');
   const serverCliPath = path.join(kshanaInkPath, 'dist', 'server', 'cli.cjs');
   const releaseAppPath = webpackPaths.appPath;
-  const metadataPath = path.join(releaseAppPath, '.kshana-ink-version.json');
+  const metadataPath = path.join(releaseAppPath, '.kshana-core-version.json');
 
   if (!fs.existsSync(kshanaInkPath)) {
-    throw new Error(`kshana-ink repo not found at ${kshanaInkPath}`);
+    throw new Error(`kshana-core repo not found at ${kshanaInkPath}`);
   }
 
   if (!fs.existsSync(packageJsonPath)) {
-    throw new Error(`kshana-ink package.json not found at ${packageJsonPath}`);
+    throw new Error(`kshana-core package.json not found at ${packageJsonPath}`);
   }
 
   if (!fs.existsSync(serverCliPath)) {
     throw new Error(
-      `kshana-ink build output missing at ${serverCliPath}. Run a build in ../kshana-ink first.`,
+      `kshana-core build output missing at ${serverCliPath}. Run a build in ../kshana-core first.`,
     );
   }
 
@@ -68,7 +68,7 @@ function verifyKshanaInk(): void {
 
   fs.mkdirSync(releaseAppPath, { recursive: true });
   fs.writeFileSync(`${metadataPath}`, `${JSON.stringify(metadata, null, 2)}\n`);
-  console.log(`✓ Verified kshana-ink at ${kshanaInkPath}`);
+  console.log(`✓ Verified kshana-core at ${kshanaInkPath}`);
   console.log(`✓ Wrote bundled version metadata to ${metadataPath}`);
 }
 
@@ -76,7 +76,7 @@ try {
   verifyKshanaInk();
 } catch (error) {
   console.error(
-    error instanceof Error ? error.message : 'Failed to verify kshana-ink',
+    error instanceof Error ? error.message : 'Failed to verify kshana-core',
   );
   process.exit(1);
 }
