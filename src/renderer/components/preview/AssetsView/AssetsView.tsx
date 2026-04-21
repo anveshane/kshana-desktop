@@ -1,10 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Image as ImageIcon, Video, X, Play, ImagePlus } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { FileNode, getFileType } from '../../../../shared/fileSystemTypes';
 import { resolveAssetPathForDisplay } from '../../../utils/pathResolver';
 import { imageToBase64, shouldUseBase64 } from '../../../utils/imageToBase64';
+import {
+  buildProjectAbsolutePath,
+  getFinalVideoStateWarning,
+  getManifestFinalVideoAsset,
+} from '../../../services/project/finalVideoValidation';
 import styles from './AssetsView.module.scss';
 
 interface MediaAsset {
@@ -41,7 +46,8 @@ const normalizeMediaPath = (
 const assetKey = (
   asset: Pick<MediaAsset, 'path' | 'category'>,
   projectDirectory: string | null,
-): string => `${asset.category}:${normalizeMediaPath(asset.path, projectDirectory)}`;
+): string =>
+  `${asset.category}:${normalizeMediaPath(asset.path, projectDirectory)}`;
 
 const mediaNameFromPath = (filePath: string): string => {
   return filePath.replace(/\\/g, '/').split('/').pop() || filePath;
@@ -101,7 +107,9 @@ const classifyScannedMedia = (
   }
 
   const normalizedPath = node.path.replace(/\\/g, '/');
-  if (!MEDIA_SCAN_ROOTS.some((segment) => normalizedPath.includes(`/${segment}/`))) {
+  if (
+    !MEDIA_SCAN_ROOTS.some((segment) => normalizedPath.includes(`/${segment}/`))
+  ) {
     return null;
   }
 
@@ -140,7 +148,7 @@ const collectScannedMedia = (
 
 export default function AssetsView() {
   const { projectDirectory } = useWorkspace();
-  const { assetManifest } = useProject();
+  const { assetManifest, agentState } = useProject();
 
   const [generatedImages, setGeneratedImages] = useState<MediaAsset[]>([]);
   const [generatedVideos, setGeneratedVideos] = useState<MediaAsset[]>([]);
@@ -157,8 +165,113 @@ export default function AssetsView() {
   const [infographicPaths, setInfographicPaths] = useState<
     Record<string, string>
   >({});
+  const refreshInFlightRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
+  const fileChangeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const currentLoadIdRef = useRef(0);
+  const [validFinalVideoPaths, setValidFinalVideoPaths] = useState<Set<string> | null>(
+    null,
+  );
+  const manifestFinalVideoAsset = useMemo(
+    () => getManifestFinalVideoAsset(agentState, assetManifest),
+    [agentState, assetManifest],
+  );
+  const finalVideoWarning = useMemo(
+    () =>
+      getFinalVideoStateWarning(
+        agentState,
+        assetManifest,
+        projectDirectory,
+        manifestFinalVideoAsset && validFinalVideoPaths
+          ? validFinalVideoPaths.has(
+              normalizeMediaPath(manifestFinalVideoAsset.path, projectDirectory),
+            )
+          : undefined,
+      ),
+    [
+      agentState,
+      assetManifest,
+      projectDirectory,
+      manifestFinalVideoAsset,
+      validFinalVideoPaths,
+    ],
+  );
 
-  const loadMediaFiles = useCallback(async () => {
+  const hasAnyAssetsRef = useRef(false);
+
+  useEffect(() => {
+    hasAnyAssetsRef.current =
+      generatedImages.length > 0 ||
+      generatedVideos.length > 0 ||
+      generatedInfographics.length > 0;
+  }, [generatedImages.length, generatedVideos.length, generatedInfographics.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const verifyFinalVideos = async () => {
+      if (!projectDirectory || !assetManifest?.assets?.length) {
+        if (!cancelled) {
+          setValidFinalVideoPaths(new Set());
+        }
+        return;
+      }
+
+      const finalVideoAssets = assetManifest.assets.filter(
+        (asset) => asset.type === 'final_video',
+      );
+      const nextValidPaths = new Set<string>();
+
+      await Promise.all(
+        finalVideoAssets.map(async (asset) => {
+          const absolutePath = buildProjectAbsolutePath(
+            projectDirectory,
+            asset.path,
+          );
+          if (
+            await window.electron.project.checkFileExists(absolutePath)
+          ) {
+            nextValidPaths.add(
+              normalizeMediaPath(asset.path, projectDirectory),
+            );
+          }
+        }),
+      );
+
+      if (!cancelled) {
+        setValidFinalVideoPaths(nextValidPaths);
+      }
+    };
+
+    void verifyFinalVideos();
+    return () => {
+      cancelled = true;
+    };
+  }, [assetManifest, projectDirectory]);
+
+  const areMediaListsEqual = (
+    left: MediaAsset[],
+    right: MediaAsset[],
+  ): boolean => {
+    if (left.length !== right.length) {
+      return false;
+    }
+
+    return left.every((asset, index) => {
+      const other = right[index];
+      return (
+        other &&
+        asset.name === other.name &&
+        asset.path === other.path &&
+        asset.type === other.type &&
+        asset.category === other.category
+      );
+    });
+  };
+
+  const loadMediaFiles = useCallback(async (options?: { background?: boolean }) => {
     if (!projectDirectory) {
       setGeneratedImages([]);
       setGeneratedVideos([]);
@@ -166,11 +279,34 @@ export default function AssetsView() {
       return;
     }
 
-    setIsLoadingMedia(true);
+    if (refreshInFlightRef.current) {
+      pendingRefreshRef.current = true;
+      return;
+    }
+
+    refreshInFlightRef.current = true;
+    const loadId = currentLoadIdRef.current + 1;
+    currentLoadIdRef.current = loadId;
+
+    const shouldShowLoading =
+      !options?.background && !hasAnyAssetsRef.current;
+
+    if (shouldShowLoading) {
+      setIsLoadingMedia(true);
+    }
+
     try {
       const discoveredMedia = new Map<string, MediaAsset>();
 
       for (const asset of assetManifest?.assets || []) {
+        if (
+          asset.type === 'final_video' &&
+          !validFinalVideoPaths?.has(
+            normalizeMediaPath(asset.path, projectDirectory),
+          )
+        ) {
+          continue;
+        }
         const category = inferCategoryFromManifest(asset.path, asset.type);
         if (!category) {
           continue;
@@ -192,27 +328,66 @@ export default function AssetsView() {
         );
         collectScannedMedia(projectTree, discoveredMedia, projectDirectory);
       } catch (error) {
-        console.error('[AssetsView] Failed to scan project tree for media:', error);
+        console.error(
+          '[AssetsView] Failed to scan project tree for media:',
+          error,
+        );
       }
 
-      const allMedia = Array.from(discoveredMedia.values()).sort((left, right) =>
-        left.name.localeCompare(right.name),
+      const allMedia = Array.from(discoveredMedia.values()).sort(
+        (left, right) => left.name.localeCompare(right.name),
+      );
+      const filteredMedia = allMedia.filter((asset) => {
+        const normalizedPath = normalizeMediaPath(asset.path, projectDirectory);
+        if (!normalizedPath.includes('assets/final_video/')) {
+          return true;
+        }
+        return validFinalVideoPaths?.has(normalizedPath) ?? false;
+      });
+
+      const nextGeneratedImages = filteredMedia.filter(
+        (asset) => asset.category === 'images',
+      );
+      const nextGeneratedVideos = filteredMedia.filter(
+        (asset) => asset.category === 'videos',
+      );
+      const nextGeneratedInfographics = filteredMedia.filter(
+        (asset) => asset.category === 'infographics',
       );
 
-      setGeneratedImages(allMedia.filter((asset) => asset.category === 'images'));
-      setGeneratedVideos(allMedia.filter((asset) => asset.category === 'videos'));
-      setGeneratedInfographics(
-        allMedia.filter((asset) => asset.category === 'infographics'),
+      if (currentLoadIdRef.current !== loadId) {
+        return;
+      }
+
+      setGeneratedImages((prev) =>
+        areMediaListsEqual(prev, nextGeneratedImages)
+          ? prev
+          : nextGeneratedImages,
+      );
+      setGeneratedVideos((prev) =>
+        areMediaListsEqual(prev, nextGeneratedVideos)
+          ? prev
+          : nextGeneratedVideos,
+      );
+      setGeneratedInfographics((prev) =>
+        areMediaListsEqual(prev, nextGeneratedInfographics)
+          ? prev
+          : nextGeneratedInfographics,
       );
     } catch (err) {
       console.error('Failed to load media files:', err);
-      setGeneratedImages([]);
-      setGeneratedVideos([]);
-      setGeneratedInfographics([]);
     } finally {
-      setIsLoadingMedia(false);
+      if (currentLoadIdRef.current === loadId && shouldShowLoading) {
+        setIsLoadingMedia(false);
+      }
+      refreshInFlightRef.current = false;
+
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        void loadMediaFiles({ background: true });
+      }
     }
-  }, [assetManifest, projectDirectory]);
+  }, [assetManifest, projectDirectory, validFinalVideoPaths]);
 
   useEffect(() => {
     void loadMediaFiles();
@@ -229,11 +404,21 @@ export default function AssetsView() {
         normalizedPath.endsWith('/assets/manifest.json');
 
       if (isRelevantMediaChange) {
-        void loadMediaFiles();
+        if (fileChangeDebounceRef.current) {
+          clearTimeout(fileChangeDebounceRef.current);
+        }
+        fileChangeDebounceRef.current = setTimeout(() => {
+          fileChangeDebounceRef.current = null;
+          void loadMediaFiles({ background: true });
+        }, 250);
       }
     });
 
     return () => {
+      if (fileChangeDebounceRef.current) {
+        clearTimeout(fileChangeDebounceRef.current);
+        fileChangeDebounceRef.current = null;
+      }
       unsubscribe();
     };
   }, [loadMediaFiles]);
@@ -308,7 +493,10 @@ export default function AssetsView() {
       const paths: Record<string, string> = {};
       for (const infographic of generatedInfographics) {
         try {
-          console.log('[AssetsView] Resolving infographic path:', infographic.path);
+          console.log(
+            '[AssetsView] Resolving infographic path:',
+            infographic.path,
+          );
           const resolved = await resolveAssetPathForDisplay(
             infographic.path,
             projectDirectory,
@@ -323,7 +511,10 @@ export default function AssetsView() {
         }
       }
       setInfographicPaths(paths);
-      console.log('[AssetsView] All infographic paths resolved:', Object.keys(paths).length);
+      console.log(
+        '[AssetsView] All infographic paths resolved:',
+        Object.keys(paths).length,
+      );
     };
 
     resolvePaths();
@@ -351,6 +542,9 @@ export default function AssetsView() {
   if (!isLoadingMedia && !hasAnyAssets) {
     return (
       <div className={styles.container}>
+        {finalVideoWarning ? (
+          <div className={styles.warningBanner}>{finalVideoWarning}</div>
+        ) : null}
         <div className={styles.emptyState}>
           <ImageIcon size={48} className={styles.emptyIcon} />
           <h3>No Generated Assets Yet</h3>
@@ -363,6 +557,9 @@ export default function AssetsView() {
   return (
     <>
       <div className={styles.container}>
+        {finalVideoWarning ? (
+          <div className={styles.warningBanner}>{finalVideoWarning}</div>
+        ) : null}
         <div className={styles.content}>
           {/* Generated Images Section */}
           {(generatedImages.length > 0 || isLoadingMedia) && (
@@ -485,7 +682,11 @@ export default function AssetsView() {
                   generatedInfographics.map((infographic) => {
                     const videoSrc = infographicPaths[infographic.path];
                     if (!videoSrc) {
-                      console.warn('[AssetsView] No video src for infographic:', infographic.name, infographic.path);
+                      console.warn(
+                        '[AssetsView] No video src for infographic:',
+                        infographic.name,
+                        infographic.path,
+                      );
                     }
                     return (
                       <div
@@ -585,35 +786,32 @@ export default function AssetsView() {
       )}
 
       {/* Infographic Modal */}
-      {selectedInfographic &&
-        infographicPaths[selectedInfographic.path] && (
+      {selectedInfographic && infographicPaths[selectedInfographic.path] && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => setSelectedInfographic(null)}
+        >
           <div
-            className={styles.modalOverlay}
-            onClick={() => setSelectedInfographic(null)}
+            className={styles.modalContent}
+            onClick={(e) => e.stopPropagation()}
           >
-            <div
-              className={styles.modalContent}
-              onClick={(e) => e.stopPropagation()}
+            <button
+              className={styles.modalClose}
+              onClick={() => setSelectedInfographic(null)}
+              aria-label="Close"
             >
-              <button
-                className={styles.modalClose}
-                onClick={() => setSelectedInfographic(null)}
-                aria-label="Close"
-              >
-                <X size={24} />
-              </button>
-              <video
-                src={infographicPaths[selectedInfographic.path]}
-                controls
-                autoPlay
-                className={styles.modalVideo}
-              />
-              <div className={styles.modalTitle}>
-                {selectedInfographic.name}
-              </div>
-            </div>
+              <X size={24} />
+            </button>
+            <video
+              src={infographicPaths[selectedInfographic.path]}
+              controls
+              autoPlay
+              className={styles.modalVideo}
+            />
+            <div className={styles.modalTitle}>{selectedInfographic.name}</div>
           </div>
-        )}
+        </div>
+      )}
     </>
   );
 }

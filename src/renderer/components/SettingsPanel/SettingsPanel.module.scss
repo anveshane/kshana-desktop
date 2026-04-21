@@ -87,13 +87,16 @@
 .content {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
+  flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .section {
   display: flex;
   flex-direction: column;
-  gap: $spacing-lg;
+  gap: $spacing-md;
+  min-height: 0;
 }
 
 .sidebar {
@@ -236,10 +239,12 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .form .section {
-  padding: $spacing-xl;
+  padding: $spacing-lg;
   overflow-y: auto;
   @include custom-scrollbar;
   min-width: 0;
@@ -248,7 +253,7 @@
 .fieldset {
   border: 1px solid $color-panel-border;
   border-radius: $radius-sm;
-  padding: $spacing-lg;
+  padding: $spacing-md;
 
   legend {
     padding: 0 $spacing-sm;
@@ -261,8 +266,8 @@
 .radios {
   display: flex;
   flex-direction: column;
-  gap: $spacing-md;
-  margin-top: $spacing-md;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
 }
 
 .radioLabel {
@@ -281,10 +286,52 @@
   cursor: pointer;
 }
 
+.modeFieldset {
+  padding: $spacing-sm;
+}
+
+.modeSwitch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $spacing-xs;
+}
+
+.modeSwitch .radioLabel {
+  position: relative;
+  justify-content: center;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.35);
+  border-radius: $radius-sm;
+  background: rgba(var(--color-bg-panel-soft-rgb), 0.18);
+  transition:
+    border-color $transition-fast,
+    background-color $transition-fast,
+    color $transition-fast;
+}
+
+.modeSwitch .radioLabel:has(.radioInput:checked) {
+  border-color: rgba(var(--color-accent-primary-rgb), 0.48);
+  background: rgba(var(--color-accent-primary-rgb), 0.12);
+  color: $color-text-primary;
+}
+
+.modeSwitch .radioInput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+
+.modeOption {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
 .label {
   display: flex;
   flex-direction: column;
-  gap: $spacing-sm;
+  gap: $spacing-xs;
   color: $color-text-secondary;
   font-size: $font-size-sm;
 }
@@ -313,6 +360,166 @@
   &:disabled {
     opacity: 0.55;
   }
+}
+
+.statusCard,
+.infoCard {
+  border: 1px solid rgba(var(--color-accent-primary-rgb), 0.18);
+  border-radius: $radius-md;
+  background: rgba(var(--color-bg-panel-soft-rgb), 0.18);
+  padding: $spacing-md;
+}
+
+.statusCardWarning {
+  border-color: rgba(var(--color-warning-rgb), 0.34);
+  background: rgba(var(--color-warning-rgb), 0.06);
+}
+
+.statusCardError {
+  border-color: rgba(var(--color-error-rgb), 0.34);
+  background: rgba(var(--color-error-rgb), 0.06);
+}
+
+.statusHeader,
+.infoTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  margin-bottom: $spacing-xs;
+}
+
+.statusTopRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+.statusHeadline {
+  color: $color-text-primary;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  margin-bottom: $spacing-xs;
+}
+
+.statusHeaderError,
+.statusHeadlineError {
+  color: $color-error;
+}
+
+.statusSupportText {
+  margin: 0;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  line-height: 1.5;
+}
+
+.statusPrimaryMeta {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  margin-top: $spacing-md;
+}
+
+.statusMetaLabel {
+  color: $color-text-muted;
+  font-size: $font-size-xs;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  white-space: nowrap;
+}
+
+.statusBadgeSuccess {
+  color: $color-success;
+  background: rgba(var(--color-success-rgb), 0.18);
+  border-color: rgba(var(--color-success-rgb), 0.34);
+}
+
+.statusBadgeWarning {
+  color: $color-warning;
+  background: rgba(var(--color-warning-rgb), 0.12);
+  border-color: rgba(var(--color-warning-rgb), 0.24);
+}
+
+.statusBadgeError {
+  color: $color-error;
+  background: rgba(var(--color-error-rgb), 0.12);
+  border-color: rgba(var(--color-error-rgb), 0.24);
+}
+
+.statusBadgeNeutral {
+  color: $color-text-secondary;
+  background: rgba(var(--color-text-primary-rgb), 0.06);
+  border-color: rgba(var(--color-text-primary-rgb), 0.08);
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.statusGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $spacing-sm $spacing-md;
+}
+
+.statusItem,
+.statusItemFull {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+}
+
+.statusItemFull {
+  grid-column: 1 / -1;
+}
+
+.statusLabel {
+  color: $color-text-muted;
+  font-size: $font-size-xs;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.statusValue {
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  line-height: 1.45;
+}
+
+.statusMessage {
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  line-height: 1.55;
+}
+
+.statusCode {
+  color: $color-text-primary;
+  font-size: $font-size-xs;
+  font-family: $font-family-mono;
+  word-break: break-word;
+}
+
+.infoText {
+  margin: 0 0 $spacing-md;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  line-height: 1.5;
 }
 
 .error {
@@ -364,6 +571,19 @@
   }
 
   .themeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .statusTopRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .statusGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .modeSwitch {
     grid-template-columns: 1fr;
   }
 }

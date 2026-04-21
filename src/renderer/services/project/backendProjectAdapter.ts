@@ -74,6 +74,7 @@ export interface BackendProjectFile {
   version: '2.0';
   id: string;
   title: string;
+  description?: string;
   originalInputFile: string;
   style: string;
   inputType: 'idea' | 'story' | 'multi_input';
@@ -105,6 +106,8 @@ export interface BackendProjectFile {
   productionCompletedAt?: number;
   lastCheckpointAt?: number;
   targetDuration?: number;
+  duration?: number;
+  autonomousMode?: boolean;
 }
 
 export interface BackendAssetManifest {
@@ -120,6 +123,79 @@ export interface BackendAssetManifest {
     metadata?: Record<string, unknown>;
   }>;
   schema_version?: string;
+}
+
+export function normalizeBackendProjectForWrite(
+  project: BackendProjectFile,
+): BackendProjectFile {
+  return {
+    version: project.version,
+    id: project.id,
+    title: project.title,
+    ...(project.description ? { description: project.description } : {}),
+    originalInputFile: project.originalInputFile,
+    style: project.style,
+    inputType: project.inputType,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+    currentPhase: project.currentPhase,
+    ...(project.templateId ? { templateId: project.templateId } : {}),
+    ...(typeof project.targetDuration === 'number'
+      ? { targetDuration: project.targetDuration }
+      : {}),
+    ...(typeof project.duration === 'number'
+      ? { duration: project.duration }
+      : {}),
+    ...(typeof project.autonomousMode === 'boolean'
+      ? { autonomousMode: project.autonomousMode }
+      : {}),
+    phases: project.phases,
+    content: project.content,
+    characters: project.characters,
+    settings: project.settings,
+    scenes: project.scenes,
+    assets: project.assets,
+    ...(project.finalVideo ? { finalVideo: project.finalVideo } : {}),
+    ...(typeof project.productionStartedAt === 'number'
+      ? { productionStartedAt: project.productionStartedAt }
+      : {}),
+    ...(typeof project.productionCompletedAt === 'number'
+      ? { productionCompletedAt: project.productionCompletedAt }
+      : {}),
+    ...(typeof project.lastCheckpointAt === 'number'
+      ? { lastCheckpointAt: project.lastCheckpointAt }
+      : {}),
+    ...('elapsedMs' in (project as Record<string, unknown>)
+      ? { elapsedMs: (project as Record<string, unknown>)['elapsedMs'] as number | undefined }
+      : {}),
+    ...('timerLastStartedAt' in (project as Record<string, unknown>)
+      ? {
+          timerLastStartedAt: (project as Record<string, unknown>)['timerLastStartedAt'] as
+            | number
+            | undefined,
+        }
+      : {}),
+    ...('files' in (project as Record<string, unknown>)
+      ? { files: (project as Record<string, unknown>)['files'] as unknown }
+      : {}),
+    ...('artifacts' in (project as Record<string, unknown>)
+      ? { artifacts: (project as Record<string, unknown>)['artifacts'] as unknown }
+      : {}),
+    ...('goal' in (project as Record<string, unknown>)
+      ? { goal: (project as Record<string, unknown>)['goal'] as unknown }
+      : {}),
+    ...('todos' in (project as Record<string, unknown>)
+      ? { todos: (project as Record<string, unknown>)['todos'] as unknown }
+      : {}),
+    ...('inputs' in (project as Record<string, unknown>)
+      ? { inputs: (project as Record<string, unknown>)['inputs'] as unknown }
+      : {}),
+    ...('primaryNarration' in (project as Record<string, unknown>)
+      ? {
+          primaryNarration: (project as Record<string, unknown>)['primaryNarration'] as unknown,
+        }
+      : {}),
+  };
 }
 
 function slugify(value: string): string {
@@ -283,7 +359,10 @@ function latestAssetPathForScene(
 ): string | undefined {
   const matches =
     assets?.assets.filter(
-      (asset) => asset.type === type && asset.scene_number === sceneNumber,
+      (asset) =>
+        asset.type === type &&
+        asset.scene_number === sceneNumber &&
+        asset.metadata?.['shot_number'] === undefined,
     ) ?? [];
 
   if (matches.length === 0) return undefined;
@@ -367,6 +446,7 @@ function mapPhaseRecordToBackend(
 export function createDefaultBackendProject(params: {
   id: string;
   title: string;
+  description?: string;
   style?: string;
   templateId?: string;
   targetDuration?: number;
@@ -376,13 +456,14 @@ export function createDefaultBackendProject(params: {
     version: '2.0',
     id: params.id,
     title: params.title,
+    description: params.description?.trim() || undefined,
     originalInputFile: 'original_input.md',
-    style: params.style ?? 'cinematic_realism',
+    style: params.style ?? '',
     inputType: 'idea',
     createdAt: now,
     updatedAt: now,
     currentPhase: 'plot',
-    templateId: params.templateId ?? 'narrative',
+    templateId: params.templateId,
     phases: {
       plot: { status: 'pending', completedAt: null },
       story: { status: 'pending', completedAt: null },
@@ -406,7 +487,9 @@ export function createDefaultBackendProject(params: {
     settings: [],
     scenes: [],
     assets: [],
-    targetDuration: params.targetDuration ?? 120,
+    ...(typeof params.targetDuration === 'number'
+      ? { targetDuration: params.targetDuration, duration: params.targetDuration }
+      : {}),
     productionStartedAt: now,
   };
 }
@@ -415,6 +498,7 @@ export function backendProjectToDesktopManifest(
   project: BackendProjectFile,
 ): KshanaManifest {
   const manifest = createDefaultManifest(project.id, project.title, '1.0.0');
+  manifest.description = project.description?.trim() || undefined;
   manifest.created_at = new Date(project.createdAt).toISOString();
   manifest.updated_at = new Date(project.updatedAt).toISOString();
   return manifest;

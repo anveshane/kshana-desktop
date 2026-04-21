@@ -7,6 +7,17 @@
   background-color: $color-bg-app;
 }
 
+.warningBanner {
+  margin: $spacing-lg $spacing-xl 0;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid rgba(var(--color-warning-rgb), 0.25);
+  background: rgba(var(--color-warning-rgb), 0.1);
+  color: $color-warning;
+  font-size: $font-size-xs;
+  line-height: 1.5;
+  border-radius: $radius-md;
+}
+
 .content {
   flex: 1;
   overflow-y: auto;
@@ -118,8 +129,11 @@
   align-items: center;
   justify-content: center;
   padding: $spacing-xl;
-  background:
-    linear-gradient(180deg, rgba(var(--color-bg-panel-rgb), 0.98) 0%, rgba(var(--color-bg-panel-elevated-rgb), 0.98) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--color-bg-panel-rgb), 0.98) 0%,
+    rgba(var(--color-bg-panel-elevated-rgb), 0.98) 100%
+  );
   border-radius: $radius-lg;
   cursor: pointer;
   transition:
@@ -161,8 +175,11 @@
   @include panel-base;
   display: flex;
   flex-direction: column;
-  background:
-    linear-gradient(180deg, rgba(var(--color-bg-panel-rgb), 0.98) 0%, rgba(var(--color-bg-panel-elevated-rgb), 0.98) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--color-bg-panel-rgb), 0.98) 0%,
+    rgba(var(--color-bg-panel-elevated-rgb), 0.98) 100%
+  );
   border-radius: $radius-lg;
   overflow: hidden;
   cursor: pointer;
@@ -192,14 +209,19 @@
 .thumbnailVideo {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  background-color: rgba(var(--color-background-dark-rgb), 0.72);
 }
 
 .playOverlay {
   position: absolute;
   inset: 0;
   @include flex-center;
-  background: linear-gradient(180deg, rgba(10, 14, 20, 0.18), rgba(10, 14, 20, 0.45));
+  background: linear-gradient(
+    180deg,
+    rgba(10, 14, 20, 0.18),
+    rgba(10, 14, 20, 0.45)
+  );
   color: white;
   opacity: 0;
   transition: opacity $transition-fast;

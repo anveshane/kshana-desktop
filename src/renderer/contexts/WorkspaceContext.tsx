@@ -59,6 +59,10 @@ interface WorkspaceProviderProps {
   children: ReactNode;
 }
 
+function normalizeProjectPath(input: string): string {
+  return input.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
 export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const [state, setState] = useState<WorkspaceState>(initialState);
   const projectSwitchGuardsRef = useRef<Set<ProjectSwitchGuard>>(new Set());
@@ -115,7 +119,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
   const openProject = useCallback(
     async (path: string) => {
-      const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '');
+      const normalizedPath = normalizeProjectPath(path);
       const previousProjectDirectory = currentProjectDirectoryRef.current;
 
       if (
@@ -143,6 +147,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
       }
 
       setState((prev) => ({ ...prev, isLoading: true }));
+      let directoryWatchStarted: string | null = null;
       try {
         const exists = await window.electron.project.checkFileExists(path);
         if (!exists) {
@@ -150,22 +155,26 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           throw new Error('Selected project folder does not exist anymore.');
         }
 
-        const normalizedProjectPath = normalizedPath.toLowerCase();
-        if (!normalizedProjectPath.endsWith('.kshana')) {
-          throw new Error('Select an existing .kshana project folder.');
-        }
-
-        const hasProjectFile = await window.electron.project.checkFileExists(
-          `${normalizedPath}/project.json`,
-        );
-        if (!hasProjectFile) {
-          throw new Error('Selected folder is missing project.json.');
+        const hasRootProjectFile =
+          await window.electron.project.checkFileExists(
+            `${normalizedPath}/project.json`,
+          );
+        const hasLegacyAgentProjectFile =
+          await window.electron.project.checkFileExists(
+            `${normalizedPath}/.kshana/agent/project.json`,
+          );
+        if (!hasRootProjectFile && !hasLegacyAgentProjectFile) {
+          throw new Error(
+            'Selected folder is not a Kshana project. Expected project.json or .kshana/agent/project.json.',
+          );
         }
 
         // Read only first level to prevent freeze
         const tree = await window.electron.project.readTree(path, 1);
-        const projectName =
-          (normalizedPath.split('/').pop() || path).replace(/\.kshana$/i, '');
+        const projectName = (normalizedPath.split('/').pop() || path).replace(
+          /\.kshana$/i,
+          '',
+        );
 
         if (
           previousProjectDirectory &&
@@ -178,6 +187,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
 
         // Start watching the directory
         await window.electron.project.watchDirectory(path);
+        directoryWatchStarted = path;
 
         // Add to recent projects
         await window.electron.project.addRecent(path);
@@ -199,6 +209,11 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
           projectName,
         });
       } catch (error) {
+        if (directoryWatchStarted) {
+          await window.electron.project
+            .unwatchDirectory(directoryWatchStarted)
+            .catch(() => undefined);
+        }
         setState((prev) => ({ ...prev, isLoading: false }));
         throw error;
       }
@@ -331,6 +346,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     () => ({
       ...state,
       openProject,
+      refreshRecentProjects,
       registerProjectSwitchGuard,
       closeProject,
       selectFile,
@@ -345,6 +361,7 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     [
       state,
       openProject,
+      refreshRecentProjects,
       registerProjectSwitchGuard,
       closeProject,
       selectFile,

@@ -6,7 +6,7 @@ This document explains how to create releases for Kshana Desktop using GitHub Ac
 
 When you push a version tag, GitHub Actions automatically:
 1. Checks out the code
-2. Installs dependencies (including kshana-ink)
+2. Installs dependencies (including kshana-core)
 3. Builds the Electron app
 4. Creates DMG installers for Mac (arm64 + x64)
 5. Publishes to GitHub Releases
@@ -92,7 +92,7 @@ Download the DMG files:
 
 The workflow builds:
 
-1. **kshana-ink** (TypeScript backend)
+1. **kshana-core** (TypeScript backend)
    - Built with tsup
    - Bundled into the Electron app
 
@@ -117,7 +117,7 @@ The workflow builds:
 
 Common issues:
 - **Missing dependencies**: Check if `npm ci` fails
-- **kshana-ink build errors**: Check tsup logs
+- **kshana-core build errors**: Check tsup logs
 - **Electron build errors**: Check electron-builder logs
 
 View detailed logs in the Actions tab.
@@ -159,7 +159,7 @@ Before creating a release:
 - [ ] Version updated in `package.json` (if needed)
 - [ ] Changes committed and pushed
 - [ ] Correct branch checked out
-- [ ] kshana-ink is building successfully
+- [ ] kshana-core is building successfully
 - [ ] Tag name follows versioning scheme
 
 ## Workflow Configuration

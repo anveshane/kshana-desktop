@@ -1,7 +1,7 @@
 /**
  * Agent Project File (.kshana/agent/project.json)
  * Location: <ProjectName>/.kshana/agent/project.json
- * Owner: Agent (kshana-ink)
+ * Owner: Agent (kshana-core)
  * Purpose: Central registry for workflow state, per-entity indexes, and approval metadata
  */
 

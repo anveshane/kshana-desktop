@@ -69,6 +69,11 @@ function isBrokenWhisperRuntimeError(error) {
   );
 }
 
+function isMissingContentLengthError(error) {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes('content-length header not found');
+}
+
 async function validateOrDownloadModel(whisper) {
   try {
     const result = await whisper.downloadWhisperModel({
@@ -83,6 +88,15 @@ async function validateOrDownloadModel(whisper) {
       console.log(`[Whisper model] downloaded ${modelPath}`);
     }
   } catch (error) {
+    if (isMissingContentLengthError(error)) {
+      if (await modelExistsWithContent(modelPath)) {
+        console.warn(
+          `[Whisper model] Download completed but validation could not determine Content-Length. Continuing with existing ${modelPath}.`,
+        );
+        return;
+      }
+    }
+
     if (!isModelSizeMismatchError(error)) {
       throw error;
     }

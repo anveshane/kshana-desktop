@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Bot, Download, Trash2 } from 'lucide-react';
 import type { BackendState } from '../../../../shared/backendTypes';
 import type { AppSettings } from '../../../../shared/settingsTypes';
@@ -34,12 +41,19 @@ import ProjectSetupPanel, {
 import {
   failExecutingToolCalls,
   isCancelAckStatus,
+  settleExecutingToolCalls,
 } from './chatPanelStopUtils';
 import {
   applyDesktopRemotionQueryParams,
   extractIncomingFileOpPath,
   isAbsoluteWirePath,
 } from './chatPanelPathProtocolUtils';
+import {
+  assembleRemoteFinalVideo,
+  type TimelineAssemblyProgress,
+  type TimelineAssemblyRequest,
+  type TimelineAssemblyResult,
+} from './remoteFinalVideoAssembly';
 import { getDisconnectBannerMessage } from './chatPanelConnectionUtils';
 import { getImmediateAutoQuestionResponse } from './chatPanelQuestionUtils';
 import {
@@ -47,6 +61,26 @@ import {
   shouldConfigureProjectAfterConnect,
   type RemoteSessionInfo,
 } from './chatPanelResumeUtils';
+import {
+  findActiveToolCallEntry,
+  mergeToolStreamingContent,
+  normalizeComparableChatText,
+  normalizeTodoUpdatePayload,
+  shouldStreamToToolCallCard,
+  shouldSuppressAgentResponse,
+} from './chatPanelStreamUtils';
+import {
+  getPostToolUiState,
+  getRemoteFsReconnectMessage,
+} from './chatPanelToolStatusUtils';
+import {
+  isChatRestoreCompleteForProject as isChatRestoreCompleteForProjectState,
+  shouldAutoConnectChat,
+  shouldPersistChatSnapshot,
+  type ChatRestoreState,
+  type ChatRestoreStatus,
+} from './chatPanelPersistenceUtils';
+import useQuestionTimerCancellation from './useQuestionTimerCancellation';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
 
@@ -64,7 +98,6 @@ const OUTBOUND_ACTION_QUEUE_CAP = 200;
 const CONNECTION_BANNER_DEDUPE_MS = 5000;
 const STOP_ACK_TIMEOUT_MS = 12000;
 const SETTINGS_RECONNECT_DEBOUNCE_MS = 400;
-const PROJECT_SETUP_FILE = 'project-setup.json';
 const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
 const DEFAULT_SETUP_TEMPLATE_ID = 'narrative';
 const DEFAULT_SETUP_STYLE_ID = 'cinematic_realism';
@@ -76,6 +109,7 @@ interface ProjectSetupPersisted {
   templateId: string;
   style: string;
   duration: number;
+  autonomousMode?: boolean;
 }
 
 interface TemplateCatalogResponse {
@@ -99,6 +133,7 @@ interface ConfigureProjectPayload {
   templateId: string;
   style: string;
   duration: number;
+  autonomousMode: boolean;
   projectDir: string;
   projectName?: string;
 }
@@ -163,13 +198,11 @@ const normalizeProjectDirectory = (value: string): string => {
 
 const getProjectNameFromDirectory = (value: string): string => {
   return (
-    normalizeProjectDirectory(value).split('/').pop()?.replace(/\.kshana$/i, '') ||
-    value
+    normalizeProjectDirectory(value)
+      .split('/')
+      .pop()
+      ?.replace(/\.kshana$/i, '') || value
   );
-};
-
-const normalizeComparableChatText = (value: string): string => {
-  return value.trim().replace(/\r\n/g, '\n');
 };
 
 const ORIGINAL_INPUT_FILE = 'original_input.md';
@@ -187,7 +220,9 @@ const normalizeHttpUrl = (value?: string): string | null => {
   }
 };
 
-const resolveComfyUIOverride = (settings: AppSettings | null): string | null => {
+const resolveComfyUIOverride = (
+  settings: AppSettings | null,
+): string | null => {
   const mode = settings?.comfyuiMode ?? 'inherit';
   if (mode !== 'custom') {
     return null;
@@ -198,7 +233,9 @@ const resolveComfyUIOverride = (settings: AppSettings | null): string | null => 
 const getComfyUISettingsKey = (settings: AppSettings | null): string => {
   const mode = settings?.comfyuiMode ?? 'inherit';
   const override =
-    mode === 'custom' ? resolveComfyUIOverride(settings) ?? '__invalid__' : '__inherit__';
+    mode === 'custom'
+      ? (resolveComfyUIOverride(settings) ?? '__invalid__')
+      : '__inherit__';
   return `${mode}:${override}`;
 };
 
@@ -209,6 +246,16 @@ const normalizeNotificationLevel = (
     return value;
   }
   return 'info';
+};
+
+const isReconnectStatusMessage = (content: string): boolean => {
+  return content.startsWith('Reconnected');
+};
+
+const isNoRunningTaskCancelMessage = (message?: string): boolean => {
+  return (
+    typeof message === 'string' && /no running task to cancel/i.test(message)
+  );
 };
 
 export default function ChatPanel() {
@@ -229,9 +276,12 @@ export default function ChatPanel() {
   const [isTaskRunning, setIsTaskRunning] = useState(false);
   const [isStopPending, setIsStopPending] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [setupPanelMode, setSetupPanelMode] = useState<SetupPanelMode>('hidden');
+  const [setupPanelMode, setSetupPanelMode] =
+    useState<SetupPanelMode>('hidden');
   const [setupStep, setSetupStep] = useState<SetupStep>('template');
-  const [setupTemplates, setSetupTemplates] = useState<SetupTemplateOption[]>([]);
+  const [setupTemplates, setSetupTemplates] = useState<SetupTemplateOption[]>(
+    [],
+  );
   const [setupDurationPresets, setSetupDurationPresets] = useState<
     Record<string, SetupDurationOption[]>
   >({});
@@ -240,6 +290,9 @@ export default function ChatPanel() {
   );
   const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
   const [selectedDuration, setSelectedDuration] = useState<number | null>(null);
+  const [autonomousModeEnabled, setAutonomousModeEnabled] = useState(false);
+  const [questionTimerCancelledForId, setQuestionTimerCancelledForId] =
+    useState<string | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [isLoadingSetupCatalog, setIsLoadingSetupCatalog] = useState(false);
   const [isConfiguringProjectSetup, setIsConfiguringProjectSetup] =
@@ -261,6 +314,7 @@ export default function ChatPanel() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const lastAssistantIdRef = useRef<string | null>(null);
+  const lastFinalizedAssistantStreamTextRef = useRef<string>('');
   const connectingRef = useRef(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -276,7 +330,9 @@ export default function ChatPanel() {
   // Track the last question message ID to avoid duplicates
   const lastQuestionMessageIdRef = useRef<string | null>(null);
   const reconnectAttemptRef = useRef(0);
-  const settingsReconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settingsReconnectTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const notificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -289,6 +345,10 @@ export default function ChatPanel() {
   const connectionBannerRef = useRef<{ key: string; at: number } | null>(null);
   const currentProjectDirectoryRef = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const chatRestoreStateRef = useRef<ChatRestoreState>({
+    projectDirectory: null,
+    status: 'idle',
+  });
   const messagesRef = useRef<ChatMessage[]>([]);
   const agentStatusRef = useRef<AgentStatus>('idle');
   const agentNameRef = useRef('Kshana');
@@ -298,6 +358,7 @@ export default function ChatPanel() {
   const hasUserSentMessageRef = useRef(false);
   const isTaskRunningRef = useRef(false);
   const isStopPendingRef = useRef(false);
+  const autonomousModeRef = useRef(false);
   const supportsProjectStateSyncRef = useRef(true);
   const stopRequestRef = useRef<{
     promise: Promise<boolean>;
@@ -318,6 +379,7 @@ export default function ChatPanel() {
 
   const resetConversationRefs = useCallback(() => {
     lastAssistantIdRef.current = null;
+    lastFinalizedAssistantStreamTextRef.current = '';
     awaitingResponseRef.current = false;
     activeToolCallsRef.current.clear();
     toolCallSequenceRef.current.clear();
@@ -325,6 +387,45 @@ export default function ChatPanel() {
     lastQuestionMessageIdRef.current = null;
     backgroundGenerationEventDedupe.clear();
   }, []);
+
+  const getChatRestoreState = useCallback((): ChatRestoreState => {
+    return chatRestoreStateRef.current;
+  }, []);
+
+  const setChatRestoreState = useCallback(
+    (projectDir: string | null, status: ChatRestoreStatus) => {
+      chatRestoreStateRef.current = {
+        projectDirectory: projectDir,
+        status,
+      };
+      console.log('[ChatPanel] Chat restore state updated:', {
+        projectDirectory: projectDir,
+        status,
+      });
+    },
+    [],
+  );
+
+  const isChatRestoreCompleteForProject = useCallback(
+    (projectDir: string | null | undefined): boolean => {
+      return isChatRestoreCompleteForProjectState(
+        getChatRestoreState(),
+        projectDir,
+      );
+    },
+    [getChatRestoreState],
+  );
+
+  const shouldPersistSnapshotForProject = useCallback(
+    (targetProjectDirectory: string | null | undefined): boolean => {
+      return shouldPersistChatSnapshot({
+        currentProjectDirectory: currentProjectDirectoryRef.current,
+        targetProjectDirectory,
+        restoreState: getChatRestoreState(),
+      });
+    },
+    [getChatRestoreState],
+  );
   const appendMessage = useCallback(
     (message: Omit<ChatMessage, 'id' | 'timestamp'> & Partial<ChatMessage>) => {
       const id = message.id ?? makeId();
@@ -339,8 +440,65 @@ export default function ChatPanel() {
     [],
   );
 
+  const updateToolCallStreamingContent = useCallback(
+    (messageId: string, content: string, options?: { reset?: boolean }) => {
+      setMessages((prev) =>
+        prev.map((message) => {
+          if (message.id !== messageId) {
+            return message;
+          }
+
+          const existingContent =
+            typeof message.meta?.streamingContent === 'string'
+              ? message.meta.streamingContent
+              : '';
+          const nextContent = mergeToolStreamingContent(
+            existingContent,
+            content,
+            options,
+          );
+
+          return {
+            ...message,
+            meta: {
+              ...(message.meta || {}),
+              streamingContent: nextContent,
+            },
+            timestamp: Date.now(),
+          };
+        }),
+      );
+    },
+    [],
+  );
+
   const appendSystemMessage = useCallback(
     (content: string, type = 'status') => {
+      if (type === 'status' && isReconnectStatusMessage(content)) {
+        setMessages((prev) => {
+          const filtered = prev.filter(
+            (message) =>
+              !(
+                message.role === 'system' &&
+                message.type === 'status' &&
+                isReconnectStatusMessage(message.content)
+              ),
+          );
+
+          return [
+            ...filtered,
+            {
+              id: makeId(),
+              role: 'system',
+              type,
+              content,
+              timestamp: Date.now(),
+            },
+          ];
+        });
+        return;
+      }
+
       // Dedupe progress messages - update last matching one within recent history
       if (DEDUPE_TYPES.includes(type)) {
         setMessages((prev) => {
@@ -389,6 +547,7 @@ export default function ChatPanel() {
     hasUserSentMessageRef.current = hasUserSentMessage;
     isTaskRunningRef.current = isTaskRunning;
     isStopPendingRef.current = isStopPending;
+    autonomousModeRef.current = autonomousModeEnabled;
     sessionIdRef.current = sessionId;
   }, [
     messages,
@@ -400,6 +559,7 @@ export default function ChatPanel() {
     hasUserSentMessage,
     isTaskRunning,
     isStopPending,
+    autonomousModeEnabled,
     sessionId,
   ]);
 
@@ -432,31 +592,38 @@ export default function ChatPanel() {
     [appendSystemMessage],
   );
 
-  const fetchTemplateCatalog = useCallback(async (): Promise<TemplateCatalogResponse> => {
-    const backendState = await window.electron.backend.getState();
-    const baseUrl =
-      backendState.serverUrl || `http://localhost:${backendState.port ?? 8001}`;
-    const response = await fetch(`${baseUrl}/api/v1/templates`, {
-      method: 'GET',
-      cache: 'no-store',
-    });
+  const fetchTemplateCatalog =
+    useCallback(async (): Promise<TemplateCatalogResponse> => {
+      const backendState = await window.electron.backend.getState();
+      const baseUrl =
+        backendState.serverUrl ||
+        `http://localhost:${backendState.port ?? 8001}`;
+      const response = await fetch(`${baseUrl}/api/v1/templates`, {
+        method: 'GET',
+        cache: 'no-store',
+      });
 
-    if (!response.ok) {
-      throw new Error(`Template request failed with status ${response.status}`);
-    }
+      if (!response.ok) {
+        throw new Error(
+          `Template request failed with status ${response.status}`,
+        );
+      }
 
-    const parsed = (await response.json()) as TemplateCatalogResponse;
-    return {
-      templates: parsed.templates || [],
-      durationPresets: parsed.durationPresets || {},
-    };
-  }, []);
+      const parsed = (await response.json()) as TemplateCatalogResponse;
+      return {
+        templates: parsed.templates || [],
+        durationPresets: parsed.durationPresets || {},
+      };
+    }, []);
 
   const ensureTemplateCatalogLoaded = useCallback(async (): Promise<{
     templates: SetupTemplateOption[];
     durationPresets: Record<string, SetupDurationOption[]>;
   }> => {
-    if (setupTemplates.length > 0 && Object.keys(setupDurationPresets).length > 0) {
+    if (
+      setupTemplates.length > 0 &&
+      Object.keys(setupDurationPresets).length > 0
+    ) {
       return {
         templates: setupTemplates,
         durationPresets: setupDurationPresets,
@@ -471,7 +638,8 @@ export default function ChatPanel() {
           ? catalog.templates
           : FALLBACK_TEMPLATE_CATALOG.templates || [];
       const durationPresets =
-        catalog.durationPresets && Object.keys(catalog.durationPresets).length > 0
+        catalog.durationPresets &&
+        Object.keys(catalog.durationPresets).length > 0
           ? catalog.durationPresets
           : FALLBACK_TEMPLATE_CATALOG.durationPresets || {};
 
@@ -493,34 +661,7 @@ export default function ChatPanel() {
     } finally {
       setIsLoadingSetupCatalog(false);
     }
-  }, [
-    fetchTemplateCatalog,
-    setupDurationPresets,
-    setupTemplates,
-  ]);
-
-  const persistProjectSetup = useCallback(
-    async (config: ConfigureProjectPayload): Promise<void> => {
-      if (!projectDirectory) return;
-
-      const payload: ProjectSetupPersisted = {
-        version: 1,
-        templateId: config.templateId,
-        style: config.style,
-        duration: config.duration,
-      };
-
-      try {
-        await window.electron.project.writeFile(
-          `${projectDirectory}/${PROJECT_SETUP_FILE}`,
-          JSON.stringify(payload, null, 2),
-        );
-      } catch (error) {
-        console.warn('[ChatPanel] Failed to persist project setup:', error);
-      }
-    },
-    [projectDirectory],
-  );
+  }, [fetchTemplateCatalog, setupDurationPresets, setupTemplates]);
 
   const loadPersistedSetupForDirectory = useCallback(
     async (
@@ -528,22 +669,41 @@ export default function ChatPanel() {
     ): Promise<ProjectSetupPersisted | null> => {
       try {
         const content = await window.electron.project.readFile(
-          `${targetProjectDirectory}/${PROJECT_SETUP_FILE}`,
+          `${targetProjectDirectory}/project.json`,
         );
-        if (!content) return null;
-        const parsed = JSON.parse(content) as ProjectSetupPersisted;
-        if (
-          parsed &&
-          parsed.version === 1 &&
-          typeof parsed.templateId === 'string' &&
-          typeof parsed.style === 'string' &&
-          typeof parsed.duration === 'number'
-        ) {
-          return parsed;
+        if (content) {
+          const parsed = JSON.parse(content) as Partial<{
+            templateId: unknown;
+            style: unknown;
+            duration: unknown;
+            targetDuration: unknown;
+            autonomousMode: unknown;
+          }>;
+          const duration =
+            typeof parsed.targetDuration === 'number'
+              ? parsed.targetDuration
+              : parsed.duration;
+          if (
+            parsed &&
+            typeof parsed.templateId === 'string' &&
+            parsed.templateId.trim().length > 0 &&
+            typeof parsed.style === 'string' &&
+            parsed.style.trim().length > 0 &&
+            typeof duration === 'number'
+          ) {
+            return {
+              version: 1,
+              templateId: parsed.templateId,
+              style: parsed.style,
+              duration,
+              autonomousMode: Boolean(parsed.autonomousMode),
+            };
+          }
         }
       } catch {
-        // Ignore malformed or missing setup files.
+        // Ignore malformed project.json
       }
+
       return null;
     },
     [],
@@ -555,6 +715,7 @@ export default function ChatPanel() {
 
       const normalizedConfig: ConfigureProjectPayload = {
         ...config,
+        autonomousMode: Boolean(config.autonomousMode),
         projectName:
           config.projectName ?? getProjectNameFromDirectory(config.projectDir),
       };
@@ -567,7 +728,6 @@ export default function ChatPanel() {
           type: 'configure_project',
           data: normalizedConfig,
         });
-        await persistProjectSetup(normalizedConfig);
       } catch (error) {
         setSetupError(
           `Failed to configure project setup: ${
@@ -577,7 +737,7 @@ export default function ChatPanel() {
         setIsConfiguringProjectSetup(false);
       }
     },
-    [persistProjectSetup, projectDirectory],
+    [projectDirectory],
   );
 
   const openSetupWizard = useCallback(async () => {
@@ -587,12 +747,13 @@ export default function ChatPanel() {
     setSetupStep('template');
   }, [ensureTemplateCatalogLoaded]);
 
-  const loadPersistedSetup = useCallback(async (): Promise<ProjectSetupPersisted | null> => {
-    if (!projectDirectory) {
-      return null;
-    }
-    return loadPersistedSetupForDirectory(projectDirectory);
-  }, [loadPersistedSetupForDirectory, projectDirectory]);
+  const loadPersistedSetup =
+    useCallback(async (): Promise<ProjectSetupPersisted | null> => {
+      if (!projectDirectory) {
+        return null;
+      }
+      return loadPersistedSetupForDirectory(projectDirectory);
+    }, [loadPersistedSetupForDirectory, projectDirectory]);
 
   const deriveDefaultSetup = useCallback(
     (
@@ -600,20 +761,22 @@ export default function ChatPanel() {
       durationPresets: Record<string, SetupDurationOption[]>,
     ): ConfigureProjectPayload | null => {
       const template =
-        templates.find((candidate) => candidate.id === DEFAULT_SETUP_TEMPLATE_ID) ||
-        templates[0];
+        templates.find(
+          (candidate) => candidate.id === DEFAULT_SETUP_TEMPLATE_ID,
+        ) || templates[0];
       if (!template) return null;
 
       const style =
-        template.styles.find((candidate) => candidate.id === template.defaultStyle)
-          ?.id ||
-        template.styles.find((candidate) => candidate.id === DEFAULT_SETUP_STYLE_ID)
-          ?.id ||
+        template.styles.find(
+          (candidate) => candidate.id === template.defaultStyle,
+        )?.id ||
+        template.styles.find(
+          (candidate) => candidate.id === DEFAULT_SETUP_STYLE_ID,
+        )?.id ||
         template.styles[0]?.id ||
         DEFAULT_SETUP_STYLE_ID;
 
-      const duration =
-        resolvePreferredDuration(template.id, durationPresets);
+      const duration = resolvePreferredDuration(template.id, durationPresets);
 
       if (!projectDirectory) return null;
 
@@ -621,6 +784,7 @@ export default function ChatPanel() {
         templateId: template.id,
         style,
         duration,
+        autonomousMode: false,
         projectDir: projectDirectory,
         projectName: getProjectNameFromDirectory(projectDirectory),
       };
@@ -628,13 +792,43 @@ export default function ChatPanel() {
     [projectDirectory],
   );
 
-  const applySetupSelection = useCallback(
-    (config: ConfigureProjectPayload) => {
-      setSelectedTemplateId(config.templateId);
-      setSelectedStyleId(config.style);
-      setSelectedDuration(config.duration);
+  const applySetupSelection = useCallback((config: ConfigureProjectPayload) => {
+    setSelectedTemplateId(config.templateId);
+    setSelectedStyleId(config.style);
+    setSelectedDuration(config.duration);
+    setAutonomousModeEnabled(config.autonomousMode);
+  }, []);
+
+  const buildSetupPayload = useCallback(
+    (
+      overrides: Partial<ConfigureProjectPayload> = {},
+    ): ConfigureProjectPayload | null => {
+      if (
+        !projectDirectory ||
+        !selectedTemplateId ||
+        !selectedStyleId ||
+        !selectedDuration
+      ) {
+        return null;
+      }
+
+      return {
+        templateId: selectedTemplateId,
+        style: selectedStyleId,
+        duration: selectedDuration,
+        autonomousMode: autonomousModeEnabled,
+        projectDir: projectDirectory,
+        projectName: getProjectNameFromDirectory(projectDirectory),
+        ...overrides,
+      };
     },
-    [],
+    [
+      autonomousModeEnabled,
+      projectDirectory,
+      selectedDuration,
+      selectedStyleId,
+      selectedTemplateId,
+    ],
   );
 
   const handleSelectTemplate = useCallback(
@@ -644,16 +838,20 @@ export default function ChatPanel() {
       if (!template || !projectDirectory) return;
 
       const style =
-        template.styles.find((candidate) => candidate.id === template.defaultStyle)
-          ?.id ||
+        template.styles.find(
+          (candidate) => candidate.id === template.defaultStyle,
+        )?.id ||
         template.styles[0]?.id ||
         DEFAULT_SETUP_STYLE_ID;
-      const duration =
-        resolvePreferredDuration(templateId, setupDurationPresets);
+      const duration = resolvePreferredDuration(
+        templateId,
+        setupDurationPresets,
+      );
 
       setSelectedTemplateId(templateId);
       setSelectedStyleId(style);
       setSelectedDuration(duration);
+      setAutonomousModeEnabled(false);
       setSetupStep('style');
     },
     [projectDirectory, setupDurationPresets, setupTemplates],
@@ -670,26 +868,27 @@ export default function ChatPanel() {
         return;
       }
 
-      const payload: ConfigureProjectPayload = {
-        templateId: selectedTemplateId,
-        style: selectedStyleId,
-        duration,
-        projectDir: projectDirectory,
-        projectName: getProjectNameFromDirectory(projectDirectory),
-      };
-
       setSelectedDuration(duration);
       setSetupPanelMode('wizard');
-      setSetupStep('duration');
-      void configureProjectSetup(payload);
+      setSetupStep('autonomous');
     },
-    [
-      configureProjectSetup,
-      projectDirectory,
-      selectedStyleId,
-      selectedTemplateId,
-    ],
+    [projectDirectory, selectedStyleId, selectedTemplateId],
   );
+
+  const handleSelectAutonomousMode = useCallback((enabled: boolean) => {
+    setAutonomousModeEnabled(enabled);
+  }, []);
+
+  const handleConfirmSetup = useCallback(() => {
+    const payload = buildSetupPayload();
+    if (!payload) {
+      return;
+    }
+
+    setSetupPanelMode('wizard');
+    setSetupStep('autonomous');
+    configureProjectSetup(payload).catch(() => undefined);
+  }, [buildSetupPayload, configureProjectSetup]);
 
   const handleSetupBack = useCallback(() => {
     if (setupStep === 'style') {
@@ -698,6 +897,10 @@ export default function ChatPanel() {
     }
     if (setupStep === 'duration') {
       setSetupStep('style');
+      return;
+    }
+    if (setupStep === 'autonomous') {
+      setSetupStep('duration');
     }
   }, [setupStep]);
 
@@ -719,8 +922,13 @@ export default function ChatPanel() {
       if (success) {
         setIsTaskRunning(false);
       } else {
-        setIsTaskRunning(true);
         const message = errorMessage || 'Failed to stop task.';
+        const noRunningTask = isNoRunningTaskCancelMessage(message);
+        setIsTaskRunning(!noRunningTask);
+        if (noRunningTask) {
+          setAgentStatus('idle');
+          setStatusMessage('Ready');
+        }
         appendSystemMessage(message, 'error');
       }
 
@@ -746,7 +954,102 @@ export default function ChatPanel() {
     toolCallSequenceRef.current.clear();
     setIsStreaming(false);
     lastAssistantIdRef.current = null;
+    lastFinalizedAssistantStreamTextRef.current = '';
   }, []);
+
+  const finalizeAssistantStream = useCallback((finalText?: string) => {
+    const activeAssistantId = lastAssistantIdRef.current;
+    if (!activeAssistantId) {
+      if (finalText !== undefined) {
+        lastFinalizedAssistantStreamTextRef.current =
+          normalizeComparableChatText(finalText);
+      }
+      setIsStreaming(false);
+      return;
+    }
+
+    const activeMessage = messagesRef.current.find(
+      (message) =>
+        message.id === activeAssistantId &&
+        message.role === 'assistant' &&
+        message.type !== 'tool_call',
+    );
+
+    const resolvedFinalText =
+      finalText !== undefined
+        ? finalText
+        : activeMessage
+          ? activeMessage.content
+          : '';
+
+    lastFinalizedAssistantStreamTextRef.current =
+      normalizeComparableChatText(resolvedFinalText);
+    lastAssistantIdRef.current = null;
+    setIsStreaming(false);
+
+    // Remove the active message if it never received any content (empty ghost bubble)
+    if (
+      activeAssistantId &&
+      (!activeMessage || !activeMessage.content.trim())
+    ) {
+      setMessages((prev) => prev.filter((msg) => msg.id !== activeAssistantId));
+    }
+  }, []);
+
+  const markExecutionInterrupted = useCallback(
+    (statusText: string, toolReason: string, systemMessage?: string) => {
+      finalizeAssistantStream();
+      failActiveToolCalls(toolReason);
+
+      const pending = stopRequestRef.current;
+      if (pending) {
+        clearTimeout(pending.timeoutId);
+        stopRequestRef.current = null;
+        pending.resolve(false);
+      }
+
+      setIsStopPending(false);
+      setIsTaskRunning(false);
+      setAgentStatus('waiting');
+      setStatusMessage(statusText);
+      setSessionTimer((prev) => ({
+        ...prev,
+        running: false,
+      }));
+
+      if (systemMessage) {
+        appendSystemMessage(systemMessage, 'status');
+      }
+    },
+    [appendSystemMessage, failActiveToolCalls, finalizeAssistantStream],
+  );
+
+  const settleActiveToolCalls = useCallback(
+    (status: 'completed' | 'error', result: string) => {
+      const now = Date.now();
+      const activeEntries = Array.from(activeToolCallsRef.current.values());
+      const updated = settleExecutingToolCalls(
+        messagesRef.current,
+        activeEntries,
+        status,
+        result,
+        now,
+      );
+
+      if (updated === messagesRef.current) {
+        return;
+      }
+
+      messagesRef.current = updated;
+      setMessages(updated);
+      activeToolCallsRef.current.clear();
+      toolCallSequenceRef.current.clear();
+      setIsStreaming(false);
+      lastAssistantIdRef.current = null;
+      lastFinalizedAssistantStreamTextRef.current = '';
+    },
+    [],
+  );
 
   const getRendererErrorMessage = useCallback(
     (error: unknown, fallback: string): string => {
@@ -774,6 +1077,7 @@ export default function ChatPanel() {
       phaseDisplayName: phaseDisplayNameRef.current,
       hasUserSentMessage: hasUserSentMessageRef.current,
       isTaskRunning: isTaskRunningRef.current,
+      autonomousMode: autonomousModeRef.current,
     };
   }, []);
 
@@ -792,20 +1096,54 @@ export default function ChatPanel() {
         return;
       }
 
+      if (!shouldPersistSnapshotForProject(targetProjectDirectory)) {
+        console.log(
+          '[ChatPanel] Skipping snapshot persist until restore completes:',
+          {
+            targetProjectDirectory,
+            restoreState: getChatRestoreState(),
+          },
+        );
+        return;
+      }
+
       const snapshot = createChatSnapshot({
         projectDirectory: targetProjectDirectory,
         sessionId: sessionIdRef.current,
         messages: messagesRef.current,
         uiState: buildSnapshotUiState(),
       });
+      if (snapshot.messages.length === 0) {
+        console.log(
+          '[ChatPanel] Persisting empty chat snapshot after restore completion:',
+          {
+            projectDirectory: targetProjectDirectory,
+            sessionId: snapshot.sessionId,
+          },
+        );
+      }
       await saveChatSnapshot(snapshot);
     },
-    [buildSnapshotUiState],
+    [
+      buildSnapshotUiState,
+      getChatRestoreState,
+      shouldPersistSnapshotForProject,
+    ],
   );
 
   const scheduleSnapshotSave = useCallback(
     (targetProjectDirectory: string | null | undefined) => {
       if (!targetProjectDirectory) {
+        return;
+      }
+      if (!shouldPersistSnapshotForProject(targetProjectDirectory)) {
+        console.log(
+          '[ChatPanel] Autosave suppressed while chat restore is pending:',
+          {
+            targetProjectDirectory,
+            restoreState: getChatRestoreState(),
+          },
+        );
         return;
       }
       if (snapshotSaveTimeoutRef.current) {
@@ -818,7 +1156,7 @@ export default function ChatPanel() {
         });
       }, SNAPSHOT_SAVE_DEBOUNCE_MS);
     },
-    [persistSnapshot],
+    [getChatRestoreState, persistSnapshot, shouldPersistSnapshotForProject],
   );
 
   const hasQueuedOutboundActionType = useCallback((type: string): boolean => {
@@ -833,16 +1171,15 @@ export default function ChatPanel() {
   }, []);
 
   const removeQueuedOutboundActionType = useCallback((type: string): void => {
-    pendingOutboundActionsRef.current = pendingOutboundActionsRef.current.filter(
-      (payload) => {
+    pendingOutboundActionsRef.current =
+      pendingOutboundActionsRef.current.filter((payload) => {
         try {
           const parsed = JSON.parse(payload) as { type?: unknown };
           return parsed.type !== type;
         } catch {
           return true;
         }
-      },
-    );
+      });
   }, []);
 
   const fetchSessionInfo = useCallback(
@@ -904,10 +1241,9 @@ export default function ChatPanel() {
       }
 
       try {
-        const snapshot =
-          await window.electron.project.readProjectSnapshot(
-            targetProjectDirectory,
-          );
+        const snapshot = await window.electron.project.readProjectSnapshot(
+          targetProjectDirectory,
+        );
         activeSocket.send(
           JSON.stringify({
             type: 'project_state_sync',
@@ -935,8 +1271,9 @@ export default function ChatPanel() {
         return;
       }
 
-      const persistedSetup =
-        await loadPersistedSetupForDirectory(targetProjectDirectory);
+      const persistedSetup = await loadPersistedSetupForDirectory(
+        targetProjectDirectory,
+      );
       if (!persistedSetup) {
         return;
       }
@@ -948,6 +1285,7 @@ export default function ChatPanel() {
             templateId: persistedSetup.templateId,
             style: persistedSetup.style,
             duration: persistedSetup.duration,
+            autonomousMode: Boolean(persistedSetup.autonomousMode),
             projectDir: targetProjectDirectory,
             projectName: getProjectNameFromDirectory(targetProjectDirectory),
           },
@@ -974,10 +1312,7 @@ export default function ChatPanel() {
   );
 
   const persistOriginalInputIfNeeded = useCallback(
-    async (
-      content: string,
-      optionsToIgnore: string[] = [],
-    ): Promise<void> => {
+    async (content: string, optionsToIgnore: string[] = []): Promise<void> => {
       if (!projectDirectory) {
         return;
       }
@@ -989,8 +1324,7 @@ export default function ChatPanel() {
 
       if (
         optionsToIgnore.some(
-          (option) =>
-            normalizeComparableChatText(option) === normalizedContent,
+          (option) => normalizeComparableChatText(option) === normalizedContent,
         )
       ) {
         return;
@@ -1014,6 +1348,11 @@ export default function ChatPanel() {
 
   const restoreSnapshot = useCallback(
     async (targetProjectDirectory: string) => {
+      console.log('[ChatPanel] Starting chat snapshot restore:', {
+        projectDirectory: targetProjectDirectory,
+      });
+      setChatRestoreState(targetProjectDirectory, 'restoring');
+
       const pendingStop = stopRequestRef.current;
       if (pendingStop) {
         clearTimeout(pendingStop.timeoutId);
@@ -1024,6 +1363,9 @@ export default function ChatPanel() {
       const snapshot = await loadChatSnapshot(targetProjectDirectory);
       resetConversationRefs();
       if (!snapshot) {
+        console.log('[ChatPanel] No chat snapshot found for project:', {
+          projectDirectory: targetProjectDirectory,
+        });
         sessionIdRef.current = null;
         setMessages([]);
         setSessionId(null);
@@ -1035,6 +1377,7 @@ export default function ChatPanel() {
         setHasUserSentMessage(false);
         setIsTaskRunning(false);
         setIsStopPending(false);
+        setAutonomousModeEnabled(false);
         setNotificationBanner(null);
         setSessionTimer({
           visible: false,
@@ -1042,8 +1385,15 @@ export default function ChatPanel() {
           running: false,
           completed: false,
         });
+        setChatRestoreState(targetProjectDirectory, 'missing');
         return;
       }
+
+      console.log('[ChatPanel] Restored chat snapshot:', {
+        projectDirectory: targetProjectDirectory,
+        messageCount: snapshot.messages.length,
+        sessionId: snapshot.sessionId,
+      });
 
       setMessages(
         (snapshot.messages as ChatMessage[]).filter(
@@ -1071,6 +1421,7 @@ export default function ChatPanel() {
       setHasUserSentMessage(Boolean(snapshot.uiState.hasUserSentMessage));
       setIsTaskRunning(Boolean(snapshot.uiState.isTaskRunning));
       setIsStopPending(false);
+      setAutonomousModeEnabled(Boolean(snapshot.uiState.autonomousMode));
       setNotificationBanner(null);
       setSessionTimer({
         visible: false,
@@ -1078,8 +1429,14 @@ export default function ChatPanel() {
         running: false,
         completed: false,
       });
+      setChatRestoreState(targetProjectDirectory, 'restored');
     },
-    [persistOriginalInputIfNeeded, resetConversationRefs, resolveAgentStatus],
+    [
+      persistOriginalInputIfNeeded,
+      resetConversationRefs,
+      resolveAgentStatus,
+      setChatRestoreState,
+    ],
   );
 
   const clearChat = useCallback(() => {
@@ -1101,6 +1458,7 @@ export default function ChatPanel() {
     setHasUserSentMessage(false);
     setIsTaskRunning(false);
     setIsStopPending(false);
+    setAutonomousModeEnabled(false);
     setNotificationBanner(null);
     setSessionTimer({
       visible: false,
@@ -1131,16 +1489,25 @@ export default function ChatPanel() {
       // Normalize stream_chunk to agent_text for comparison
       const normalizedType = type === 'stream_chunk' ? 'agent_text' : type;
 
+      lastFinalizedAssistantStreamTextRef.current = '';
+
       setMessages((prev) => {
+        const hasToolCallAfterIndex = (messageIndex: number) =>
+          messageIndex >= 0 &&
+          prev.slice(messageIndex + 1).some((msg) => msg.type === 'tool_call');
+
         // If we're streaming and have an active message, ALWAYS append to it
         // This matches CLI behavior where chunks accumulate smoothly
         if (isStreamingType && lastAssistantIdRef.current) {
-          const existingMessage = prev.find(
+          const existingIndex = prev.findIndex(
             (msg) => msg.id === lastAssistantIdRef.current,
           );
+          const existingMessage =
+            existingIndex >= 0 ? prev[existingIndex] : undefined;
 
           if (
             existingMessage &&
+            !hasToolCallAfterIndex(existingIndex) &&
             existingMessage.role === 'assistant' &&
             existingMessage.type !== 'tool_call' && // Don't append to tool calls
             (existingMessage.type === 'agent_text' ||
@@ -1185,6 +1552,7 @@ export default function ChatPanel() {
             const msg = prev[i];
             if (
               msg.role === 'assistant' &&
+              !hasToolCallAfterIndex(i) &&
               msg.content &&
               msg.type === normalizedType &&
               msg.content.substring(0, 100) === contentHash
@@ -1195,10 +1563,10 @@ export default function ChatPanel() {
               return prev.map((m) =>
                 m.id === msg.id
                   ? {
-                    ...m,
-                    content: m.content + trimmedContent,
-                    timestamp: Date.now(),
-                  }
+                      ...m,
+                      content: m.content + trimmedContent,
+                      timestamp: Date.now(),
+                    }
                   : m,
               );
             }
@@ -1225,12 +1593,49 @@ export default function ChatPanel() {
           return prev.map((msg) =>
             msg.id === lastMessage.id
               ? {
-                ...msg,
-                content: trimmedContent,
-                type: normalizedType,
-                author: msg.author || author || 'Kshana',
-                timestamp: Date.now(),
-              }
+                  ...msg,
+                  content: trimmedContent,
+                  type: normalizedType,
+                  author: msg.author || author || 'Kshana',
+                  timestamp: Date.now(),
+                }
+              : msg,
+          );
+        }
+
+        // Skip creating a standalone bubble for single non-word characters (e.g. "." coordinator signals)
+        const contentForNoiseCheck = (content || '').trim();
+        if (
+          contentForNoiseCheck.length === 1 &&
+          !/\w/.test(contentForNoiseCheck)
+        ) {
+          return prev;
+        }
+
+        // If the very last message is a non-empty assistant text bubble from the same agent,
+        // treat this new chunk as a continuation — append rather than create a new bubble.
+        // This handles fragmented streaming where the backend sends multiple sessions for one response.
+        const lastMessageForContinuation = prev[prev.length - 1];
+        if (
+          isStreamingType &&
+          lastMessageForContinuation &&
+          lastMessageForContinuation.role === 'assistant' &&
+          lastMessageForContinuation.type !== 'tool_call' &&
+          lastMessageForContinuation.type !== 'agent_question' &&
+          (lastMessageForContinuation.type === 'agent_text' ||
+            lastMessageForContinuation.type === 'agent_response') &&
+          lastMessageForContinuation.content &&
+          lastMessageForContinuation.content.trim().length > 0
+        ) {
+          lastAssistantIdRef.current = lastMessageForContinuation.id;
+          setIsStreaming(true);
+          return prev.map((msg) =>
+            msg.id === lastMessageForContinuation.id
+              ? {
+                  ...msg,
+                  content: `${msg.content}${trimmedContent}`,
+                  timestamp: Date.now(),
+                }
               : msg,
           );
         }
@@ -1287,9 +1692,10 @@ export default function ChatPanel() {
   const queueOutboundAction = useCallback((payload: string) => {
     pendingOutboundActionsRef.current.push(payload);
     if (pendingOutboundActionsRef.current.length > OUTBOUND_ACTION_QUEUE_CAP) {
-      pendingOutboundActionsRef.current = pendingOutboundActionsRef.current.slice(
-        pendingOutboundActionsRef.current.length - OUTBOUND_ACTION_QUEUE_CAP,
-      );
+      pendingOutboundActionsRef.current =
+        pendingOutboundActionsRef.current.slice(
+          pendingOutboundActionsRef.current.length - OUTBOUND_ACTION_QUEUE_CAP,
+        );
     }
   }, []);
 
@@ -1325,18 +1731,27 @@ export default function ChatPanel() {
   );
 
   /**
-   * Handle server payload from kshana-ink WebSocket.
-   * kshana-ink messages have the format: { type, sessionId, timestamp, data: {...} }
+   * Handle server payload from kshana-core WebSocket.
+   * kshana-core messages have the format: { type, sessionId, timestamp, data: {...} }
    */
   const handleServerPayload = useCallback(
     (payload: Record<string, unknown>) => {
-      // Extract data from kshana-ink message format
+      // Extract data from kshana-core message format
       const data = (payload.data as Record<string, unknown>) ?? payload;
       const messageType = payload.type as string;
       const payloadSessionId =
         typeof payload.sessionId === 'string' ? payload.sessionId : null;
 
       if (payloadSessionId && payloadSessionId !== sessionIdRef.current) {
+        console.log(
+          '[ChatPanel] Updating active session from server payload:',
+          {
+            previousSessionId: sessionIdRef.current,
+            nextSessionId: payloadSessionId,
+            messageType,
+          },
+        );
+        sessionIdRef.current = payloadSessionId;
         setSessionId(payloadSessionId);
       }
 
@@ -1355,7 +1770,7 @@ export default function ChatPanel() {
       const opId =
         typeof data.opId === 'string' && data.opId.trim()
           ? data.opId
-          : (requestId || undefined);
+          : requestId || undefined;
 
       const sendRequestResponse = (
         responseType: string,
@@ -1371,16 +1786,16 @@ export default function ChatPanel() {
           JSON.stringify(
             errorMessage
               ? {
-                type: responseType,
-                requestId: responseRequestId,
-                error: errorMessage,
-                data: responseData,
-              }
+                  type: responseType,
+                  requestId: responseRequestId,
+                  error: errorMessage,
+                  data: responseData,
+                }
               : {
-                type: responseType,
-                requestId: responseRequestId,
-                data: responseData,
-              },
+                  type: responseType,
+                  requestId: responseRequestId,
+                  data: responseData,
+                },
           ),
         );
       };
@@ -1396,7 +1811,10 @@ export default function ChatPanel() {
       const formatFileOpError = (error: unknown, fallback: string): string =>
         getRendererErrorMessage(error, fallback);
 
-      const isNoEntryError = (error: unknown, errorMessage: string): boolean => {
+      const isNoEntryError = (
+        error: unknown,
+        errorMessage: string,
+      ): boolean => {
         if (errorMessage.includes('[ENOENT]')) {
           return true;
         }
@@ -1413,7 +1831,7 @@ export default function ChatPanel() {
 
       switch (messageType) {
         case 'status': {
-          // kshana-ink status: { status: 'connected' | 'ready' | 'busy' | 'completed' | 'error', message?: string, agentName?: string }
+          // kshana-core status: { status: 'connected' | 'ready' | 'busy' | 'completed' | 'error', message?: string, agentName?: string }
           const statusMsg =
             (data.message as string) ??
             (data.status as string) ??
@@ -1486,7 +1904,9 @@ export default function ChatPanel() {
               setIsTaskRunning(false);
               if (isConfiguringProjectSetupRef.current) {
                 setIsConfiguringProjectSetup(false);
-                setSetupError(statusMsg || 'Failed to configure project setup.');
+                setSetupError(
+                  statusMsg || 'Failed to configure project setup.',
+                );
               }
               if (isStopPendingRef.current) {
                 resolveStopRequest(false, statusMsg || 'Failed to stop task.');
@@ -1508,12 +1928,12 @@ export default function ChatPanel() {
           break;
         }
         case 'progress': {
-          // kshana-ink progress: { iteration, maxIterations, status }
+          // kshana-core progress: { iteration, maxIterations, status }
           const { iteration, maxIterations, status: progressStatus } = data;
           const percent = maxIterations
             ? Math.round(
-              ((iteration as number) / (maxIterations as number)) * 100,
-            )
+                ((iteration as number) / (maxIterations as number)) * 100,
+              )
             : 0;
           const details = [
             progressStatus ? `${progressStatus}` : null,
@@ -1526,13 +1946,73 @@ export default function ChatPanel() {
           break;
         }
         case 'stream_chunk': {
-          // kshana-ink stream_chunk: { content, done }
-          // This represents thinking/reasoning that happens BEFORE tool calls start
+          // kshana-core stream_chunk:
+          // - assistant streaming: { content, done, agentName? }
+          // - tool streaming: { content, done, toolCallId?, toolName?, reset?, agentName? }
           const content = (data.content as string) ?? '';
           const done = (data.done as boolean) ?? false;
+          const toolCallId =
+            typeof data.toolCallId === 'string' ? data.toolCallId : undefined;
+          const toolName =
+            typeof data.toolName === 'string' ? data.toolName : undefined;
+          const reset = Boolean(data.reset);
 
           // Skip empty chunks
           if (!content && !done) {
+            break;
+          }
+
+          if (toolCallId || toolName) {
+            if (shouldStreamToToolCallCard(toolName)) {
+              finalizeAssistantStream();
+
+              const activeToolCall = findActiveToolCallEntry(
+                activeToolCallsRef.current,
+                toolCallId,
+                toolName,
+              );
+
+              if (activeToolCall) {
+                updateToolCallStreamingContent(
+                  activeToolCall.entry.messageId,
+                  content,
+                  {
+                    reset,
+                  },
+                );
+              }
+
+              if (done) {
+                finalizeAssistantStream();
+              }
+            } else {
+              // Keep stream text in assistant bubbles below the tool row — not in the tool card.
+              if (reset) {
+                finalizeAssistantStream();
+              }
+              // Preserve whitespace-only chunks for text-generating tools.
+              // Markdown streams often split headings, list markers, spaces, and
+              // blank lines into separate chunks; trimming here corrupts the live view.
+              if (content.length > 0) {
+                appendAssistantChunk(content, 'stream_chunk', agentName);
+              }
+
+              if (done) {
+                if (lastAssistantIdRef.current) {
+                  const activeAssistant = messagesRef.current.find(
+                    (message) =>
+                      message.id === lastAssistantIdRef.current &&
+                      message.role === 'assistant',
+                  );
+                  const finalizedText = activeAssistant
+                    ? `${activeAssistant.content}${content}`
+                    : undefined;
+                  finalizeAssistantStream(finalizedText);
+                } else {
+                  finalizeAssistantStream();
+                }
+              }
+            }
             break;
           }
 
@@ -1581,15 +2061,22 @@ export default function ChatPanel() {
           appendAssistantChunk(content, 'stream_chunk', agentName);
 
           if (done) {
-            setIsStreaming(false);
-            // Clear the ref so next stream starts fresh
-            lastAssistantIdRef.current = null;
+            const activeAssistant = lastAssistantIdRef.current
+              ? messagesRef.current.find(
+                  (message) =>
+                    message.id === lastAssistantIdRef.current &&
+                    message.role === 'assistant',
+                )
+              : null;
+            const finalizedText = activeAssistant
+              ? `${activeAssistant.content}${content}`
+              : content;
+            finalizeAssistantStream(finalizedText);
           }
           break;
         }
         case 'stream_end': {
-          lastAssistantIdRef.current = null;
-          setIsStreaming(false);
+          finalizeAssistantStream();
           setAgentStatus('idle');
           break;
         }
@@ -1604,8 +2091,6 @@ export default function ChatPanel() {
           const toolCallId = (data.toolCallId as string) || '';
 
           if (toolStatus === 'completed' || toolStatus === 'error') {
-            debouncedSetStatus('thinking', 'Processing...');
-
             // Clean thinking/reasoning content from result if it exists
             let cleanedResult = result ?? error;
             const cleanThinkingTags = (text: string): string => {
@@ -1627,6 +2112,23 @@ export default function ChatPanel() {
             } else if (typeof cleanedResult === 'string') {
               cleanedResult = cleanThinkingTags(cleanedResult);
             }
+
+            const reconnectMessage = getRemoteFsReconnectMessage(
+              typeof cleanedResult === 'string'
+                ? cleanedResult
+                : ((
+                    cleanedResult as {
+                      error?: unknown;
+                      message?: unknown;
+                    } | null
+                  )?.error ??
+                    (
+                      cleanedResult as {
+                        error?: unknown;
+                        message?: unknown;
+                      } | null
+                    )?.message),
+            );
 
             const now = Date.now();
             let duration = (data.duration as number) ?? 0;
@@ -1672,19 +2174,19 @@ export default function ChatPanel() {
                 prev.map((msg) =>
                   msg.id === activeEntry.messageId
                     ? {
-                      ...msg,
-                      meta: {
-                        ...(msg.meta || {}),
-                        toolCallId: toolCallId || activeKey,
-                        toolName,
-                        args,
-                        status:
-                          toolStatus === 'error' ? 'error' : 'completed',
-                        result: cleanedResult,
-                        duration,
-                      },
-                      timestamp: Date.now(),
-                    }
+                        ...msg,
+                        meta: {
+                          ...(msg.meta || {}),
+                          toolCallId: toolCallId || activeKey,
+                          toolName,
+                          args,
+                          status:
+                            toolStatus === 'error' ? 'error' : 'completed',
+                          result: cleanedResult,
+                          duration,
+                        },
+                        timestamp: Date.now(),
+                      }
                     : msg,
                 ),
               );
@@ -1703,6 +2205,71 @@ export default function ChatPanel() {
                   duration,
                 },
               });
+            }
+
+            const hasActiveQuestion = messagesRef.current.some(
+              (message) => message.type === 'agent_question',
+            );
+            const nextUiState = getPostToolUiState({
+              toolStatus: toolStatus === 'error' ? 'error' : 'completed',
+              currentAgentStatus: agentStatusRef.current,
+              isTaskRunning: isTaskRunningRef.current,
+              hasActiveQuestion,
+              hasOtherActiveTools: activeToolCallsRef.current.size > 0,
+              toolMessage:
+                reconnectMessage ??
+                (typeof cleanedResult === 'string' && cleanedResult.trim()
+                  ? cleanedResult
+                  : toolStatus === 'error'
+                    ? `${toolName} failed`
+                    : undefined),
+            });
+            if (nextUiState) {
+              setAgentStatus(nextUiState.agentStatus);
+              setStatusMessage(nextUiState.statusMessage);
+              setIsTaskRunning(nextUiState.isTaskRunning);
+            }
+            if (reconnectMessage) {
+              appendSystemMessage(reconnectMessage, 'error');
+            }
+
+            // For content-generation tools, also render the result as an assistant message
+            // so it appears in the natural chat flow (tool card remains for reference)
+            if (
+              toolStatus === 'completed' &&
+              cleanedResult &&
+              typeof cleanedResult === 'object' &&
+              'content' in cleanedResult &&
+              typeof cleanedResult.content === 'string' &&
+              cleanedResult.content.trim()
+            ) {
+              // Only render if this is a content-generation tool (not read/update/system tools)
+              const isContentGenerationTool =
+                toolName.includes('generate') ||
+                toolName.includes('create_content') ||
+                toolName.includes('write_content');
+
+              if (isContentGenerationTool) {
+                // Don't duplicate if we already streamed this exact content
+                const resultContent = cleanedResult.content.trim();
+                const alreadyStreamed = messagesRef.current.some(
+                  (msg) =>
+                    msg.role === 'assistant' &&
+                    (msg.type === 'agent_text' ||
+                      msg.type === 'stream_chunk') &&
+                    normalizeComparableChatText(msg.content) ===
+                      normalizeComparableChatText(resultContent),
+                );
+
+                if (!alreadyStreamed) {
+                  appendMessage({
+                    role: 'assistant',
+                    type: 'agent_text',
+                    content: resultContent,
+                    author: agentName,
+                  });
+                }
+              }
             }
 
             // Check for phase transitions in update_project results
@@ -1741,6 +2308,8 @@ export default function ChatPanel() {
               }
             }
           } else if (toolStatus === 'started') {
+            finalizeAssistantStream();
+
             const now = Date.now();
             const sequence =
               (toolCallSequenceRef.current.get(toolName) ?? 0) + 1;
@@ -1780,7 +2349,7 @@ export default function ChatPanel() {
           break;
         }
         case 'agent_response': {
-          // kshana-ink agent_response: { output, status }
+          // kshana-core agent_response: { output, status }
           const output = (data.output as string) ?? '';
           const responseStatus = data.status as string;
           if (output) {
@@ -1792,6 +2361,18 @@ export default function ChatPanel() {
             // Replace last assistant message if it exists (could be agent_text or stream_chunk)
             // to avoid duplicates
             setMessages((prev) => {
+              if (
+                shouldSuppressAgentResponse({
+                  output,
+                  status: responseStatus,
+                  lastFinalizedStreamText:
+                    lastFinalizedAssistantStreamTextRef.current,
+                  messages: prev,
+                })
+              ) {
+                return prev;
+              }
+
               // Find the last assistant message that's not a question or tool call
               let lastAssistantIdx = -1;
               for (let i = prev.length - 1; i >= 0; i--) {
@@ -1809,50 +2390,22 @@ export default function ChatPanel() {
                 }
               }
 
-              if (
-                lastAssistantIdx >= 0 &&
-                lastAssistantIdRef.current === prev[lastAssistantIdx].id
-              ) {
-                // Update existing message
+              if (lastAssistantIdx >= 0) {
+                // Update existing message in place — avoids a duplicate bubble
                 return prev.map((msg, idx) =>
                   idx === lastAssistantIdx
                     ? {
-                      ...msg,
-                      type: 'agent_response',
-                      content: output,
-                      timestamp: Date.now(),
-                      author: agentName,
-                    }
+                        ...msg,
+                        type: 'agent_response',
+                        content: output,
+                        timestamp: Date.now(),
+                        author: agentName,
+                      }
                     : msg,
                 );
               }
 
-              const mirrorsExistingQuestion = prev.some((msg) => {
-                if (msg.type !== 'agent_question') {
-                  return false;
-                }
-
-                return (
-                  normalizeComparableChatText(msg.content) === normalizedOutput
-                );
-              });
-              if (mirrorsExistingQuestion) {
-                return prev;
-              }
-
-              // Check if output already exists in messages to avoid duplicates
-              const existingMessage = prev.find(
-                (msg) =>
-                  msg.role === 'assistant' &&
-                  normalizeComparableChatText(msg.content) === normalizedOutput &&
-                  msg.type === 'agent_response',
-              );
-              if (existingMessage) {
-                // Already have this exact message, don't create duplicate
-                return prev;
-              }
-
-              // Create new message only if we don't have a matching one
+              // No recent assistant message at all — create one
               const id = makeId();
               lastAssistantIdRef.current = id;
               return [
@@ -1867,6 +2420,7 @@ export default function ChatPanel() {
                 },
               ];
             });
+            lastFinalizedAssistantStreamTextRef.current = normalizedOutput;
             lastAssistantIdRef.current = null;
             setIsStreaming(false);
           }
@@ -1928,7 +2482,7 @@ export default function ChatPanel() {
           break;
         }
         case 'agent_question': {
-          // kshana-ink agent_question: { question, options?, timeout?, defaultOption?, questionType? }
+          // kshana-core agent_question: { question, options?, timeout?, defaultOption?, questionType? }
           // options can be string[] or Array<{ label: string; description?: string }>
           const question = (data.question as string) ?? '';
           const rawOptions = data.options as
@@ -1940,18 +2494,18 @@ export default function ChatPanel() {
               typeof option === 'string'
                 ? { label: option }
                 : {
-                  label: option.label,
-                  description: option.description,
-                },
+                    label: option.label,
+                    description: option.description,
+                  },
           );
           const isConfirmation = Boolean(data.isConfirmation);
           const questionType =
-            ((data.questionType as 'text' | 'confirm' | 'select' | undefined) ??
-              (isConfirmation
-                ? 'confirm'
-                : options && options.length > 0
-                  ? 'select'
-                  : 'text'));
+            (data.questionType as 'text' | 'confirm' | 'select' | undefined) ??
+            (isConfirmation
+              ? 'confirm'
+              : options && options.length > 0
+                ? 'select'
+                : 'text');
           const autoApproveTimeoutMs =
             typeof data.autoApproveTimeoutMs === 'number'
               ? data.autoApproveTimeoutMs
@@ -1971,12 +2525,14 @@ export default function ChatPanel() {
             // Log question
             const questionOptions = rawOptions
               ? rawOptions.map((opt) =>
-                typeof opt === 'string' ? { label: opt } : opt,
-              )
+                  typeof opt === 'string' ? { label: opt } : opt,
+                )
               : undefined;
             window.electron.logger.logQuestion(
               question,
-              questionOptions as Array<{ label: string; description?: string }> | undefined,
+              questionOptions as
+                | Array<{ label: string; description?: string }>
+                | undefined,
               isConfirmation || questionType === 'confirm',
               autoApproveTimeoutMs,
             );
@@ -1995,17 +2551,17 @@ export default function ChatPanel() {
                   return prev.map((msg) =>
                     msg.id === lastQuestionMessageIdRef.current
                       ? {
-                        ...msg,
-                        content: question,
-                        meta: {
-                          options,
-                          questionType,
-                          isConfirmation,
-                          autoApproveTimeoutMs,
-                          defaultOption,
-                        },
-                        timestamp: Date.now(),
-                      }
+                          ...msg,
+                          content: question,
+                          meta: {
+                            options,
+                            questionType,
+                            isConfirmation,
+                            autoApproveTimeoutMs,
+                            defaultOption,
+                          },
+                          timestamp: Date.now(),
+                        }
                       : msg,
                   );
                 }
@@ -2031,17 +2587,17 @@ export default function ChatPanel() {
                   role: 'assistant',
                   type: 'agent_question',
                   content: question,
-                    author: agentName,
-                    timestamp: Date.now(),
-                    meta: {
-                      options,
-                      questionType,
-                      isConfirmation,
-                      autoApproveTimeoutMs,
-                      defaultOption,
-                    },
+                  author: agentName,
+                  timestamp: Date.now(),
+                  meta: {
+                    options,
+                    questionType,
+                    isConfirmation,
+                    autoApproveTimeoutMs,
+                    defaultOption,
                   },
-                ];
+                },
+              ];
             });
 
             lastAssistantIdRef.current = null;
@@ -2064,13 +2620,13 @@ export default function ChatPanel() {
                   prev.map((message) =>
                     message.id === lastQuestionMessageIdRef.current
                       ? {
-                        ...message,
-                        meta: {
-                          ...message.meta,
-                          selectedResponse: effectiveAutoResponse,
-                        },
-                        timestamp: Date.now(),
-                      }
+                          ...message,
+                          meta: {
+                            ...message.meta,
+                            selectedResponse: effectiveAutoResponse,
+                          },
+                          timestamp: Date.now(),
+                        }
                       : message,
                   ),
                 );
@@ -2111,50 +2667,53 @@ export default function ChatPanel() {
           break;
         }
         case 'todo_update': {
-          // kshana-ink todo_update: { todos }
-          const todos = data.todos as Array<any>;
-          if (todos?.length) {
-            // Log todo update
-            window.electron.logger.logTodoUpdate(
-              todos.map((t) => ({
-                content: t.content || t.id,
-                status: t.status,
-              })),
-            );
+          // kshana-core todo_update: { todos }
+          const todos = normalizeTodoUpdatePayload(
+            (data.todos as Array<Record<string, unknown>> | undefined) ?? [],
+          );
 
-            if (lastTodoMessageIdRef.current) {
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === lastTodoMessageIdRef.current
-                    ? {
+          window.electron.logger.logTodoUpdate(
+            todos.map((todo) => ({
+              content:
+                (typeof todo.content === 'string' && todo.content) ||
+                (typeof todo.id === 'string' ? todo.id : 'todo'),
+              status: typeof todo.status === 'string' ? todo.status : 'pending',
+            })),
+          );
+
+          if (lastTodoMessageIdRef.current) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === lastTodoMessageIdRef.current
+                  ? {
                       ...msg,
                       meta: { ...msg.meta, todos },
                       timestamp: Date.now(),
                     }
-                    : msg,
-                ),
-              );
-            } else {
-              const messageId = appendMessage({
-                role: 'system',
-                type: 'todo_update',
-                content: '',
-                meta: { todos },
-              });
-              lastTodoMessageIdRef.current = messageId;
-            }
+                  : msg,
+              ),
+            );
+          } else {
+            const messageId = appendMessage({
+              role: 'system',
+              type: 'todo_update',
+              content: '',
+              meta: { todos },
+            });
+            lastTodoMessageIdRef.current = messageId;
           }
           break;
         }
         case 'background_generation': {
           const batchId = String(data.batchId ?? '');
-          const kind = ((data.kind as 'image' | 'video' | undefined) ?? 'image');
-          const batchStatus = (data.status as
-            | 'queued'
-            | 'running'
-            | 'completed'
-            | 'failed'
-            | undefined) ?? 'running';
+          const kind = (data.kind as 'image' | 'video' | undefined) ?? 'image';
+          const batchStatus =
+            (data.status as
+              | 'queued'
+              | 'running'
+              | 'completed'
+              | 'failed'
+              | undefined) ?? 'running';
           const totalItems = Number(data.totalItems ?? 0);
           const completedItems = Number(data.completedItems ?? 0);
           const failedItems = Number(data.failedItems ?? 0);
@@ -2162,8 +2721,12 @@ export default function ChatPanel() {
 
           if (batchStatus === 'queued' || batchStatus === 'running') {
             const progress =
-              totalItems > 0 ? ` (${Math.min(completedItems, totalItems)}/${totalItems})` : '';
-            setStatusMessage(`Background ${kindLabel} generation ${batchStatus}${progress}.`);
+              totalItems > 0
+                ? ` (${Math.min(completedItems, totalItems)}/${totalItems})`
+                : '';
+            setStatusMessage(
+              `Background ${kindLabel} generation ${batchStatus}${progress}.`,
+            );
             break;
           }
 
@@ -2202,7 +2765,8 @@ export default function ChatPanel() {
           setSessionTimer({
             visible: true,
             elapsedMs:
-              typeof data.elapsedMs === 'number' && Number.isFinite(data.elapsedMs)
+              typeof data.elapsedMs === 'number' &&
+              Number.isFinite(data.elapsedMs)
                 ? data.elapsedMs
                 : 0,
             running: Boolean(data.running),
@@ -2239,10 +2803,11 @@ export default function ChatPanel() {
             const retryMessage =
               `Transient network issue while contacting the model: ${errorMsg}. ` +
               'Please retry your last step.';
-            appendSystemMessage(retryMessage, 'status');
-            setAgentStatus('waiting');
-            setStatusMessage('Connection issue. Ready to retry.');
-            setIsTaskRunning(false);
+            markExecutionInterrupted(
+              'Connection issue. Ready to retry.',
+              errorMsg,
+              retryMessage,
+            );
             window.electron.logger.logError(
               errorMsg,
               data as Record<string, unknown>,
@@ -2254,10 +2819,20 @@ export default function ChatPanel() {
             );
             break;
           }
+          const reconnectMessage = getRemoteFsReconnectMessage(errorMsg);
+          if (reconnectMessage) {
+            appendSystemMessage(reconnectMessage, 'error');
+          }
           appendSystemMessage(errorMsg, 'error');
+          finalizeAssistantStream();
+          failActiveToolCalls(errorMsg);
           setAgentStatus('error');
           setStatusMessage(errorMsg);
           setIsTaskRunning(false);
+          setSessionTimer((prev) => ({
+            ...prev,
+            running: false,
+          }));
           window.electron.logger.logError(
             errorMsg,
             data as Record<string, unknown>,
@@ -2311,7 +2886,7 @@ export default function ChatPanel() {
           if (
             requestedProjectDir &&
             normalizeProjectPath(requestedProjectDir) !==
-            normalizeProjectPath(projectDirectory)
+              normalizeProjectPath(projectDirectory)
           ) {
             sendResult({
               requestId,
@@ -2337,7 +2912,7 @@ export default function ChatPanel() {
                 : '',
             componentSource:
               request.componentSource &&
-                typeof request.componentSource === 'object'
+              typeof request.componentSource === 'object'
                 ? request.componentSource
                 : undefined,
           };
@@ -2385,6 +2960,116 @@ export default function ChatPanel() {
             });
           break;
         }
+        case 'timeline_assembly_request': {
+          const request = data as Partial<TimelineAssemblyRequest>;
+          const requestId =
+            typeof request.requestId === 'string'
+              ? request.requestId.trim()
+              : '';
+          if (!requestId) {
+            console.warn(
+              '[ChatPanel] timeline_assembly_request missing requestId',
+              payload,
+            );
+            break;
+          }
+
+          const sendProgress = (progress: TimelineAssemblyProgress) => {
+            const ws = wsRef.current;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+              return;
+            }
+            ws.send(
+              JSON.stringify({
+                type: 'timeline_assembly_progress',
+                data: progress,
+              }),
+            );
+          };
+
+          const sendResult = (result: TimelineAssemblyResult) => {
+            const ws = wsRef.current;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+              return;
+            }
+            ws.send(
+              JSON.stringify({
+                type: 'timeline_assembly_result',
+                data: result,
+              }),
+            );
+          };
+
+          if (!projectDirectory) {
+            sendResult({
+              requestId,
+              status: 'failed',
+              error:
+                'No active project selected on desktop for timeline assembly.',
+            });
+            break;
+          }
+
+          const requestPayload: TimelineAssemblyRequest = {
+            requestId,
+            projectDir:
+              typeof request.projectDir === 'string'
+                ? request.projectDir
+                : projectDirectory,
+            timelineItems: Array.isArray(request.timelineItems)
+              ? request.timelineItems
+              : [],
+            audioPath:
+              typeof request.audioPath === 'string'
+                ? request.audioPath
+                : undefined,
+            overlayItems: Array.isArray(request.overlayItems)
+              ? request.overlayItems
+              : undefined,
+            textOverlayCues: Array.isArray(request.textOverlayCues)
+              ? request.textOverlayCues
+              : undefined,
+            promptOverlayCues: Array.isArray(request.promptOverlayCues)
+              ? request.promptOverlayCues
+              : undefined,
+            outputIntent: 'final_video',
+            outputName:
+              typeof request.outputName === 'string'
+                ? request.outputName
+                : 'final_video',
+          };
+
+          void assembleRemoteFinalVideo(
+            projectDirectory,
+            requestPayload,
+            sendProgress,
+          )
+            .then((result) => {
+              sendResult(result);
+              if (result.status !== 'completed') {
+                appendSystemMessage(
+                  `Desktop final assembly failed: ${result.error || 'Unknown error'}`,
+                  'error',
+                );
+              }
+            })
+            .catch((error: unknown) => {
+              const errorMessage = getRendererErrorMessage(
+                error,
+                'Desktop final assembly failed.',
+              );
+              sendResult({
+                requestId,
+                status: 'failed',
+                error: errorMessage,
+              });
+              appendSystemMessage(
+                `Desktop final assembly failed: ${errorMessage}`,
+                'error',
+              );
+            });
+          break;
+        }
         case 'file_read_request': {
           const requestedPath = getWirePath(data.path);
           if (!requestedPath) {
@@ -2399,11 +3084,7 @@ export default function ChatPanel() {
               source: 'agent_ws',
             })
             .then((content) => {
-              sendRequestResponse(
-                'file_read_response',
-                requestId,
-                { content },
-              );
+              sendRequestResponse('file_read_response', requestId, { content });
             })
             .catch((error) => {
               const reason = formatFileOpError(
@@ -2421,7 +3102,8 @@ export default function ChatPanel() {
         case 'file_list_request': {
           const requestedPath = getWirePath(data.path);
           if (!requestedPath) {
-            const reason = 'Invalid or unsafe directory path for file_list_request.';
+            const reason =
+              'Invalid or unsafe directory path for file_list_request.';
             sendRequestResponse('file_list_response', requestId, {}, reason);
             appendSystemMessage(`⚠️ ${reason}`, 'error');
             break;
@@ -2450,7 +3132,9 @@ export default function ChatPanel() {
         case 'file_exists_request': {
           const requestedPath = getWirePath(data.path);
           if (!requestedPath) {
-            sendRequestResponse('file_exists_response', requestId, { exists: false });
+            sendRequestResponse('file_exists_response', requestId, {
+              exists: false,
+            });
             break;
           }
           void window.electron.project
@@ -2459,11 +3143,9 @@ export default function ChatPanel() {
               source: 'agent_ws',
             })
             .then(() => {
-              sendRequestResponse(
-                'file_exists_response',
-                requestId,
-                { exists: true },
-              );
+              sendRequestResponse('file_exists_response', requestId, {
+                exists: true,
+              });
             })
             .catch((error) => {
               const reason = formatFileOpError(
@@ -2471,14 +3153,17 @@ export default function ChatPanel() {
                 'Failed to check file existence.',
               );
               if (isNoEntryError(error, reason)) {
-                sendRequestResponse(
-                  'file_exists_response',
-                  requestId,
-                  { exists: false },
-                );
+                sendRequestResponse('file_exists_response', requestId, {
+                  exists: false,
+                });
                 return;
               }
-              sendRequestResponse('file_exists_response', requestId, {}, reason);
+              sendRequestResponse(
+                'file_exists_response',
+                requestId,
+                {},
+                reason,
+              );
               appendSystemMessage(
                 `⚠️ Failed to check path existence: ${pathBasename(requestedPath)}. ${reason}`,
                 'error',
@@ -2530,18 +3215,21 @@ export default function ChatPanel() {
               source: 'agent_ws',
             })
             .then((base64Data) => {
-              sendRequestResponse(
-                'file_buffer_response',
-                requestId,
-                { data: base64Data },
-              );
+              sendRequestResponse('file_buffer_response', requestId, {
+                data: base64Data,
+              });
             })
             .catch((error) => {
               const reason = formatFileOpError(
                 error,
                 'Failed to read binary file from desktop workspace.',
               );
-              sendRequestResponse('file_buffer_response', requestId, {}, reason);
+              sendRequestResponse(
+                'file_buffer_response',
+                requestId,
+                {},
+                reason,
+              );
               appendSystemMessage(
                 `⚠️ Failed to read binary file: ${pathBasename(requestedPath)}. ${reason}`,
                 'error',
@@ -2584,34 +3272,37 @@ export default function ChatPanel() {
             break;
           }
           if (filePath && fileContent !== undefined) {
-            window.electron.project.writeFile(filePath, fileContent, {
-              opId,
-              source: 'agent_ws',
-            }).then(() => {
-              if (fileWriteRequestId) {
-                sendRequestResponse('file_write_ack', fileWriteRequestId, {
-                  success: true,
-                });
-              }
-            }).catch((err) => {
-              console.error('[ChatPanel] file_write failed:', filePath, err);
-              const reason = formatFileOpError(
-                err,
-                'Unknown file write error.',
-              );
-              if (fileWriteRequestId) {
-                sendRequestResponse(
-                  'file_write_ack',
-                  fileWriteRequestId,
-                  { success: false },
-                  reason,
+            window.electron.project
+              .writeFile(filePath, fileContent, {
+                opId,
+                source: 'agent_ws',
+              })
+              .then(() => {
+                if (fileWriteRequestId) {
+                  sendRequestResponse('file_write_ack', fileWriteRequestId, {
+                    success: true,
+                  });
+                }
+              })
+              .catch((err) => {
+                console.error('[ChatPanel] file_write failed:', filePath, err);
+                const reason = formatFileOpError(
+                  err,
+                  'Unknown file write error.',
                 );
-              }
-              appendSystemMessage(
-                `⚠️ Failed to save file: ${pathBasename(filePath)}. ${reason}`,
-                'error',
-              );
-            });
+                if (fileWriteRequestId) {
+                  sendRequestResponse(
+                    'file_write_ack',
+                    fileWriteRequestId,
+                    { success: false },
+                    reason,
+                  );
+                }
+                appendSystemMessage(
+                  `⚠️ Failed to save file: ${pathBasename(filePath)}. ${reason}`,
+                  'error',
+                );
+              });
           }
           break;
         }
@@ -2664,34 +3355,41 @@ export default function ChatPanel() {
             break;
           }
           if (binPath && binContent) {
-            window.electron.project.writeFileBinary(binPath, binContent, {
-              opId,
-              source: 'agent_ws',
-            }).then(() => {
-              if (fileWriteRequestId) {
-                sendRequestResponse('file_write_ack', fileWriteRequestId, {
-                  success: true,
-                });
-              }
-            }).catch((err) => {
-              console.error('[ChatPanel] file_write_binary failed:', binPath, err);
-              const reason = formatFileOpError(
-                err,
-                'Unknown binary write error.',
-              );
-              if (fileWriteRequestId) {
-                sendRequestResponse(
-                  'file_write_ack',
-                  fileWriteRequestId,
-                  { success: false },
-                  reason,
+            window.electron.project
+              .writeFileBinary(binPath, binContent, {
+                opId,
+                source: 'agent_ws',
+              })
+              .then(() => {
+                if (fileWriteRequestId) {
+                  sendRequestResponse('file_write_ack', fileWriteRequestId, {
+                    success: true,
+                  });
+                }
+              })
+              .catch((err) => {
+                console.error(
+                  '[ChatPanel] file_write_binary failed:',
+                  binPath,
+                  err,
                 );
-              }
-              appendSystemMessage(
-                `⚠️ Failed to save binary file: ${pathBasename(binPath)}. ${reason}`,
-                'error',
-              );
-            });
+                const reason = formatFileOpError(
+                  err,
+                  'Unknown binary write error.',
+                );
+                if (fileWriteRequestId) {
+                  sendRequestResponse(
+                    'file_write_ack',
+                    fileWriteRequestId,
+                    { success: false },
+                    reason,
+                  );
+                }
+                appendSystemMessage(
+                  `⚠️ Failed to save binary file: ${pathBasename(binPath)}. ${reason}`,
+                  'error',
+                );
+              });
           }
           break;
         }
@@ -2743,34 +3441,34 @@ export default function ChatPanel() {
             break;
           }
           if (mkdirPath) {
-            window.electron.project.mkdir(mkdirPath, {
-              opId,
-              source: 'agent_ws',
-            }).then(() => {
-              if (mkdirRequestId) {
-                sendRequestResponse('file_write_ack', mkdirRequestId, {
-                  success: true,
-                });
-              }
-            }).catch((err) => {
-              console.error('[ChatPanel] file_mkdir failed:', mkdirPath, err);
-              const reason = formatFileOpError(
-                err,
-                'Unknown mkdir error.',
-              );
-              if (mkdirRequestId) {
-                sendRequestResponse(
-                  'file_write_ack',
-                  mkdirRequestId,
-                  { success: false },
-                  reason,
+            window.electron.project
+              .mkdir(mkdirPath, {
+                opId,
+                source: 'agent_ws',
+              })
+              .then(() => {
+                if (mkdirRequestId) {
+                  sendRequestResponse('file_write_ack', mkdirRequestId, {
+                    success: true,
+                  });
+                }
+              })
+              .catch((err) => {
+                console.error('[ChatPanel] file_mkdir failed:', mkdirPath, err);
+                const reason = formatFileOpError(err, 'Unknown mkdir error.');
+                if (mkdirRequestId) {
+                  sendRequestResponse(
+                    'file_write_ack',
+                    mkdirRequestId,
+                    { success: false },
+                    reason,
+                  );
+                }
+                appendSystemMessage(
+                  `⚠️ Failed to create directory: ${pathBasename(mkdirPath)}. ${reason}`,
+                  'error',
                 );
-              }
-              appendSystemMessage(
-                `⚠️ Failed to create directory: ${pathBasename(mkdirPath)}. ${reason}`,
-                'error',
-              );
-            });
+              });
           }
           break;
         }
@@ -2821,34 +3519,34 @@ export default function ChatPanel() {
             break;
           }
           if (rmPath) {
-            window.electron.project.delete(rmPath, {
-              opId,
-              source: 'agent_ws',
-            }).then(() => {
-              if (rmRequestId) {
-                sendRequestResponse('file_write_ack', rmRequestId, {
-                  success: true,
-                });
-              }
-            }).catch((err) => {
-              console.error('[ChatPanel] file_rm failed:', rmPath, err);
-              const reason = formatFileOpError(
-                err,
-                'Unknown delete error.',
-              );
-              if (rmRequestId) {
-                sendRequestResponse(
-                  'file_write_ack',
-                  rmRequestId,
-                  { success: false },
-                  reason,
+            window.electron.project
+              .delete(rmPath, {
+                opId,
+                source: 'agent_ws',
+              })
+              .then(() => {
+                if (rmRequestId) {
+                  sendRequestResponse('file_write_ack', rmRequestId, {
+                    success: true,
+                  });
+                }
+              })
+              .catch((err) => {
+                console.error('[ChatPanel] file_rm failed:', rmPath, err);
+                const reason = formatFileOpError(err, 'Unknown delete error.');
+                if (rmRequestId) {
+                  sendRequestResponse(
+                    'file_write_ack',
+                    rmRequestId,
+                    { success: false },
+                    reason,
+                  );
+                }
+                appendSystemMessage(
+                  `⚠️ Failed to delete path: ${pathBasename(rmPath)}. ${reason}`,
+                  'error',
                 );
-              }
-              appendSystemMessage(
-                `⚠️ Failed to delete path: ${pathBasename(rmPath)}. ${reason}`,
-                'error',
-              );
-            });
+              });
           }
           break;
         }
@@ -2871,7 +3569,12 @@ export default function ChatPanel() {
           const destinationPath = getWirePath(data.dest);
           if (!sourcePath || !destinationPath) {
             const reason = 'Invalid source or destination path for file copy.';
-            sendRequestResponse('file_write_ack', requestId, { success: false }, reason);
+            sendRequestResponse(
+              'file_write_ack',
+              requestId,
+              { success: false },
+              reason,
+            );
             appendSystemMessage(`⚠️ ${reason}`, 'error');
             break;
           }
@@ -2881,7 +3584,9 @@ export default function ChatPanel() {
               source: 'agent_ws',
             })
             .then(() => {
-              sendRequestResponse('file_write_ack', requestId, { success: true });
+              sendRequestResponse('file_write_ack', requestId, {
+                success: true,
+              });
             })
             .catch((error) => {
               const reason = formatFileOpError(
@@ -2917,7 +3622,9 @@ export default function ChatPanel() {
                 const opContent =
                   typeof op.content === 'string' ? op.content : '';
                 if (!opPath) {
-                  throw new Error('Invalid path in batch_write_command operation.');
+                  throw new Error(
+                    'Invalid path in batch_write_command operation.',
+                  );
                 }
                 // eslint-disable-next-line no-await-in-loop
                 await window.electron.project.writeFile(opPath, opContent, {
@@ -2925,7 +3632,9 @@ export default function ChatPanel() {
                   source: 'agent_ws',
                 });
               }
-              sendRequestResponse('file_write_ack', requestId, { success: true });
+              sendRequestResponse('file_write_ack', requestId, {
+                success: true,
+              });
             } catch (error) {
               const reason = formatFileOpError(
                 error,
@@ -2957,11 +3666,13 @@ export default function ChatPanel() {
       appendSystemMessage,
       debouncedSetStatus,
       fetchSessionInfo,
+      finalizeAssistantStream,
       getRendererErrorMessage,
       hasQueuedOutboundActionType,
       projectDirectory,
       removeQueuedOutboundActionType,
       resolveStopRequest,
+      markExecutionInterrupted,
       showNotificationBanner,
       syncConfiguredProject,
       syncProjectState,
@@ -3037,7 +3748,9 @@ export default function ChatPanel() {
         throw new Error(errorMsg);
       }
 
-      const baseUrl = currentState.serverUrl || `http://localhost:${currentState.port ?? 8001}`;
+      const baseUrl =
+        currentState.serverUrl ||
+        `http://localhost:${currentState.port ?? 8001}`;
       const wsBase = baseUrl.replace(/^http/, 'ws');
       const url = new URL(DEFAULT_WS_PATH, wsBase);
       url.searchParams.set('channel', 'chat');
@@ -3048,7 +3761,8 @@ export default function ChatPanel() {
         : null;
       applyDesktopRemotionQueryParams(url, desktopVersion);
       const effectiveSettings =
-        appSettingsRef.current ?? (await window.electron.settings.get().catch(() => null));
+        appSettingsRef.current ??
+        (await window.electron.settings.get().catch(() => null));
       if (!appSettingsRef.current && effectiveSettings) {
         appSettingsRef.current = effectiveSettings;
       }
@@ -3120,10 +3834,20 @@ export default function ChatPanel() {
           const hasQueuedConfigureProject =
             hasQueuedOutboundActionType('configure_project');
           void (async () => {
-            const resumedSession =
-              requestedSessionId
-                ? await fetchSessionInfo(requestedSessionId, currentState)
-                : null;
+            const resumedSession = requestedSessionId
+              ? await fetchSessionInfo(requestedSessionId, currentState)
+              : null;
+            console.log('[ChatPanel] WebSocket connected session sync state:', {
+              requestedSessionId,
+              resumedSessionId: resumedSession?.id ?? null,
+              resumed: Boolean(resumedSession),
+            });
+            if (requestedSessionId && !resumedSession) {
+              console.log(
+                '[ChatPanel] Previous backend session is unavailable; preserving restored local chat history and attaching to a new session.',
+                { requestedSessionId },
+              );
+            }
             await syncProjectState(socket, projectDirectory);
             if (resumedSession) {
               removeQueuedOutboundActionType('configure_project');
@@ -3142,7 +3866,22 @@ export default function ChatPanel() {
               setAgentStatus(resumedState.agentStatus);
               setStatusMessage(resumedState.statusMessage);
               setIsTaskRunning(resumedState.isTaskRunning);
-              appendSystemMessage(resumedState.notice, 'status');
+              setAutonomousModeEnabled(resumedState.autonomousMode);
+              setSessionTimer({
+                visible:
+                  typeof resumedSession.elapsedMs === 'number' &&
+                  Number.isFinite(resumedSession.elapsedMs),
+                elapsedMs:
+                  typeof resumedSession.elapsedMs === 'number' &&
+                  Number.isFinite(resumedSession.elapsedMs)
+                    ? resumedSession.elapsedMs
+                    : 0,
+                running: resumedSession.status === 'running',
+                completed: Boolean(resumedSession.completed),
+              });
+              if (resumedState.notice) {
+                appendSystemMessage(resumedState.notice, 'status');
+              }
               window.electron.logger.logStatusChange(
                 resumedState.agentStatus,
                 agentNameRef.current,
@@ -3164,6 +3903,12 @@ export default function ChatPanel() {
           clearTimeout(timeout);
           connectingRef.current = false;
           console.error('[ChatPanel] WebSocket error:', error);
+          if (isTaskRunningRef.current || isStopPendingRef.current) {
+            markExecutionInterrupted(
+              'Connection lost. Reconnecting...',
+              'Execution interrupted because the chat connection dropped.',
+            );
+          }
           appendConnectionBanner(
             'ws_connection_error',
             'WebSocket connection error. Check if backend is running.',
@@ -3199,6 +3944,12 @@ export default function ChatPanel() {
                   backendState,
                 },
               );
+              if (isTaskRunningRef.current || isStopPendingRef.current) {
+                markExecutionInterrupted(
+                  'Connection lost. Reconnecting...',
+                  'Execution interrupted because the backend connection closed.',
+                );
+              }
               appendConnectionBanner(
                 'ws_disconnected',
                 getDisconnectBannerMessage(backendState),
@@ -3229,6 +3980,7 @@ export default function ChatPanel() {
     flushPendingOutboundActions,
     handleServerPayload,
     hasQueuedOutboundActionType,
+    markExecutionInterrupted,
     projectDirectory,
     removeQueuedOutboundActionType,
     syncConfiguredProject,
@@ -3238,7 +3990,10 @@ export default function ChatPanel() {
   useEffect(() => {
     let active = true;
 
-    const syncSettings = (next: AppSettings | null, allowReconnect: boolean) => {
+    const syncSettings = (
+      next: AppSettings | null,
+      allowReconnect: boolean,
+    ) => {
       if (!active) {
         return;
       }
@@ -3334,16 +4089,33 @@ export default function ChatPanel() {
     sendClientActionRef.current = sendClientAction;
   }, [sendClientAction]);
 
+  const handleToggleAutonomousMode = useCallback(async () => {
+    const nextEnabled = !autonomousModeEnabled;
+    setAutonomousModeEnabled(nextEnabled);
+
+    if (!sessionIdRef.current) {
+      return;
+    }
+
+    await sendClientAction({
+      type: 'set_autonomous',
+      sessionId: sessionIdRef.current,
+      data: { enabled: nextEnabled },
+    });
+    showNotificationBanner(
+      `Autonomous mode ${nextEnabled ? 'enabled' : 'disabled'}.`,
+      'info',
+    );
+  }, [autonomousModeEnabled, sendClientAction, showNotificationBanner]);
+
   const sendResponse = useCallback(
     async (content: string) => {
       const questionOptions = lastQuestionMessageIdRef.current
         ? (
-          (
-            messagesRef.current.find(
+            (messagesRef.current.find(
               (message) => message.id === lastQuestionMessageIdRef.current,
-            )?.meta?.options as ChatQuestionOption[] | undefined
-          ) || []
-        ).map((option) => option.label)
+            )?.meta?.options as ChatQuestionOption[] | undefined) || []
+          ).map((option) => option.label)
         : [];
 
       if (lastQuestionMessageIdRef.current) {
@@ -3572,6 +4344,14 @@ export default function ChatPanel() {
 
   useEffect(() => {
     const bootstrap = async () => {
+      if (
+        !shouldAutoConnectChat({
+          projectDirectory,
+          restoreState: getChatRestoreState(),
+        })
+      ) {
+        return;
+      }
       const state = await window.electron.backend.getState();
       if (
         state.status === 'ready' &&
@@ -3582,10 +4362,18 @@ export default function ChatPanel() {
         connectWebSocket().catch(() => undefined);
       }
     };
-    bootstrap().catch(() => { });
+    bootstrap().catch(() => {});
 
     const unsubscribeBackend = window.electron.backend.onStateChange(
       (state: BackendState) => {
+        if (
+          !shouldAutoConnectChat({
+            projectDirectory,
+            restoreState: getChatRestoreState(),
+          })
+        ) {
+          return;
+        }
         if (state.status === 'error' && state.message) {
           appendSystemMessage(`Backend error: ${state.message}`, 'error');
         } else if (
@@ -3605,6 +4393,7 @@ export default function ChatPanel() {
   }, [
     connectWebSocket,
     appendSystemMessage,
+    getChatRestoreState,
     projectDirectory,
   ]);
 
@@ -3666,8 +4455,10 @@ export default function ChatPanel() {
     setSelectedTemplateId(null);
     setSelectedStyleId(null);
     setSelectedDuration(null);
+    setAutonomousModeEnabled(false);
 
     if (!projectDirectory) {
+      setChatRestoreState(null, 'idle');
       resetConversationRefs();
       setMessages([]);
       setSessionId(null);
@@ -3679,6 +4470,7 @@ export default function ChatPanel() {
       setHasUserSentMessage(false);
       setIsTaskRunning(false);
       setIsStopPending(false);
+      setAutonomousModeEnabled(false);
       setNotificationBanner(null);
       setSessionTimer({
         visible: false,
@@ -3708,6 +4500,7 @@ export default function ChatPanel() {
             templateId: persistedSetup.templateId,
             style: persistedSetup.style,
             duration: persistedSetup.duration,
+            autonomousMode: Boolean(persistedSetup.autonomousMode),
             projectDir: projectDirectory,
             projectName: getProjectNameFromDirectory(projectDirectory),
           };
@@ -3738,7 +4531,10 @@ export default function ChatPanel() {
         }
 
         const state = await window.electron.backend.getState();
-        if (state.status === 'ready') {
+        if (
+          state.status === 'ready' &&
+          isChatRestoreCompleteForProject(projectDirectory)
+        ) {
           await connectWebSocket();
         }
       } catch (error) {
@@ -3752,9 +4548,11 @@ export default function ChatPanel() {
     ensureTemplateCatalogLoaded,
     deriveDefaultSetup,
     flushSnapshotSave,
+    isChatRestoreCompleteForProject,
     projectDirectory,
     resetConversationRefs,
     restoreSnapshot,
+    setChatRestoreState,
     applySetupSelection,
     loadPersistedSetup,
     configureProjectSetup,
@@ -3762,7 +4560,10 @@ export default function ChatPanel() {
 
   const handleExportChat = useCallback(async () => {
     if (!projectDirectory) {
-      appendSystemMessage('Open a project before exporting chat history.', 'error');
+      appendSystemMessage(
+        'Open a project before exporting chat history.',
+        'error',
+      );
       return;
     }
 
@@ -3818,14 +4619,22 @@ export default function ChatPanel() {
           (message.meta?.questionType as 'text' | 'confirm' | 'select') ||
           'text',
         isConfirmation: Boolean(message.meta?.isConfirmation),
-        autoApproveTimeoutMs:
-          message.meta?.autoApproveTimeoutMs as number | undefined,
+        autoApproveTimeoutMs: message.meta?.autoApproveTimeoutMs as
+          | number
+          | undefined,
         defaultOption: message.meta?.defaultOption as string | undefined,
       };
     }
 
     return null;
   }, [messages]);
+
+  const { cancelActiveQuestionTimer, effectiveAutoApproveTimeoutMs } =
+    useQuestionTimerCancellation({
+      activeQuestion,
+      questionTimerCancelledForId,
+      setQuestionTimerCancelledForId,
+    });
 
   const activeTodos = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -3835,11 +4644,7 @@ export default function ChatPanel() {
       }
 
       const todos = (message.meta?.todos as Array<any> | undefined) || [];
-      if (todos.length === 0) {
-        continue;
-      }
-
-      return todos;
+      return todos.length > 0 ? todos : null;
     }
 
     return null;
@@ -3847,13 +4652,66 @@ export default function ChatPanel() {
 
   const showDockedTodoPrompt =
     setupPanelMode === 'hidden' && !activeQuestion && !!activeTodos;
+
+  useEffect(() => {
+    if (isTaskRunning) {
+      return;
+    }
+
+    const hasExecutingToolCall = messages.some(
+      (message) =>
+        message.type === 'tool_call' &&
+        (message.meta?.status === 'executing' ||
+          message.meta?.status === 'started'),
+    );
+
+    if (!hasExecutingToolCall) {
+      return;
+    }
+
+    if (agentStatus === 'error') {
+      settleActiveToolCalls(
+        'error',
+        statusMessage || 'Run ended with an error.',
+      );
+      return;
+    }
+
+    const completionMessage = activeQuestion
+      ? 'Waiting for your input.'
+      : statusMessage || 'Run finished.';
+    settleActiveToolCalls('completed', completionMessage);
+  }, [
+    activeQuestion,
+    agentStatus,
+    isTaskRunning,
+    messages,
+    settleActiveToolCalls,
+    statusMessage,
+  ]);
+
+  useEffect(() => {
+    if (isTaskRunning || !sessionTimer.running) {
+      return;
+    }
+
+    setSessionTimer((prev) => ({
+      ...prev,
+      running: false,
+      completed: prev.completed || agentStatus === 'completed',
+    }));
+  }, [agentStatus, isTaskRunning, sessionTimer.running]);
   // Never show legacy greeting messages.
   const filteredMessages = useMemo(() => {
     return messages.filter(
       (msg) =>
         !(msg.type === 'greeting' && msg.role === 'system') &&
         msg.type !== 'agent_question' &&
-        msg.type !== 'todo_update',
+        msg.type !== 'todo_update' &&
+        msg.type !== 'status' &&
+        msg.type !== 'progress' &&
+        msg.type !== 'comfyui_progress' &&
+        msg.type !== 'notification',
     );
   }, [messages]);
 
@@ -3916,8 +4774,20 @@ export default function ChatPanel() {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <Bot size={18} className={styles.headerIcon} />
+        {createElement(Bot as any, { size: 18, className: styles.headerIcon })}
         <span className={styles.headerTitle}>Kshana Assistant</span>
+        <button
+          type="button"
+          className={`${styles.autonomousButton} ${
+            autonomousModeEnabled ? styles.autonomousButtonActive : ''
+          }`}
+          onClick={handleToggleAutonomousMode}
+          title="Toggle autonomous mode"
+          aria-pressed={autonomousModeEnabled}
+          disabled={!sessionId || !isProjectSetupConfigured}
+        >
+          <span>AUTO</span>
+        </button>
         <button
           type="button"
           className={styles.exportButton}
@@ -3925,7 +4795,7 @@ export default function ChatPanel() {
           title="Export chat history as JSON"
           aria-label="Export chat history as JSON"
         >
-          <Download size={14} />
+          {createElement(Download as any, { size: 14 })}
           <span>Export Chat</span>
         </button>
         <button
@@ -3934,7 +4804,7 @@ export default function ChatPanel() {
           onClick={clearChat}
           title="Clear chat"
         >
-          <Trash2 size={14} />
+          {createElement(Trash2 as any, { size: 14 })}
           <span>Clear</span>
         </button>
       </div>
@@ -3951,7 +4821,9 @@ export default function ChatPanel() {
       {notificationBanner && (
         <div
           className={`${styles.notificationBanner} ${
-            styles[`notification${notificationBanner.level[0].toUpperCase()}${notificationBanner.level.slice(1)}`]
+            styles[
+              `notification${notificationBanner.level[0].toUpperCase()}${notificationBanner.level.slice(1)}`
+            ]
           }`}
           role="status"
           aria-live="polite"
@@ -3979,6 +4851,7 @@ export default function ChatPanel() {
         selectedTemplateId={selectedTemplateId}
         selectedStyleId={selectedStyleId}
         selectedDuration={selectedDuration}
+        selectedAutonomousMode={autonomousModeEnabled}
         loading={isLoadingSetupCatalog}
         configuring={isConfiguringProjectSetup}
         error={setupError}
@@ -3987,11 +4860,13 @@ export default function ChatPanel() {
         onSelectTemplate={handleSelectTemplate}
         onSelectStyle={handleSelectStyle}
         onSelectDuration={handleSelectDuration}
+        onSelectAutonomousMode={handleSelectAutonomousMode}
+        onConfirmSetup={handleConfirmSetup}
         onBack={handleSetupBack}
       />
 
       {showDockedTodoPrompt && (
-        <TodoPrompt todos={activeTodos} />
+        <TodoPrompt todos={activeTodos} isRunning={isTaskRunning} />
       )}
 
       {setupPanelMode === 'hidden' && activeQuestion && (
@@ -3999,7 +4874,7 @@ export default function ChatPanel() {
           question={activeQuestion.question}
           options={activeQuestion.options}
           type={activeQuestion.type}
-          autoApproveTimeoutMs={activeQuestion.autoApproveTimeoutMs}
+          autoApproveTimeoutMs={effectiveAutoApproveTimeoutMs}
           isConfirmation={activeQuestion.isConfirmation}
           defaultOption={activeQuestion.defaultOption}
           onSelect={sendResponse}
@@ -4017,6 +4892,7 @@ export default function ChatPanel() {
         placeholder={chatInputPlaceholder}
         hintText={chatInputHint}
         questionMode={!!activeQuestion && setupPanelMode === 'hidden'}
+        onQuestionInteraction={cancelActiveQuestionTimer}
         onSend={sendMessage}
         onStop={stopTask}
       />

@@ -6,13 +6,25 @@ import {
 } from './chatPanelResumeUtils';
 
 describe('chatPanelResumeUtils', () => {
-  it('skips configure_project when reconnecting to an existing session', () => {
+  it('skips configure_project when reconnecting to an already configured session', () => {
     const session: RemoteSessionInfo = {
       id: 'session-1',
       status: 'running',
+      configured: true,
     };
 
     expect(shouldConfigureProjectAfterConnect(session, false)).toBe(false);
+    expect(shouldConfigureProjectAfterConnect(session, true)).toBe(false);
+  });
+
+  it('reconfigures project when reconnecting to an unconfigured session', () => {
+    const session: RemoteSessionInfo = {
+      id: 'session-1',
+      status: 'idle',
+      configured: false,
+    };
+
+    expect(shouldConfigureProjectAfterConnect(session, false)).toBe(true);
     expect(shouldConfigureProjectAfterConnect(session, true)).toBe(false);
   });
 
@@ -29,9 +41,27 @@ describe('chatPanelResumeUtils', () => {
       }),
     ).toEqual({
       agentStatus: 'thinking',
-      statusMessage: 'Reconnected to active session. Waiting for next update...',
+      statusMessage:
+        'Reconnected to active session. Waiting for next update...',
       isTaskRunning: true,
       notice: 'Reconnected to active session.',
+      autonomousMode: false,
+    });
+  });
+
+  it('surfaces autonomous mode from resumed sessions', () => {
+    expect(
+      getResumedSessionUiState({
+        id: 'session-2',
+        status: 'idle',
+        autonomousMode: true,
+      }),
+    ).toEqual({
+      agentStatus: 'idle',
+      statusMessage: 'Ready',
+      isTaskRunning: false,
+      notice: null,
+      autonomousMode: true,
     });
   });
 });

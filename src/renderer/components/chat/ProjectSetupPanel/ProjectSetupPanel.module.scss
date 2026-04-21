@@ -77,6 +77,11 @@
   font-size: $font-size-xs;
 }
 
+.autonomousTag {
+  border-color: rgba(var(--color-success-rgb), 0.34);
+  background: rgba(var(--color-success-rgb), 0.12);
+}
+
 .summaryStatus {
   display: inline-flex;
   align-items: center;
@@ -116,27 +121,27 @@
 }
 
 .wizardStep {
-  font-size: $font-size-xs;
+  font-size: 10px;
   color: $color-text-secondary;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.4px;
 }
 
 .wizardTitle {
   margin: 0;
-  font-size: $font-size-lg;
+  font-size: 17px;
+  line-height: 1.2;
   color: $color-text-primary;
 }
 
 .cardsGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: $spacing-sm;
+  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+  gap: $spacing-xs;
 }
 
 .card {
   text-align: left;
-  padding: $spacing-sm;
   border-radius: $radius-md;
   border: 1px solid rgba(var(--color-panel-border-rgb), 0.9);
   background: rgba(255, 255, 255, 0.02);
@@ -144,7 +149,7 @@
   transition: border-color $transition-fast, background $transition-fast;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  overflow: hidden;
 
   &:hover {
     border-color: rgba(var(--color-accent-primary-rgb), 0.28);
@@ -157,21 +162,55 @@
   background: rgba(var(--color-accent-primary-rgb), 0.1);
 }
 
+.cardPreview {
+  width: 100%;
+  aspect-ratio: 1.9 / 1;
+  background:
+    linear-gradient(135deg, rgba(var(--color-accent-primary-rgb), 0.22), rgba(255, 255, 255, 0.04)),
+    rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(var(--color-panel-border-rgb), 0.85);
+}
+
+.cardPreviewImage {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.cardPreviewPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xs;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  text-align: center;
+}
+
+.cardContent {
+  padding: $spacing-xs $spacing-sm $spacing-sm;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .cardIndex {
   color: $color-text-muted;
-  font-size: $font-size-xs;
+  font-size: 11px;
 }
 
 .cardName {
   color: $color-text-primary;
-  font-size: $font-size-sm;
+  font-size: 13px;
   font-weight: $font-weight-semibold;
+  line-height: 1.25;
 }
 
 .cardDescription {
   color: $color-text-secondary;
-  font-size: $font-size-xs;
-  line-height: $line-height-relaxed;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .durationRow {
@@ -217,6 +256,16 @@
 .customSet {
   @include button-primary;
   height: 30px;
+}
+
+.autonomousFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.continueButton {
+  @include button-primary;
+  min-width: 120px;
 }
 
 .loading {

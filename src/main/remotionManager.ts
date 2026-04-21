@@ -304,7 +304,7 @@ class RemotionManager extends EventEmitter {
         return {
           jobId: '',
           error:
-            'Remotion bundle not found. Run "pnpm run build" in kshana-ink/remotion-infographics first.',
+            'Remotion bundle not found. Run "pnpm run build" in kshana-core/remotion-infographics first.',
         };
       }
     }

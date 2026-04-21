@@ -9,20 +9,25 @@ export interface AudioImportProjectBridge {
   copy: (sourcePath: string, destDir: string) => Promise<string>;
 }
 
+export interface ImportedAudioResult {
+  sourcePath: string;
+  destinationPath: string;
+  relativePath: string;
+  fileName: string;
+}
+
 export async function importAudioFromFileToProject({
   projectDirectory,
   projectBridge,
-  refreshAudioFiles,
 }: {
   projectDirectory: string | null;
   projectBridge: AudioImportProjectBridge;
-  refreshAudioFiles: () => Promise<void>;
-}): Promise<boolean> {
-  if (!projectDirectory) return false;
+}): Promise<ImportedAudioResult | null> {
+  if (!projectDirectory) return null;
 
   try {
     const audioPath = await projectBridge.selectAudioFile();
-    if (!audioPath) return false;
+    if (!audioPath) return null;
 
     const audioFolder = await PROJECT_PATHS.AGENT_AUDIO.split('/')
       .filter(Boolean)
@@ -35,10 +40,22 @@ export async function importAudioFromFileToProject({
         Promise.resolve(projectDirectory),
       );
 
-    await projectBridge.copy(audioPath, audioFolder);
-    await refreshAudioFiles();
-    return true;
+    const destinationPath = await projectBridge.copy(audioPath, audioFolder);
+    const normalizedProjectDirectory = projectDirectory.replace(/\\/g, '/');
+    const normalizedDestinationPath = destinationPath.replace(/\\/g, '/');
+    const relativePath = normalizedDestinationPath.startsWith(
+      `${normalizedProjectDirectory}/`,
+    )
+      ? normalizedDestinationPath.slice(normalizedProjectDirectory.length + 1)
+      : `${PROJECT_PATHS.AGENT_AUDIO}/${normalizedDestinationPath.split('/').pop() ?? 'audio'}`;
+
+    return {
+      sourcePath: audioPath,
+      destinationPath: normalizedDestinationPath,
+      relativePath,
+      fileName: normalizedDestinationPath.split('/').pop() ?? 'Audio Track',
+    };
   } catch {
-    return false;
+    return null;
   }
 }

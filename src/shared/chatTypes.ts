@@ -21,6 +21,7 @@ export interface ChatSnapshotUiState {
   phaseDisplayName?: string;
   hasUserSentMessage: boolean;
   isTaskRunning: boolean;
+  autonomousMode: boolean;
 }
 
 export interface ChatSnapshot {

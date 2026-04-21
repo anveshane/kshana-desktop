@@ -18,8 +18,6 @@ export class TimeIndex {
 
   constructor(timelineItems: TimelineItem[]) {
     // Build sorted array of non-overlapping ranges
-    // Filter out audio items as they span the entire timeline
-    const nonAudioItems = timelineItems.filter((item) => item.type !== 'audio');
 
     // Map to ranges, preserving original index from timelineItems array
     this.ranges = timelineItems
@@ -51,23 +49,29 @@ export class TimeIndex {
   }
 
   /**
-   * Get the item index at a specific time (returns the index in the original timelineItems array)
-   */
-  getItemIndexAtTime(time: number): number | null {
-    const range = this.binarySearch(time);
-    if (!range) return null;
-
-    // Find the original index in timelineItems by matching the item
-    // We need to search through ranges to find which one matches
-    return range.itemIndex;
-  }
-
-  /**
    * Get the item index at a specific time
    * Returns the original index from the timelineItems array
    */
   getItemIndexAtTime(time: number): number | null {
     const range = this.binarySearch(time);
+    return range?.itemIndex ?? null;
+  }
+
+  /**
+   * Get the next non-audio item whose range starts at or after the supplied time.
+   * Exact boundaries resolve to the next range so callers can transition smoothly.
+   */
+  getNextItemAfterTime(time: number): TimelineItem | null {
+    const range = this.getNextRangeAfterTime(time);
+    return range?.item ?? null;
+  }
+
+  /**
+   * Get the original timelineItems index for the next non-audio item whose range
+   * starts at or after the supplied time.
+   */
+  getNextItemIndexAfterTime(time: number): number | null {
+    const range = this.getNextRangeAfterTime(time);
     return range?.itemIndex ?? null;
   }
 
@@ -135,5 +139,14 @@ export class TimeIndex {
    */
   getRanges(): readonly TimeRange[] {
     return this.ranges;
+  }
+
+  private getNextRangeAfterTime(time: number): TimeRange | null {
+    if (this.ranges.length === 0) return null;
+
+    const epsilon = 0.001;
+    return (
+      this.ranges.find((range) => range.startTime >= time - epsilon) || null
+    );
   }
 }

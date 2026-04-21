@@ -7,12 +7,15 @@ interface TimelineContextMenuProps {
   canUndo?: boolean;
   canGenerateWordCaptions?: boolean;
   isGeneratingWordCaptions?: boolean;
+  showRegenerateShotAction?: boolean;
   showVideoEditActions?: boolean;
+  showDeleteAudioAction?: boolean;
   onUndo?: () => void;
-  onAddTimelineInstruction: () => void;
+  onRegenerateShot?: () => void;
   onGenerateWordCaptions?: () => void;
   onSplitClip?: () => void;
   onTrimLeftToPlayhead?: () => void;
+  onDeleteAudio?: () => void;
   onClose: () => void;
 }
 
@@ -22,12 +25,15 @@ export default function TimelineContextMenu({
   canUndo = false,
   canGenerateWordCaptions = false,
   isGeneratingWordCaptions = false,
+  showRegenerateShotAction = false,
   showVideoEditActions = false,
+  showDeleteAudioAction = false,
   onUndo,
-  onAddTimelineInstruction,
+  onRegenerateShot,
   onGenerateWordCaptions,
   onSplitClip,
   onTrimLeftToPlayhead,
+  onDeleteAudio,
   onClose,
 }: TimelineContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -94,13 +100,15 @@ export default function TimelineContextMenu({
       </button>
       <div className={styles.divider} />
 
-      <button
-        type="button"
-        className={styles.menuItem}
-        onClick={() => handleAction(onAddTimelineInstruction)}
-      >
-        Add Timeline Instruction
-      </button>
+      {showRegenerateShotAction && (
+        <button
+          type="button"
+          className={styles.menuItem}
+          onClick={() => handleAction(onRegenerateShot)}
+        >
+          Regenerate Shot
+        </button>
+      )}
 
       <button
         type="button"
@@ -135,6 +143,20 @@ export default function TimelineContextMenu({
             disabled={!onTrimLeftToPlayhead}
           >
             Trim Left to Playhead
+          </button>
+        </>
+      )}
+
+      {showDeleteAudioAction && (
+        <>
+          <div className={styles.divider} />
+          <button
+            type="button"
+            className={`${styles.menuItem} ${styles.destructive} ${!onDeleteAudio ? styles.disabled : ''}`}
+            onClick={() => handleAction(onDeleteAudio)}
+            disabled={!onDeleteAudio}
+          >
+            Delete Audio
           </button>
         </>
       )}

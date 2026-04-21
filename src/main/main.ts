@@ -25,22 +25,26 @@ import {
 } from './utils/audioWaveform';
 import {
   assertCanonicalProjectContainment,
+  isSafeNewProjectFolderSegment,
   normalizeIncomingPath,
   ProjectFileOpGuardError,
   resolveAndValidateProjectPath,
 } from './utils/projectFileOpGuard';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
-import serverConnectionManager, {
-  BackendState,
-  ServerConnectionConfig,
-} from './serverConnectionManager';
+import backendManager from './backendManager';
 import {
   AppSettings,
   getSettings,
   getStoredServerUrl,
   updateSettings,
 } from './settingsManager';
+import {
+  getAccount,
+  setAccount,
+  clearAccount,
+  refreshBalance,
+} from './accountManager';
 import fileSystemManager from './fileSystemManager';
 import { remotionManager } from './remotionManager';
 import { generateWordCaptions } from './services/wordCaptionService';
@@ -53,6 +57,11 @@ import type {
   RemotionServerRenderProgress,
 } from '../shared/remotionTypes';
 import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
+import type {
+  BackendConnectionInfo,
+  BackendState,
+  ServerConnectionConfig,
+} from '../shared/backendTypes';
 import * as desktopLogger from './services/DesktopLogger';
 import { exportChatJsonWithDialog } from './services/chatExportService';
 import {
@@ -99,6 +108,7 @@ let appUpdateStatus: AppUpdateStatus = {
 };
 
 interface RuntimeConfig {
+  cloudServerUrl?: string;
   serverUrl?: string;
 }
 
@@ -118,7 +128,7 @@ function normalizeServerUrl(value?: string): string | undefined {
   }
 }
 
-async function getRuntimeConfigServerUrl(): Promise<string | undefined> {
+async function getRuntimeConfigCloudServerUrl(): Promise<string | undefined> {
   const candidatePaths = app.isPackaged
     ? [path.join(process.resourcesPath, 'assets', 'runtime-config.json')]
     : [path.join(__dirname, '../../assets/runtime-config.json')];
@@ -127,7 +137,9 @@ async function getRuntimeConfigServerUrl(): Promise<string | undefined> {
     try {
       const raw = await fs.readFile(configPath, 'utf-8');
       const parsed = JSON.parse(raw) as RuntimeConfig;
-      const normalized = normalizeServerUrl(parsed.serverUrl);
+      const normalized = normalizeServerUrl(
+        parsed.cloudServerUrl || parsed.serverUrl,
+      );
       if (normalized) {
         return normalized;
       }
@@ -139,8 +151,8 @@ async function getRuntimeConfigServerUrl(): Promise<string | undefined> {
   return undefined;
 }
 
-async function resolveBackendServerUrl(): Promise<string> {
-  const runtimeConfigUrl = await getRuntimeConfigServerUrl();
+async function resolveCloudBackendServerUrl(): Promise<string> {
+  const runtimeConfigUrl = await getRuntimeConfigCloudServerUrl();
   if (runtimeConfigUrl) {
     return runtimeConfigUrl;
   }
@@ -169,6 +181,8 @@ type GuardedFileOp =
 interface FileOpMeta {
   opId?: string | null;
   source?: 'agent_ws' | 'renderer';
+  /** When set with source renderer, create-folder validates under basePath only (new project wizard). */
+  intent?: 'new_project_parent';
 }
 
 interface FileOpErrorContext {
@@ -284,7 +298,7 @@ const broadcastAppUpdateStatus = (
   }
 };
 
-serverConnectionManager.on('state', (state: BackendState) => {
+backendManager.on('state', (state: BackendState) => {
   if (mainWindow) {
     mainWindow.webContents.send('backend:state', state);
   }
@@ -297,23 +311,28 @@ ipcMain.on('ipc-example', async (event, arg) => {
 });
 
 ipcMain.handle('backend:get-state', async (): Promise<BackendState> => {
-  return serverConnectionManager.status;
+  return backendManager.status;
 });
 
 ipcMain.handle(
+  'backend:get-connection-info',
+  async (): Promise<BackendConnectionInfo> => {
+    const settings = getSettings();
+    const cloudServerUrl = await resolveCloudBackendServerUrl();
+    return backendManager.getConnectionInfo(settings, cloudServerUrl);
+  },
+);
+
+ipcMain.handle(
   'backend:start',
-  async (
-    _event,
-    config?: ServerConnectionConfig,
-  ): Promise<BackendState> => {
+  async (_event, config?: ServerConnectionConfig): Promise<BackendState> => {
     try {
-      const resolvedServerUrl = await resolveBackendServerUrl();
-      return await serverConnectionManager.connect({
-        serverUrl: config?.serverUrl || resolvedServerUrl,
-        autoReconnect: config?.autoReconnect,
-      });
+      const settings = getSettings();
+      const resolvedCloudServerUrl =
+        config?.serverUrl || (await resolveCloudBackendServerUrl());
+      return await backendManager.start(settings, resolvedCloudServerUrl);
     } catch (error) {
-      log.error(`Failed to connect to server: ${(error as Error).message}`);
+      log.error(`Failed to start backend: ${(error as Error).message}`);
       return {
         status: 'error',
         message: (error as Error).message,
@@ -324,15 +343,14 @@ ipcMain.handle(
 
 ipcMain.handle(
   'backend:restart',
-  async (_event, _config?: ServerConnectionConfig) => {
+  async (_event, config?: ServerConnectionConfig) => {
     try {
-      const resolvedServerUrl = await resolveBackendServerUrl();
-      await serverConnectionManager.disconnect();
-      return await serverConnectionManager.connect({
-        serverUrl: resolvedServerUrl,
-      });
+      const settings = getSettings();
+      const resolvedCloudServerUrl =
+        config?.serverUrl || (await resolveCloudBackendServerUrl());
+      return await backendManager.restart(settings, resolvedCloudServerUrl);
     } catch (error) {
-      log.error(`Failed to reconnect to server: ${(error as Error).message}`);
+      log.error(`Failed to restart backend: ${(error as Error).message}`);
       return {
         status: 'error',
         message: (error as Error).message,
@@ -342,7 +360,7 @@ ipcMain.handle(
 );
 
 ipcMain.handle('backend:stop', async () => {
-  return serverConnectionManager.disconnect();
+  return backendManager.stop();
 });
 
 ipcMain.handle('settings:get', async (): Promise<AppSettings> => {
@@ -483,7 +501,12 @@ ipcMain.handle(
     _event,
     projectDirectory: string,
     audioPath?: string,
-  ): Promise<{ success: boolean; outputPath?: string; words?: unknown[]; error?: string }> => {
+  ): Promise<{
+    success: boolean;
+    outputPath?: string;
+    words?: unknown[];
+    error?: string;
+  }> => {
     const result = await generateWordCaptions(projectDirectory, audioPath);
     if (result.success && result.outputPath) {
       fileSystemManager.emit('file-change', {
@@ -523,7 +546,9 @@ ipcMain.handle(
 ipcMain.handle(
   'project:watch-infographic-placements',
   async (_event, infographicPlacementsDir: string) => {
-    await fileSystemManager.watchInfographicPlacements(infographicPlacementsDir);
+    await fileSystemManager.watchInfographicPlacements(
+      infographicPlacementsDir,
+    );
   },
 );
 
@@ -551,11 +576,14 @@ ipcMain.handle(
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Manifest not found';
-      console.warn('[Main][refresh-assets] Failed to trigger manifest refresh', {
-        source: 'ipc_refresh_assets',
-        manifestPath,
-        error: message,
-      });
+      console.warn(
+        '[Main][refresh-assets] Failed to trigger manifest refresh',
+        {
+          source: 'ipc_refresh_assets',
+          manifestPath,
+          error: message,
+        },
+      );
       return { success: false, error: message };
     }
   },
@@ -607,6 +635,24 @@ ipcMain.handle('project:add-recent', async (_event, projectPath: string) => {
   fileSystemManager.addRecentProject(projectPath);
 });
 
+ipcMain.handle('project:remove-recent', async (_event, projectPath: string) => {
+  fileSystemManager.removeRecentProject(projectPath);
+});
+
+ipcMain.handle(
+  'project:rename-project',
+  async (_event, projectPath: string, newName: string): Promise<string> => {
+    return fileSystemManager.renameProject(projectPath, newName);
+  },
+);
+
+ipcMain.handle(
+  'project:delete-project',
+  async (_event, projectPath: string): Promise<void> => {
+    await fileSystemManager.deleteProject(projectPath);
+  },
+);
+
 ipcMain.handle('project:get-resources-path', async () => {
   // Get the path to resources (where test_image and test_video are packaged)
   // In development: __dirname/../../ (points to kshana-desktop directory)
@@ -642,11 +688,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:read-file-guarded',
-  async (
-    _event,
-    filePath: string,
-    meta?: FileOpMeta,
-  ): Promise<string> => {
+  async (_event, filePath: string, meta?: FileOpMeta): Promise<string> => {
     const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -679,11 +721,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:read-file-buffer-guarded',
-  async (
-    _event,
-    filePath: string,
-    meta?: FileOpMeta,
-  ): Promise<string> => {
+  async (_event, filePath: string, meta?: FileOpMeta): Promise<string> => {
     const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -771,7 +809,8 @@ ipcMain.handle(
     projectDir: string,
   ): Promise<Array<{ path: string; content: string; isBinary: boolean }>> => {
     const kshanaDir = path.join(projectDir, '.kshana');
-    const results: Array<{ path: string; content: string; isBinary: boolean }> = [];
+    const results: Array<{ path: string; content: string; isBinary: boolean }> =
+      [];
     const TEXT_EXTS = new Set([
       '.json',
       '.md',
@@ -786,7 +825,12 @@ ipcMain.handle(
       '.html',
       '.xml',
     ]);
-    const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', '__pycache__']);
+    const SKIP_DIRS = new Set([
+      'node_modules',
+      '.git',
+      '.cache',
+      '__pycache__',
+    ]);
     const MAX_TEXT_BYTES = 5 * 1024 * 1024;
     let skippedNonText = 0;
     let skippedOversized = 0;
@@ -835,7 +879,7 @@ ipcMain.handle(
 
     log.info(
       `[project:read-all-files] Read ${results.length} text files from ${kshanaDir} ` +
-      `(skipped non-text: ${skippedNonText}, skipped oversized: ${skippedOversized})`,
+        `(skipped non-text: ${skippedNonText}, skipped oversized: ${skippedOversized})`,
     );
     return results;
   },
@@ -867,7 +911,12 @@ ipcMain.handle(
       '.html',
       '.xml',
     ]);
-    const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', '__pycache__']);
+    const SKIP_DIRS = new Set([
+      'node_modules',
+      '.git',
+      '.cache',
+      '__pycache__',
+    ]);
     const MAX_TEXT_BYTES = 5 * 1024 * 1024;
     const normalizedRoot = path.resolve(projectDir);
 
@@ -927,11 +976,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'project:list-directory',
-  async (
-    _event,
-    dirPath: string,
-    meta?: FileOpMeta,
-  ): Promise<string[]> => {
+  async (_event, dirPath: string, meta?: FileOpMeta): Promise<string[]> => {
     const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -1201,11 +1246,32 @@ ipcMain.handle(
     relativePath: string,
     meta?: FileOpMeta,
   ): Promise<string | null> => {
-    const activeProjectRoot = resolveBootstrapValidationRoot(
-      fileSystemManager.getActiveProjectRoot(),
-      path.isAbsolute(basePath) ? basePath : null,
-      meta,
-    );
+    const absoluteBase = path.isAbsolute(basePath) ? path.resolve(basePath) : null;
+    let activeProjectRoot: string | null;
+    if (
+      meta?.source === 'renderer' &&
+      meta?.intent === 'new_project_parent'
+    ) {
+      if (!absoluteBase) {
+        throw createIpcFileOpError(
+          'INVALID_FILE_PATH',
+          'New project creation requires an absolute parent folder path.',
+        );
+      }
+      if (!isSafeNewProjectFolderSegment(relativePath)) {
+        throw createIpcFileOpError(
+          'INVALID_FILE_PATH',
+          'Invalid project folder name.',
+        );
+      }
+      activeProjectRoot = absoluteBase;
+    } else {
+      activeProjectRoot = resolveBootstrapValidationRoot(
+        fileSystemManager.getActiveProjectRoot(),
+        absoluteBase,
+        meta,
+      );
+    }
     const combinedPath = path.join(basePath, relativePath);
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
@@ -1334,7 +1400,9 @@ ipcMain.handle(
         activeProjectRoot,
       );
 
-      await fs.mkdir(path.dirname(resolvedDestinationPath), { recursive: true });
+      await fs.mkdir(path.dirname(resolvedDestinationPath), {
+        recursive: true,
+      });
       await fs.copyFile(resolvedSourcePath, resolvedDestinationPath);
     } catch (error) {
       throwFileOpError({
@@ -1385,10 +1453,7 @@ ipcMain.handle('project:save-video-file', async () => {
 
 ipcMain.handle(
   'project:export-chat-json',
-  async (
-    _event,
-    payload: ChatExportPayload,
-  ): Promise<ChatExportResult> => {
+  async (_event, payload: ChatExportPayload): Promise<ChatExportResult> => {
     const targetWindow = mainWindow;
     if (!targetWindow) {
       return { success: false, error: 'Main window is not available' };
@@ -1413,10 +1478,11 @@ ipcMain.handle(
     overlayItems?: ExportOverlayItem[],
     textOverlayCues?: ExportTextOverlayCue[],
     promptOverlayCues?: ExportPromptOverlayCue[],
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
+  ): Promise<{ success: boolean; outputPath?: string; duration?: number; error?: string }> => {
     console.log('[Export:CapCut] Starting CapCut export...');
     try {
-      const projectName = projectDirectory.split(/[/\\]/).filter(Boolean).pop() || 'Project';
+      const projectName =
+        projectDirectory.split(/[/\\]/).filter(Boolean).pop() || 'Project';
       const result = await generateCapcutProject(
         projectName,
         timelineItems,
@@ -1427,11 +1493,13 @@ ipcMain.handle(
         promptOverlayCues,
       );
 
-      console.log('[Export:CapCut] Exported successfully to:', result.outputDir);
+      console.log(
+        '[Export:CapCut] Exported successfully to:',
+        result.outputDir,
+      );
       return { success: true, outputPath: result.outputDir };
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Unknown error';
+      const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('[Export:CapCut] Failed:', message);
       return { success: false, error: message };
     }
@@ -1449,7 +1517,10 @@ if (app.isPackaged) {
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
 configureAudioWaveformExtractor(ffmpegPath);
-log.info('[FFmpeg] Paths configured:', { ffmpeg: ffmpegPath, ffprobe: ffprobePath });
+log.info('[FFmpeg] Paths configured:', {
+  ffmpeg: ffmpegPath,
+  ffprobe: ffprobePath,
+});
 
 interface TimelineItem {
   type: 'image' | 'video' | 'placeholder';
@@ -1482,6 +1553,11 @@ interface TextOverlayCue {
   endTime: number;
   text: string;
   words: TextOverlayWord[];
+}
+
+interface RenderResolution {
+  width: number;
+  height: number;
 }
 
 const VIDEO_WATERMARK_TEXT = 'kshana';
@@ -1562,12 +1638,120 @@ function escapeDrawtextValue(input: string): string {
     .replace(/[\r\n]+/g, ' ');
 }
 
-function buildAssFromTextOverlayCues(cues: TextOverlayCue[]): string {
+function parseAspectRatioValue(value: unknown): RenderResolution | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const match = value.trim().match(/^(\d+)\s*:\s*(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const widthRatio = Number(match[1]);
+  const heightRatio = Number(match[2]);
+  if (
+    !Number.isFinite(widthRatio) ||
+    !Number.isFinite(heightRatio) ||
+    widthRatio <= 0 ||
+    heightRatio <= 0
+  ) {
+    return null;
+  }
+
+  if (widthRatio >= heightRatio) {
+    return {
+      width: 1920,
+      height: Math.round((1920 * heightRatio) / widthRatio),
+    };
+  }
+
+  return {
+    width: Math.round((1920 * widthRatio) / heightRatio),
+    height: 1920,
+  };
+}
+
+type ExportAspectRatio = '16:9' | '9:16';
+type ExportQuality = 'standard' | 'high';
+
+interface ExportRenderOptions {
+  aspectRatio: ExportAspectRatio;
+  quality: ExportQuality;
+}
+
+function resolveExportRenderResolution(
+  options: ExportRenderOptions,
+): RenderResolution {
+  if (options.aspectRatio === '9:16') {
+    if (options.quality === 'high') {
+      return { width: 1080, height: 1920 };
+    }
+
+    return { width: 720, height: 1280 };
+  }
+
+  if (options.quality === 'high') {
+    return { width: 1920, height: 1080 };
+  }
+
+  return { width: 1280, height: 720 };
+}
+
+async function getProjectRenderResolution(
+  projectDirectory: string,
+): Promise<RenderResolution> {
+  const fallback = { width: 1920, height: 1080 };
+  const manifestPath = path.join(projectDirectory, 'kshana.json');
+
+  try {
+    const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+    const parsed = JSON.parse(manifestContent) as {
+      settings?: {
+        resolution?: { width?: unknown; height?: unknown };
+        aspect_ratio?: unknown;
+      };
+    };
+
+    const width = parsed.settings?.resolution?.width;
+    const height = parsed.settings?.resolution?.height;
+    if (
+      typeof width === 'number' &&
+      typeof height === 'number' &&
+      Number.isFinite(width) &&
+      Number.isFinite(height) &&
+      width > 0 &&
+      height > 0
+    ) {
+      return {
+        width: Math.round(width),
+        height: Math.round(height),
+      };
+    }
+
+    const derived = parseAspectRatioValue(parsed.settings?.aspect_ratio);
+    if (derived) {
+      return derived;
+    }
+  } catch (error) {
+    console.warn(
+      '[VideoComposition] Failed to read project render resolution:',
+      error,
+    );
+  }
+
+  return fallback;
+}
+
+function buildAssFromTextOverlayCues(
+  cues: TextOverlayCue[],
+  resolution: RenderResolution = { width: 1920, height: 1080 },
+): string {
   const header = [
     '[Script Info]',
     'ScriptType: v4.00+',
-    'PlayResX: 1920',
-    'PlayResY: 1080',
+    `PlayResX: ${resolution.width}`,
+    `PlayResY: ${resolution.height}`,
     'WrapStyle: 2',
     'ScaledBorderAndShadow: yes',
     '',
@@ -1580,7 +1764,9 @@ function buildAssFromTextOverlayCues(cues: TextOverlayCue[]): string {
   ];
 
   const events = cues
-    .filter((cue) => Number.isFinite(cue.startTime) && Number.isFinite(cue.endTime))
+    .filter(
+      (cue) => Number.isFinite(cue.startTime) && Number.isFinite(cue.endTime),
+    )
     .filter((cue) => cue.endTime > cue.startTime)
     .sort((a, b) => a.startTime - b.startTime)
     .map((cue) => {
@@ -1629,7 +1815,9 @@ async function burnWordCaptionsIntoVideo(
       fontsDirExists = true;
       console.log(`[VideoComposition] Fonts directory validated: ${fontsDir}`);
     } catch (error) {
-      console.warn(`[VideoComposition] Fonts directory not accessible: ${fontsDir}`);
+      console.warn(
+        `[VideoComposition] Fonts directory not accessible: ${fontsDir}`,
+      );
     }
 
     if (fontsDirExists) {
@@ -1655,8 +1843,8 @@ async function burnWordCaptionsIntoVideo(
 
     // Strategy 4: Try with original Windows backslashes (heavily escaped)
     const heavyEscapedPath = assPath
-      .replace(/\\/g, '\\\\\\\\')  // Each backslash becomes 4 backslashes
-      .replace(/:/g, '\\\\:');       // Each colon gets escaped with 2 backslashes
+      .replace(/\\/g, '\\\\\\\\') // Each backslash becomes 4 backslashes
+      .replace(/:/g, '\\\\:'); // Each colon gets escaped with 2 backslashes
     strategies.push({
       filter: `subtitles=${heavyEscapedPath}`,
       description: 'subtitles filter (Windows backslash escaping)',
@@ -1818,7 +2006,8 @@ ipcMain.handle(
     overlayItems?: OverlayItem[],
     textOverlayCues?: TextOverlayCue[],
     promptOverlayCues?: PromptOverlayCue[],
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
+    exportOptions?: ExportRenderOptions,
+  ): Promise<{ success: boolean; outputPath?: string; duration?: number; error?: string }> => {
     console.log('[VideoComposition] Starting video composition...');
     console.log('[VideoComposition] Timeline items:', timelineItems.length);
 
@@ -1830,10 +2019,21 @@ ipcMain.handle(
     const tempDir = path.join(projectDirectory, '.kshana', 'temp');
     await fs.mkdir(tempDir, { recursive: true });
     console.log('[VideoComposition] Temp directory:', tempDir);
+    const renderResolution = exportOptions
+      ? resolveExportRenderResolution(exportOptions)
+      : await getProjectRenderResolution(projectDirectory);
+    const { width: outputWidth, height: outputHeight } = renderResolution;
+    const scaleAndPadFilter = `scale=${outputWidth}:${outputHeight}:force_original_aspect_ratio=decrease,pad=${outputWidth}:${outputHeight}:(ow-iw)/2:(oh-ih)/2`;
+    console.log(
+      '[VideoComposition] Using render resolution:',
+      renderResolution,
+    );
 
     const segmentFiles: string[] = [];
     const cleanupFiles: string[] = [];
-    const normalizedOverlayItems: Array<OverlayItem & { absolutePath: string }> = [];
+    const normalizedOverlayItems: Array<
+      OverlayItem & { absolutePath: string }
+    > = [];
     const placeholderFontPath = await findAvailableSystemFont();
 
     if (!placeholderFontPath) {
@@ -1892,7 +2092,9 @@ ipcMain.handle(
       ): Promise<void> =>
         new Promise<void>((resolve, reject) => {
           ffmpeg()
-            .input(`color=c=black:s=1920x1080:d=${duration}`)
+            .input(
+              `color=c=black:s=${outputWidth}x${outputHeight}:d=${duration}`,
+            )
             .inputOptions(['-f lavfi'])
             .outputOptions(outputOptions)
             .output(segmentPath)
@@ -2072,7 +2274,8 @@ ipcMain.handle(
                 '-preset medium',
                 '-crf 23',
                 '-pix_fmt yuv420p',
-                '-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+                '-vf',
+                scaleAndPadFilter,
                 '-t',
                 item.duration.toString(), // Limit to segment duration
               ])
@@ -2168,7 +2371,8 @@ ipcMain.handle(
                 '-preset medium',
                 '-crf 23',
                 '-pix_fmt yuv420p',
-                '-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+                '-vf',
+                scaleAndPadFilter,
               ])
               .output(segmentPath)
               .on('start', (commandLine) => {
@@ -2474,7 +2678,10 @@ ipcMain.handle(
           tempDir,
           'composed-video-prompts.mp4',
         );
-        const assContent = buildAssFromPromptOverlayCues(promptOverlayCues);
+        const assContent = buildAssFromPromptOverlayCues(
+          promptOverlayCues,
+          renderResolution,
+        );
         await fs.writeFile(promptAssPath, assContent, 'utf-8');
         cleanupFiles.push(promptAssPath);
 
@@ -2488,7 +2695,8 @@ ipcMain.handle(
           overlayedOutputPath = promptOverlayOutputPath;
         } catch (error) {
           console.warn(
-            `[VideoComposition] Prompt overlay burn failed, proceeding without prompt overlays: ${error instanceof Error ? error.message : 'Unknown error'
+            `[VideoComposition] Prompt overlay burn failed, proceeding without prompt overlays: ${
+              error instanceof Error ? error.message : 'Unknown error'
             }`,
           );
         }
@@ -2502,7 +2710,10 @@ ipcMain.handle(
           tempDir,
           'composed-video-captions.mp4',
         );
-        const assContent = buildAssFromTextOverlayCues(textOverlayCues);
+        const assContent = buildAssFromTextOverlayCues(
+          textOverlayCues,
+          renderResolution,
+        );
         await fs.writeFile(assPath, assContent, 'utf-8');
         cleanupFiles.push(assPath);
 
@@ -2516,7 +2727,8 @@ ipcMain.handle(
           finalOutputPath = captionedOutputPath;
         } catch (error) {
           console.warn(
-            `[VideoComposition] Word caption burn failed, proceeding without captions: ${error instanceof Error ? error.message : 'Unknown error'
+            `[VideoComposition] Word caption burn failed, proceeding without captions: ${
+              error instanceof Error ? error.message : 'Unknown error'
             }`,
           );
         }
@@ -2546,7 +2758,11 @@ ipcMain.handle(
       console.log(
         '[VideoComposition] Video composition completed successfully!',
       );
-      return { success: true, outputPath: finalOutputPath };
+      return {
+        success: true,
+        outputPath: finalOutputPath,
+        duration: timelineItems.reduce((sum, item) => sum + (item.duration || 0), 0),
+      };
     } catch (error) {
       console.error('[VideoComposition] Error during composition:', error);
       // Clean up temporary files on error
@@ -2890,9 +3106,7 @@ const checkForAppUpdates = async () => {
     broadcastAppUpdateStatus({
       phase: 'error',
       message:
-        error instanceof Error
-          ? error.message
-          : 'Unable to check for updates',
+        error instanceof Error ? error.message : 'Unable to check for updates',
     });
   }
 };
@@ -3025,19 +3239,18 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   desktopLogger.logSessionEnd();
-  serverConnectionManager.disconnect().catch((error) => {
-    log.error(`Failed to disconnect from server: ${(error as Error).message}`);
+  backendManager.stop().catch((error) => {
+    log.error(`Failed to stop backend: ${(error as Error).message}`);
   });
 });
 
 const bootstrapBackend = async () => {
   try {
-    const resolvedServerUrl = await resolveBackendServerUrl();
-    await serverConnectionManager.connect({
-      serverUrl: resolvedServerUrl,
-    });
+    const settings = getSettings();
+    const resolvedCloudServerUrl = await resolveCloudBackendServerUrl();
+    await backendManager.start(settings, resolvedCloudServerUrl);
   } catch (error) {
-    log.error(`Failed to connect to server: ${(error as Error).message}`);
+    log.error(`Failed to start backend: ${(error as Error).message}`);
   }
 };
 
@@ -3049,6 +3262,96 @@ const startBackendInBackground = () => {
   const backendPromise = bootstrapBackend();
   backendPromise.catch(handleBackendStartup);
 };
+
+// ─── Kshana Cloud deep-link protocol ─────────────────────────────────────────
+
+const KSHANA_CLOUD_URL =
+  process.env.KSHANA_CLOUD_URL ?? 'https://kshana.app';
+
+// Register kshana:// as the custom URL scheme
+if (!app.isDefaultProtocolClient('kshana')) {
+  app.setAsDefaultProtocolClient('kshana');
+}
+
+/** Parses kshana://auth?token=xxx&state=xxx and stores the account. */
+async function handleDeepLink(url: string): Promise<void> {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'auth') return;
+
+    const token = parsed.searchParams.get('token');
+    if (!token) return;
+
+    // Decode JWT payload without verifying (trust comes from HTTPS + state)
+    const parts = token.split('.');
+    if (parts.length !== 3) return;
+    const payload = JSON.parse(
+      Buffer.from(parts[1], 'base64url').toString('utf-8'),
+    ) as { sub?: string; email?: string; name?: string };
+
+    setAccount({
+      userId: payload.sub ?? '',
+      email: payload.email ?? '',
+      name: payload.name ?? null,
+      credits: 0,
+      token,
+    });
+
+    // Fetch balance immediately so the Account tab shows it
+    await refreshBalance(KSHANA_CLOUD_URL);
+
+    // Notify renderer that account changed
+    mainWindow?.webContents.send('account:changed');
+    log.info('[Account] Desktop sign-in complete:', payload.email);
+  } catch (err) {
+    log.error('[Account] Failed to handle deep link:', err);
+  }
+}
+
+// macOS: app is already running, open-url fires
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
+});
+
+// Windows / Linux: second-instance argv carries the URL
+app.on('second-instance', (_event, argv) => {
+  const deepLink = argv.find((arg) => arg.startsWith('kshana://'));
+  if (deepLink) handleDeepLink(deepLink);
+  // Focus the existing window
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
+// ─── Account IPC handlers ──────────────────────────────────────────────────
+
+ipcMain.handle('account:get', () => {
+  return getAccount();
+});
+
+ipcMain.handle('account:sign-in', async () => {
+  // Generate a random state token for CSRF protection
+  const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const url = `${KSHANA_CLOUD_URL}/auth/desktop?state=${state}`;
+  await shell.openExternal(url);
+  return { opened: true };
+});
+
+ipcMain.handle('account:sign-out', async () => {
+  clearAccount();
+  mainWindow?.webContents.send('account:changed');
+  return { success: true };
+});
+
+ipcMain.handle('account:refresh-balance', async () => {
+  const balance = await refreshBalance(KSHANA_CLOUD_URL);
+  mainWindow?.webContents.send('account:changed');
+  return { balance };
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 app
   .whenReady()

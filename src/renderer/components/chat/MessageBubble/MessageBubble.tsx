@@ -7,6 +7,10 @@ import MessageActions from '../MessageActions';
 import ToolCallCard from '../ToolCallCard';
 import TodoDisplay from '../TodoDisplay';
 import type { TodoItem } from '../TodoDisplay';
+import SceneCard, {
+  isDuplicateSceneSummary,
+  parseSceneContent,
+} from '../SceneCard';
 import styles from './MessageBubble.module.scss';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 
@@ -305,17 +309,47 @@ export default function MessageBubble({
               </>
             )}
           </div>
-        ) : (
-          <ReactMarkdown
-            remarkPlugins={remarkGfm ? [remarkGfm] : []}
-            components={MarkdownComponents}
-          >
-            {message.content ||
-              (message.role === 'assistant' && isStreaming
-                ? '*Thinking...*'
-                : message.content)}
-          </ReactMarkdown>
-        )}
+        ) : (() => {
+          // Try to render as a structured scene card when the content embeds scene JSON.
+          if (!isStreaming && message.content) {
+            const parsedSceneContent = parseSceneContent(message.content);
+            if (parsedSceneContent) {
+              const shouldHideRemainingText =
+                !parsedSceneContent.remainingText ||
+                isDuplicateSceneSummary(
+                  parsedSceneContent.remainingText,
+                  parsedSceneContent.sceneData,
+                );
+
+              return (
+                <div className={styles.sceneContent}>
+                  <SceneCard data={parsedSceneContent.sceneData} />
+                  {!shouldHideRemainingText && (
+                    <div className={styles.sceneSupplementaryText}>
+                      <ReactMarkdown
+                        remarkPlugins={remarkGfm ? [remarkGfm] : []}
+                        components={MarkdownComponents}
+                      >
+                        {parsedSceneContent.remainingText}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+          }
+          return (
+            <ReactMarkdown
+              remarkPlugins={remarkGfm ? [remarkGfm] : []}
+              components={MarkdownComponents}
+            >
+              {message.content ||
+                (message.role === 'assistant' && isStreaming
+                  ? '*Thinking...*'
+                  : message.content)}
+            </ReactMarkdown>
+          );
+        })()}
       </div>
     </div>
   );

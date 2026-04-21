@@ -9,6 +9,7 @@ interface ChatInputProps {
   placeholder?: string;
   hintText?: string;
   questionMode?: boolean;
+  onQuestionInteraction?: () => void;
   onSend: (message: string) => void;
   onStop?: () => void;
 }
@@ -24,12 +25,19 @@ export default function ChatInput({
   placeholder = 'Describe your story, ask for a storyboard, or request assets…',
   hintText,
   questionMode = false,
+  onQuestionInteraction,
   onSend,
   onStop,
 }: ChatInputProps) {
   const [value, setValue] = useState('');
   const [rows, setRows] = useState(MIN_ROWS);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const notifyQuestionInteraction = () => {
+    if (questionMode) {
+      onQuestionInteraction?.();
+    }
+  };
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -61,6 +69,8 @@ export default function ChatInput({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    notifyQuestionInteraction();
+
     if (event.key === 'Enter') {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const isModifierPressed = isMac ? event.metaKey : event.ctrlKey;
@@ -98,7 +108,12 @@ export default function ChatInput({
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => {
+            notifyQuestionInteraction();
+            setValue(event.target.value);
+          }}
+          onFocus={notifyQuestionInteraction}
+          onClick={notifyQuestionInteraction}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           rows={rows}

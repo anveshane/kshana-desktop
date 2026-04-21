@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
+import { useAgent } from '../../../contexts/AgentContext';
 import { useTimelineWebSocket } from '../../../hooks/useTimelineWebSocket';
 import { type TimelineItem } from '../../../hooks/useTimelineData';
 import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
@@ -36,6 +37,7 @@ import {
   buildUpdatedVideoSplitOverride,
   snapToSecond,
 } from '../../../utils/timelineImageEditing';
+import { getThumbnailPreviewTime } from '../../../utils/videoPreview';
 import type { TimelineMarker } from '../../../types/projectState';
 import type {
   KshanaTimelineMarker,
@@ -54,8 +56,13 @@ import TimelineMarkerComponent from '../TimelineMarker/TimelineMarker';
 import MarkerPromptPopover from '../TimelineMarker/MarkerPromptPopover';
 import VersionSelector from '../VersionSelector';
 import AudioImportModal from './AudioImportModal';
+import ShotRegenerateModal from './ShotRegenerateModal';
 import TimelineContextMenu from './TimelineContextMenu';
 import { importAudioFromFileToProject } from './importAudio';
+import {
+  buildShotRegenerateMessage,
+  isServerTimelineShotItem,
+} from './timelineShotRegenerate';
 import { getAudioBlockWidthPx } from './timelineAudioSizing';
 import styles from './TimelinePanel.module.scss';
 
@@ -64,6 +71,15 @@ const modKey = isMac ? 'Cmd' : 'Ctrl';
 const AUDIO_WAVEFORM_HEIGHT = 28;
 const BASE_PIXELS_PER_SECOND = 50;
 const MAJOR_MARKER_STEPS_SECONDS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+
+function buildImportedAudioAssetId(fileName: string): string {
+  const slug = fileName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return `imported-audio-${slug || 'track'}-${Date.now()}`;
+}
 
 function getMajorMarkerStepSeconds(zoomLevel: number): number {
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoomLevel;
@@ -95,7 +111,11 @@ function downsampleWaveformPeaks(
     );
 
     let bucketPeak = 0;
-    for (let sampleIndex = startIndex; sampleIndex < endIndex; sampleIndex += 1) {
+    for (
+      let sampleIndex = startIndex;
+      sampleIndex < endIndex;
+      sampleIndex += 1
+    ) {
       bucketPeak = Math.max(bucketPeak, peaks[sampleIndex] ?? 0);
     }
 
@@ -105,13 +125,7 @@ function downsampleWaveformPeaks(
   return downsampled;
 }
 
-function AudioWaveform({
-  peaks,
-  width,
-}: {
-  peaks?: number[];
-  width: number;
-}) {
+function AudioWaveform({ peaks, width }: { peaks?: number[]; width: number }) {
   const waveformBars = useMemo(() => {
     if (!peaks?.length) {
       return [];
@@ -161,26 +175,28 @@ function AudioWaveform({
       preserveAspectRatio="none"
       aria-hidden="true"
     >
-      {waveformBars.map(({ x, y, barHeight, dotRadius, dotY, showPeakDot }, index) => (
-        <g key={`waveform-bar-${index}`}>
-          <rect
-            className={styles.audioWaveformBar}
-            x={x}
-            y={y}
-            width={2}
-            height={barHeight}
-            rx={0.75}
-          />
-          {showPeakDot ? (
-            <circle
-              className={styles.audioWaveformPeakDot}
-              cx={x + 1}
-              cy={dotY}
-              r={dotRadius}
+      {waveformBars.map(
+        ({ x, y, barHeight, dotRadius, dotY, showPeakDot }, index) => (
+          <g key={`waveform-bar-${index}`}>
+            <rect
+              className={styles.audioWaveformBar}
+              x={x}
+              y={y}
+              width={2}
+              height={barHeight}
+              rx={0.75}
             />
-          ) : null}
-        </g>
-      ))}
+            {showPeakDot ? (
+              <circle
+                className={styles.audioWaveformPeakDot}
+                cx={x + 1}
+                cy={dotY}
+                r={dotRadius}
+              />
+            ) : null}
+          </g>
+        ),
+      )}
     </svg>
   );
 }
@@ -233,11 +249,18 @@ function TimelineItemComponent({
   onItemContextMenu,
   isEditing = false,
 }: TimelineItemComponentProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoPath, setVideoPath] = useState<string | null>(null);
+  const [hasVideoPreviewFrame, setHasVideoPreviewFrame] = useState(false);
   const [imagePath, setImagePath] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState<boolean>(false);
   const imageRetryCountRef = React.useRef<number>(0);
   const imageResolveAbortRef = React.useRef<AbortController | null>(null);
+  const footerLabel = item.sceneLabel || item.label;
+  const clipBadgeLabel = item.sceneLabel ? item.label : null;
+  const accessibleLabel = item.prompt
+    ? `${footerLabel}. ${item.prompt}`
+    : footerLabel;
 
   // Resolve video path from item (video and infographic both use videoPath for mp4)
   useEffect(() => {
@@ -245,6 +268,7 @@ function TimelineItemComponent({
       (item.type === 'video' || item.type === 'infographic') &&
       item.videoPath
     ) {
+      setHasVideoPreviewFrame(false);
       resolveAssetPathForDisplay(item.videoPath, projectDirectory).then(
         (resolved) => {
           setVideoPath(resolved);
@@ -252,8 +276,64 @@ function TimelineItemComponent({
       );
     } else {
       setVideoPath(null);
+      setHasVideoPreviewFrame(false);
     }
   }, [item.type, item.videoPath, projectDirectory]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!videoPath || !video) {
+      return undefined;
+    }
+
+    setHasVideoPreviewFrame(false);
+
+    const primePreviewFrame = () => {
+      const previewTime = getThumbnailPreviewTime(video.duration);
+      if (!Number.isFinite(previewTime) || previewTime <= 0) {
+        setHasVideoPreviewFrame(true);
+        return;
+      }
+
+      if (Math.abs((video.currentTime || 0) - previewTime) < 0.04) {
+        setHasVideoPreviewFrame(true);
+        return;
+      }
+
+      try {
+        video.currentTime = previewTime;
+      } catch {
+        setHasVideoPreviewFrame(true);
+      }
+    };
+
+    const handleLoadedMetadata = () => {
+      primePreviewFrame();
+    };
+    const handleLoadedData = () => {
+      setHasVideoPreviewFrame(true);
+    };
+    const handleSeeked = () => {
+      setHasVideoPreviewFrame(true);
+      video.pause();
+    };
+    const handleError = () => {
+      setHasVideoPreviewFrame(false);
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('loadeddata', handleLoadedData);
+    video.addEventListener('seeked', handleSeeked);
+    video.addEventListener('error', handleError);
+    video.load();
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('seeked', handleSeeked);
+      video.removeEventListener('error', handleError);
+    };
+  }, [videoPath]);
 
   // Resolve image path from timeline item only (projection-backed in v2).
   useEffect(() => {
@@ -386,10 +466,13 @@ function TimelineItemComponent({
             onItemContextMenu(e, item);
           }
         }}
-        title={item.label}
+        aria-label={accessibleLabel}
       >
         <div className={styles.scenePlaceholder} />
-        <div className={styles.sceneId}>{item.label}</div>
+        {clipBadgeLabel && (
+          <div className={styles.clipBadge}>{clipBadgeLabel}</div>
+        )}
+        <div className={styles.sceneId}>{footerLabel}</div>
       </div>
     );
   }
@@ -413,13 +496,13 @@ function TimelineItemComponent({
             onItemContextMenu(e, item);
           }
         }}
-        title={item.label}
+        aria-label={accessibleLabel}
       >
         <div className={styles.audioMetaRow}>
           <span className={styles.audioClipIcon}>
             <Music size={12} />
           </span>
-          <div className={styles.audioLabel}>{item.label}</div>
+          <div className={styles.audioLabel}>{footerLabel}</div>
         </div>
         <div className={styles.audioWaveform}>
           <AudioWaveform peaks={item.waveformPeaks} width={width} />
@@ -452,15 +535,24 @@ function TimelineItemComponent({
             onItemContextMenu(e, item);
           }
         }}
-        title={item.prompt || item.label}
+        aria-label={accessibleLabel}
       >
+        {!hasVideoPreviewFrame && (
+          <div className={styles.scenePlaceholder}>Video</div>
+        )}
         <video
+          ref={videoRef}
           src={videoPath}
           className={styles.videoThumbnail}
           preload="metadata"
           muted
+          playsInline
+          style={{ visibility: hasVideoPreviewFrame ? 'visible' : 'hidden' }}
         />
-        <div className={styles.videoLabel}>{item.label}</div>
+        {clipBadgeLabel && (
+          <div className={styles.clipBadge}>{clipBadgeLabel}</div>
+        )}
+        <div className={styles.videoLabel}>{footerLabel}</div>
         {item.sourceType === 'server_timeline' && (
           <div
             className={styles.imageResizeHandle}
@@ -502,15 +594,24 @@ function TimelineItemComponent({
             onItemContextMenu(e, item);
           }
         }}
-        title={item.prompt || item.label}
+        aria-label={accessibleLabel}
       >
+        {!hasVideoPreviewFrame && (
+          <div className={styles.scenePlaceholder}>Info</div>
+        )}
         <video
+          ref={videoRef}
           src={videoPath}
           className={styles.videoThumbnail}
           preload="metadata"
           muted
+          playsInline
+          style={{ visibility: hasVideoPreviewFrame ? 'visible' : 'hidden' }}
         />
-        <div className={styles.videoLabel}>{item.label}</div>
+        {clipBadgeLabel && (
+          <div className={styles.clipBadge}>{clipBadgeLabel}</div>
+        )}
+        <div className={styles.videoLabel}>{footerLabel}</div>
       </div>
     );
   }
@@ -525,10 +626,13 @@ function TimelineItemComponent({
         }
         onClick={(e) => onItemClick && onItemClick(e, item)}
         onContextMenu={(e) => onItemContextMenu && onItemContextMenu(e, item)}
-        title={item.prompt || item.label}
+        aria-label={accessibleLabel}
       >
         <div className={styles.scenePlaceholder}>Info</div>
-        <div className={styles.videoLabel}>{item.label}</div>
+        {clipBadgeLabel && (
+          <div className={styles.clipBadge}>{clipBadgeLabel}</div>
+        )}
+        <div className={styles.videoLabel}>{footerLabel}</div>
       </div>
     );
   }
@@ -551,9 +655,9 @@ function TimelineItemComponent({
             onItemContextMenu(e, item);
           }
         }}
-        title={item.label}
+        aria-label={accessibleLabel}
       >
-        <div className={styles.textOverlayLabel}>{item.label}</div>
+        <div className={styles.textOverlayLabel}>{footerLabel}</div>
       </div>
     );
   }
@@ -607,10 +711,13 @@ function TimelineItemComponent({
           onItemContextMenu(e, item);
         }
       }}
-      title={item.prompt || item.label}
+      aria-label={accessibleLabel}
     >
       {thumbnailElement}
-      <div className={styles.sceneId}>{item.label}</div>
+      {clipBadgeLabel && (
+        <div className={styles.clipBadge}>{clipBadgeLabel}</div>
+      )}
+      <div className={styles.sceneId}>{footerLabel}</div>
       {item.prompt && (
         <div className={styles.sceneDescription} title={item.prompt}>
           {item.prompt.length > 50
@@ -778,6 +885,7 @@ export default function TimelinePanel({
   onActiveVersionsChange,
 }: TimelinePanelProps) {
   const { projectDirectory } = useWorkspace();
+  const agentContext = useAgent();
   const {
     isLoaded,
     isLoading,
@@ -794,6 +902,8 @@ export default function TimelinePanel({
     updateVideoSplitOverrides,
     updateSegmentTimingOverrides,
     addAsset,
+    removeAsset,
+    refreshAssetManifest,
   } = useProject();
 
   // Use unified timeline data from context (single source of truth for TimelinePanel + VideoLibraryView)
@@ -806,6 +916,8 @@ export default function TimelinePanel({
     timelineSource,
     error: timelineError,
     isTimelineLoading,
+    normalizationSummary,
+    isNormalizedFromCorruption,
   } = useTimelineDataContext();
 
   // Initialize zoom level from timeline state
@@ -1019,6 +1131,10 @@ export default function TimelinePanel({
     number | null
   >(null);
   const [isAudioModalOpen, setIsAudioModalOpen] = useState(false);
+  const [regenerateShotItem, setRegenerateShotItem] =
+    useState<TimelineItem | null>(null);
+  const [isSubmittingShotRegenerate, setIsSubmittingShotRegenerate] =
+    useState(false);
   const [contextMenuState, setContextMenuState] =
     useState<TimelineContextMenuState | null>(null);
   const [isGeneratingWordCaptions, setIsGeneratingWordCaptions] =
@@ -1579,13 +1695,43 @@ export default function TimelinePanel({
     [openContextMenuAtPointer],
   );
 
-  const handleAddTimelineInstructionFromContextMenu = useCallback(() => {
-    if (!contextMenuState) return;
+  const handleRegenerateShotFromContextMenu = useCallback(() => {
+    const contextItem = contextMenuState?.item;
+    if (!isServerTimelineShotItem(contextItem)) {
+      return;
+    }
 
-    setMarkerPromptPosition(contextMenuState.positionSeconds);
-    setMarkerPromptOpen(true);
+    setRegenerateShotItem(contextItem);
     setContextMenuState(null);
   }, [contextMenuState]);
+
+  const handleCloseRegenerateShotModal = useCallback(() => {
+    if (isSubmittingShotRegenerate) {
+      return;
+    }
+
+    setRegenerateShotItem(null);
+  }, [isSubmittingShotRegenerate]);
+
+  const handleSubmitRegenerateShot = useCallback(
+    async (prompt: string) => {
+      if (!regenerateShotItem || !agentContext?.sendTask) {
+        return;
+      }
+
+      setIsSubmittingShotRegenerate(true);
+
+      try {
+        await agentContext.sendTask(
+          buildShotRegenerateMessage(regenerateShotItem, prompt),
+        );
+        setRegenerateShotItem(null);
+      } finally {
+        setIsSubmittingShotRegenerate(false);
+      }
+    },
+    [agentContext, regenerateShotItem],
+  );
 
   const handleUndoFromContextMenu = useCallback(() => {
     undoLastTimelineEdit();
@@ -1646,6 +1792,48 @@ export default function TimelinePanel({
     isGeneratingWordCaptions,
     contextMenuState,
     audioTimelineItems,
+  ]);
+
+  const handleDeleteAudioFromContextMenu = useCallback(async () => {
+    if (!projectDirectory || contextMenuState?.item?.type !== 'audio') {
+      return;
+    }
+
+    const audioItem = contextMenuState.item;
+    if (!audioItem.audioPath) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `Delete "${audioItem.label}" from this project? This will remove the audio file.`,
+    );
+    if (!shouldDelete) {
+      return;
+    }
+
+    try {
+      await window.electron.project.delete(
+        `${projectDirectory}/${audioItem.audioPath}`,
+      );
+
+      if (audioItem.assetId) {
+        await removeAsset(audioItem.assetId);
+      }
+
+      await Promise.all([refreshAssetManifest(), refreshAudioFiles()]);
+      setCaptionGenerationMessage(`Deleted audio track "${audioItem.label}".`);
+    } catch (error) {
+      console.error('[TimelinePanel] Failed to delete audio:', error);
+      setCaptionGenerationMessage('Failed to delete audio track.');
+    } finally {
+      setContextMenuState(null);
+    }
+  }, [
+    contextMenuState,
+    projectDirectory,
+    removeAsset,
+    refreshAssetManifest,
+    refreshAudioFiles,
   ]);
 
   const canGenerateWordCaptions = audioTimelineItems.length > 0;
@@ -2268,14 +2456,17 @@ export default function TimelinePanel({
 
   // Fallback for environments where touchpad pinch events are routed
   // through React's synthetic wheel path instead of the native listener.
-  const handleReactWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    if (e.defaultPrevented || !(e.ctrlKey || e.metaKey)) {
-      return;
-    }
+  const handleReactWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (e.defaultPrevented || !(e.ctrlKey || e.metaKey)) {
+        return;
+      }
 
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoomLevel((prev) => Math.max(0.1, Math.min(5, prev * delta)));
-  }, []);
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      setZoomLevel((prev) => Math.max(0.1, Math.min(5, prev * delta)));
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!isOpen) {
@@ -2386,12 +2577,36 @@ export default function TimelinePanel({
 
   // Handle audio import from file
   const handleImportAudioFromFile = useCallback(async () => {
-    await importAudioFromFileToProject({
+    const importedAudio = await importAudioFromFileToProject({
       projectDirectory,
       projectBridge: window.electron.project,
-      refreshAudioFiles,
     });
-  }, [projectDirectory, refreshAudioFiles]);
+
+    if (!importedAudio) {
+      return;
+    }
+
+    const assetInfo = createAssetInfo(
+      buildImportedAudioAssetId(importedAudio.fileName),
+      'final_audio',
+      importedAudio.relativePath,
+      1,
+      {
+        metadata: {
+          imported: true,
+          original_file_name: importedAudio.fileName,
+          source_path: importedAudio.sourcePath,
+        },
+      },
+    );
+
+    const saved = await addAsset(assetInfo);
+    if (!saved) {
+      console.error('Failed to save imported audio to asset manifest');
+    }
+
+    await Promise.all([refreshAssetManifest(), refreshAudioFiles()]);
+  }, [projectDirectory, addAsset, refreshAssetManifest, refreshAudioFiles]);
 
   // YouTube audio import removed - can be re-added later if needed
   const handleImportAudioFromYouTube = useCallback(
@@ -2418,6 +2633,11 @@ export default function TimelinePanel({
       contextMenuState.item.placementNumber !== undefined
     );
   }, [contextMenuState]);
+
+  const isServerTimelineShotContextTarget = useMemo(
+    () => isServerTimelineShotItem(contextMenuState?.item),
+    [contextMenuState],
+  );
 
   const canSplitContextTarget = useMemo(() => {
     if (!contextMenuState?.item || !isPlacementVideoContextTarget) return false;
@@ -2661,18 +2881,24 @@ export default function TimelinePanel({
     } => track !== null,
   );
 
+  const normalizationMessage =
+    normalizationSummary.droppedCount > 0
+      ? `Some timeline segments were unavailable (${normalizationSummary.droppedCount} dropped)`
+      : isNormalizedFromCorruption
+        ? `Recovered timeline from stale restore data (${normalizationSummary.repairedCount} repaired)`
+        : null;
+
   const timelineStateMessage = timelineError
     ? timelineError
     : isTimelineLoading
       ? 'Loading local timeline'
-      : captionGenerationMessage ||
-        'Timeline ready';
+      : normalizationMessage || captionGenerationMessage || 'Timeline ready';
 
   const timelineStateClass = timelineError
     ? styles.stateError
     : isTimelineLoading
       ? styles.stateLoading
-      : captionGenerationMessage
+      : normalizationMessage || captionGenerationMessage
         ? styles.stateInfo
         : styles.stateReady;
 
@@ -3044,11 +3270,11 @@ export default function TimelinePanel({
               canUndo={canUndo}
               canGenerateWordCaptions={canGenerateWordCaptions}
               isGeneratingWordCaptions={isGeneratingWordCaptions}
+              showRegenerateShotAction={isServerTimelineShotContextTarget}
               showVideoEditActions={isPlacementVideoContextTarget}
+              showDeleteAudioAction={contextMenuState.item?.type === 'audio'}
               onUndo={handleUndoFromContextMenu}
-              onAddTimelineInstruction={
-                handleAddTimelineInstructionFromContextMenu
-              }
+              onRegenerateShot={handleRegenerateShotFromContextMenu}
               onGenerateWordCaptions={handleGenerateWordCaptions}
               onSplitClip={
                 isPlacementVideoContextTarget && canSplitContextTarget
@@ -3056,6 +3282,7 @@ export default function TimelinePanel({
                   : undefined
               }
               onTrimLeftToPlayhead={undefined}
+              onDeleteAudio={handleDeleteAudioFromContextMenu}
               onClose={closeContextMenu}
             />
           )}
@@ -3074,6 +3301,14 @@ export default function TimelinePanel({
               }}
             />
           )}
+
+          <ShotRegenerateModal
+            item={regenerateShotItem}
+            isOpen={regenerateShotItem !== null}
+            isSubmitting={isSubmittingShotRegenerate}
+            onClose={handleCloseRegenerateShotModal}
+            onSubmit={handleSubmitRegenerateShot}
+          />
 
           <AudioImportModal
             isOpen={isAudioModalOpen}

@@ -39,6 +39,7 @@ export type ProjectSwitchGuard = (
 
 export interface WorkspaceActions {
   openProject: (path: string) => Promise<void>;
+  refreshRecentProjects: () => Promise<void>;
   registerProjectSwitchGuard: (guard: ProjectSwitchGuard) => () => void;
   closeProject: () => void;
   selectFile: (file: SelectedFile | null) => void;

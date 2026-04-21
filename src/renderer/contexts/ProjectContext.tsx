@@ -30,6 +30,7 @@ import type {
 import type { SceneVersions } from '../types/kshana/timeline';
 import { DEFAULT_TIMELINE_STATE } from '../types/kshana';
 import { projectService } from '../services/project';
+import { ensureProjectThumbnailFromManifest } from '../services/project/projectThumbnail';
 import {
   buildAssetDedupeKey,
   createEmptyImageProjectionSnapshot,
@@ -143,6 +144,9 @@ interface ProjectActions {
   /** Add an asset to the asset manifest */
   addAsset: (assetInfo: AssetInfo) => Promise<boolean>;
 
+  /** Remove an asset from the asset manifest */
+  removeAsset: (assetId: string) => Promise<boolean>;
+
   /** Explicitly refresh the asset manifest from disk */
   refreshAssetManifest: () => Promise<void>;
 
@@ -213,6 +217,26 @@ const initialState: ProjectState = {
   timelineState: { ...DEFAULT_TIMELINE_STATE },
   contextIndex: null,
 };
+
+function mergeAssetIntoManifest(
+  manifest: AssetManifest | null,
+  assetInfo: AssetInfo,
+): AssetManifest | null {
+  if (!manifest) return manifest;
+
+  const existingIndex = manifest.assets.findIndex((asset) => asset.id === assetInfo.id);
+  const nextAssets =
+    existingIndex >= 0
+      ? manifest.assets.map((asset, index) =>
+          index === existingIndex ? assetInfo : asset,
+        )
+      : [...manifest.assets, assetInfo];
+
+  return {
+    ...manifest,
+    assets: nextAssets,
+  };
+}
 
 function normalizeProjectDirectoryPath(
   input: string | null | undefined,
@@ -384,13 +408,27 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
       if (result.success) {
         const project = result.data;
+        let nextAssetManifest = project.assetManifest;
+        try {
+          const syncResult = await ensureProjectThumbnailFromManifest(
+            normalizedDir,
+            project.assetManifest,
+          );
+          nextAssetManifest = syncResult.manifest;
+          if (syncResult.changed) {
+            await projectService.updateAssetManifest(nextAssetManifest);
+          }
+        } catch (error) {
+          console.warn('[ProjectContext] Failed to sync project thumbnail:', error);
+        }
+
         console.log('[ProjectContext] Project loaded successfully:', {
           hasManifest: !!project.manifest,
           hasAgentState: !!project.agentState,
-          hasAssetManifest: !!project.assetManifest,
-          assetCount: project.assetManifest?.assets?.length || 0,
+          hasAssetManifest: !!nextAssetManifest,
+          assetCount: nextAssetManifest?.assets?.length || 0,
           imageAssets:
-            project.assetManifest?.assets?.filter(
+            nextAssetManifest?.assets?.filter(
               (a) => a.type === 'scene_image',
             ).length || 0,
         });
@@ -401,7 +439,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           error: null,
           manifest: project.manifest,
           agentState: project.agentState,
-          assetManifest: project.assetManifest,
+          assetManifest: nextAssetManifest,
           timelineState: project.timelineState,
           contextIndex: project.contextIndex,
         }));
@@ -558,6 +596,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
               '[ProjectContext] Reloading project due to file change:',
               filePath,
             );
+            // openProject() returns a cached result for MIN_OPEN_INTERVAL_MS; backend/chat
+            // writes to project.json must bypass that or the UI keeps stale setup/phase.
+            projectService.invalidateCache();
             const result = await projectService.openProject(projectDirectory);
             if (result.success) {
               const project = result.data;
@@ -678,7 +719,22 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       const result = await projectService.openProject(projectDirectory);
       if (result.success) {
         const project = result.data;
-        const newManifest = project.assetManifest;
+        let newManifest = project.assetManifest;
+        try {
+          const syncResult = await ensureProjectThumbnailFromManifest(
+            projectDirectory,
+            newManifest,
+          );
+          newManifest = syncResult.manifest;
+          if (syncResult.changed) {
+            await projectService.updateAssetManifest(newManifest);
+          }
+        } catch (error) {
+          console.warn(
+            '[ProjectContext] Failed to sync project thumbnail during refresh:',
+            error,
+          );
+        }
 
         // Use functional setState to compare with latest state (avoids stale closure)
         setState((prev) => {
@@ -1314,31 +1370,67 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
     async (assetInfo: AssetInfo): Promise<boolean> => {
       const result = await projectService.addAssetToManifest(assetInfo);
       if (result.success) {
+        let nextAssetManifest = mergeAssetIntoManifest(state.assetManifest, assetInfo);
+        if (projectDirectory && nextAssetManifest) {
+          try {
+            const syncResult = await ensureProjectThumbnailFromManifest(
+              projectDirectory,
+              nextAssetManifest,
+            );
+            nextAssetManifest = syncResult.manifest;
+            if (syncResult.changed) {
+              await projectService.updateAssetManifest(nextAssetManifest);
+            }
+          } catch (error) {
+            console.warn(
+              '[ProjectContext] Failed to sync project thumbnail after asset add:',
+              error,
+            );
+          }
+        }
+
         setState((prev) => {
-          if (!prev.assetManifest) return prev;
-          // Check if asset already exists
-          const existingIndex = prev.assetManifest.assets.findIndex(
-            (asset) => asset.id === assetInfo.id,
-          );
-          const newAssets =
-            existingIndex >= 0
-              ? prev.assetManifest.assets.map((asset, index) =>
-                  index === existingIndex ? assetInfo : asset,
-                )
-              : [...prev.assetManifest.assets, assetInfo];
+          if (!nextAssetManifest) return prev;
           return {
             ...prev,
-            assetManifest: {
-              ...prev.assetManifest,
-              assets: newAssets,
-            },
+            assetManifest: nextAssetManifest,
           };
         });
         return true;
       }
       return false;
     },
-    [],
+    [projectDirectory, state.assetManifest],
+  );
+
+  const removeAsset = useCallback(
+    async (assetId: string): Promise<boolean> => {
+      const currentManifest = state.assetManifest;
+      if (!currentManifest) {
+        return false;
+      }
+
+      const nextAssetManifest = {
+        ...currentManifest,
+        assets: currentManifest.assets.filter((asset) => asset.id !== assetId),
+      };
+
+      if (nextAssetManifest.assets.length === currentManifest.assets.length) {
+        return false;
+      }
+
+      const result = await projectService.updateAssetManifest(nextAssetManifest);
+      if (!result.success) {
+        return false;
+      }
+
+      setState((prev) => ({
+        ...prev,
+        assetManifest: nextAssetManifest,
+      }));
+      return true;
+    },
+    [state.assetManifest],
   );
 
   const subscribeImageProjection = useCallback(
@@ -1501,6 +1593,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateVideoSplitOverrides,
       updateSegmentTimingOverrides,
       addAsset,
+      removeAsset,
       refreshAssetManifest,
       subscribeImageProjection,
       getImageProjectionSnapshot,
@@ -1526,6 +1619,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
       updateVideoSplitOverrides,
       updateSegmentTimingOverrides,
       addAsset,
+      removeAsset,
       refreshAssetManifest,
       subscribeImageProjection,
       getImageProjectionSnapshot,

@@ -1,7 +1,11 @@
 // Disable no-unused-vars, broken for spread args
 /* eslint no-unused-vars: off */
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
-import type { BackendState, ServerConnectionConfig } from '../shared/backendTypes';
+import type {
+  BackendConnectionInfo,
+  BackendState,
+  ServerConnectionConfig,
+} from '../shared/backendTypes';
 import type { AppSettings } from '../shared/settingsTypes';
 import type {
   FileNode,
@@ -18,6 +22,7 @@ import type {
   RemotionServerRenderProgress,
 } from '../shared/remotionTypes';
 import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
+import type { AccountInfo } from '../shared/settingsTypes';
 
 interface WordTimestamp {
   text: string;
@@ -52,6 +57,7 @@ interface PromptOverlayCue {
 interface FileOpMeta {
   opId?: string | null;
   source?: 'agent_ws' | 'renderer';
+  intent?: 'new_project_parent';
 }
 
 type AppUpdatePhase =
@@ -86,6 +92,9 @@ const backendBridge = {
   },
   getState(): Promise<BackendState> {
     return ipcRenderer.invoke('backend:get-state');
+  },
+  getConnectionInfo(): Promise<BackendConnectionInfo> {
+    return ipcRenderer.invoke('backend:get-connection-info');
   },
   onStateChange(callback: (state: BackendState) => void) {
     const subscription = (_event: IpcRendererEvent, state: BackendState) => {
@@ -286,6 +295,15 @@ const projectBridge = {
   addRecent(projectPath: string): Promise<void> {
     return ipcRenderer.invoke('project:add-recent', projectPath);
   },
+  removeRecent(projectPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:remove-recent', projectPath);
+  },
+  renameProject(projectPath: string, newName: string): Promise<string> {
+    return ipcRenderer.invoke('project:rename-project', projectPath, newName);
+  },
+  deleteProject(projectPath: string): Promise<void> {
+    return ipcRenderer.invoke('project:delete-project', projectPath);
+  },
   getResourcesPath(): Promise<string> {
     return ipcRenderer.invoke('project:get-resources-path');
   },
@@ -315,7 +333,11 @@ const projectBridge = {
     }>,
     textOverlayCues?: TextOverlayCue[],
     promptOverlayCues?: PromptOverlayCue[],
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> {
+    exportOptions?: {
+      aspectRatio: '16:9' | '9:16';
+      quality: 'standard' | 'high';
+    },
+  ): Promise<{ success: boolean; outputPath?: string; duration?: number; error?: string }> {
     return ipcRenderer.invoke(
       'project:compose-timeline-video',
       timelineItems,
@@ -324,6 +346,7 @@ const projectBridge = {
       overlayItems,
       textOverlayCues,
       promptOverlayCues,
+      exportOptions,
     );
   },
   exportCapcut(
@@ -564,6 +587,30 @@ const appBridge = {
   },
 };
 
+const accountBridge = {
+  get(): Promise<AccountInfo | null> {
+    return ipcRenderer.invoke('account:get');
+  },
+  signIn(): Promise<{ opened: boolean }> {
+    return ipcRenderer.invoke('account:sign-in');
+  },
+  signOut(): Promise<{ success: boolean }> {
+    return ipcRenderer.invoke('account:sign-out');
+  },
+  refreshBalance(): Promise<{ balance: number | null }> {
+    return ipcRenderer.invoke('account:refresh-balance');
+  },
+  onChange(callback: (account: AccountInfo | null) => void) {
+    const subscription = () => {
+      ipcRenderer.invoke('account:get').then(callback).catch(() => {});
+    };
+    ipcRenderer.on('account:changed', subscription);
+    return () => {
+      ipcRenderer.removeListener('account:changed', subscription);
+    };
+  },
+};
+
 const electronHandler = {
   ipcRenderer: {
     sendMessage(channel: Channels, ...args: unknown[]) {
@@ -589,6 +636,7 @@ const electronHandler = {
   logger: loggerBridge,
   updates: updateBridge,
   app: appBridge,
+  account: accountBridge,
 };
 
 contextBridge.exposeInMainWorld('electron', electronHandler);

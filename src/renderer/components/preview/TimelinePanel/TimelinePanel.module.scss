@@ -605,6 +605,22 @@
   font-size: $font-size-xs;
 }
 
+.clipBadge {
+  position: absolute;
+  top: $spacing-xs;
+  left: $spacing-xs;
+  max-width: calc(100% - #{$spacing-sm * 2} - 10px);
+  padding: 2px $spacing-xs;
+  border-radius: $radius-sm;
+  background-color: rgba(6, 8, 12, 0.78);
+  color: $color-text-primary;
+  font-size: 11px;
+  font-weight: $font-weight-semibold;
+  line-height: 1.2;
+  z-index: 2;
+  @include truncate;
+}
+
 .sceneId,
 .videoLabel {
   padding: $spacing-xs $spacing-sm;

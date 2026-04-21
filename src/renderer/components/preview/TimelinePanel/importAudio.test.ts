@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import { importAudioFromFileToProject } from './importAudio';
 
 describe('importAudioFromFileToProject', () => {
-  it('copies selected audio and refreshes timeline audio files', async () => {
+  it('copies selected audio and returns manifest-friendly metadata', async () => {
     const callOrder: string[] = [];
 
     const projectBridge = {
@@ -20,26 +20,23 @@ describe('importAudioFromFileToProject', () => {
       }),
     };
 
-    const refreshAudioFiles = jest.fn(async () => {
-      callOrder.push('refresh');
-    });
-
     const imported = await importAudioFromFileToProject({
       projectDirectory: '/project',
       projectBridge,
-      refreshAudioFiles,
     });
 
-    expect(imported).toBe(true);
+    expect(imported).toEqual({
+      sourcePath: '/tmp/voice.mp3',
+      destinationPath: '/project/.kshana/agent/audio/voice.mp3',
+      relativePath: 'assets/audio/voice.mp3',
+      fileName: 'voice.mp3',
+    });
     expect(projectBridge.createFolder).toHaveBeenCalledTimes(3);
     expect(projectBridge.copy).toHaveBeenCalledWith(
       '/tmp/voice.mp3',
       '/project/.kshana/agent/audio',
     );
-    expect(refreshAudioFiles).toHaveBeenCalledTimes(1);
-    expect(callOrder.indexOf('copy')).toBeLessThan(
-      callOrder.indexOf('refresh'),
-    );
+    expect(callOrder[callOrder.length - 1]).toBe('copy');
   });
 
   it('returns false when the user does not select an audio file', async () => {
@@ -48,17 +45,13 @@ describe('importAudioFromFileToProject', () => {
       createFolder: jest.fn(async () => null),
       copy: jest.fn(async () => ''),
     };
-    const refreshAudioFiles = jest.fn(async () => {});
-
     const imported = await importAudioFromFileToProject({
       projectDirectory: '/project',
       projectBridge,
-      refreshAudioFiles,
     });
 
-    expect(imported).toBe(false);
+    expect(imported).toBeNull();
     expect(projectBridge.createFolder).not.toHaveBeenCalled();
     expect(projectBridge.copy).not.toHaveBeenCalled();
-    expect(refreshAudioFiles).not.toHaveBeenCalled();
   });
 });

@@ -1,171 +1,212 @@
-# Kshana Desktop Application
+# Kshana Desktop
 
-Electron-based desktop application for the Kshana video generation platform. This application uses the kshana-ink TypeScript backend and provides a native desktop interface.
+Electron desktop application for Kshana. The app bundles the `kshana-core` TypeScript backend and can run in two modes:
 
-## Features
+- `Local`: starts the bundled `kshana-core` server on an internal localhost port
+- `Cloud`: connects to a release-configured remote backend
 
-- 🖥️ **Native Desktop App**: Built with Electron for cross-platform support
-- 🔧 **TypeScript Backend**: Uses kshana-ink for AI-powered video generation (no Python needed!)
-- 💬 **Chat Interface**: Minimal chat UI for interacting with the video generation system
-- ⚙️ **Settings Management**: Configure LM Studio and ComfyUI URLs via app settings
-- 🚀 **Auto-start Backend**: Backend automatically starts when the app launches
+The renderer always talks to a backend over HTTP/WebSocket. In local mode, the desktop app starts that backend itself as a child process.
 
 ## Prerequisites
 
-- Node.js 20+ and npm
-- LM Studio (optional, for local LLM)
-- ComfyUI (optional, for image/video generation)
+- Node.js 20+
+- npm
+- sibling `kshana-core` repo at `../kshana-core`
+- ComfyUI if you want local image/video generation
+- LM Studio, Gemini, or OpenAI-compatible credentials if you want local LLM-backed generation
 
-## Development Setup
+Notes:
 
-### 1. Build kshana-ink
+- The product no longer depends on a Python backend.
+- Local packaging can still rebuild native Node modules used by `kshana-core`, so build machines may still need a working native toolchain.
 
-First, ensure kshana-ink is built:
+## Development
+
+### 1. Build `kshana-core`
 
 ```bash
-cd ../kshana-ink
+cd ../kshana-core
 pnpm install
 pnpm build
 ```
 
-### 2. Install Dependencies
+### 2. Install desktop dependencies
 
 ```bash
-cd ../kshana-frontend
+cd ../kshana-desktop
 npm install
 ```
 
-### 3. Start Development Server
+### 3. Start the desktop app
 
 ```bash
 npm run start
 ```
 
-This will:
-- Start the Electron app in development mode
-- Automatically start the kshana-ink backend
-- Enable hot-reload for frontend changes
+In development:
 
-## Building for Production
+- `Cloud` mode connects to the configured cloud URL
+- `Local` mode starts `../kshana-core/dist/server/cli.cjs` automatically
+- the local backend chooses a free loopback port automatically
 
-### Build All Platforms
+You do not need to run `kshana-core` separately for the normal desktop local flow. You only need `pnpm build` in the sibling repo.
+
+## Settings
+
+The Connection settings are mode-aware:
+
+- `Local`
+  - lets you configure ComfyUI and provider settings
+  - starts bundled `kshana-core` on localhost
+- `Cloud`
+  - connects to the release-configured cloud backend
+  - shows connection info only
+
+Local mode currently supports:
+
+- LM Studio
+- Gemini
+- OpenAI-compatible providers
+
+## Production Packaging
+
+### How bundling works
+
+`kshana-core` is bundled as a package artifact, not as a symlink.
+
+Current flow:
+
+1. `verify:kshana-core`
+   - checks that `../kshana-core` exists
+   - checks that the built server entry exists
+   - writes `release/app/.kshana-core-version.json`
+2. `prepare:app-deps`
+   - runs `npm pack` in `../kshana-core`
+   - writes the tarball into `release/app/vendor`
+   - rewrites `release/app/package.json` to depend on that tarball
+   - runs a production `npm install` in `release/app`
+3. `build`
+   - builds Electron main and renderer
+4. `electron-builder build`
+   - packages `release/app` into the final installers
+
+This avoids the old `file:../kshana-core` symlink problem inside packaged Electron apps.
+
+### Local packaging
 
 ```bash
 npm run package
 ```
 
-This will:
-1. Build the frontend (main and renderer processes)
-2. Package everything into installers
+Build macOS artifacts only:
 
-### Running the Built App
+```bash
+npm run package:mac
+```
 
-The packaged application includes the kshana-ink backend and runs entirely from the installer - no external dependencies required!
+Build Windows artifacts only:
+
+```bash
+npm run package:win
+```
+
+Build every configured local target:
+
+```bash
+npm run package:all
+```
+
+`npm run package:all` needs substantially more disk space than `npm run package`.
+
+### Release packaging
+
+```bash
+npm run release
+```
+
+## Runtime Model
+
+### Local mode
+
+- desktop starts bundled `kshana-core`
+- desktop waits for `/api/v1/health`
+- renderer connects over WebSocket/HTTP to the localhost backend
+
+### Cloud mode
+
+- desktop does not start a local backend
+- desktop connects to the cloud URL injected at release time
+
+## Bundled Backend Assets
+
+The packaged `kshana-core` artifact includes:
+
+- `dist/`
+- `prompts/`
+- `workflows/`
+
+These are required at runtime for:
+
+- server startup
+- prompt loading
+- ComfyUI workflow loading
 
 ## Project Structure
 
-```
-kshana-frontend/
+```text
+kshana-desktop/
 ├── src/
-│   ├── main/              # Electron main process
-│   │   ├── backendManager.ts    # Manages kshana-ink backend lifecycle
-│   │   ├── settingsManager.ts   # Persistent settings storage
-│   │   └── main.ts              # Main Electron entry point
-│   ├── renderer/          # React frontend
-│   │   ├── components/    # UI components
-│   │   └── styles/        # CSS styles
-│   └── shared/            # Shared TypeScript types
-└── assets/               # App icons and resources
+│   ├── main/
+│   ├── renderer/
+│   └── shared/
+├── .erb/
+│   └── scripts/
+├── release/
+│   └── app/
+└── assets/
 ```
 
-## Configuration
+## Project Creation
 
-### Settings
+Desktop projects use a normal folder root:
 
-The app stores settings using Electron's native storage. Configure:
+```text
+my-project/
+├── .kshana/
+├── assets/
+└── prompts/
+```
 
-- **ComfyUI URL**: URL where ComfyUI is running (default: `http://localhost:8000`)
-- **LM Studio URL**: URL where LM Studio is running (default: `http://127.0.0.1:1234`)
-- **LM Studio Model**: Model name to use (default: `qwen3`)
-- **LLM Provider**: Choose between `gemini`, `lmstudio`, or `openrouter`
+The outer project folder does not need a `.kshana` extension.
 
-Settings are accessible via the Settings panel in the app UI.
+## Known Build Caveats
 
-### Environment Variables
-
-The backend uses environment variables set by the Electron main process:
-
-- `LLM_PROVIDER`: `gemini`, `lmstudio`, or `openrouter`
-- `LMSTUDIO_BASE_URL`: LM Studio URL
-- `LMSTUDIO_MODEL`: Model name
-- `GOOGLE_API_KEY`: Google API key (if using Gemini)
-- `COMFYUI_BASE_URL`: ComfyUI HTTP URL
+- `kshana-core` still includes some native modules such as `sharp`
+- packaging may trigger Electron/native rebuild steps depending on dependency state
+- local build machines should use a current Node/npm toolchain compatible with the Electron version in this repo
 
 ## WebSocket API
 
-The kshana-ink backend exposes a WebSocket API at `/api/v1/ws/chat`.
+The `kshana-core` backend exposes a WebSocket API at `/api/v1/ws/chat`.
 
-### Client → Server Messages
+### Client → Server
 
-```typescript
-// Start a new task
+```ts
 { type: "start_task", data: { task: "Create a video about..." } }
-
-// Respond to agent question
 { type: "user_response", data: { response: "Yes, proceed" } }
-
-// Cancel current task
 { type: "cancel" }
-
-// Keep-alive
 { type: "ping" }
 ```
 
-### Server → Client Messages
+### Server → Client
 
-```typescript
-// Connection status
+```ts
 { type: "status", sessionId, timestamp, data: { status: "connected" | "ready" | "busy" | "completed" | "error", message? } }
-
-// Agent progress
 { type: "progress", sessionId, timestamp, data: { iteration, maxIterations, status } }
-
-// Streaming text
 { type: "stream_chunk", sessionId, timestamp, data: { content, done } }
-
-// Final response
 { type: "agent_response", sessionId, timestamp, data: { output, status } }
-
-// Agent asking a question
 { type: "agent_question", sessionId, timestamp, data: { question, toolCallId } }
-
-// Tool execution
 { type: "tool_call", sessionId, timestamp, data: { toolName, status, arguments, result?, error? } }
-
-// Todo updates
 { type: "todo_update", sessionId, timestamp, data: { todos: [...] } }
-
-// Error
 { type: "error", sessionId, timestamp, data: { code, message, details? } }
-```
-
-## Architecture
-
-### Backend Integration
-
-The kshana-ink backend is imported directly into the Electron main process:
-
-1. On app start, `BackendManager` dynamically imports kshana-ink
-2. Creates a Fastify server with WebSocket support
-3. Server listens on port 8001 (or next available)
-4. Health check at `/api/v1/health` confirms server is ready
-
-### Communication Flow
-
-```
-[Renderer Process]
-       ↓ WebSocket
-[kshana-ink Server] (in Main Process)
-       ↓ HTTP/Tool Calls
-[ComfyUI / LLM Provider]
 ```

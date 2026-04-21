@@ -5,14 +5,7 @@ import React, {
   useRef,
   useMemo,
 } from 'react';
-import {
-  Film,
-  Play,
-  Calendar,
-  Pause,
-  Download,
-  ChevronDown,
-} from 'lucide-react';
+import { Film, Play, Calendar, Pause, Download } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useTimelineDataContext } from '../../../contexts/TimelineDataContext';
@@ -36,6 +29,15 @@ import {
   buildTimelineExportItem,
   sanitizePromptOverlayText,
 } from '../../../utils/promptOverlayExport';
+import {
+  buildProjectAbsolutePath,
+  getFinalVideoStateWarning,
+  getManifestFinalVideoAsset,
+} from '../../../services/project/finalVideoValidation';
+import {
+  getThumbnailPreviewTime,
+  getVisibleVideoTime,
+} from '../../../utils/videoPreview';
 import type { Artifact } from '../../../types/projectState';
 import type { SceneRef } from '../../../types/kshana/entities';
 import type { SceneVersions } from '../../../types/kshana/timeline';
@@ -47,6 +49,13 @@ import {
 import styles from './VideoLibraryView.module.scss';
 
 const PREVIEW_WATERMARK_TEXT = 'kshana';
+type ExportAspectRatio = '16:9' | '9:16';
+type ExportQuality = 'standard' | 'high';
+
+interface ExportRenderOptions {
+  aspectRatio: ExportAspectRatio;
+  quality: ExportQuality;
+}
 
 function normalizeVideoSourcePath(path: string): string {
   const trimmed = path.trim();
@@ -78,11 +87,6 @@ interface VideoCardProps {
   artifact: Artifact;
   formatDate: (dateString: string) => string;
   projectDirectory: string | null;
-}
-
-function getVideoCardPreviewTime(duration: number | undefined): number {
-  if (!Number.isFinite(duration) || (duration ?? 0) <= 0) return 0;
-  return Math.max(0, Math.min((duration ?? 0) * 0.12, (duration ?? 0) - 0.05));
 }
 
 function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
@@ -160,10 +164,15 @@ function VideoCard({ artifact, formatDate, projectDirectory }: VideoCardProps) {
     return () => {
       isCancelled = true;
     };
-  }, [artifact.artifact_id, artifact.file_path, projectDirectory, shouldLoadThumbnail]);
+  }, [
+    artifact.artifact_id,
+    artifact.file_path,
+    projectDirectory,
+    shouldLoadThumbnail,
+  ]);
 
   const primePreviewFrame = useCallback((video: HTMLVideoElement) => {
-    const previewTime = getVideoCardPreviewTime(video.duration);
+    const previewTime = getThumbnailPreviewTime(video.duration);
     if (!Number.isFinite(previewTime) || previewTime <= 0) {
       setHasPreviewFrame(true);
       return;
@@ -290,7 +299,68 @@ export default function VideoLibraryView({
   projectScenes = [],
 }: VideoLibraryViewProps) {
   const { projectDirectory } = useWorkspace();
-  const { isLoading, assetManifest } = useProject();
+  const { isLoading, assetManifest, agentState } = useProject();
+  const [validFinalVideoIds, setValidFinalVideoIds] = useState<Set<string> | null>(
+    null,
+  );
+  const manifestFinalVideoAsset = useMemo(
+    () => getManifestFinalVideoAsset(agentState, assetManifest),
+    [agentState, assetManifest],
+  );
+  const finalVideoWarning = useMemo(
+    () =>
+      getFinalVideoStateWarning(
+        agentState,
+        assetManifest,
+        projectDirectory,
+        manifestFinalVideoAsset && validFinalVideoIds
+          ? validFinalVideoIds.has(manifestFinalVideoAsset.id)
+          : undefined,
+      ),
+    [agentState, assetManifest, projectDirectory, manifestFinalVideoAsset, validFinalVideoIds],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const verifyFinalVideos = async () => {
+      if (!projectDirectory || !assetManifest?.assets?.length) {
+        if (!cancelled) {
+          setValidFinalVideoIds(new Set());
+        }
+        return;
+      }
+
+      const assets = assetManifest.assets.filter(
+        (asset) => asset.type === 'final_video',
+      );
+      const validIds = new Set<string>();
+
+      await Promise.all(
+        assets.map(async (asset) => {
+          const absolutePath = buildProjectAbsolutePath(
+            projectDirectory,
+            asset.path,
+          );
+          if (
+            !(await window.electron.project.checkFileExists(absolutePath))
+          ) {
+            return;
+          }
+          validIds.add(asset.id);
+        }),
+      );
+
+      if (!cancelled) {
+        setValidFinalVideoIds(validIds);
+      }
+    };
+
+    void verifyFinalVideos();
+    return () => {
+      cancelled = true;
+    };
+  }, [assetManifest, projectDirectory]);
 
   // Create scene folder map
   const sceneFoldersByNumber = useMemo(() => {
@@ -329,7 +399,9 @@ export default function VideoLibraryView({
     if (!assetManifest?.assets) return [];
     return assetManifest.assets
       .filter(
-        (asset) => asset.type === 'scene_video' || asset.type === 'final_video',
+        (asset) =>
+          asset.type === 'scene_video' ||
+          (asset.type === 'final_video' && validFinalVideoIds?.has(asset.id)),
       )
       .map((asset) => {
         let createdAt: string;
@@ -354,7 +426,7 @@ export default function VideoLibraryView({
           },
         };
       });
-  }, [assetManifest]);
+  }, [assetManifest, validFinalVideoIds]);
 
   // Refs must be declared before usePlaybackController hook
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -365,14 +437,29 @@ export default function VideoLibraryView({
   const sceneImageRequestIdRef = useRef(0);
   const isSeekingRef = useRef(false);
   const isVideoLoadingRef = useRef(false);
+  const playbackAnimationFrameRef = useRef<number | null>(null);
+  const playbackClockRef = useRef<{
+    lastTimestamp: number | null;
+    fallbackTimelineTime: number;
+  }>({
+    lastTimestamp: null,
+    fallbackTimelineTime: playbackTime,
+  });
+  const clipTransitionTimeRef = useRef<number | null>(null);
+  const nextVideoPreloadRef = useRef<HTMLVideoElement | null>(null);
+  const nextPreloadedClipIdentityRef = useRef<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportAspectRatio, setExportAspectRatio] =
+    useState<ExportAspectRatio | null>(null);
+  const [exportQuality, setExportQuality] = useState<ExportQuality | null>(
+    null,
+  );
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const lastPlaybackTimeRef = useRef(0);
-
   // Use production-grade playback controller instead of manual state management
-  const { currentItem, currentItemIndex } = usePlaybackController(
+  const { currentItem, currentItemIndex, timeIndex } = usePlaybackController(
     timelineItems,
     playbackTime,
     isPlaying,
@@ -428,26 +515,47 @@ export default function VideoLibraryView({
   const safeSetPlaybackTime = useCallback(
     (newTime: number, isSeeking = false) => {
       const lastTime = lastPlaybackTimeRef.current;
+      const boundedTime =
+        totalDuration > 0
+          ? Math.max(0, Math.min(newTime, totalDuration))
+          : Math.max(0, newTime);
 
       // Allow backward jumps if:
       // - Explicitly seeking
       // - Small correction (< 0.5s)
       // - Moving forward (newTime >= lastTime)
       // - Starting from 0
-      if (isSeeking || newTime >= lastTime - 0.5 || lastTime === 0) {
-        onPlaybackTimeChange(newTime);
-        lastPlaybackTimeRef.current = newTime;
+      if (isSeeking || boundedTime >= lastTime - 0.5 || lastTime === 0) {
+        onPlaybackTimeChange(boundedTime);
+        lastPlaybackTimeRef.current = boundedTime;
       } else {
         debugRendererWarn(
           '[VideoLibraryView] Prevented backward jump during playback:',
           {
             from: lastTime,
-            to: newTime,
+            to: boundedTime,
           },
         );
       }
     },
-    [onPlaybackTimeChange],
+    [onPlaybackTimeChange, totalDuration],
+  );
+
+  const transitionPlaybackToTime = useCallback(
+    (targetTime: number) => {
+      const boundedTarget =
+        totalDuration > 0
+          ? Math.max(0, Math.min(targetTime, totalDuration))
+          : Math.max(0, targetTime);
+
+      clipTransitionTimeRef.current = boundedTarget;
+      safeSetPlaybackTime(boundedTarget, false);
+
+      if (totalDuration > 0 && boundedTarget >= totalDuration - 0.001) {
+        onPlaybackStateChange(false);
+      }
+    },
+    [onPlaybackStateChange, safeSetPlaybackTime, totalDuration],
   );
 
   // Get current video and image from playback controller
@@ -494,6 +602,19 @@ export default function VideoLibraryView({
     [activeTextCue, playbackTime],
   );
 
+  const nextTimelineItem = useMemo(() => {
+    if (!currentItem) return null;
+    return timeIndex.getNextItemAfterTime(currentItem.endTime);
+  }, [currentItem, timeIndex]);
+
+  const nextVideoItem = useMemo(() => {
+    if (!nextTimelineItem || nextTimelineItem.type !== 'video') {
+      return null;
+    }
+
+    return nextTimelineItem;
+  }, [nextTimelineItem]);
+
   // Log when currentVideo changes
   useEffect(() => {
     debugRendererLog('[VideoLibraryView] currentVideo changed:', {
@@ -508,6 +629,10 @@ export default function VideoLibraryView({
       currentVideoElementSrc: videoRef.current?.src,
     });
   }, [currentVideo, currentItemIndex, currentItem]);
+
+  useEffect(() => {
+    playbackClockRef.current.fallbackTimelineTime = playbackTime;
+  }, [playbackTime]);
 
   // Extract audio file metadata from timeline data (stable - only changes when audio file changes)
   const audioFile = useMemo(() => {
@@ -645,60 +770,34 @@ export default function VideoLibraryView({
     // Audio play/pause is handled by audio controller
   }, [isPlaying, onPlaybackStateChange]);
 
-  // Handle video time update - sync with timeline position
-  // Video time updates should always be trusted - they come from the video element itself
+  // Keep a sparse event-based sync as a fallback; continuous playback uses rAF.
   const handleTimeUpdate = useCallback(
     (e: React.SyntheticEvent<HTMLVideoElement>) => {
-      if (!currentVideo || isSeekingRef.current || isDragging) return;
+      if (!currentVideo || isSeekingRef.current || isDragging || isPlaying) {
+        return;
+      }
       const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
       const videoTime = e.currentTarget.currentTime;
       const timelineTime = currentVideo.startTime + (videoTime - sourceOffset);
-      // Always update playbackTime from video - don't use safeSetPlaybackTime
-      // Video element's currentTime is authoritative and should be trusted
-      debugRendererLog('[VideoLibraryView] Video time update:', {
-        videoTime: videoTime.toFixed(2),
-        timelineTime: timelineTime.toFixed(2),
-        currentVideoLabel: currentVideo?.label,
-        currentVideoStartTime: currentVideo.startTime.toFixed(2),
-      });
-      onPlaybackTimeChange(timelineTime);
-      lastPlaybackTimeRef.current = timelineTime; // Update ref for safeSetPlaybackTime
+      safeSetPlaybackTime(timelineTime, true);
     },
-    [currentVideo, onPlaybackTimeChange, isDragging],
+    [currentVideo, isDragging, isPlaying, safeSetPlaybackTime],
   );
 
-  // Handle video end - playback controller will handle item transitions automatically
-  // We just need to advance playbackTime to trigger the transition
+  // Native ended is used as a final safety net only; boundary transitions happen
+  // from the timeline clock before the element fully ends.
   const handleVideoEnd = useCallback(() => {
     if (isDragging) return; // Don't auto-advance during dragging
 
-    if (
-      currentItemIndex !== null &&
-      currentItemIndex < timelineItems.length - 1
-    ) {
-      const nextIndex = currentItemIndex + 1;
-      const nextItem = timelineItems[nextIndex];
-      if (nextItem) {
-        // Advance playbackTime to next item's start - playback controller will handle the transition
-        safeSetPlaybackTime(nextItem.startTime, false);
-        // Video will auto-play when source changes if was playing (only if next item is video)
-      }
-    } else {
-      // Reached end of timeline
-      onPlaybackStateChange(false);
-      safeSetPlaybackTime(0, false);
-      if (videoRef.current) {
-        videoRef.current.currentTime = 0;
-      }
-      // Audio position is managed by timeline-driven sync, not scene events
+    if (currentVideo) {
+      transitionPlaybackToTime(currentVideo.endTime);
+      return;
     }
-  }, [
-    currentItemIndex,
-    timelineItems,
-    safeSetPlaybackTime,
-    onPlaybackStateChange,
-    isDragging,
-  ]);
+
+    if (totalDuration > 0) {
+      transitionPlaybackToTime(totalDuration);
+    }
+  }, [currentVideo, isDragging, totalDuration, transitionPlaybackToTime]);
 
   // Handle seek - find which item and position
   const handleSeek = useCallback(
@@ -854,6 +953,55 @@ export default function VideoLibraryView({
     appliedClipIdentityRef.current = null;
     isVideoLoadingRef.current = false;
   }, [clipIdentity]);
+
+  useEffect(() => {
+    const preloadElement = nextVideoPreloadRef.current;
+    if (
+      !preloadElement ||
+      !nextVideoItem ||
+      !nextVideoItem.videoPath ||
+      !projectDirectory
+    ) {
+      nextPreloadedClipIdentityRef.current = null;
+      return;
+    }
+
+    if (
+      !currentVideo ||
+      !isPlaying ||
+      isDragging ||
+      currentVideo.endTime - playbackTime > 0.35
+    ) {
+      return;
+    }
+
+    const nextClipIdentity = `${nextVideoItem.id}:${nextVideoItem.startTime}:${nextVideoItem.endTime}:${nextVideoItem.sourceOffsetSeconds ?? 0}`;
+    if (nextPreloadedClipIdentityRef.current === nextClipIdentity) {
+      return;
+    }
+
+    resolveAssetPathForDisplay(nextVideoItem.videoPath, projectDirectory)
+      .then((resolved) => {
+        if (!resolved || !nextVideoPreloadRef.current) {
+          return;
+        }
+
+        nextPreloadedClipIdentityRef.current = nextClipIdentity;
+        nextVideoPreloadRef.current.src = resolved;
+        nextVideoPreloadRef.current.preload = 'auto';
+        nextVideoPreloadRef.current.load();
+      })
+      .catch(() => {
+        nextPreloadedClipIdentityRef.current = null;
+      });
+  }, [
+    nextVideoItem,
+    projectDirectory,
+    currentVideo,
+    isPlaying,
+    isDragging,
+    playbackTime,
+  ]);
 
   // Resolve video path when current video or version changes
   useEffect(() => {
@@ -1059,15 +1207,22 @@ export default function VideoLibraryView({
       );
       // Seek to the correct position based on playbackTime
       const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
-      const timelinePlaybackTime = lastPlaybackTimeRef.current;
-      const videoTime =
+      const timelinePlaybackTime =
+        clipTransitionTimeRef.current ?? lastPlaybackTimeRef.current;
+      const rawVideoTime =
         sourceOffset + (timelinePlaybackTime - currentVideo.startTime);
+      const videoTime = getVisibleVideoTime({
+        desiredTime: rawVideoTime,
+        sourceOffset,
+        clipDuration: currentVideo.duration,
+      });
       if (
-        videoTime > sourceOffset &&
+        videoTime >= sourceOffset &&
         videoTime < sourceOffset + currentVideo.duration
       ) {
         videoElement.currentTime = Math.max(0, videoTime);
       }
+      clipTransitionTimeRef.current = null;
       // Resume playback if it was playing
       if (wasPlaying || isPlaying) {
         videoElement.play().catch((playError) => {
@@ -1087,15 +1242,22 @@ export default function VideoLibraryView({
       );
       // Video is loaded, seek to correct position
       const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
-      const timelinePlaybackTime = lastPlaybackTimeRef.current;
-      const videoTime =
+      const timelinePlaybackTime =
+        clipTransitionTimeRef.current ?? lastPlaybackTimeRef.current;
+      const rawVideoTime =
         sourceOffset + (timelinePlaybackTime - currentVideo.startTime);
+      const videoTime = getVisibleVideoTime({
+        desiredTime: rawVideoTime,
+        sourceOffset,
+        clipDuration: currentVideo.duration,
+      });
       if (
-        videoTime > sourceOffset &&
+        videoTime >= sourceOffset &&
         videoTime < sourceOffset + currentVideo.duration
       ) {
         videoElement.currentTime = Math.max(0, videoTime);
       }
+      clipTransitionTimeRef.current = null;
       // Resume playback if it was playing
       if (wasPlaying || isPlaying) {
         videoElement.play().catch((playError) => {
@@ -1218,14 +1380,94 @@ export default function VideoLibraryView({
     }
   }, [isPlaying, currentVideo, isDragging]);
 
-  // Sync video position with playbackTime (when not seeking or dragging)
+  // Continuous playback clock: prefer the active video element, then audio,
+  // and finally a monotonic rAF fallback for still-only timelines.
+  useEffect(() => {
+    if (playbackAnimationFrameRef.current) {
+      cancelAnimationFrame(playbackAnimationFrameRef.current);
+      playbackAnimationFrameRef.current = null;
+    }
+
+    if (!isPlaying || isDragging) {
+      playbackClockRef.current.lastTimestamp = null;
+      return undefined;
+    }
+
+    const syncPlaybackClock = (timestamp: number) => {
+      const videoElement = videoRef.current;
+      const audioElement = audioRef.current;
+      const hasReadyVideo =
+        Boolean(currentVideo) &&
+        Boolean(videoElement) &&
+        !isVideoLoadingRef.current &&
+        (videoElement?.readyState ?? 0) >= 2;
+
+      if (hasReadyVideo && currentVideo && videoElement) {
+        const sourceOffset = currentVideo.sourceOffsetSeconds ?? 0;
+        const timelineTime =
+          currentVideo.startTime + (videoElement.currentTime - sourceOffset);
+        const boundedTime = Math.max(
+          currentVideo.startTime,
+          Math.min(timelineTime, currentVideo.endTime),
+        );
+
+        safeSetPlaybackTime(boundedTime, false);
+
+        if (boundedTime >= currentVideo.endTime - 0.05) {
+          transitionPlaybackToTime(currentVideo.endTime);
+        }
+      } else if (
+        !currentVideo &&
+        audioElement &&
+        resolvedAudioPath &&
+        audioElement.readyState >= 2
+      ) {
+        safeSetPlaybackTime(audioElement.currentTime, false);
+      } else {
+        const previousTimestamp = playbackClockRef.current.lastTimestamp;
+        const deltaSeconds = previousTimestamp
+          ? Math.max(0, (timestamp - previousTimestamp) / 1000)
+          : 0;
+        const nextTime =
+          playbackClockRef.current.fallbackTimelineTime + deltaSeconds;
+        playbackClockRef.current.fallbackTimelineTime = nextTime;
+        safeSetPlaybackTime(nextTime, false);
+      }
+
+      playbackClockRef.current.lastTimestamp = timestamp;
+      playbackAnimationFrameRef.current =
+        requestAnimationFrame(syncPlaybackClock);
+    };
+
+    playbackAnimationFrameRef.current =
+      requestAnimationFrame(syncPlaybackClock);
+
+    return () => {
+      if (playbackAnimationFrameRef.current) {
+        cancelAnimationFrame(playbackAnimationFrameRef.current);
+        playbackAnimationFrameRef.current = null;
+      }
+      playbackClockRef.current.lastTimestamp = null;
+    };
+  }, [
+    isPlaying,
+    isDragging,
+    currentVideo,
+    resolvedAudioPath,
+    audioRef,
+    safeSetPlaybackTime,
+    transitionPlaybackToTime,
+  ]);
+
+  // Sync video position with playbackTime during seeks / drags / source changes.
   useEffect(() => {
     if (
       !videoRef.current ||
       !currentVideo ||
       isSeekingRef.current ||
       isDragging ||
-      isVideoLoadingRef.current // Don't sync while video is loading
+      isVideoLoadingRef.current ||
+      clipTransitionTimeRef.current !== null
     ) {
       return;
     }
@@ -1309,6 +1551,34 @@ export default function VideoLibraryView({
     // This ensures the ref is always in sync with the prop
     lastPlaybackTimeRef.current = playbackTime;
   }, [playbackTime]);
+
+  useEffect(() => {
+    if (!isPlaying || isDragging || isSeekingRef.current) {
+      return;
+    }
+
+    if (totalDuration > 0 && playbackTime >= totalDuration - 0.001) {
+      transitionPlaybackToTime(totalDuration);
+      return;
+    }
+
+    if (!currentItem) {
+      return;
+    }
+
+    const epsilon = currentVideo ? 0.05 : 0.01;
+    if (playbackTime >= currentItem.endTime - epsilon) {
+      transitionPlaybackToTime(currentItem.endTime);
+    }
+  }, [
+    currentItem,
+    currentVideo,
+    isDragging,
+    isPlaying,
+    playbackTime,
+    totalDuration,
+    transitionPlaybackToTime,
+  ]);
 
   // Auto-advance is handled by playback controller
   // When playbackTime advances, controller automatically determines which item should be active
@@ -1440,102 +1710,123 @@ export default function VideoLibraryView({
     };
   }, [projectDirectory, timelineItems, overlayItems, textOverlayCues]);
 
-  // Handle video download
-  const handleDownloadVideo = useCallback(async () => {
-    if (!projectDirectory || timelineItems.length === 0 || isDownloading) {
+  const handleOpenExportChooser = useCallback(() => {
+    if (
+      !projectDirectory ||
+      timelineItems.length === 0 ||
+      isDownloading ||
+      isExporting
+    ) {
       return;
     }
 
-    setIsDownloading(true);
+    setExportAspectRatio(null);
+    setExportQuality(null);
+    setShowExportMenu(true);
+  }, [isDownloading, isExporting, projectDirectory, timelineItems.length]);
 
-    try {
-      console.log('[VideoDownload] Starting video download process...');
-      const data = await resolveExportData();
-      if (!data || data.itemsData.length === 0) {
-        alert('No valid timeline items found for export.');
+  // Handle video download
+  const handleDownloadVideo = useCallback(
+    async (options: ExportRenderOptions) => {
+      if (!projectDirectory || timelineItems.length === 0 || isDownloading) {
         return;
       }
 
-      const composeVideo = window.electron.project.composeTimelineVideo as (
-        timelineItems: Array<{
-          type: 'image' | 'video' | 'placeholder';
-          path: string;
-          duration: number;
-          startTime: number;
-          endTime: number;
-          sourceOffsetSeconds?: number;
-          label?: string;
-        }>,
-        projectDirectory: string,
-        audioPath?: string,
-        overlayItems?: Array<{
-          path: string;
-          duration: number;
-          startTime: number;
-          endTime: number;
-        }>,
-        textOverlayCues?: TextOverlayCue[],
-        promptOverlayCues?: PromptOverlayCue[],
-      ) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
+      setIsDownloading(true);
+      setShowExportMenu(false);
 
-      const result = await composeVideo(
-        data.itemsData,
-        projectDirectory,
-        data.resolvedAudioPath || undefined,
-        data.overlayItemsData,
-        data.textOverlayCues,
-        data.promptOverlayCues,
-      );
+      try {
+        console.log('[VideoDownload] Starting video download process...');
+        const data = await resolveExportData();
+        if (!data || data.itemsData.length === 0) {
+          alert('No valid timeline items found for export.');
+          return;
+        }
 
-      if (!result.success) {
-        alert(`Failed to compose video: ${result.error || 'Unknown error'}`);
-        return;
+        const composeVideo = window.electron.project.composeTimelineVideo as (
+          timelineItems: Array<{
+            type: 'image' | 'video' | 'placeholder';
+            path: string;
+            duration: number;
+            startTime: number;
+            endTime: number;
+            sourceOffsetSeconds?: number;
+            label?: string;
+          }>,
+          projectDirectory: string,
+          audioPath?: string,
+          overlayItems?: Array<{
+            path: string;
+            duration: number;
+            startTime: number;
+            endTime: number;
+          }>,
+          textOverlayCues?: TextOverlayCue[],
+          promptOverlayCues?: PromptOverlayCue[],
+          exportOptions?: ExportRenderOptions,
+        ) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
+
+        const result = await composeVideo(
+          data.itemsData,
+          projectDirectory,
+          data.resolvedAudioPath || undefined,
+          data.overlayItemsData,
+          data.textOverlayCues,
+          data.promptOverlayCues,
+          options,
+        );
+
+        if (!result.success) {
+          alert(`Failed to compose video: ${result.error || 'Unknown error'}`);
+          return;
+        }
+        if (!result.outputPath) {
+          alert('Video composition completed but no output path was returned');
+          return;
+        }
+
+        const savePath = await window.electron.project.saveVideoFile();
+        if (!savePath) {
+          return;
+        }
+
+        const normalizedSavePath = savePath.replace(/\\/g, '/');
+        const lastSlash = normalizedSavePath.lastIndexOf('/');
+        const saveDir =
+          lastSlash >= 0 ? normalizedSavePath.substring(0, lastSlash) : '';
+        const saveFileName =
+          lastSlash >= 0
+            ? normalizedSavePath.substring(lastSlash + 1)
+            : normalizedSavePath;
+
+        const copiedPath = await window.electron.project.copy(
+          result.outputPath,
+          saveDir,
+        );
+
+        const normalizedCopiedPath = copiedPath.replace(/\\/g, '/');
+        const copiedFileName = normalizedCopiedPath.substring(
+          normalizedCopiedPath.lastIndexOf('/') + 1,
+        );
+
+        if (copiedFileName !== saveFileName) {
+          await window.electron.project.rename(copiedPath, saveFileName);
+        }
+
+        alert('Video downloaded successfully!');
+      } catch (error) {
+        console.error('Error downloading video:', error);
+        alert(
+          `Failed to download video: ${
+            error instanceof Error ? error.message : 'Unknown error'
+          }`,
+        );
+      } finally {
+        setIsDownloading(false);
       }
-      if (!result.outputPath) {
-        alert('Video composition completed but no output path was returned');
-        return;
-      }
-
-      const savePath = await window.electron.project.saveVideoFile();
-      if (!savePath) {
-        return;
-      }
-
-      const normalizedSavePath = savePath.replace(/\\/g, '/');
-      const lastSlash = normalizedSavePath.lastIndexOf('/');
-      const saveDir =
-        lastSlash >= 0 ? normalizedSavePath.substring(0, lastSlash) : '';
-      const saveFileName =
-        lastSlash >= 0
-          ? normalizedSavePath.substring(lastSlash + 1)
-          : normalizedSavePath;
-
-      const copiedPath = await window.electron.project.copy(
-        result.outputPath,
-        saveDir,
-      );
-
-      const normalizedCopiedPath = copiedPath.replace(/\\/g, '/');
-      const copiedFileName = normalizedCopiedPath.substring(
-        normalizedCopiedPath.lastIndexOf('/') + 1,
-      );
-
-      if (copiedFileName !== saveFileName) {
-        await window.electron.project.rename(copiedPath, saveFileName);
-      }
-
-      alert('Video downloaded successfully!');
-    } catch (error) {
-      console.error('Error downloading video:', error);
-      alert(
-        `Failed to download video: ${
-          error instanceof Error ? error.message : 'Unknown error'
-        }`,
-      );
-    } finally {
-      setIsDownloading(false);
-    }
-  }, [projectDirectory, timelineItems, isDownloading, resolveExportData]);
+    },
+    [projectDirectory, timelineItems, isDownloading, resolveExportData],
+  );
 
   // Close export menu when clicking outside
   useEffect(() => {
@@ -1622,6 +1913,17 @@ export default function VideoLibraryView({
     }
   }, [projectDirectory, timelineItems, isExporting, resolveExportData]);
 
+  const handleConfirmMp4Export = useCallback(() => {
+    if (!exportAspectRatio || !exportQuality) {
+      return;
+    }
+
+    void handleDownloadVideo({
+      aspectRatio: exportAspectRatio,
+      quality: exportQuality,
+    });
+  }, [exportAspectRatio, exportQuality, handleDownloadVideo]);
+
   // Show empty state if no project
   if (!projectDirectory) {
     return (
@@ -1656,11 +1958,11 @@ export default function VideoLibraryView({
             <button
               type="button"
               className={styles.downloadButton}
-              onClick={handleDownloadVideo}
+              onClick={handleOpenExportChooser}
               disabled={
                 isDownloading || isExporting || timelineItems.length === 0
               }
-              title="Download complete timeline video as MP4"
+              title="Choose export settings and download MP4"
             >
               <Download size={16} />
               {isDownloading
@@ -1669,28 +1971,69 @@ export default function VideoLibraryView({
                   ? 'Exporting...'
                   : 'Download'}
             </button>
-            <button
-              type="button"
-              className={styles.exportDropdownToggle}
-              onClick={() => setShowExportMenu((prev) => !prev)}
-              disabled={
-                isDownloading || isExporting || timelineItems.length === 0
-              }
-              title="Export options"
-            >
-              <ChevronDown size={14} />
-            </button>
             {showExportMenu && (
               <div className={styles.exportDropdownMenu}>
-                <button
-                  type="button"
-                  className={styles.exportDropdownItem}
-                  onClick={handleDownloadVideo}
-                  disabled={isDownloading || isExporting}
-                >
-                  <Download size={14} />
-                  Export as MP4
-                </button>
+                <div className={styles.exportSection}>
+                  <div className={styles.exportSectionTitle}>Export MP4</div>
+                  <div className={styles.exportOptionGroup}>
+                    <span className={styles.exportOptionLabel}>
+                      Aspect ratio
+                    </span>
+                    <div className={styles.exportOptionRow}>
+                      <button
+                        type="button"
+                        className={`${styles.choiceChip} ${exportAspectRatio === '16:9' ? styles.choiceChipActive : ''}`}
+                        onClick={() => setExportAspectRatio('16:9')}
+                        disabled={isDownloading || isExporting}
+                      >
+                        16:9
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.choiceChip} ${exportAspectRatio === '9:16' ? styles.choiceChipActive : ''}`}
+                        onClick={() => setExportAspectRatio('9:16')}
+                        disabled={isDownloading || isExporting}
+                      >
+                        9:16
+                      </button>
+                    </div>
+                  </div>
+                  <div className={styles.exportOptionGroup}>
+                    <span className={styles.exportOptionLabel}>Quality</span>
+                    <div className={styles.exportOptionRow}>
+                      <button
+                        type="button"
+                        className={`${styles.choiceChip} ${exportQuality === 'standard' ? styles.choiceChipActive : ''}`}
+                        onClick={() => setExportQuality('standard')}
+                        disabled={isDownloading || isExporting}
+                      >
+                        Standard
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.choiceChip} ${exportQuality === 'high' ? styles.choiceChipActive : ''}`}
+                        onClick={() => setExportQuality('high')}
+                        disabled={isDownloading || isExporting}
+                      >
+                        High
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.exportConfirmButton}
+                    onClick={handleConfirmMp4Export}
+                    disabled={
+                      isDownloading ||
+                      isExporting ||
+                      exportAspectRatio === null ||
+                      exportQuality === null
+                    }
+                  >
+                    <Download size={14} />
+                    Export MP4
+                  </button>
+                </div>
                 <button
                   type="button"
                   className={styles.exportDropdownItem}
@@ -1709,6 +2052,9 @@ export default function VideoLibraryView({
       <div className={styles.content}>
         {/* Left Sidebar - Video Grid */}
         <div className={styles.sidebar}>
+          {finalVideoWarning ? (
+            <div className={styles.warningBanner}>{finalVideoWarning}</div>
+          ) : null}
           {videoArtifacts.length === 0 ? (
             <div className={styles.emptyState}>
               <Film size={32} className={styles.emptyIcon} />
@@ -1790,18 +2136,14 @@ export default function VideoLibraryView({
                       </p>
                     </div>
                   ) : (
-                    <div
-                      className={`${styles.scenePlaceholder} ${
-                        resolvedSceneImagePath ? styles.hasBackgroundImage : ''
-                      }`}
-                      style={
-                        resolvedSceneImagePath
-                          ? {
-                              backgroundImage: `url("${resolvedSceneImagePath}")`,
-                            }
-                          : undefined
-                      }
-                    >
+                    <div className={styles.scenePlaceholder}>
+                      {resolvedSceneImagePath && (
+                        <img
+                          src={resolvedSceneImagePath}
+                          alt={currentItem?.label || 'Scene preview'}
+                          className={styles.playerImage}
+                        />
+                      )}
                       {currentItem &&
                         (currentItem.type === 'image' ||
                           currentItem.type === 'placeholder') &&
@@ -1938,6 +2280,14 @@ export default function VideoLibraryView({
             key="timeline-audio"
             preload="auto"
             style={{ display: 'none' }}
+          />
+          <video
+            ref={nextVideoPreloadRef}
+            preload="auto"
+            muted
+            playsInline
+            style={{ display: 'none' }}
+            aria-hidden
           />
         </div>
       </div>

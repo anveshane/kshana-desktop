@@ -21,8 +21,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function sanitizeNestedProjectMetadata(
+  value: unknown,
+  expectedProjectDirectory: string,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      sanitizeNestedProjectMetadata(item, expectedProjectDirectory),
+    );
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const sanitizedEntries = Object.entries(value).map(([key, nestedValue]) => {
+    if (
+      (key === 'projectDirectory' || key === 'project_directory') &&
+      typeof nestedValue === 'string' &&
+      nestedValue.trim() &&
+      nestedValue !== expectedProjectDirectory
+    ) {
+      return [key, expectedProjectDirectory];
+    }
+
+    return [
+      key,
+      sanitizeNestedProjectMetadata(nestedValue, expectedProjectDirectory),
+    ];
+  });
+
+  return Object.fromEntries(sanitizedEntries);
+}
+
 function normalizePersistedMessage(
   value: unknown,
+  expectedProjectDirectory: string,
 ): PersistedChatMessage | null {
   if (!isRecord(value)) {
     return null;
@@ -54,7 +88,12 @@ function normalizePersistedMessage(
     content,
     timestamp,
     author: typeof value.author === 'string' ? value.author : undefined,
-    meta: isRecord(value.meta) ? value.meta : undefined,
+    meta: isRecord(value.meta)
+      ? (sanitizeNestedProjectMetadata(
+          value.meta,
+          expectedProjectDirectory,
+        ) as Record<string, unknown>)
+      : undefined,
   };
 }
 
@@ -66,6 +105,7 @@ function normalizeUiState(value: unknown): ChatSnapshotUiState {
       statusMessage: 'Ready',
       hasUserSentMessage: false,
       isTaskRunning: false,
+      autonomousMode: false,
     };
   }
 
@@ -77,7 +117,8 @@ function normalizeUiState(value: unknown): ChatSnapshotUiState {
       : undefined;
 
   return {
-    agentStatus: typeof value.agentStatus === 'string' ? value.agentStatus : 'idle',
+    agentStatus:
+      typeof value.agentStatus === 'string' ? value.agentStatus : 'idle',
     agentName: typeof value.agentName === 'string' ? value.agentName : 'Kshana',
     statusMessage:
       typeof value.statusMessage === 'string' ? value.statusMessage : 'Ready',
@@ -85,6 +126,7 @@ function normalizeUiState(value: unknown): ChatSnapshotUiState {
     phaseDisplayName,
     hasUserSentMessage: Boolean(value.hasUserSentMessage),
     isTaskRunning: Boolean(value.isTaskRunning),
+    autonomousMode: Boolean(value.autonomousMode),
   };
 }
 
@@ -154,7 +196,9 @@ export function parseChatSnapshot(
   }
 
   const projectDirectory =
-    typeof parsed.projectDirectory === 'string' ? parsed.projectDirectory : null;
+    typeof parsed.projectDirectory === 'string'
+      ? parsed.projectDirectory
+      : null;
   if (!projectDirectory || projectDirectory !== expectedProjectDirectory) {
     return null;
   }
@@ -163,13 +207,17 @@ export function parseChatSnapshot(
     typeof parsed.sessionId === 'string' ? parsed.sessionId : null;
   const messages = Array.isArray(parsed.messages)
     ? parsed.messages
-        .map(normalizePersistedMessage)
+        .map((message) =>
+          normalizePersistedMessage(message, expectedProjectDirectory),
+        )
         .filter((message): message is PersistedChatMessage => message !== null)
     : [];
 
   return {
     version:
-      typeof parsed.version === 'number' ? parsed.version : CHAT_SNAPSHOT_VERSION,
+      typeof parsed.version === 'number'
+        ? parsed.version
+        : CHAT_SNAPSHOT_VERSION,
     projectDirectory,
     sessionId,
     messages: prunePersistedMessages(messages, maxMessages),
@@ -207,5 +255,8 @@ export async function saveChatSnapshot(
     version: CHAT_SNAPSHOT_VERSION,
     messages: prunePersistedMessages(snapshot.messages),
   };
-  await storage.writeFile(filePath, JSON.stringify(normalizedSnapshot, null, 2));
+  await storage.writeFile(
+    filePath,
+    JSON.stringify(normalizedSnapshot, null, 2),
+  );
 }

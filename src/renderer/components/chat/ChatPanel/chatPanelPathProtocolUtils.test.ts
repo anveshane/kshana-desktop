@@ -34,11 +34,13 @@ describe('chatPanelPathProtocolUtils', () => {
     const withVersion = new URL('ws://localhost:8001/api/v1/ws/chat');
     applyDesktopRemotionQueryParams(withVersion, '1.0.9');
     expect(withVersion.searchParams.get('desktop_remotion')).toBe('1');
+    expect(withVersion.searchParams.get('desktop_assembly')).toBe('1');
     expect(withVersion.searchParams.get('desktop_version')).toBe('1.0.9');
 
     const withoutVersion = new URL('ws://localhost:8001/api/v1/ws/chat');
     applyDesktopRemotionQueryParams(withoutVersion, '');
     expect(withoutVersion.searchParams.get('desktop_remotion')).toBe('1');
+    expect(withoutVersion.searchParams.get('desktop_assembly')).toBe('1');
     expect(withoutVersion.searchParams.get('desktop_version')).toBeNull();
   });
 });

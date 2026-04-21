@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { createElement, useEffect, useState } from 'react';
 import { CheckCircle2, XCircle, AlertCircle, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import styles from './ToolCallCard.module.scss';
+import SceneCard, {
+  isDuplicateSceneSummary,
+  parseSceneContent,
+} from '../SceneCard';
 
 export type ToolCallStatus =
   | 'executing'
@@ -60,6 +64,20 @@ function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+}
+
+function getStreamingPercent(content: string): number | null {
+  const matches = Array.from(content.matchAll(/(\d+)%/g));
+  if (matches.length === 0) {
+    return null;
+  }
+
+  const percent = Number(matches[matches.length - 1]?.[1]);
+  if (!Number.isFinite(percent)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, percent));
 }
 
 function formatToolCall(name: string, args?: Record<string, unknown>): string {
@@ -498,8 +516,22 @@ export default function ToolCallCard({
   onFileClick,
 }: ToolCallCardProps) {
   const isExecuting = status === 'executing';
+  const trimmedStreamingContent = streamingContent?.trim() ?? '';
+  const showStreamingContent = isExecuting && trimmedStreamingContent.length > 0;
+  const streamingSceneContent = showStreamingContent
+    ? parseSceneContent(trimmedStreamingContent)
+    : null;
+  const streamingPercent = showStreamingContent
+    ? getStreamingPercent(trimmedStreamingContent)
+    : null;
 
   const [isExpanded, setIsExpanded] = useState(() => shouldToolStartExpanded());
+
+  useEffect(() => {
+    if (showStreamingContent) {
+      setIsExpanded(true);
+    }
+  }, [showStreamingContent]);
 
   const isError = status === 'error';
   const isCompleted = status === 'completed';
@@ -581,6 +613,11 @@ export default function ToolCallCard({
     }
   }
 
+  const resultSceneContent =
+    resultDisplay && toolName === 'generate_content'
+      ? parseSceneContent(resultDisplay)
+      : null;
+
   const borderClass = isExecuting
     ? styles.borderExecuting
     : isError
@@ -598,16 +635,25 @@ export default function ToolCallCard({
         className={styles.header}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <ChevronRight
-          size={14}
-          className={isExpanded ? styles.chevronExpanded : styles.chevron}
-        />
+        {createElement(ChevronRight as any, {
+          size: 14,
+          className: isExpanded ? styles.chevronExpanded : styles.chevron,
+        })}
         {isExecuting ? (
-          <AlertCircle size={14} className={styles.statusIconExecuting} />
+          createElement(AlertCircle as any, {
+            size: 14,
+            className: styles.statusIconExecuting,
+          })
         ) : isError ? (
-          <XCircle size={14} className={styles.statusIconError} />
+          createElement(XCircle as any, {
+            size: 14,
+            className: styles.statusIconError,
+          })
         ) : (
-          <CheckCircle2 size={14} className={styles.statusIconCompleted} />
+          createElement(CheckCircle2 as any, {
+            size: 14,
+            className: styles.statusIconCompleted,
+          })
         )}
         <span className={styles.toolName}>{toolName}</span>
         <span className={styles.cliPrefix}>{prefix}</span>
@@ -624,6 +670,42 @@ export default function ToolCallCard({
           <div className={styles.toolCall}>
             <span className={styles.toolCallCode}>{toolCallText}</span>
           </div>
+
+          {showStreamingContent && (
+            <div className={styles.streamingContent}>
+              <div className={styles.streamingLabel}>Live output</div>
+              {streamingSceneContent ? (
+                <>
+                  <SceneCard data={streamingSceneContent.sceneData} />
+                  {streamingSceneContent.remainingText &&
+                    !isDuplicateSceneSummary(
+                      streamingSceneContent.remainingText,
+                      streamingSceneContent.sceneData,
+                    ) && (
+                      <div className={styles.resultContentMarkdown}>
+                        <ReactMarkdown>
+                          {streamingSceneContent.remainingText}
+                        </ReactMarkdown>
+                      </div>
+                    )}
+                </>
+              ) : (
+                <>
+                  {streamingPercent !== null && (
+                    <div className={styles.streamingProgressBar}>
+                      <div
+                        className={styles.streamingProgressFill}
+                        style={{ width: `${streamingPercent}%` }}
+                      />
+                    </div>
+                  )}
+                  <pre className={styles.streamingPre}>
+                    {trimmedStreamingContent}
+                  </pre>
+                </>
+              )}
+            </div>
+          )}
 
           {!isExecuting &&
             (filePath ||
@@ -715,9 +797,24 @@ export default function ToolCallCard({
               )}
               {resultDisplay && (
                 <div className={styles.cliResultContent}>
-                  {typeof result === 'object' &&
-                  result !== null &&
-                  'content' in result ? (
+                  {resultSceneContent ? (
+                    <>
+                      <SceneCard data={resultSceneContent.sceneData} />
+                      {resultSceneContent.remainingText &&
+                        !isDuplicateSceneSummary(
+                          resultSceneContent.remainingText,
+                          resultSceneContent.sceneData,
+                        ) && (
+                          <div className={styles.resultContentMarkdown}>
+                            <ReactMarkdown>
+                              {resultSceneContent.remainingText}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                    </>
+                  ) : typeof result === 'object' &&
+                    result !== null &&
+                    'content' in result ? (
                     <ReactMarkdown>{resultDisplay}</ReactMarkdown>
                   ) : (
                     <pre className={styles.cliResultPre}>{resultDisplay}</pre>

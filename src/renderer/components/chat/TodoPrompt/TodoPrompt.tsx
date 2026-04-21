@@ -3,8 +3,9 @@ import { ChevronDown, ChevronUp, ListTodo, LoaderCircle } from 'lucide-react';
 import type { TodoItem, TodoStatus } from '../TodoDisplay';
 import styles from './TodoPrompt.module.scss';
 
-export interface TodoPromptProps {
+interface TodoPromptProps {
   todos: TodoItem[];
+  isRunning?: boolean;
 }
 
 const STATUS_SYMBOLS: Record<TodoStatus, string> = {
@@ -14,7 +15,10 @@ const STATUS_SYMBOLS: Record<TodoStatus, string> = {
   cancelled: '✗',
 };
 
-export default function TodoPrompt({ todos }: TodoPromptProps) {
+export default function TodoPrompt({
+  todos,
+  isRunning = false,
+}: TodoPromptProps) {
   const [collapsed, setCollapsed] = useState(true);
 
   const visibleTodos = useMemo(
@@ -66,7 +70,9 @@ export default function TodoPrompt({ todos }: TodoPromptProps) {
           </div>
         </div>
         <div className={styles.summaryText}>
-          {inProgressTodo && <LoaderCircle size={13} className={styles.spinner} />}
+          {inProgressTodo && isRunning && (
+            <LoaderCircle size={13} className={styles.spinner} />
+          )}
           <span>{currentTask}</span>
         </div>
       </button>
@@ -79,7 +85,10 @@ export default function TodoPrompt({ todos }: TodoPromptProps) {
             const depth = todo.depth || 0;
 
             return (
-              <div key={todo.id || `${content}-${index}`} className={styles.todoItem}>
+              <div
+                key={todo.id || `${content}-${index}`}
+                className={styles.todoItem}
+              >
                 <span className={styles.todoIndent}>{'  '.repeat(depth)}</span>
                 <span className={styles[`status${status}`]}>
                   {STATUS_SYMBOLS[status]}
@@ -101,3 +110,7 @@ export default function TodoPrompt({ todos }: TodoPromptProps) {
     </div>
   );
 }
+
+TodoPrompt.defaultProps = {
+  isRunning: false,
+};
