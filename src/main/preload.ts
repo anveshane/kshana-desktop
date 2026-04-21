@@ -22,6 +22,7 @@ import type {
   RemotionServerRenderProgress,
 } from '../shared/remotionTypes';
 import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
+import type { AccountInfo } from '../shared/settingsTypes';
 
 interface WordTimestamp {
   text: string;
@@ -586,6 +587,30 @@ const appBridge = {
   },
 };
 
+const accountBridge = {
+  get(): Promise<AccountInfo | null> {
+    return ipcRenderer.invoke('account:get');
+  },
+  signIn(): Promise<{ opened: boolean }> {
+    return ipcRenderer.invoke('account:sign-in');
+  },
+  signOut(): Promise<{ success: boolean }> {
+    return ipcRenderer.invoke('account:sign-out');
+  },
+  refreshBalance(): Promise<{ balance: number | null }> {
+    return ipcRenderer.invoke('account:refresh-balance');
+  },
+  onChange(callback: (account: AccountInfo | null) => void) {
+    const subscription = () => {
+      ipcRenderer.invoke('account:get').then(callback).catch(() => {});
+    };
+    ipcRenderer.on('account:changed', subscription);
+    return () => {
+      ipcRenderer.removeListener('account:changed', subscription);
+    };
+  },
+};
+
 const electronHandler = {
   ipcRenderer: {
     sendMessage(channel: Channels, ...args: unknown[]) {
@@ -611,6 +636,7 @@ const electronHandler = {
   logger: loggerBridge,
   updates: updateBridge,
   app: appBridge,
+  account: accountBridge,
 };
 
 contextBridge.exposeInMainWorld('electron', electronHandler);

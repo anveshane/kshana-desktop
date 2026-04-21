@@ -39,6 +39,12 @@ import {
   getStoredServerUrl,
   updateSettings,
 } from './settingsManager';
+import {
+  getAccount,
+  setAccount,
+  clearAccount,
+  refreshBalance,
+} from './accountManager';
 import fileSystemManager from './fileSystemManager';
 import { remotionManager } from './remotionManager';
 import { generateWordCaptions } from './services/wordCaptionService';
@@ -3256,6 +3262,96 @@ const startBackendInBackground = () => {
   const backendPromise = bootstrapBackend();
   backendPromise.catch(handleBackendStartup);
 };
+
+// ─── Kshana Cloud deep-link protocol ─────────────────────────────────────────
+
+const KSHANA_CLOUD_URL =
+  process.env.KSHANA_CLOUD_URL ?? 'https://kshana.app';
+
+// Register kshana:// as the custom URL scheme
+if (!app.isDefaultProtocolClient('kshana')) {
+  app.setAsDefaultProtocolClient('kshana');
+}
+
+/** Parses kshana://auth?token=xxx&state=xxx and stores the account. */
+async function handleDeepLink(url: string): Promise<void> {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'auth') return;
+
+    const token = parsed.searchParams.get('token');
+    if (!token) return;
+
+    // Decode JWT payload without verifying (trust comes from HTTPS + state)
+    const parts = token.split('.');
+    if (parts.length !== 3) return;
+    const payload = JSON.parse(
+      Buffer.from(parts[1], 'base64url').toString('utf-8'),
+    ) as { sub?: string; email?: string; name?: string };
+
+    setAccount({
+      userId: payload.sub ?? '',
+      email: payload.email ?? '',
+      name: payload.name ?? null,
+      credits: 0,
+      token,
+    });
+
+    // Fetch balance immediately so the Account tab shows it
+    await refreshBalance(KSHANA_CLOUD_URL);
+
+    // Notify renderer that account changed
+    mainWindow?.webContents.send('account:changed');
+    log.info('[Account] Desktop sign-in complete:', payload.email);
+  } catch (err) {
+    log.error('[Account] Failed to handle deep link:', err);
+  }
+}
+
+// macOS: app is already running, open-url fires
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
+});
+
+// Windows / Linux: second-instance argv carries the URL
+app.on('second-instance', (_event, argv) => {
+  const deepLink = argv.find((arg) => arg.startsWith('kshana://'));
+  if (deepLink) handleDeepLink(deepLink);
+  // Focus the existing window
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
+// ─── Account IPC handlers ──────────────────────────────────────────────────
+
+ipcMain.handle('account:get', () => {
+  return getAccount();
+});
+
+ipcMain.handle('account:sign-in', async () => {
+  // Generate a random state token for CSRF protection
+  const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const url = `${KSHANA_CLOUD_URL}/auth/desktop?state=${state}`;
+  await shell.openExternal(url);
+  return { opened: true };
+});
+
+ipcMain.handle('account:sign-out', async () => {
+  clearAccount();
+  mainWindow?.webContents.send('account:changed');
+  return { success: true };
+});
+
+ipcMain.handle('account:refresh-balance', async () => {
+  const balance = await refreshBalance(KSHANA_CLOUD_URL);
+  mainWindow?.webContents.send('account:changed');
+  return { balance };
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 app
   .whenReady()

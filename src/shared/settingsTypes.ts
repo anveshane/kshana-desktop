@@ -12,6 +12,17 @@ export type ThemeId =
   | 'paper-light'
   | 'void-cut';
 
+export interface AccountInfo {
+  /** User ID from Kshana Cloud */
+  userId: string;
+  email: string;
+  name?: string | null;
+  /** Current credit balance (cached; call refreshBalance() to update) */
+  credits: number;
+  /** Signed desktop JWT — 30-day TTL */
+  token: string;
+}
+
 export interface AppSettings {
   /** Whether the desktop should run the bundled backend or connect to cloud. */
   backendMode: BackendMode;

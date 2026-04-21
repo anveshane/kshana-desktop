@@ -10,8 +10,9 @@ import type {
 } from '../../../shared/settingsTypes';
 import { DESKTOP_THEMES } from '../../themes';
 import styles from './SettingsPanel.module.scss';
+import AccountTab from './AccountTab';
 
-type SettingsTab = 'appearance' | 'connection';
+type SettingsTab = 'account' | 'appearance' | 'connection';
 
 type Props = {
   isOpen: boolean;
@@ -171,7 +172,7 @@ export default function SettingsPanel({
 
   useEffect(() => {
     if (isVisible) {
-      setActiveTab('appearance');
+      setActiveTab('account');
     }
   }, [isVisible]);
 
@@ -335,6 +336,16 @@ export default function SettingsPanel({
         <aside className={styles.sidebar}>
           <button
             type="button"
+            className={`${styles.tabButton} ${activeTab === 'account' ? styles.tabButtonActive : ''}`}
+            onClick={() => setActiveTab('account')}
+          >
+            <span className={styles.tabLabel}>Account</span>
+            <span className={styles.tabDescription}>
+              Kshana Cloud sign-in &amp; credits
+            </span>
+          </button>
+          <button
+            type="button"
             className={`${styles.tabButton} ${activeTab === 'appearance' ? styles.tabButtonActive : ''}`}
             onClick={() => setActiveTab('appearance')}
           >
@@ -357,7 +368,9 @@ export default function SettingsPanel({
 
         <form className={styles.form} onSubmit={handleSubmit}>
           <section className={styles.section}>
-            {activeTab === 'appearance' ? (
+            {activeTab === 'account' ? (
+              <AccountTab />
+            ) : activeTab === 'appearance' ? (
               <>
                 <div className={styles.sectionHeader}>
                   <h3>Appearance</h3>
@@ -625,13 +638,15 @@ export default function SettingsPanel({
           </section>
 
           <div className={styles.actions}>
-            <button
-              type="button"
-              className={styles.cancelButton}
-              onClick={onClose}
-            >
-              {isEmbedded ? 'Back to Projects' : 'Close'}
-            </button>
+            {activeTab !== 'account' && (
+              <button
+                type="button"
+                className={styles.cancelButton}
+                onClick={onClose}
+              >
+                {isEmbedded ? 'Back to Projects' : 'Close'}
+              </button>
+            )}
             {activeTab === 'connection' && (
               <button
                 type="submit"
