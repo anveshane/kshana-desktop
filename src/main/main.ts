@@ -3266,7 +3266,7 @@ const startBackendInBackground = () => {
 // ─── Kshana Cloud deep-link protocol ─────────────────────────────────────────
 
 const KSHANA_CLOUD_URL =
-  process.env.KSHANA_CLOUD_URL ?? 'https://kshana.app';
+  process.env.KSHANA_CLOUD_URL ?? 'http://localhost:3000';
 
 // Register kshana:// as the custom URL scheme
 if (!app.isDefaultProtocolClient('kshana')) {

@@ -127,28 +127,6 @@ function getStatusTone(
   }
 }
 
-function getEffectiveConnectionUrl(
-  selectedMode: AppSettings['backendMode'],
-  backendState: BackendState | null,
-  connectionInfo: BackendConnectionInfo | null,
-): string {
-  if (selectedMode === 'local') {
-    return (
-      connectionInfo?.localServerUrl ||
-      connectionInfo?.effectiveServerUrl ||
-      backendState?.serverUrl ||
-      'Unavailable'
-    );
-  }
-
-  return (
-    connectionInfo?.cloudServerUrl ||
-    connectionInfo?.effectiveServerUrl ||
-    backendState?.serverUrl ||
-    'Unavailable'
-  );
-}
-
 export default function SettingsPanel({
   isOpen,
   variant = 'modal',
@@ -264,11 +242,6 @@ export default function SettingsPanel({
   const isCurrentLocalMode = currentMode === 'local';
   const statusLabel = formatStatusLabel(backendState?.status);
   const statusTone = getStatusTone(backendState?.status);
-  const effectiveUrl = getEffectiveConnectionUrl(
-    currentMode,
-    backendState,
-    connectionInfo,
-  );
   const statusHeadline = isCurrentLocalMode
     ? backendState?.status === 'ready'
       ? 'Connected to Local'
@@ -444,12 +417,7 @@ export default function SettingsPanel({
                         {statusHeadline}
                       </div>
                       <p className={styles.statusSupportText}>{statusSupportText}</p>
-                      {!isCurrentLocalMode && (
-                        <div className={styles.statusPrimaryMeta}>
-                          <span className={styles.statusMetaLabel}>Endpoint</span>
-                          <span className={styles.statusCode}>{effectiveUrl}</span>
-                        </div>
-                      )}
+                      {/* Intentionally do not display internal cloud endpoint URL. */}
                     </div>
                     <div className={`${styles.statusBadge} ${styles[`statusBadge${statusTone.charAt(0).toUpperCase()}${statusTone.slice(1)}`]}`}>
                       <span className={styles.statusDot} />
@@ -617,15 +585,6 @@ export default function SettingsPanel({
                     <p className={styles.infoText}>
                       The cloud backend URL is injected at release time and is not editable in the desktop app.
                     </p>
-                    <label className={styles.label}>
-                      Cloud Backend URL
-                      <input
-                        type="text"
-                        className={styles.input}
-                        value={connectionInfo?.cloudServerUrl ?? 'Not configured'}
-                        readOnly
-                      />
-                    </label>
                     {connectionInfo?.note && (
                       <p className={styles.infoText}>{connectionInfo.note}</p>
                     )}
