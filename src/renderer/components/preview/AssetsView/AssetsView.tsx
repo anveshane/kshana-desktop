@@ -1,6 +1,19 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Image as ImageIcon, Video, X, Play, ImagePlus } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, useMemo, type FC, type SVGProps } from 'react';
+import {
+  Image as _ImageIcon,
+  Video as _Video,
+  X as _X,
+  Play as _Play,
+  ImagePlus as _ImagePlus,
+} from 'lucide-react';
+
+type LucideFC = FC<SVGProps<SVGSVGElement> & { size?: number | string }>;
+
+const ImageIcon = _ImageIcon as unknown as LucideFC;
+const Video = _Video as unknown as LucideFC;
+const X = _X as unknown as LucideFC;
+const Play = _Play as unknown as LucideFC;
+const ImagePlus = _ImagePlus as unknown as LucideFC;
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { FileNode, getFileType } from '../../../../shared/fileSystemTypes';
@@ -167,7 +180,7 @@ const resolveMediaDisplayPath = async (
 interface LazyMediaCardProps {
   media: MediaAsset;
   projectDirectory: string;
-  PlaceholderIcon: LucideIcon;
+  PlaceholderIcon: LucideFC;
   onClick: () => void;
 }
 

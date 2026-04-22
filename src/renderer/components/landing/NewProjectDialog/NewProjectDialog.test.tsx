@@ -2,12 +2,21 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import NewProjectDialog from './NewProjectDialog';
 
-const mockCreateProject = jest.fn();
-const mockOpenProject = jest.fn();
+const mockCreateProject =
+  jest.fn<
+    (
+      directory: string,
+      name: string,
+      description?: string,
+    ) => Promise<boolean>
+  >();
+const mockCloseProject = jest.fn<() => void>();
+const mockOpenProject = jest.fn<(path: string) => Promise<void>>();
 
 jest.mock('../../../contexts/ProjectContext', () => ({
   useProject: () => ({
     createProject: mockCreateProject,
+    closeProject: mockCloseProject,
     error: null,
     isLoading: false,
   }),
@@ -20,15 +29,26 @@ jest.mock('../../../contexts/WorkspaceContext', () => ({
 }));
 
 describe('NewProjectDialog', () => {
-  const mockSelectDirectory = jest.fn();
-  const mockCreateFolder = jest.fn();
-  const mockCheckFileExists = jest.fn();
-  const mockAccountGet = jest.fn();
-  const mockAccountSignIn = jest.fn();
-  const mockAccountOnChange = jest.fn(() => () => {});
+  const mockSelectDirectory = jest.fn<() => Promise<string | null>>();
+  const mockCreateFolder =
+    jest.fn<
+      (
+        basePath: string,
+        relativePath: string,
+        meta?: unknown,
+      ) => Promise<string | null>
+    >();
+  const mockCheckFileExists = jest.fn<(path: string) => Promise<boolean>>();
+  const mockAccountGet = jest.fn<() => Promise<unknown>>();
+  const mockAccountSignIn = jest.fn<() => Promise<{ opened: boolean }>>();
+  const mockAccountOnChange =
+    jest.fn<(callback: (account: unknown) => void) => () => void>(
+      () => () => {},
+    );
 
   beforeEach(() => {
     mockCreateProject.mockReset();
+    mockCloseProject.mockReset();
     mockOpenProject.mockReset();
     mockSelectDirectory.mockReset();
     mockCreateFolder.mockReset();
@@ -68,6 +88,13 @@ describe('NewProjectDialog', () => {
 
   async function pickFolder(path: string) {
     mockSelectDirectory.mockResolvedValue(path);
+    await waitFor(() => {
+      expect(
+        (screen.getByRole('button', {
+          name: 'Choose Folder',
+        }) as HTMLButtonElement).disabled,
+      ).toBe(false);
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Choose Folder' }));
     await waitFor(() => {
       expect(screen.getByText(path)).not.toBeNull();
@@ -143,9 +170,15 @@ describe('NewProjectDialog', () => {
     });
 
     expect(
-      screen.getByRole('button', { name: 'Sign in with Kshana' }),
-    ).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Create Project' })).toBeDisabled();
+      (screen.getByRole('button', {
+        name: 'Sign in with Kshana',
+      }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(
+      (screen.getByRole('button', {
+        name: 'Sign in to create',
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
     expect(mockCreateProject).not.toHaveBeenCalled();
   });
 
@@ -177,6 +210,35 @@ describe('NewProjectDialog', () => {
       'A test project',
     );
     expect(mockOpenProject).toHaveBeenCalledWith('/projects/demo');
+    expect(mockCloseProject).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('resets the created project state when opening the new folder fails', async () => {
+    mockCheckFileExists.mockResolvedValue(false);
+    mockOpenProject.mockRejectedValue(new Error('Unable to attach project'));
+
+    const onClose = jest.fn();
+    render(<NewProjectDialog isOpen onClose={onClose} />);
+
+    fireEvent.change(screen.getByLabelText('Project name'), {
+      target: { value: 'demo' },
+    });
+    await pickFolder('/projects');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Unable to attach project')).not.toBeNull();
+    });
+
+    expect(mockCreateProject).toHaveBeenCalledWith(
+      '/projects/demo',
+      'demo',
+      undefined,
+    );
+    expect(mockOpenProject).toHaveBeenCalledWith('/projects/demo');
+    expect(mockCloseProject).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

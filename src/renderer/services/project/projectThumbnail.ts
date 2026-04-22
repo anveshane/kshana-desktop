@@ -219,11 +219,16 @@ export async function ensureProjectThumbnailFromManifest(
     projectDirectory,
     thumbnailRelativePath,
   );
+  const fileOpMeta = {
+    source: 'renderer' as const,
+    projectRoot: projectDirectory,
+  };
 
-  await window.electron.project.mkdir(thumbnailDirectory);
+  await window.electron.project.mkdir(thumbnailDirectory, fileOpMeta);
   await window.electron.project.copyFileExact(
     sourcePath,
     thumbnailAbsolutePath,
+    fileOpMeta,
   );
 
   return buildThumbnailAssetResult(

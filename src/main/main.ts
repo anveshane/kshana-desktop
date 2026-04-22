@@ -853,7 +853,6 @@ ipcMain.handle(
       cacheMap.set(cacheKey, { value: true, expiresAt: Date.now() + ttlMs });
       return true;
     } catch {
-      cacheMap.set(cacheKey, { value: false, expiresAt: Date.now() + ttlMs });
       return false;
     }
   },
@@ -1467,7 +1466,11 @@ ipcMain.handle(
     destinationPath: string,
     meta?: FileOpMeta,
   ): Promise<void> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      null,
+      meta,
+    );
     let normalizedSourcePath: string | undefined;
     let resolvedSourcePath: string | undefined;
     let normalizedDestinationPath: string | undefined;
@@ -3236,6 +3239,7 @@ const createWindow = async () => {
       preload: app.isPackaged
         ? path.join(__dirname, 'preload.js')
         : path.join(__dirname, '../../.erb/dll/preload.js'),
+      sandbox: false,
       webSecurity: false, // Allow file:// protocol for media preview
     },
   });

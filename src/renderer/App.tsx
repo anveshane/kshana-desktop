@@ -1,6 +1,6 @@
 import { WorkspaceProvider, useWorkspace } from './contexts/WorkspaceContext';
 import { TimelineProvider } from './contexts/TimelineContext';
-import { ProjectProvider, useProject } from './contexts/ProjectContext';
+import { ProjectProvider } from './contexts/ProjectContext';
 import { AgentProvider } from './contexts/AgentContext';
 import { AppSettingsProvider } from './contexts/AppSettingsContext';
 import LandingScreen from './components/landing/LandingScreen/LandingScreen';
@@ -10,10 +10,8 @@ import './styles/global.scss';
 
 function AppContent() {
   const { projectDirectory } = useWorkspace();
-  const { isLoaded: projectLoaded } = useProject();
 
-  // Show landing if no project directory OR no project loaded
-  if (!projectDirectory && !projectLoaded) {
+  if (!projectDirectory) {
     return <LandingScreen />;
   }
 

@@ -40,6 +40,7 @@ export default function NewProjectDialog({
 }: NewProjectDialogProps) {
   const {
     createProject,
+    closeProject,
     error: projectError,
     isLoading: isProjectLoading,
   } = useProject();
@@ -156,6 +157,7 @@ export default function NewProjectDialog({
 
     setError(null);
     setIsSubmitting(true);
+    let didCreateProject = false;
     try {
       let projectDirectory = joinPath(normalizedWorkspacePath, trimmedName);
 
@@ -193,6 +195,7 @@ export default function NewProjectDialog({
       if (!created) {
         throw new Error(projectError || 'Project creation failed.');
       }
+      didCreateProject = true;
 
       try {
         window.localStorage.setItem(
@@ -206,12 +209,16 @@ export default function NewProjectDialog({
       await openProject(projectDirectory);
       onClose();
     } catch (err) {
+      if (didCreateProject) {
+        closeProject();
+      }
       setError((err as Error).message);
     } finally {
       setIsSubmitting(false);
     }
   }, [
     createProject,
+    closeProject,
     description,
     onClose,
     openProject,

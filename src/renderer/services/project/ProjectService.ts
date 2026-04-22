@@ -65,6 +65,11 @@ interface AssetManifestReadResult {
   error?: string;
 }
 
+interface ProjectFileOpMeta {
+  source: 'renderer';
+  projectRoot: string;
+}
+
 /**
  * Project Service class
  * Handles all project-related operations
@@ -327,6 +332,10 @@ export class ProjectService {
       // Create asset manifest
       const assetManifest = backendAssetManifestToDesktop({ assets: [] });
       await this.writeAssetManifest(directory, assetManifest);
+      const timelineState = { ...DEFAULT_TIMELINE_STATE };
+      await this.writeTimelineState(directory, timelineState);
+      const contextIndex = createDefaultContextIndex();
+      await this.writeContextIndex(directory, contextIndex);
 
       this.projectDirectory = directory;
       this.currentBackendProject = backendProject;
@@ -334,8 +343,8 @@ export class ProjectService {
         manifest,
         agentState,
         assetManifest,
-        timelineState: { ...DEFAULT_TIMELINE_STATE },
-        contextIndex: createDefaultContextIndex(),
+        timelineState,
+        contextIndex,
       };
 
       return { success: true, data: this.currentProject };
@@ -484,6 +493,13 @@ export class ProjectService {
     return [normalized, ...segments].join('/');
   }
 
+  private static fileOpMeta(directory: string): ProjectFileOpMeta {
+    return {
+      source: 'renderer',
+      projectRoot: directory.replace(/\\/g, '/').replace(/\/+$/, ''),
+    };
+  }
+
   private async fileExists(path: string): Promise<boolean> {
     try {
       const content = await window.electron.project.readFile(path);
@@ -554,10 +570,18 @@ export class ProjectService {
     return null;
   }
 
-  private async writeJSON(path: string, data: unknown): Promise<void> {
+  private async writeJSON(
+    path: string,
+    data: unknown,
+    projectRoot?: string,
+  ): Promise<void> {
     try {
       const content = JSON.stringify(data, null, 2);
-      await window.electron.project.writeFile(path, content);
+      await window.electron.project.writeFile(
+        path,
+        content,
+        projectRoot ? ProjectService.fileOpMeta(projectRoot) : undefined,
+      );
     } catch (error) {
       console.error(`[ProjectService] Failed to write JSON to ${path}:`, error);
       throw new Error(`Failed to write file: ${(error as Error).message}`);
@@ -585,6 +609,7 @@ export class ProjectService {
     await this.writeJSON(
       ProjectService.buildPath(directory, PROJECT_PATHS.ROOT_MANIFEST),
       this.currentBackendProject,
+      directory,
     );
   }
 
@@ -615,6 +640,7 @@ export class ProjectService {
     await this.writeJSON(
       ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_PROJECT),
       normalizedProject,
+      directory,
     );
   }
 
@@ -665,6 +691,7 @@ export class ProjectService {
     await this.writeJSON(
       ProjectService.buildPath(directory, PROJECT_PATHS.AGENT_MANIFEST),
       desktopAssetManifestToBackend(manifest),
+      directory,
     );
   }
 
@@ -685,6 +712,7 @@ export class ProjectService {
     await this.writeJSON(
       ProjectService.buildPath(directory, PROJECT_PATHS.UI_TIMELINE),
       state,
+      directory,
     );
   }
 
@@ -709,6 +737,17 @@ export class ProjectService {
   ): Promise<ContextIndex | null> {
     return this.readJSON<ContextIndex>(
       ProjectService.buildPath(directory, PROJECT_PATHS.CONTEXT_INDEX),
+    );
+  }
+
+  private async writeContextIndex(
+    directory: string,
+    contextIndex: ContextIndex,
+  ): Promise<void> {
+    await this.writeJSON(
+      ProjectService.buildPath(directory, PROJECT_PATHS.CONTEXT_INDEX),
+      contextIndex,
+      directory,
     );
   }
 
@@ -745,6 +784,7 @@ export class ProjectService {
           const newPath = await window.electron.project.createFolder(
             basePath,
             part,
+            ProjectService.fileOpMeta(normalizedDirectory),
           );
           if (newPath) {
             basePath = newPath.replace(/\\/g, '/');

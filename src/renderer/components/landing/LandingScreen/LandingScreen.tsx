@@ -1,5 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FolderOpen, Plus, Play, Settings, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type FC, type SVGProps } from 'react';
+import {
+  FolderOpen as _FolderOpen,
+  Plus as _Plus,
+  Play as _Play,
+  Settings as _Settings,
+  Sparkles as _Sparkles,
+} from 'lucide-react';
+
+type LucideFC = FC<SVGProps<SVGSVGElement> & { size?: number | string }>;
+
+const FolderOpen = _FolderOpen as unknown as LucideFC;
+const Plus = _Plus as unknown as LucideFC;
+const Play = _Play as unknown as LucideFC;
+const Settings = _Settings as unknown as LucideFC;
+const Sparkles = _Sparkles as unknown as LucideFC;
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { safeJsonParse } from '../../../utils/safeJsonParse';
 import { useProject } from '../../../contexts/ProjectContext';
