@@ -296,6 +296,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   const connectAssetWebSocketRef = useRef<(source: string) => void>(() => {});
   const connectingRef = useRef(false);
   const currentProjectDirRef = useRef<string | null>(null);
+  const projectReloadInFlightRef = useRef<Promise<void> | null>(null);
+  const projectReloadQueuedRef = useRef(false);
+  const lastReloadTriggerPathRef = useRef<string | null>(null);
   const imageSyncEngineRef = useRef<ReturnType<
     typeof createImageAssetSyncEngine
   > | null>(null);
@@ -560,6 +563,58 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
     let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
+    const runReload = async () => {
+      if (projectReloadInFlightRef.current) {
+        projectReloadQueuedRef.current = true;
+        return;
+      }
+
+      const triggerPath = lastReloadTriggerPathRef.current;
+      const start =
+        process.env.NODE_ENV === 'development' ? performance.now() : 0;
+
+      const reloadPromise = (async () => {
+        try {
+          projectService.invalidateCache();
+          const result = await projectService.openProject(projectDirectory);
+          if (!result.success) {
+            console.error('[ProjectContext] Failed to reload project:', result.error);
+            return;
+          }
+
+          const project = result.data;
+          setState((prev) => ({
+            ...prev,
+            manifest: project.manifest,
+            agentState: project.agentState,
+            assetManifest: project.assetManifest,
+            timelineState: project.timelineState,
+            contextIndex: project.contextIndex,
+          }));
+        } catch (error) {
+          console.error('[ProjectContext] Error reloading project:', error);
+        } finally {
+          if (process.env.NODE_ENV === 'development') {
+            // eslint-disable-next-line no-console
+            console.debug(
+              `[perf][ProjectContext] openProject(reload) ${(performance.now() - start).toFixed(1)}ms`,
+              triggerPath ? { triggerPath } : undefined,
+            );
+          }
+        }
+      })()
+        .finally(() => {});
+
+      projectReloadInFlightRef.current = reloadPromise;
+      await reloadPromise;
+      projectReloadInFlightRef.current = null;
+
+      if (projectReloadQueuedRef.current) {
+        projectReloadQueuedRef.current = false;
+        await runReload();
+      }
+    };
+
     const unsubscribe = window.electron.project.onFileChange((event) => {
       const filePath = event.path.replace(/\\/g, '/');
       const isManifestFile = filePath.includes('assets/manifest.json');
@@ -568,7 +623,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         filePath.endsWith('/context-index.json');
       const isImagePlacementFile = filePath.includes('assets/images/');
 
-      if (isImageSyncV2Enabled && (isManifestFile || isImagePlacementFile)) {
+      if (isImageSyncV2Enabled && isImagePlacementFile) {
         projectService.invalidateCache();
         imageSyncEngineRef.current?.triggerReconcile('file_watch', filePath);
       }
@@ -590,49 +645,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
         }
 
         // Debounce rapid file changes (reduced to 300ms for faster response)
-        debounceTimeout = setTimeout(async () => {
-          try {
-            console.log(
-              '[ProjectContext] Reloading project due to file change:',
-              filePath,
-            );
-            // openProject() returns a cached result for MIN_OPEN_INTERVAL_MS; backend/chat
-            // writes to project.json must bypass that or the UI keeps stale setup/phase.
-            projectService.invalidateCache();
-            const result = await projectService.openProject(projectDirectory);
-            if (result.success) {
-              const project = result.data;
-              console.log('[ProjectContext] Project reloaded successfully:', {
-                hasAssetManifest: !!project.assetManifest,
-                assetCount: project.assetManifest?.assets?.length || 0,
-                imageAssets:
-                  project.assetManifest?.assets
-                    ?.filter((a) => a.type === 'scene_image')
-                    .map((a) => ({
-                      id: a.id,
-                      placementNumber: a.metadata?.placementNumber,
-                      path: a.path,
-                    })) || [],
-              });
-              setState((prev) => ({
-                ...prev,
-                manifest: project.manifest,
-                agentState: project.agentState,
-                assetManifest: project.assetManifest,
-                timelineState: project.timelineState,
-                contextIndex: project.contextIndex,
-              }));
-            } else {
-              console.error(
-                '[ProjectContext] Failed to reload project:',
-                result.error,
-              );
-              // Don't show error to user - file might be temporarily locked
-            }
-          } catch (error) {
-            console.error('[ProjectContext] Error reloading project:', error);
-            // Don't show error to user - file might be temporarily locked
-          }
+        lastReloadTriggerPathRef.current = filePath;
+        debounceTimeout = setTimeout(() => {
+          void runReload();
         }, 300); // 300ms debounce for faster response
       }
     });

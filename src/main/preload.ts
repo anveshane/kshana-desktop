@@ -58,6 +58,7 @@ interface FileOpMeta {
   opId?: string | null;
   source?: 'agent_ws' | 'renderer';
   intent?: 'new_project_parent';
+  projectRoot?: string | null;
 }
 
 type AppUpdatePhase =

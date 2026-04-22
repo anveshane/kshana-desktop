@@ -110,6 +110,35 @@ let appUpdateStatus: AppUpdateStatus = {
 interface RuntimeConfig {
   cloudServerUrl?: string;
   serverUrl?: string;
+  /** Kshana website (Next.js): /auth/desktop, /api/credits/balance, etc. */
+  kshanaWebsiteUrl?: string;
+  /** Alias for kshanaWebsiteUrl */
+  websiteUrl?: string;
+}
+
+let runtimeConfigReadPromise: Promise<RuntimeConfig | null> | null = null;
+
+function readRuntimeConfigOnce(): Promise<RuntimeConfig | null> {
+  if (!runtimeConfigReadPromise) {
+    runtimeConfigReadPromise = (async () => {
+      const candidatePaths = app.isPackaged
+        ? [path.join(process.resourcesPath, 'assets', 'runtime-config.json')]
+        : [path.join(__dirname, '../../assets/runtime-config.json')];
+      for (const configPath of candidatePaths) {
+        try {
+          const raw = await fs.readFile(configPath, 'utf-8');
+          const parsed = JSON.parse(raw) as RuntimeConfig;
+          if (parsed && typeof parsed === 'object') {
+            return parsed;
+          }
+        } catch {
+          /* missing or invalid */
+        }
+      }
+      return null;
+    })();
+  }
+  return runtimeConfigReadPromise;
 }
 
 function normalizeServerUrl(value?: string): string | undefined {
@@ -129,26 +158,21 @@ function normalizeServerUrl(value?: string): string | undefined {
 }
 
 async function getRuntimeConfigCloudServerUrl(): Promise<string | undefined> {
-  const candidatePaths = app.isPackaged
-    ? [path.join(process.resourcesPath, 'assets', 'runtime-config.json')]
-    : [path.join(__dirname, '../../assets/runtime-config.json')];
+  const parsed = await readRuntimeConfigOnce();
+  if (!parsed) return undefined;
+  return normalizeServerUrl(parsed.cloudServerUrl || parsed.serverUrl);
+}
 
-  for (const configPath of candidatePaths) {
-    try {
-      const raw = await fs.readFile(configPath, 'utf-8');
-      const parsed = JSON.parse(raw) as RuntimeConfig;
-      const normalized = normalizeServerUrl(
-        parsed.cloudServerUrl || parsed.serverUrl,
-      );
-      if (normalized) {
-        return normalized;
-      }
-    } catch {
-      // Ignore missing/invalid config and continue to fallback candidates.
-    }
-  }
-
-  return undefined;
+/** Website origin for cloud sign-in and billing APIs (not the agent backend URL). */
+async function resolveKshanaWebsiteUrl(): Promise<string> {
+  const fromEnv = normalizeServerUrl(process.env.KSHANA_CLOUD_URL);
+  if (fromEnv) return fromEnv;
+  const parsed = await readRuntimeConfigOnce();
+  const fromFile = normalizeServerUrl(
+    parsed?.kshanaWebsiteUrl || parsed?.websiteUrl,
+  );
+  if (fromFile) return fromFile;
+  return 'http://localhost:3000';
 }
 
 async function resolveCloudBackendServerUrl(): Promise<string> {
@@ -183,6 +207,8 @@ interface FileOpMeta {
   source?: 'agent_ws' | 'renderer';
   /** When set with source renderer, create-folder validates under basePath only (new project wizard). */
   intent?: 'new_project_parent';
+  /** Current renderer project root for relative backend file operations before watchers are ready. */
+  projectRoot?: string | null;
 }
 
 interface FileOpErrorContext {
@@ -276,6 +302,10 @@ function resolveBootstrapValidationRoot(
 ): string | null {
   if (activeProjectRoot && activeProjectRoot.trim()) {
     return activeProjectRoot;
+  }
+
+  if (meta?.projectRoot && meta.projectRoot.trim()) {
+    return path.resolve(meta.projectRoot);
   }
 
   if (isAgentWireSource(meta) || !fallbackPath) {
@@ -521,7 +551,46 @@ ipcMain.handle(
 ipcMain.handle(
   'project:read-tree',
   async (_event, dirPath: string, depth?: number) => {
-    return fileSystemManager.readDirectory(dirPath, depth);
+    // Small TTL cache + in-flight de-dupe to reduce IPC churn.
+    // This avoids repeated filesystem walks during file-watch bursts.
+    const normalizedPath = path.isAbsolute(dirPath)
+      ? path.normalize(dirPath)
+      : path.resolve(dirPath);
+    const cacheKey = `${normalizedPath}:${depth ?? ''}`;
+    const now = Date.now();
+    const ttlMs = 1000;
+
+    const cached = (globalThis as any).__kshanaReadTreeCache?.get?.(cacheKey) as
+      | { value: unknown; expiresAt: number }
+      | undefined;
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
+    }
+
+    const inflightMap: Map<string, Promise<unknown>> =
+      (globalThis as any).__kshanaReadTreeInflight ??
+      ((globalThis as any).__kshanaReadTreeInflight = new Map());
+    const cacheMap: Map<string, { value: unknown; expiresAt: number }> =
+      (globalThis as any).__kshanaReadTreeCache ??
+      ((globalThis as any).__kshanaReadTreeCache = new Map());
+
+    const inflight = inflightMap.get(cacheKey);
+    if (inflight) {
+      return inflight;
+    }
+
+    const promise = fileSystemManager
+      .readDirectory(normalizedPath, depth)
+      .then((value) => {
+        cacheMap.set(cacheKey, { value, expiresAt: Date.now() + ttlMs });
+        return value;
+      })
+      .finally(() => {
+        inflightMap.delete(cacheKey);
+      });
+
+    inflightMap.set(cacheKey, promise);
+    return promise;
   },
 );
 
@@ -689,7 +758,11 @@ ipcMain.handle(
 ipcMain.handle(
   'project:read-file-guarded',
   async (_event, filePath: string, meta?: FileOpMeta): Promise<string> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      null,
+      meta,
+    );
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
     try {
@@ -722,7 +795,11 @@ ipcMain.handle(
 ipcMain.handle(
   'project:read-file-buffer-guarded',
   async (_event, filePath: string, meta?: FileOpMeta): Promise<string> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      null,
+      meta,
+    );
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
     try {
@@ -759,10 +836,24 @@ ipcMain.handle(
     const normalizedPath = path.isAbsolute(filePath)
       ? path.normalize(filePath)
       : path.resolve(filePath);
+    const cacheKey = normalizedPath;
+    const now = Date.now();
+    const ttlMs = 750;
+
+    const cacheMap: Map<string, { value: boolean; expiresAt: number }> =
+      (globalThis as any).__kshanaExistsCache ??
+      ((globalThis as any).__kshanaExistsCache = new Map());
+    const cached = cacheMap.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
+    }
+
     try {
       await fs.access(normalizedPath);
+      cacheMap.set(cacheKey, { value: true, expiresAt: Date.now() + ttlMs });
       return true;
     } catch {
+      cacheMap.set(cacheKey, { value: false, expiresAt: Date.now() + ttlMs });
       return false;
     }
   },
@@ -977,7 +1068,11 @@ ipcMain.handle(
 ipcMain.handle(
   'project:list-directory',
   async (_event, dirPath: string, meta?: FileOpMeta): Promise<string[]> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      null,
+      meta,
+    );
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
     try {
@@ -1014,7 +1109,11 @@ ipcMain.handle(
     targetPath: string,
     meta?: FileOpMeta,
   ): Promise<{ isFile: boolean; isDirectory: boolean; size: number }> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      null,
+      meta,
+    );
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
     try {
@@ -1312,7 +1411,11 @@ ipcMain.handle(
 ipcMain.handle(
   'project:delete',
   async (_event, targetPath: string, meta?: FileOpMeta): Promise<void> => {
-    const activeProjectRoot = fileSystemManager.getActiveProjectRoot();
+    const activeProjectRoot = resolveBootstrapValidationRoot(
+      fileSystemManager.getActiveProjectRoot(),
+      null,
+      meta,
+    );
     let normalizedPath: string | undefined;
     let resolvedPath: string | undefined;
     try {
@@ -3265,9 +3368,6 @@ const startBackendInBackground = () => {
 
 // ─── Kshana Cloud deep-link protocol ─────────────────────────────────────────
 
-const KSHANA_CLOUD_URL =
-  process.env.KSHANA_CLOUD_URL ?? 'http://localhost:3000';
-
 // Register kshana:// as the custom URL scheme
 if (!app.isDefaultProtocolClient('kshana')) {
   app.setAsDefaultProtocolClient('kshana');
@@ -3298,7 +3398,8 @@ async function handleDeepLink(url: string): Promise<void> {
     });
 
     // Fetch balance immediately so the Account tab shows it
-    await refreshBalance(KSHANA_CLOUD_URL);
+    const websiteBase = await resolveKshanaWebsiteUrl();
+    await refreshBalance(websiteBase);
 
     // Notify renderer that account changed
     mainWindow?.webContents.send('account:changed');
@@ -3334,7 +3435,8 @@ ipcMain.handle('account:get', () => {
 ipcMain.handle('account:sign-in', async () => {
   // Generate a random state token for CSRF protection
   const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
-  const url = `${KSHANA_CLOUD_URL}/auth/desktop?state=${state}`;
+  const websiteBase = await resolveKshanaWebsiteUrl();
+  const url = `${websiteBase}/auth/desktop?state=${state}`;
   await shell.openExternal(url);
   return { opened: true };
 });
@@ -3346,7 +3448,8 @@ ipcMain.handle('account:sign-out', async () => {
 });
 
 ipcMain.handle('account:refresh-balance', async () => {
-  const balance = await refreshBalance(KSHANA_CLOUD_URL);
+  const websiteBase = await resolveKshanaWebsiteUrl();
+  const balance = await refreshBalance(websiteBase);
   mainWindow?.webContents.send('account:changed');
   return { balance };
 });

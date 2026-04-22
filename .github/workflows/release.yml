@@ -49,14 +49,18 @@ jobs:
       - name: Inject cloud runtime config
         env:
           KSHANA_CLOUD_SERVER_URL: ${{ secrets.KSHANA_SERVER_URL }}
+          KSHANA_WEBSITE_URL: ${{ secrets.KSHANA_WEBSITE_URL }}
         run: |
           node << 'EOF'
           const fs = require('fs');
-          const url = process.env.KSHANA_CLOUD_SERVER_URL;
-          if (!url) throw new Error('KSHANA_SERVER_URL is missing');
+          const backend = process.env.KSHANA_CLOUD_SERVER_URL;
+          const website = process.env.KSHANA_WEBSITE_URL;
+          if (!backend) throw new Error('KSHANA_SERVER_URL is missing');
+          const cfg = { cloudServerUrl: backend };
+          if (website && website.trim()) cfg.kshanaWebsiteUrl = website.trim();
           fs.writeFileSync(
             'assets/runtime-config.json',
-            JSON.stringify({ cloudServerUrl: url }, null, 2),
+            JSON.stringify(cfg, null, 2),
           );
           console.log('Wrote assets/runtime-config.json');
           EOF
@@ -110,10 +114,19 @@ jobs:
           npm run build:dll
 
       - name: Inject cloud runtime config
+        env:
+          KSHANA_CLOUD_SERVER_URL: ${{ secrets.KSHANA_SERVER_URL }}
+          KSHANA_WEBSITE_URL: ${{ secrets.KSHANA_WEBSITE_URL }}
         run: |
-          $url = "${{ secrets.KSHANA_SERVER_URL }}"
-          if (-not $url) { throw "KSHANA_SERVER_URL is missing" }
-          $json = @{ cloudServerUrl = $url } | ConvertTo-Json
+          $backend = $env:KSHANA_CLOUD_SERVER_URL
+          $website = $env:KSHANA_WEBSITE_URL
+          if (-not $backend) { throw "KSHANA_SERVER_URL is missing" }
+          if ($website -and $website.Trim()) {
+            $obj = @{ cloudServerUrl = $backend; kshanaWebsiteUrl = $website.Trim() }
+          } else {
+            $obj = @{ cloudServerUrl = $backend }
+          }
+          $json = $obj | ConvertTo-Json
           Set-Content -Path "assets/runtime-config.json" -Value $json -Encoding UTF8
           Write-Host "Wrote assets/runtime-config.json"
 

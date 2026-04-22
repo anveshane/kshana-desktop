@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FolderOpen, Plus, X } from 'lucide-react';
+import { FolderOpen, LogIn, Plus, X } from 'lucide-react';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import type { AccountInfo } from '../../../../shared/settingsTypes';
 import styles from './NewProjectDialog.module.scss';
 
 const PROJECT_SETUP_STORAGE_KEY = 'kshana.pendingProjectSetup';
@@ -49,6 +50,9 @@ export default function NewProjectDialog({
   const [workspacePath, setWorkspacePath] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [account, setAccount] = useState<AccountInfo | null>(null);
+  const [accountLoading, setAccountLoading] = useState(true);
+  const [signingIn, setSigningIn] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -57,7 +61,49 @@ export default function NewProjectDialog({
       setWorkspacePath('');
       setError(null);
       setIsSubmitting(false);
+      setAccount(null);
+      setAccountLoading(true);
+      setSigningIn(false);
     }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const load = async () => {
+      setAccountLoading(true);
+      try {
+        const info = await window.electron.account.get();
+        if (!cancelled) {
+          setAccount(info);
+        }
+      } catch {
+        if (!cancelled) {
+          setAccount(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setAccountLoading(false);
+        }
+      }
+    };
+
+    void load();
+
+    const unsubscribe = window.electron.account.onChange((info) => {
+      if (!cancelled) {
+        setAccount(info);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [isOpen]);
 
   const handlePickWorkspace = useCallback(async () => {
@@ -72,10 +118,32 @@ export default function NewProjectDialog({
     }
   }, []);
 
+  const handleSignIn = useCallback(async () => {
+    setError(null);
+    setSigningIn(true);
+    try {
+      await window.electron.account.signIn();
+    } catch (err) {
+      setError(
+        `Could not start sign-in: ${(err as Error).message}. Try again from Settings → Account.`,
+      );
+    } finally {
+      setSigningIn(false);
+    }
+  }, []);
+
   const handleCreate = useCallback(async () => {
     const trimmedName = projectName.trim();
     const trimmedDescription = description.trim();
     const normalizedWorkspacePath = normalizePathValue(workspacePath);
+
+    const cloudAccount = await window.electron.account.get();
+    if (!cloudAccount?.token) {
+      setError(
+        'Sign in to Kshana Cloud first so new projects can sync credits and sessions.',
+      );
+      return;
+    }
 
     if (!trimmedName) {
       setError('Project name is required.');
@@ -152,6 +220,10 @@ export default function NewProjectDialog({
     workspacePath,
   ]);
 
+  const cloudConnected = Boolean(account?.token);
+  const formLocked =
+    isSubmitting || isProjectLoading || accountLoading || !cloudConnected;
+
   if (!isOpen) {
     return null;
   }
@@ -171,11 +243,31 @@ export default function NewProjectDialog({
             className={styles.closeButton}
             onClick={onClose}
             aria-label="Close create project dialog"
-            disabled={isSubmitting || isProjectLoading}
+            disabled={isSubmitting || isProjectLoading || signingIn}
           >
             <X size={16} />
           </button>
         </div>
+
+        {!accountLoading && !cloudConnected ? (
+          <div className={styles.cloudNotice}>
+            <p className={styles.cloudNoticeTitle}>Sign in to Kshana Cloud</p>
+            <p className={styles.cloudNoticeText}>
+              New projects need an active cloud account for credits and session
+              sync. Sign in below — your browser will open to log you in, then
+              you can finish creating the project here.
+            </p>
+            <button
+              type="button"
+              className={styles.signInButton}
+              onClick={handleSignIn}
+              disabled={signingIn || isSubmitting}
+            >
+              <LogIn size={15} />
+              {signingIn ? 'Opening browser…' : 'Sign in with Kshana'}
+            </button>
+          </div>
+        ) : null}
 
         <div className={styles.form}>
           <span className={styles.label}>Project Name</span>
@@ -185,7 +277,7 @@ export default function NewProjectDialog({
             value={projectName}
             onChange={(event) => setProjectName(event.target.value)}
             placeholder="My Agentic Video Project"
-            disabled={isSubmitting || isProjectLoading}
+            disabled={formLocked}
             aria-label="Project name"
           />
 
@@ -197,7 +289,7 @@ export default function NewProjectDialog({
             onChange={(event) => setDescription(event.target.value)}
             placeholder="What this project is about..."
             rows={3}
-            disabled={isSubmitting || isProjectLoading}
+            disabled={formLocked}
             aria-label="Project description"
           />
 
@@ -212,7 +304,7 @@ export default function NewProjectDialog({
               type="button"
               className={styles.pickButton}
               onClick={handlePickWorkspace}
-              disabled={isSubmitting || isProjectLoading}
+              disabled={formLocked}
             >
               <FolderOpen size={15} />
               Choose Folder
@@ -227,7 +319,7 @@ export default function NewProjectDialog({
             type="button"
             className={styles.cancelButton}
             onClick={onClose}
-            disabled={isSubmitting || isProjectLoading}
+            disabled={isSubmitting || isProjectLoading || signingIn}
           >
             Cancel
           </button>
@@ -235,12 +327,16 @@ export default function NewProjectDialog({
             type="button"
             className={styles.createButton}
             onClick={handleCreate}
-            disabled={isSubmitting || isProjectLoading}
+            disabled={formLocked}
           >
             <Plus size={15} />
             {isSubmitting || isProjectLoading
               ? 'Creating...'
-              : 'Create Project'}
+              : accountLoading
+                ? 'Checking account…'
+                : !cloudConnected
+                  ? 'Sign in to create'
+                  : 'Create Project'}
           </button>
         </div>
       </div>

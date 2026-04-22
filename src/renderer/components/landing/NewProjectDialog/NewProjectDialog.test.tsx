@@ -23,6 +23,9 @@ describe('NewProjectDialog', () => {
   const mockSelectDirectory = jest.fn();
   const mockCreateFolder = jest.fn();
   const mockCheckFileExists = jest.fn();
+  const mockAccountGet = jest.fn();
+  const mockAccountSignIn = jest.fn();
+  const mockAccountOnChange = jest.fn(() => () => {});
 
   beforeEach(() => {
     mockCreateProject.mockReset();
@@ -30,10 +33,21 @@ describe('NewProjectDialog', () => {
     mockSelectDirectory.mockReset();
     mockCreateFolder.mockReset();
     mockCheckFileExists.mockReset();
+    mockAccountGet.mockReset();
+    mockAccountSignIn.mockReset();
+    mockAccountOnChange.mockReset();
+    mockAccountOnChange.mockReturnValue(() => {});
 
     mockCreateProject.mockResolvedValue(true);
     mockOpenProject.mockResolvedValue(undefined);
     mockCreateFolder.mockResolvedValue('/projects/demo');
+    mockAccountGet.mockResolvedValue({
+      userId: 'user-1',
+      email: 'test@example.com',
+      name: 'Test',
+      credits: 0,
+      token: 'test-token',
+    });
 
     Object.defineProperty(window, 'electron', {
       configurable: true,
@@ -42,6 +56,11 @@ describe('NewProjectDialog', () => {
           selectDirectory: mockSelectDirectory,
           createFolder: mockCreateFolder,
           checkFileExists: mockCheckFileExists,
+        },
+        account: {
+          get: mockAccountGet,
+          signIn: mockAccountSignIn,
+          onChange: mockAccountOnChange,
         },
       },
     });
@@ -111,6 +130,23 @@ describe('NewProjectDialog', () => {
     expect(mockCreateFolder).not.toHaveBeenCalled();
     expect(mockCreateProject).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('requires Kshana Cloud sign-in before creating a project', async () => {
+    mockAccountGet.mockResolvedValue(null);
+    mockCheckFileExists.mockResolvedValue(false);
+
+    render(<NewProjectDialog isOpen onClose={jest.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Sign in to Kshana Cloud')).not.toBeNull();
+    });
+
+    expect(
+      screen.getByRole('button', { name: 'Sign in with Kshana' }),
+    ).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create Project' })).toBeDisabled();
+    expect(mockCreateProject).not.toHaveBeenCalled();
   });
 
   it('creates a new project when no existing project is found', async () => {

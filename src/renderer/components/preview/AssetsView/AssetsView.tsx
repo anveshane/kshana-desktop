@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Image as ImageIcon, Video, X, Play, ImagePlus } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { FileNode, getFileType } from '../../../../shared/fileSystemTypes';
@@ -146,6 +147,131 @@ const collectScannedMedia = (
   );
 };
 
+const resolveMediaDisplayPath = async (
+  media: MediaAsset,
+  projectDirectory: string,
+): Promise<string> => {
+  const resolved = await resolveAssetPathForDisplay(
+    media.path,
+    projectDirectory,
+  );
+  if (media.type === 'image' && shouldUseBase64(resolved)) {
+    const base64 = await imageToBase64(resolved);
+    if (base64) {
+      return base64;
+    }
+  }
+  return resolved;
+};
+
+interface LazyMediaCardProps {
+  media: MediaAsset;
+  projectDirectory: string;
+  PlaceholderIcon: LucideIcon;
+  onClick: () => void;
+}
+
+function LazyMediaCard({
+  media,
+  projectDirectory,
+  PlaceholderIcon,
+  onClick,
+}: LazyMediaCardProps) {
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [shouldResolve, setShouldResolve] = useState(false);
+  const [resolvedPath, setResolvedPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    setShouldResolve(false);
+    setResolvedPath(null);
+  }, [media.path, projectDirectory]);
+
+  useEffect(() => {
+    if (shouldResolve) return undefined;
+    if (typeof IntersectionObserver === 'undefined') {
+      setShouldResolve(true);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldResolve(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '280px 0px' },
+    );
+
+    if (cardRef.current) {
+      observer.observe(cardRef.current);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [shouldResolve]);
+
+  useEffect(() => {
+    if (!shouldResolve) return undefined;
+
+    let cancelled = false;
+    resolveMediaDisplayPath(media, projectDirectory)
+      .then((path) => {
+        if (!cancelled) {
+          setResolvedPath(path);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error(
+            `[AssetsView] Failed to resolve media path for ${media.name}:`,
+            error,
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [media, projectDirectory, shouldResolve]);
+
+  return (
+    <div ref={cardRef} className={styles.mediaCard} onClick={onClick}>
+      <div className={styles.mediaThumbnail}>
+        {resolvedPath ? (
+          media.type === 'image' ? (
+            <img
+              src={resolvedPath}
+              alt={media.name}
+              className={styles.thumbnailImage}
+              loading="lazy"
+              decoding="async"
+            />
+          ) : (
+            <>
+              <video
+                src={resolvedPath}
+                className={styles.thumbnailVideo}
+                preload="metadata"
+                muted
+              />
+              <div className={styles.playOverlay}>
+                <Play size={32} />
+              </div>
+            </>
+          )
+        ) : (
+          <div className={styles.mediaPlaceholder}>
+            <PlaceholderIcon size={32} />
+          </div>
+        )}
+      </div>
+      <div className={styles.mediaName}>{media.name}</div>
+    </div>
+  );
+}
+
 export default function AssetsView() {
   const { projectDirectory } = useWorkspace();
   const { assetManifest, agentState } = useProject();
@@ -160,20 +286,23 @@ export default function AssetsView() {
   const [selectedVideo, setSelectedVideo] = useState<MediaAsset | null>(null);
   const [selectedInfographic, setSelectedInfographic] =
     useState<MediaAsset | null>(null);
-  const [imagePaths, setImagePaths] = useState<Record<string, string>>({});
-  const [videoPaths, setVideoPaths] = useState<Record<string, string>>({});
-  const [infographicPaths, setInfographicPaths] = useState<
-    Record<string, string>
-  >({});
+  const [selectedImagePath, setSelectedImagePath] = useState<string | null>(
+    null,
+  );
+  const [selectedVideoPath, setSelectedVideoPath] = useState<string | null>(
+    null,
+  );
+  const [selectedInfographicPath, setSelectedInfographicPath] = useState<
+    string | null
+  >(null);
   const refreshInFlightRef = useRef(false);
   const pendingRefreshRef = useRef(false);
   const fileChangeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const currentLoadIdRef = useRef(0);
-  const [validFinalVideoPaths, setValidFinalVideoPaths] = useState<Set<string> | null>(
-    null,
-  );
+  const [validFinalVideoPaths, setValidFinalVideoPaths] =
+    useState<Set<string> | null>(null);
   const manifestFinalVideoAsset = useMemo(
     () => getManifestFinalVideoAsset(agentState, assetManifest),
     [agentState, assetManifest],
@@ -186,7 +315,10 @@ export default function AssetsView() {
         projectDirectory,
         manifestFinalVideoAsset && validFinalVideoPaths
           ? validFinalVideoPaths.has(
-              normalizeMediaPath(manifestFinalVideoAsset.path, projectDirectory),
+              normalizeMediaPath(
+                manifestFinalVideoAsset.path,
+                projectDirectory,
+              ),
             )
           : undefined,
       ),
@@ -206,7 +338,11 @@ export default function AssetsView() {
       generatedImages.length > 0 ||
       generatedVideos.length > 0 ||
       generatedInfographics.length > 0;
-  }, [generatedImages.length, generatedVideos.length, generatedInfographics.length]);
+  }, [
+    generatedImages.length,
+    generatedVideos.length,
+    generatedInfographics.length,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -230,9 +366,7 @@ export default function AssetsView() {
             projectDirectory,
             asset.path,
           );
-          if (
-            await window.electron.project.checkFileExists(absolutePath)
-          ) {
+          if (await window.electron.project.checkFileExists(absolutePath)) {
             nextValidPaths.add(
               normalizeMediaPath(asset.path, projectDirectory),
             );
@@ -271,126 +405,162 @@ export default function AssetsView() {
     });
   };
 
-  const loadMediaFiles = useCallback(async (options?: { background?: boolean }) => {
-    if (!projectDirectory) {
-      setGeneratedImages([]);
-      setGeneratedVideos([]);
-      setGeneratedInfographics([]);
-      return;
-    }
-
-    if (refreshInFlightRef.current) {
-      pendingRefreshRef.current = true;
-      return;
-    }
-
-    refreshInFlightRef.current = true;
-    const loadId = currentLoadIdRef.current + 1;
-    currentLoadIdRef.current = loadId;
-
-    const shouldShowLoading =
-      !options?.background && !hasAnyAssetsRef.current;
-
-    if (shouldShowLoading) {
-      setIsLoadingMedia(true);
-    }
-
-    try {
-      const discoveredMedia = new Map<string, MediaAsset>();
-
-      for (const asset of assetManifest?.assets || []) {
-        if (
-          asset.type === 'final_video' &&
-          !validFinalVideoPaths?.has(
-            normalizeMediaPath(asset.path, projectDirectory),
-          )
-        ) {
-          continue;
-        }
-        const category = inferCategoryFromManifest(asset.path, asset.type);
-        if (!category) {
-          continue;
-        }
-
-        const media: MediaAsset = {
-          name: mediaNameFromPath(asset.path),
-          path: normalizeMediaPath(asset.path, projectDirectory),
-          type: category === 'images' ? 'image' : 'video',
-          category,
-        };
-        discoveredMedia.set(assetKey(media, projectDirectory), media);
-      }
-
-      try {
-        const projectTree = await window.electron.project.readTree(
-          projectDirectory,
-          MAX_SCAN_DEPTH,
-        );
-        collectScannedMedia(projectTree, discoveredMedia, projectDirectory);
-      } catch (error) {
-        console.error(
-          '[AssetsView] Failed to scan project tree for media:',
-          error,
-        );
-      }
-
-      const allMedia = Array.from(discoveredMedia.values()).sort(
-        (left, right) => left.name.localeCompare(right.name),
-      );
-      const filteredMedia = allMedia.filter((asset) => {
-        const normalizedPath = normalizeMediaPath(asset.path, projectDirectory);
-        if (!normalizedPath.includes('assets/final_video/')) {
-          return true;
-        }
-        return validFinalVideoPaths?.has(normalizedPath) ?? false;
-      });
-
-      const nextGeneratedImages = filteredMedia.filter(
-        (asset) => asset.category === 'images',
-      );
-      const nextGeneratedVideos = filteredMedia.filter(
-        (asset) => asset.category === 'videos',
-      );
-      const nextGeneratedInfographics = filteredMedia.filter(
-        (asset) => asset.category === 'infographics',
-      );
-
-      if (currentLoadIdRef.current !== loadId) {
+  const loadMediaFiles = useCallback(
+    async (options?: { background?: boolean; scanTree?: boolean }) => {
+      if (!projectDirectory) {
+        setGeneratedImages([]);
+        setGeneratedVideos([]);
+        setGeneratedInfographics([]);
         return;
       }
 
-      setGeneratedImages((prev) =>
-        areMediaListsEqual(prev, nextGeneratedImages)
-          ? prev
-          : nextGeneratedImages,
-      );
-      setGeneratedVideos((prev) =>
-        areMediaListsEqual(prev, nextGeneratedVideos)
-          ? prev
-          : nextGeneratedVideos,
-      );
-      setGeneratedInfographics((prev) =>
-        areMediaListsEqual(prev, nextGeneratedInfographics)
-          ? prev
-          : nextGeneratedInfographics,
-      );
-    } catch (err) {
-      console.error('Failed to load media files:', err);
-    } finally {
-      if (currentLoadIdRef.current === loadId && shouldShowLoading) {
-        setIsLoadingMedia(false);
+      if (refreshInFlightRef.current) {
+        pendingRefreshRef.current = true;
+        return;
       }
-      refreshInFlightRef.current = false;
 
-      if (pendingRefreshRef.current) {
-        pendingRefreshRef.current = false;
-        void loadMediaFiles({ background: true });
+      refreshInFlightRef.current = true;
+      const loadId = currentLoadIdRef.current + 1;
+      currentLoadIdRef.current = loadId;
+
+      const shouldShowLoading =
+        !options?.background && !hasAnyAssetsRef.current;
+
+      if (shouldShowLoading) {
+        setIsLoadingMedia(true);
       }
-    }
-  }, [assetManifest, projectDirectory, validFinalVideoPaths]);
+
+      const shouldScanTree = options?.scanTree ?? true;
+
+      try {
+        const discoveredMedia = new Map<string, MediaAsset>();
+
+        for (const asset of assetManifest?.assets || []) {
+          if (
+            asset.type === 'final_video' &&
+            !validFinalVideoPaths?.has(
+              normalizeMediaPath(asset.path, projectDirectory),
+            )
+          ) {
+            continue;
+          }
+          const category = inferCategoryFromManifest(asset.path, asset.type);
+          if (!category) {
+            continue;
+          }
+
+          const media: MediaAsset = {
+            name: mediaNameFromPath(asset.path),
+            path: normalizeMediaPath(asset.path, projectDirectory),
+            type: category === 'images' ? 'image' : 'video',
+            category,
+          };
+          discoveredMedia.set(assetKey(media, projectDirectory), media);
+        }
+
+        if (shouldScanTree) {
+          const start =
+            process.env.NODE_ENV === 'development' ? performance.now() : 0;
+          try {
+            const projectTree = await window.electron.project.readTree(
+              projectDirectory,
+              MAX_SCAN_DEPTH,
+            );
+            collectScannedMedia(projectTree, discoveredMedia, projectDirectory);
+            if (process.env.NODE_ENV === 'development') {
+              // eslint-disable-next-line no-console
+              console.debug(
+                `[perf][AssetsView] readTree(depth=${MAX_SCAN_DEPTH}) ${(performance.now() - start).toFixed(1)}ms`,
+              );
+            }
+          } catch (error) {
+            console.error(
+              '[AssetsView] Failed to scan project tree for media:',
+              error,
+            );
+          }
+        }
+
+        const allMedia = Array.from(discoveredMedia.values()).sort(
+          (left, right) => left.name.localeCompare(right.name),
+        );
+        const filteredMedia = allMedia.filter((asset) => {
+          const normalizedPath = normalizeMediaPath(
+            asset.path,
+            projectDirectory,
+          );
+          if (!normalizedPath.includes('assets/final_video/')) {
+            return true;
+          }
+          return validFinalVideoPaths?.has(normalizedPath) ?? false;
+        });
+
+        const nextGeneratedImages = filteredMedia.filter(
+          (asset) => asset.category === 'images',
+        );
+        const nextGeneratedVideos = filteredMedia.filter(
+          (asset) => asset.category === 'videos',
+        );
+        const nextGeneratedInfographics = filteredMedia.filter(
+          (asset) => asset.category === 'infographics',
+        );
+
+        if (currentLoadIdRef.current !== loadId) {
+          return;
+        }
+
+        setGeneratedImages((prev) =>
+          areMediaListsEqual(prev, nextGeneratedImages)
+            ? prev
+            : nextGeneratedImages,
+        );
+        setGeneratedVideos((prev) =>
+          areMediaListsEqual(prev, nextGeneratedVideos)
+            ? prev
+            : nextGeneratedVideos,
+        );
+        setGeneratedInfographics((prev) =>
+          areMediaListsEqual(prev, nextGeneratedInfographics)
+            ? prev
+            : nextGeneratedInfographics,
+        );
+      } catch (err) {
+        console.error('Failed to load media files:', err);
+      } finally {
+        if (currentLoadIdRef.current === loadId && shouldShowLoading) {
+          setIsLoadingMedia(false);
+        }
+        refreshInFlightRef.current = false;
+
+        if (pendingRefreshRef.current) {
+          pendingRefreshRef.current = false;
+          void loadMediaFiles({ background: true, scanTree: true });
+        }
+      }
+    },
+    [assetManifest, projectDirectory, validFinalVideoPaths],
+  );
 
   useEffect(() => {
-    void loadMediaFiles();
+    void loadMediaFiles({ scanTree: false });
+
+    const scheduleDeepScan = () => {
+      void loadMediaFiles({ background: true, scanTree: true });
+    };
+
+    if (typeof window !== 'undefined' && window.requestIdleCallback) {
+      const idleId = window.requestIdleCallback(scheduleDeepScan, {
+        timeout: 1200,
+      });
+      return () => {
+        window.cancelIdleCallback?.(idleId);
+      };
+    }
+
+    const timeoutId = window.setTimeout(scheduleDeepScan, 250);
+    return () => {
+      clearTimeout(timeoutId);
+    };
   }, [loadMediaFiles]);
 
   useEffect(() => {
@@ -407,10 +577,16 @@ export default function AssetsView() {
         if (fileChangeDebounceRef.current) {
           clearTimeout(fileChangeDebounceRef.current);
         }
-        fileChangeDebounceRef.current = setTimeout(() => {
-          fileChangeDebounceRef.current = null;
-          void loadMediaFiles({ background: true });
-        }, 250);
+        const isBurstAssetWrite =
+          normalizedPath.includes('/assets/images/') ||
+          normalizedPath.includes('/assets/infographics/');
+        fileChangeDebounceRef.current = setTimeout(
+          () => {
+            fileChangeDebounceRef.current = null;
+            void loadMediaFiles({ background: true, scanTree: true });
+          },
+          isBurstAssetWrite ? 1000 : 500,
+        );
       }
     });
 
@@ -423,102 +599,74 @@ export default function AssetsView() {
     };
   }, [loadMediaFiles]);
 
-  // Resolve image paths
   useEffect(() => {
-    if (!projectDirectory || generatedImages.length === 0) {
-      setImagePaths({});
-      return;
-    }
+    let cancelled = false;
+    setSelectedImagePath(null);
+    if (!selectedImage || !projectDirectory) return undefined;
 
-    const resolvePaths = async () => {
-      const paths: Record<string, string> = {};
-      for (const image of generatedImages) {
-        try {
-          const resolved = await resolveAssetPathForDisplay(
-            image.path,
-            projectDirectory,
-          );
-          if (shouldUseBase64(resolved)) {
-            const base64 = await imageToBase64(resolved);
-            if (base64) {
-              paths[image.path] = base64;
-              continue;
-            }
-          }
-          paths[image.path] = resolved;
-        } catch (err) {
-          console.error(`Failed to resolve image path for ${image.name}:`, err);
-        }
-      }
-      setImagePaths(paths);
-    };
-
-    resolvePaths();
-  }, [projectDirectory, generatedImages]);
-
-  // Resolve video paths
-  useEffect(() => {
-    if (!projectDirectory || generatedVideos.length === 0) {
-      setVideoPaths({});
-      return;
-    }
-
-    const resolvePaths = async () => {
-      const paths: Record<string, string> = {};
-      for (const video of generatedVideos) {
-        try {
-          const resolved = await resolveAssetPathForDisplay(
-            video.path,
-            projectDirectory,
-          );
-          paths[video.path] = resolved;
-        } catch (err) {
-          console.error(`Failed to resolve video path for ${video.name}:`, err);
-        }
-      }
-      setVideoPaths(paths);
-    };
-
-    resolvePaths();
-  }, [projectDirectory, generatedVideos]);
-
-  // Resolve infographic paths
-  useEffect(() => {
-    if (!projectDirectory || generatedInfographics.length === 0) {
-      setInfographicPaths({});
-      return;
-    }
-
-    const resolvePaths = async () => {
-      const paths: Record<string, string> = {};
-      for (const infographic of generatedInfographics) {
-        try {
-          console.log(
-            '[AssetsView] Resolving infographic path:',
-            infographic.path,
-          );
-          const resolved = await resolveAssetPathForDisplay(
-            infographic.path,
-            projectDirectory,
-          );
-          console.log('[AssetsView] Resolved to:', resolved);
-          paths[infographic.path] = resolved;
-        } catch (err) {
+    resolveMediaDisplayPath(selectedImage, projectDirectory)
+      .then((path) => {
+        if (!cancelled) setSelectedImagePath(path);
+      })
+      .catch((error) => {
+        if (!cancelled) {
           console.error(
-            `[AssetsView] Failed to resolve infographic path for ${infographic.name}:`,
-            err,
+            `[AssetsView] Failed to resolve selected image ${selectedImage.name}:`,
+            error,
           );
         }
-      }
-      setInfographicPaths(paths);
-      console.log(
-        '[AssetsView] All infographic paths resolved:',
-        Object.keys(paths).length,
-      );
-    };
+      });
 
-    resolvePaths();
-  }, [projectDirectory, generatedInfographics]);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedImage, projectDirectory]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSelectedVideoPath(null);
+    if (!selectedVideo || !projectDirectory) return undefined;
+
+    resolveMediaDisplayPath(selectedVideo, projectDirectory)
+      .then((path) => {
+        if (!cancelled) setSelectedVideoPath(path);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error(
+            `[AssetsView] Failed to resolve selected video ${selectedVideo.name}:`,
+            error,
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedVideo, projectDirectory]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSelectedInfographicPath(null);
+    if (!selectedInfographic || !projectDirectory) return undefined;
+
+    resolveMediaDisplayPath(selectedInfographic, projectDirectory)
+      .then((path) => {
+        if (!cancelled) setSelectedInfographicPath(path);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error(
+            `[AssetsView] Failed to resolve selected infographic ${selectedInfographic.name}:`,
+            error,
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedInfographic, projectDirectory]);
 
   // Show empty state if no project
   if (!projectDirectory) {
@@ -575,31 +723,15 @@ export default function AssetsView() {
                     <p>Loading images...</p>
                   </div>
                 ) : generatedImages.length > 0 ? (
-                  generatedImages.map((image) => {
-                    const imageSrc = imagePaths[image.path];
-                    return (
-                      <div
-                        key={image.path}
-                        className={styles.mediaCard}
-                        onClick={() => setSelectedImage(image)}
-                      >
-                        <div className={styles.mediaThumbnail}>
-                          {imageSrc ? (
-                            <img
-                              src={imageSrc}
-                              alt={image.name}
-                              className={styles.thumbnailImage}
-                            />
-                          ) : (
-                            <div className={styles.mediaPlaceholder}>
-                              <ImageIcon size={32} />
-                            </div>
-                          )}
-                        </div>
-                        <div className={styles.mediaName}>{image.name}</div>
-                      </div>
-                    );
-                  })
+                  generatedImages.map((image) => (
+                    <LazyMediaCard
+                      key={image.path}
+                      media={image}
+                      projectDirectory={projectDirectory}
+                      PlaceholderIcon={ImageIcon}
+                      onClick={() => setSelectedImage(image)}
+                    />
+                  ))
                 ) : (
                   <div className={styles.emptySection}>
                     <p>No generated images yet</p>
@@ -623,37 +755,15 @@ export default function AssetsView() {
                     <p>Loading videos...</p>
                   </div>
                 ) : generatedVideos.length > 0 ? (
-                  generatedVideos.map((video) => {
-                    const videoSrc = videoPaths[video.path];
-                    return (
-                      <div
-                        key={video.path}
-                        className={styles.mediaCard}
-                        onClick={() => setSelectedVideo(video)}
-                      >
-                        <div className={styles.mediaThumbnail}>
-                          {videoSrc ? (
-                            <>
-                              <video
-                                src={videoSrc}
-                                className={styles.thumbnailVideo}
-                                preload="metadata"
-                                muted
-                              />
-                              <div className={styles.playOverlay}>
-                                <Play size={32} />
-                              </div>
-                            </>
-                          ) : (
-                            <div className={styles.mediaPlaceholder}>
-                              <Video size={32} />
-                            </div>
-                          )}
-                        </div>
-                        <div className={styles.mediaName}>{video.name}</div>
-                      </div>
-                    );
-                  })
+                  generatedVideos.map((video) => (
+                    <LazyMediaCard
+                      key={video.path}
+                      media={video}
+                      projectDirectory={projectDirectory}
+                      PlaceholderIcon={Video}
+                      onClick={() => setSelectedVideo(video)}
+                    />
+                  ))
                 ) : (
                   <div className={styles.emptySection}>
                     <p>No generated videos yet</p>
@@ -679,46 +789,15 @@ export default function AssetsView() {
                     <p>Loading infographics...</p>
                   </div>
                 ) : generatedInfographics.length > 0 ? (
-                  generatedInfographics.map((infographic) => {
-                    const videoSrc = infographicPaths[infographic.path];
-                    if (!videoSrc) {
-                      console.warn(
-                        '[AssetsView] No video src for infographic:',
-                        infographic.name,
-                        infographic.path,
-                      );
-                    }
-                    return (
-                      <div
-                        key={infographic.path}
-                        className={styles.mediaCard}
-                        onClick={() => setSelectedInfographic(infographic)}
-                      >
-                        <div className={styles.mediaThumbnail}>
-                          {videoSrc ? (
-                            <>
-                              <video
-                                src={videoSrc}
-                                className={styles.thumbnailVideo}
-                                preload="metadata"
-                                muted
-                              />
-                              <div className={styles.playOverlay}>
-                                <Play size={32} />
-                              </div>
-                            </>
-                          ) : (
-                            <div className={styles.mediaPlaceholder}>
-                              <ImagePlus size={32} />
-                            </div>
-                          )}
-                        </div>
-                        <div className={styles.mediaName}>
-                          {infographic.name}
-                        </div>
-                      </div>
-                    );
-                  })
+                  generatedInfographics.map((infographic) => (
+                    <LazyMediaCard
+                      key={infographic.path}
+                      media={infographic}
+                      projectDirectory={projectDirectory}
+                      PlaceholderIcon={ImagePlus}
+                      onClick={() => setSelectedInfographic(infographic)}
+                    />
+                  ))
                 ) : (
                   <div className={styles.emptySection}>
                     <p>No generated infographics yet</p>
@@ -731,7 +810,7 @@ export default function AssetsView() {
       </div>
 
       {/* Image Modal */}
-      {selectedImage && imagePaths[selectedImage.path] && (
+      {selectedImage && selectedImagePath && (
         <div
           className={styles.modalOverlay}
           onClick={() => setSelectedImage(null)}
@@ -748,9 +827,10 @@ export default function AssetsView() {
               <X size={24} />
             </button>
             <img
-              src={imagePaths[selectedImage.path]}
+              src={selectedImagePath}
               alt={selectedImage.name}
               className={styles.modalImage}
+              decoding="async"
             />
             <div className={styles.modalTitle}>{selectedImage.name}</div>
           </div>
@@ -758,7 +838,7 @@ export default function AssetsView() {
       )}
 
       {/* Video Modal */}
-      {selectedVideo && videoPaths[selectedVideo.path] && (
+      {selectedVideo && selectedVideoPath && (
         <div
           className={styles.modalOverlay}
           onClick={() => setSelectedVideo(null)}
@@ -775,7 +855,7 @@ export default function AssetsView() {
               <X size={24} />
             </button>
             <video
-              src={videoPaths[selectedVideo.path]}
+              src={selectedVideoPath}
               controls
               autoPlay
               className={styles.modalVideo}
@@ -786,7 +866,7 @@ export default function AssetsView() {
       )}
 
       {/* Infographic Modal */}
-      {selectedInfographic && infographicPaths[selectedInfographic.path] && (
+      {selectedInfographic && selectedInfographicPath && (
         <div
           className={styles.modalOverlay}
           onClick={() => setSelectedInfographic(null)}
@@ -803,7 +883,7 @@ export default function AssetsView() {
               <X size={24} />
             </button>
             <video
-              src={infographicPaths[selectedInfographic.path]}
+              src={selectedInfographicPath}
               controls
               autoPlay
               className={styles.modalVideo}

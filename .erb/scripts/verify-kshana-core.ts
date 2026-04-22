@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
@@ -10,8 +12,8 @@ interface VersionMetadata {
   commitDate?: string;
 }
 
-function resolveKshanaInkPath(): string {
-  const configured = process.env['KSHANA_INK_PATH'];
+function resolveKshanaCorePath(): string {
+  const configured = process.env['KSHANA_CORE_PATH'] ?? process.env['KSHANA_INK_PATH'];
   if (configured && configured.trim()) {
     return path.resolve(configured);
   }
@@ -34,15 +36,15 @@ function runGit(repoPath: string, command: string): string | undefined {
   }
 }
 
-function verifyKshanaInk(): void {
-  const kshanaInkPath = resolveKshanaInkPath();
-  const packageJsonPath = path.join(kshanaInkPath, 'package.json');
-  const serverCliPath = path.join(kshanaInkPath, 'dist', 'server', 'cli.cjs');
+function verifyKshanaCore(): void {
+  const kshanaCorePath = resolveKshanaCorePath();
+  const packageJsonPath = path.join(kshanaCorePath, 'package.json');
+  const serverCliPath = path.join(kshanaCorePath, 'dist', 'server', 'cli.cjs');
   const releaseAppPath = webpackPaths.appPath;
   const metadataPath = path.join(releaseAppPath, '.kshana-core-version.json');
 
-  if (!fs.existsSync(kshanaInkPath)) {
-    throw new Error(`kshana-core repo not found at ${kshanaInkPath}`);
+  if (!fs.existsSync(kshanaCorePath)) {
+    throw new Error(`kshana-core repo not found at ${kshanaCorePath}`);
   }
 
   if (!fs.existsSync(packageJsonPath)) {
@@ -61,22 +63,23 @@ function verifyKshanaInk(): void {
 
   const metadata: VersionMetadata = {
     packageVersion: packageJson.version,
-    gitBranch: runGit(kshanaInkPath, 'git rev-parse --abbrev-ref HEAD'),
-    gitCommit: runGit(kshanaInkPath, 'git rev-parse HEAD'),
-    commitDate: runGit(kshanaInkPath, 'git log -1 --format=%cI'),
+    gitBranch: runGit(kshanaCorePath, 'git rev-parse --abbrev-ref HEAD'),
+    gitCommit: runGit(kshanaCorePath, 'git rev-parse HEAD'),
+    commitDate: runGit(kshanaCorePath, 'git log -1 --format=%cI'),
   };
 
   fs.mkdirSync(releaseAppPath, { recursive: true });
   fs.writeFileSync(`${metadataPath}`, `${JSON.stringify(metadata, null, 2)}\n`);
-  console.log(`✓ Verified kshana-core at ${kshanaInkPath}`);
+  console.log(`✓ Verified kshana-core at ${kshanaCorePath}`);
   console.log(`✓ Wrote bundled version metadata to ${metadataPath}`);
 }
 
 try {
-  verifyKshanaInk();
+  verifyKshanaCore();
 } catch (error) {
   console.error(
     error instanceof Error ? error.message : 'Failed to verify kshana-core',
   );
   process.exit(1);
 }
+

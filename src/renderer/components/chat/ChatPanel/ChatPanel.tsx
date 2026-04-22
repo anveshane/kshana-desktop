@@ -344,6 +344,7 @@ export default function ChatPanel() {
   );
   const connectionBannerRef = useRef<{ key: string; at: number } | null>(null);
   const currentProjectDirectoryRef = useRef<string | null>(null);
+  const lastMissingProjectRootWarningAtRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   const chatRestoreStateRef = useRef<ChatRestoreState>({
     projectDirectory: null,
@@ -1800,6 +1801,35 @@ export default function ChatPanel() {
         );
       };
 
+      const getAgentFileOpMeta = () => {
+        const projectRoot = currentProjectDirectoryRef.current;
+        if (!projectRoot) return null;
+        return {
+          opId,
+          source: 'agent_ws' as const,
+          projectRoot,
+        };
+      };
+
+      const rejectMissingProjectRoot = (
+        responseType: string,
+        responseRequestId: string,
+      ) => {
+        const reason =
+          'No active project root is available for backend file operations.';
+        sendRequestResponse(
+          responseType,
+          responseRequestId,
+          { success: false },
+          reason,
+        );
+        const now = Date.now();
+        if (now - lastMissingProjectRootWarningAtRef.current > 2000) {
+          lastMissingProjectRootWarningAtRef.current = now;
+          console.warn('[ChatPanel] Rejected backend file operation:', reason);
+        }
+      };
+
       const getWirePath = (pathValue: unknown): string | null => {
         if (typeof pathValue !== 'string') return null;
         const trimmed = pathValue.trim();
@@ -3078,11 +3108,13 @@ export default function ChatPanel() {
             appendSystemMessage(`⚠️ ${reason}`, 'error');
             break;
           }
+          const fileOpMeta = getAgentFileOpMeta();
+          if (!fileOpMeta) {
+            rejectMissingProjectRoot('file_read_response', requestId);
+            break;
+          }
           void window.electron.project
-            .readFileGuarded(requestedPath, {
-              opId,
-              source: 'agent_ws',
-            })
+            .readFileGuarded(requestedPath, fileOpMeta)
             .then((content) => {
               sendRequestResponse('file_read_response', requestId, { content });
             })
@@ -3108,11 +3140,13 @@ export default function ChatPanel() {
             appendSystemMessage(`⚠️ ${reason}`, 'error');
             break;
           }
+          const fileOpMeta = getAgentFileOpMeta();
+          if (!fileOpMeta) {
+            rejectMissingProjectRoot('file_list_response', requestId);
+            break;
+          }
           void window.electron.project
-            .listDirectory(requestedPath, {
-              opId,
-              source: 'agent_ws',
-            })
+            .listDirectory(requestedPath, fileOpMeta)
             .then((entries) => {
               sendRequestResponse('file_list_response', requestId, { entries });
             })
@@ -3137,11 +3171,13 @@ export default function ChatPanel() {
             });
             break;
           }
+          const fileOpMeta = getAgentFileOpMeta();
+          if (!fileOpMeta) {
+            rejectMissingProjectRoot('file_exists_response', requestId);
+            break;
+          }
           void window.electron.project
-            .statPath(requestedPath, {
-              opId,
-              source: 'agent_ws',
-            })
+            .statPath(requestedPath, fileOpMeta)
             .then(() => {
               sendRequestResponse('file_exists_response', requestId, {
                 exists: true,
@@ -3179,11 +3215,13 @@ export default function ChatPanel() {
             appendSystemMessage(`⚠️ ${reason}`, 'error');
             break;
           }
+          const fileOpMeta = getAgentFileOpMeta();
+          if (!fileOpMeta) {
+            rejectMissingProjectRoot('file_stat_response', requestId);
+            break;
+          }
           void window.electron.project
-            .statPath(requestedPath, {
-              opId,
-              source: 'agent_ws',
-            })
+            .statPath(requestedPath, fileOpMeta)
             .then((stat) => {
               sendRequestResponse('file_stat_response', requestId, stat);
             })
@@ -3209,11 +3247,13 @@ export default function ChatPanel() {
             appendSystemMessage(`⚠️ ${reason}`, 'error');
             break;
           }
+          const fileOpMeta = getAgentFileOpMeta();
+          if (!fileOpMeta) {
+            rejectMissingProjectRoot('file_buffer_response', requestId);
+            break;
+          }
           void window.electron.project
-            .readFileBufferGuarded(requestedPath, {
-              opId,
-              source: 'agent_ws',
-            })
+            .readFileBufferGuarded(requestedPath, fileOpMeta)
             .then((base64Data) => {
               sendRequestResponse('file_buffer_response', requestId, {
                 data: base64Data,
@@ -3272,11 +3312,13 @@ export default function ChatPanel() {
             break;
           }
           if (filePath && fileContent !== undefined) {
+            const fileOpMeta = getAgentFileOpMeta();
+            if (!fileOpMeta) {
+              rejectMissingProjectRoot('file_write_ack', fileWriteRequestId);
+              break;
+            }
             window.electron.project
-              .writeFile(filePath, fileContent, {
-                opId,
-                source: 'agent_ws',
-              })
+              .writeFile(filePath, fileContent, fileOpMeta)
               .then(() => {
                 if (fileWriteRequestId) {
                   sendRequestResponse('file_write_ack', fileWriteRequestId, {
@@ -3355,11 +3397,13 @@ export default function ChatPanel() {
             break;
           }
           if (binPath && binContent) {
+            const fileOpMeta = getAgentFileOpMeta();
+            if (!fileOpMeta) {
+              rejectMissingProjectRoot('file_write_ack', fileWriteRequestId);
+              break;
+            }
             window.electron.project
-              .writeFileBinary(binPath, binContent, {
-                opId,
-                source: 'agent_ws',
-              })
+              .writeFileBinary(binPath, binContent, fileOpMeta)
               .then(() => {
                 if (fileWriteRequestId) {
                   sendRequestResponse('file_write_ack', fileWriteRequestId, {
@@ -3441,11 +3485,13 @@ export default function ChatPanel() {
             break;
           }
           if (mkdirPath) {
+            const fileOpMeta = getAgentFileOpMeta();
+            if (!fileOpMeta) {
+              rejectMissingProjectRoot('file_write_ack', mkdirRequestId);
+              break;
+            }
             window.electron.project
-              .mkdir(mkdirPath, {
-                opId,
-                source: 'agent_ws',
-              })
+              .mkdir(mkdirPath, fileOpMeta)
               .then(() => {
                 if (mkdirRequestId) {
                   sendRequestResponse('file_write_ack', mkdirRequestId, {
@@ -3519,11 +3565,13 @@ export default function ChatPanel() {
             break;
           }
           if (rmPath) {
+            const fileOpMeta = getAgentFileOpMeta();
+            if (!fileOpMeta) {
+              rejectMissingProjectRoot('file_write_ack', rmRequestId);
+              break;
+            }
             window.electron.project
-              .delete(rmPath, {
-                opId,
-                source: 'agent_ws',
-              })
+              .delete(rmPath, fileOpMeta)
               .then(() => {
                 if (rmRequestId) {
                   sendRequestResponse('file_write_ack', rmRequestId, {
@@ -3627,10 +3675,17 @@ export default function ChatPanel() {
                   );
                 }
                 // eslint-disable-next-line no-await-in-loop
-                await window.electron.project.writeFile(opPath, opContent, {
-                  opId,
-                  source: 'agent_ws',
-                });
+                const fileOpMeta = getAgentFileOpMeta();
+                if (!fileOpMeta) {
+                  throw new Error(
+                    'No active project root is available for backend file operations.',
+                  );
+                }
+                await window.electron.project.writeFile(
+                  opPath,
+                  opContent,
+                  fileOpMeta,
+                );
               }
               sendRequestResponse('file_write_ack', requestId, {
                 success: true,

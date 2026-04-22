@@ -67,6 +67,9 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const [state, setState] = useState<WorkspaceState>(initialState);
   const projectSwitchGuardsRef = useRef<Set<ProjectSwitchGuard>>(new Set());
   const currentProjectDirectoryRef = useRef<string | null>(null);
+  const fileTreeRefreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const refreshRecentProjects = useCallback(async () => {
     try {
@@ -90,21 +93,55 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   useEffect(() => {
     if (!state.projectDirectory) return undefined;
 
-    const unsubscribe = window.electron.project.onFileChange(() => {
-      // Refresh file tree on any change
-      // Refresh file tree on any change - shallow refresh of root
-      window.electron.project
-        .readTree(state.projectDirectory!, 1)
-        .then((tree: FileNode) => {
-          // TODO: Ideally we should merge with existing tree to preserve expanded folders
-          // For now, we just refresh root to prevent freezing, UI will need to re-expand
-          setState((prev) => ({ ...prev, fileTree: tree }));
-          return tree;
-        })
-        .catch(() => {});
+    const projectRoot = normalizeProjectPath(state.projectDirectory);
+
+    const unsubscribe = window.electron.project.onFileChange((event) => {
+      const eventPath = event?.path ? event.path.replace(/\\/g, '/') : '';
+      if (eventPath && !eventPath.startsWith(`${projectRoot}/`)) {
+        return;
+      }
+
+      if (
+        eventPath.endsWith('/.DS_Store') ||
+        eventPath.includes('/.git/') ||
+        eventPath.includes('/node_modules/')
+      ) {
+        return;
+      }
+
+      if (fileTreeRefreshDebounceRef.current) {
+        clearTimeout(fileTreeRefreshDebounceRef.current);
+      }
+
+      fileTreeRefreshDebounceRef.current = setTimeout(() => {
+        fileTreeRefreshDebounceRef.current = null;
+
+        const start =
+          process.env.NODE_ENV === 'development' ? performance.now() : 0;
+
+        window.electron.project
+          .readTree(projectRoot, 1)
+          .then((tree: FileNode) => {
+            if (process.env.NODE_ENV === 'development') {
+              // eslint-disable-next-line no-console
+              console.debug(
+                `[perf][WorkspaceContext] readTree(root,1) ${(performance.now() - start).toFixed(1)}ms`,
+              );
+            }
+            setState((prev) => ({ ...prev, fileTree: tree }));
+            return tree;
+          })
+          .catch(() => {});
+      }, 500);
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (fileTreeRefreshDebounceRef.current) {
+        clearTimeout(fileTreeRefreshDebounceRef.current);
+        fileTreeRefreshDebounceRef.current = null;
+      }
+    };
   }, [state.projectDirectory]);
 
   const registerProjectSwitchGuard = useCallback(
