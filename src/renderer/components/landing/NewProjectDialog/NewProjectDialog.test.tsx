@@ -4,14 +4,11 @@ import NewProjectDialog from './NewProjectDialog';
 
 const mockCreateProject =
   jest.fn<
-    (
-      directory: string,
-      name: string,
-      description?: string,
-    ) => Promise<boolean>
+    (directory: string, name: string, description?: string) => Promise<boolean>
   >();
 const mockCloseProject = jest.fn<() => void>();
 const mockOpenProject = jest.fn<(path: string) => Promise<void>>();
+let mockBackendMode: 'local' | 'cloud' = 'local';
 
 jest.mock('../../../contexts/ProjectContext', () => ({
   useProject: () => ({
@@ -28,6 +25,14 @@ jest.mock('../../../contexts/WorkspaceContext', () => ({
   }),
 }));
 
+jest.mock('../../../contexts/AppSettingsContext', () => ({
+  useAppSettings: () => ({
+    settings: {
+      backendMode: mockBackendMode,
+    },
+  }),
+}));
+
 describe('NewProjectDialog', () => {
   const mockSelectDirectory = jest.fn<() => Promise<string | null>>();
   const mockCreateFolder =
@@ -41,10 +46,9 @@ describe('NewProjectDialog', () => {
   const mockCheckFileExists = jest.fn<(path: string) => Promise<boolean>>();
   const mockAccountGet = jest.fn<() => Promise<unknown>>();
   const mockAccountSignIn = jest.fn<() => Promise<{ opened: boolean }>>();
-  const mockAccountOnChange =
-    jest.fn<(callback: (account: unknown) => void) => () => void>(
-      () => () => {},
-    );
+  const mockAccountOnChange = jest.fn<
+    (callback: (account: unknown) => void) => () => void
+  >(() => () => {});
 
   beforeEach(() => {
     mockCreateProject.mockReset();
@@ -57,6 +61,7 @@ describe('NewProjectDialog', () => {
     mockAccountSignIn.mockReset();
     mockAccountOnChange.mockReset();
     mockAccountOnChange.mockReturnValue(() => {});
+    mockBackendMode = 'local';
 
     mockCreateProject.mockResolvedValue(true);
     mockOpenProject.mockResolvedValue(undefined);
@@ -90,9 +95,11 @@ describe('NewProjectDialog', () => {
     mockSelectDirectory.mockResolvedValue(path);
     await waitFor(() => {
       expect(
-        (screen.getByRole('button', {
-          name: 'Choose Folder',
-        }) as HTMLButtonElement).disabled,
+        (
+          screen.getByRole('button', {
+            name: 'Choose Folder',
+          }) as HTMLButtonElement
+        ).disabled,
       ).toBe(false);
     });
     fireEvent.click(screen.getByRole('button', { name: 'Choose Folder' }));
@@ -159,7 +166,37 @@ describe('NewProjectDialog', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('requires Kshana Cloud sign-in before creating a project', async () => {
+  it('allows unsigned users to create projects in local mode', async () => {
+    mockAccountGet.mockResolvedValue(null);
+    mockCheckFileExists.mockResolvedValue(false);
+
+    const onClose = jest.fn();
+    render(<NewProjectDialog isOpen onClose={onClose} />);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Sign in to Kshana Cloud')).toBeNull();
+    });
+
+    fireEvent.change(screen.getByLabelText('Project name'), {
+      target: { value: 'demo' },
+    });
+    await pickFolder('/projects');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
+
+    await waitFor(() => {
+      expect(mockCreateProject).toHaveBeenCalledWith(
+        '/projects/demo',
+        'demo',
+        undefined,
+      );
+    });
+    expect(mockOpenProject).toHaveBeenCalledWith('/projects/demo');
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('requires Kshana Cloud sign-in before creating a project in cloud mode', async () => {
+    mockBackendMode = 'cloud';
     mockAccountGet.mockResolvedValue(null);
     mockCheckFileExists.mockResolvedValue(false);
 
@@ -170,14 +207,18 @@ describe('NewProjectDialog', () => {
     });
 
     expect(
-      (screen.getByRole('button', {
-        name: 'Sign in with Kshana',
-      }) as HTMLButtonElement).disabled,
+      (
+        screen.getByRole('button', {
+          name: 'Sign in with Kshana',
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(false);
     expect(
-      (screen.getByRole('button', {
-        name: 'Sign in to create',
-      }) as HTMLButtonElement).disabled,
+      (
+        screen.getByRole('button', {
+          name: 'Sign in to create',
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(true);
     expect(mockCreateProject).not.toHaveBeenCalled();
   });

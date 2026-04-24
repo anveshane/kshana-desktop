@@ -29,12 +29,27 @@ export async function refreshBalance(cloudUrl: string): Promise<number | null> {
   const account = getAccount();
   if (!account) return null;
   try {
+    // eslint-disable-next-line compat/compat
     const res = await fetch(`${cloudUrl}/api/credits/balance`, {
       headers: { Authorization: `Bearer ${account.token}` },
     });
+    if (res.status === 401) {
+      clearAccount();
+      return null;
+    }
     if (!res.ok) return null;
-    const { balance } = await res.json() as { balance: number };
-    setAccount({ ...account, credits: balance });
+    const {
+      balance,
+      planId,
+      planLabel,
+      subscriptionStatus,
+    } = (await res.json()) as {
+      balance: number;
+      planId?: string;
+      planLabel?: string;
+      subscriptionStatus?: string;
+    };
+    setAccount({ ...account, credits: balance, planId, planLabel, subscriptionStatus });
     return balance;
   } catch {
     return null;

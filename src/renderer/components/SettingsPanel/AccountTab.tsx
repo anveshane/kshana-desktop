@@ -7,8 +7,15 @@ export default function AccountTab() {
   const [loading, setLoading] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
+  const [billingUrl, setBillingUrl] = useState<string>('');
 
   const loadAccount = useCallback(async () => {
+    if (!window.electron.account) {
+      setAccount(null);
+      setLoading(false);
+      return;
+    }
     const info = await window.electron.account.get();
     setAccount(info);
     setLoading(false);
@@ -16,6 +23,13 @@ export default function AccountTab() {
 
   useEffect(() => {
     loadAccount();
+    if (!window.electron.account) {
+      return undefined;
+    }
+    window.electron.account
+      .getBillingUrl()
+      .then(setBillingUrl)
+      .catch(() => setBillingUrl(''));
     // Subscribe to changes triggered by deep-link callback
     return window.electron.account.onChange((info) => {
       setAccount(info);
@@ -23,6 +37,7 @@ export default function AccountTab() {
   }, [loadAccount]);
 
   const handleSignIn = async () => {
+    setRefreshError('');
     setSigningIn(true);
     await window.electron.account.signIn();
     // The deep-link handler in main.ts will fire account:changed which updates state
@@ -30,15 +45,27 @@ export default function AccountTab() {
   };
 
   const handleSignOut = async () => {
+    setRefreshError('');
     await window.electron.account.signOut();
     setAccount(null);
   };
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await window.electron.account.refreshBalance();
+    const result = await window.electron.account.refreshBalance();
     await loadAccount();
+    if (account && result.balance === null) {
+      setRefreshError(
+        'Your desktop session expired. Sign in again to refresh credits.',
+      );
+    } else {
+      setRefreshError('');
+    }
     setRefreshing(false);
+  };
+
+  const handleOpenBilling = async () => {
+    await window.electron.account.openBilling();
   };
 
   if (loading) {
@@ -57,16 +84,22 @@ export default function AccountTab() {
         <div className={styles.sectionHeader}>
           <h3>Kshana Cloud Account</h3>
           <p>
-            Sign in to sync sessions, track credits, and buy more when you need them.
+            Sign in to sync sessions, track credits, and buy more when you need
+            them.
           </p>
         </div>
 
         <div className={styles.infoCard} style={{ marginTop: '1.25rem' }}>
           <div className={styles.infoTitle}>Not signed in</div>
           <p className={styles.infoText}>
-            Clicking &quot;Sign in&quot; opens your browser to complete sign-in securely.
-            The desktop app will be authorised automatically.
+            Clicking &quot;Sign in&quot; opens your browser to complete sign-in
+            securely. The desktop app will be authorised automatically.
           </p>
+          {refreshError ? (
+            <p className={styles.error} style={{ marginTop: '0.75rem' }}>
+              {refreshError}
+            </p>
+          ) : null}
           <button
             type="button"
             className={styles.submitButton}
@@ -87,6 +120,9 @@ export default function AccountTab() {
     .slice(0, 2)
     .join('')
     .toUpperCase();
+  const billingLabel = billingUrl
+    ? billingUrl.replace(/^https?:\/\//, '').replace(/\/$/, '')
+    : 'billing';
 
   return (
     <div>
@@ -98,7 +134,9 @@ export default function AccountTab() {
       {/* Profile card */}
       <div className={styles.statusCard} style={{ marginTop: '1.25rem' }}>
         <div className={styles.statusTopRow}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}
+          >
             <div
               style={{
                 width: '2.5rem',
@@ -118,7 +156,13 @@ export default function AccountTab() {
             </div>
             <div>
               {account.name && (
-                <div style={{ fontWeight: 600, color: 'var(--foreground)', fontSize: '0.9rem' }}>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    color: 'var(--foreground)',
+                    fontSize: '0.9rem',
+                  }}
+                >
                   {account.name}
                 </div>
               )}
@@ -141,6 +185,27 @@ export default function AccountTab() {
       <div style={{ marginTop: '1.25rem' }}>
         <div
           style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+            gap: '0.75rem',
+            marginBottom: '1rem',
+          }}
+        >
+          <div className={styles.infoCard}>
+            <div className={styles.infoTitle}>Current Plan</div>
+            <p className={styles.infoText}>
+              {account.planLabel || account.planId || 'Free'}
+            </p>
+          </div>
+          <div className={styles.infoCard}>
+            <div className={styles.infoTitle}>Subscription</div>
+            <p className={styles.infoText}>
+              {account.subscriptionStatus || 'active'}
+            </p>
+          </div>
+        </div>
+        <div
+          style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -148,7 +213,13 @@ export default function AccountTab() {
           }}
         >
           <span
-            style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--graphite-350)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+            style={{
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              color: 'var(--graphite-350)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+            }}
           >
             Credit Balance
           </span>
@@ -189,19 +260,36 @@ export default function AccountTab() {
         </div>
         <p className={styles.infoText} style={{ marginTop: '0.5rem' }}>
           Buy more credits at{' '}
-          <a
-            href="https://kshana.app/billing"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: 'var(--signal-cyan)' }}
+          <button
+            type="button"
+            onClick={handleOpenBilling}
+            style={{
+              color: 'var(--signal-cyan)',
+              background: 'transparent',
+              border: 0,
+              padding: 0,
+              cursor: 'pointer',
+              font: 'inherit',
+            }}
           >
-            kshana.app/billing
-          </a>
+            {billingLabel}
+          </button>
         </p>
+        {refreshError ? (
+          <p className={styles.error} style={{ marginTop: '0.5rem' }}>
+            {refreshError}
+          </p>
+        ) : null}
       </div>
 
       {/* Sign out */}
-      <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+      <div
+        style={{
+          marginTop: '1.5rem',
+          paddingTop: '1rem',
+          borderTop: '1px solid rgba(255,255,255,0.08)',
+        }}
+      >
         <button
           type="button"
           className={styles.cancelButton}

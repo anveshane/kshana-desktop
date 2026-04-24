@@ -64,6 +64,7 @@ describe('SettingsPanel', () => {
       );
     });
 
+    fireEvent.click(screen.getByText('Appearance'));
     fireEvent.click(screen.getByText('Deep Forest & Gold'));
     expect(onThemeChange).toHaveBeenCalledWith('deep-forest-gold');
   });
@@ -92,11 +93,13 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(screen.getByLabelText('Cloud'));
 
-    await waitFor(() =>
-      expect(screen.getByDisplayValue('https://cloud.example.com')).toBeInTheDocument(),
-    );
     expect(screen.queryByLabelText('ComfyUI URL')).not.toBeInTheDocument();
     expect(screen.getByText('Managed Cloud Backend')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'The cloud backend URL is injected at release time and is not editable in the desktop app.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('keeps the status card on the current backend until save is triggered', async () => {
@@ -121,11 +124,8 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(screen.getByLabelText('Cloud'));
 
-    await waitFor(() =>
-      expect(screen.getByDisplayValue('https://cloud.example.com')).toBeInTheDocument(),
-    );
-
     expect(screen.getByText('Connected to Local')).toBeInTheDocument();
     expect(screen.queryByText('http://127.0.0.1:8001')).not.toBeInTheDocument();
+    expect(screen.getByText('Managed Cloud Backend')).toBeInTheDocument();
   });
 });

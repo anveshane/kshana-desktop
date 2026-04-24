@@ -346,6 +346,12 @@ export default function ChatPanel() {
   const currentProjectDirectoryRef = useRef<string | null>(null);
   const lastMissingProjectRootWarningAtRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
+  const cloudJobRef = useRef<{
+    id: string;
+    baseUrl: string;
+    token: string;
+    completed: boolean;
+  } | null>(null);
   const chatRestoreStateRef = useRef<ChatRestoreState>({
     projectDirectory: null,
     status: 'idle',
@@ -358,6 +364,87 @@ export default function ChatPanel() {
   const phaseDisplayNameRef = useRef<string | undefined>(undefined);
   const hasUserSentMessageRef = useRef(false);
   const isTaskRunningRef = useRef(false);
+
+  const createCloudJobForSession = useCallback(
+    async (baseUrl: string, settings: AppSettings | null) => {
+      if (settings?.backendMode !== 'cloud') {
+        cloudJobRef.current = null;
+        return null;
+      }
+
+      const account = await window.electron.account.get().catch(() => null);
+      if (!account?.token) {
+        throw new Error('Sign in to Kshana Cloud before using cloud mode.');
+      }
+
+      const response = await fetch(`${baseUrl}/api/cloud/jobs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${account.token}`,
+        },
+        body: JSON.stringify({
+          type: 'project',
+          seconds: selectedDuration ?? 60,
+          sessionId: sessionIdRef.current,
+          metadata: {
+            projectDirectory,
+            selectedTemplateId,
+            selectedStyleId,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(
+          typeof data.error === 'string'
+            ? data.error
+            : 'Could not create cloud job.',
+        );
+      }
+
+      const data = (await response.json()) as { cloudJobId: string };
+      cloudJobRef.current = {
+        id: data.cloudJobId,
+        baseUrl,
+        token: account.token,
+        completed: false,
+      };
+      return cloudJobRef.current;
+    },
+    [projectDirectory, selectedDuration, selectedStyleId, selectedTemplateId],
+  );
+
+  const settleCloudJob = useCallback(
+    async (status: 'complete' | 'fail', details?: Record<string, unknown>) => {
+      const cloudJob = cloudJobRef.current;
+      if (!cloudJob || cloudJob.completed) {
+        return;
+      }
+
+      cloudJob.completed = true;
+      const endpoint =
+        status === 'complete'
+          ? `/api/cloud/jobs/${cloudJob.id}/complete`
+          : `/api/cloud/jobs/${cloudJob.id}/fail`;
+
+      try {
+        await fetch(`${cloudJob.baseUrl}${endpoint}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${cloudJob.token}`,
+          },
+          body: JSON.stringify(details ?? {}),
+        });
+        await window.electron.account.refreshBalance().catch(() => null);
+      } catch (error) {
+        console.warn('[ChatPanel] Failed to settle cloud job:', error);
+      }
+    },
+    [],
+  );
   const isStopPendingRef = useRef(false);
   const autonomousModeRef = useRef(false);
   const supportsProjectStateSyncRef = useRef(true);
@@ -2459,6 +2546,10 @@ export default function ChatPanel() {
             setAgentStatus('completed');
             setStatusMessage('Completed');
             setIsTaskRunning(false);
+            void settleCloudJob('complete', {
+              coreReference: sessionIdRef.current,
+              metadata: { status: responseStatus },
+            });
             if (isStopPendingRef.current) {
               resolveStopRequest(true);
             }
@@ -2471,6 +2562,7 @@ export default function ChatPanel() {
             setAgentStatus('waiting');
             setStatusMessage('Task cancelled');
             setIsTaskRunning(false);
+            void settleCloudJob('fail', { reason: 'cancelled' });
             resolveStopRequest(true);
             window.electron.logger.logStatusChange(
               'waiting',
@@ -2481,6 +2573,7 @@ export default function ChatPanel() {
             setAgentStatus('error');
             setStatusMessage('Agent reached maximum iterations');
             setIsTaskRunning(false);
+            void settleCloudJob('fail', { reason: 'max_iterations' });
             if (isStopPendingRef.current) {
               resolveStopRequest(false, 'Agent reached maximum iterations.');
             }
@@ -2497,6 +2590,7 @@ export default function ChatPanel() {
             setAgentStatus('error');
             setStatusMessage('Error');
             setIsTaskRunning(false);
+            void settleCloudJob('fail', { reason: 'error' });
             if (isStopPendingRef.current) {
               resolveStopRequest(false, 'Failed to stop task.');
             }
@@ -3820,6 +3914,10 @@ export default function ChatPanel() {
         (await window.electron.settings.get().catch(() => null));
       if (!appSettingsRef.current && effectiveSettings) {
         appSettingsRef.current = effectiveSettings;
+      }
+      const cloudJob = await createCloudJobForSession(baseUrl, effectiveSettings);
+      if (cloudJob) {
+        url.searchParams.set('cloudJobId', cloudJob.id);
       }
       const comfyUIUrl = resolveComfyUIOverride(effectiveSettings);
       if (comfyUIUrl) {

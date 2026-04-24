@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { FolderOpen, LogIn, Plus, X } from 'lucide-react';
 import { useProject } from '../../../contexts/ProjectContext';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
+import { useAppSettings } from '../../../contexts/AppSettingsContext';
 import type { AccountInfo } from '../../../../shared/settingsTypes';
 import styles from './NewProjectDialog.module.scss';
 
@@ -45,6 +46,7 @@ export default function NewProjectDialog({
     isLoading: isProjectLoading,
   } = useProject();
   const { openProject } = useWorkspace();
+  const { settings } = useAppSettings();
 
   const [projectName, setProjectName] = useState('');
   const [description, setDescription] = useState('');
@@ -93,7 +95,7 @@ export default function NewProjectDialog({
       }
     };
 
-    void load();
+    load();
 
     const unsubscribe = window.electron.account.onChange((info) => {
       if (!cancelled) {
@@ -138,10 +140,11 @@ export default function NewProjectDialog({
     const trimmedDescription = description.trim();
     const normalizedWorkspacePath = normalizePathValue(workspacePath);
 
+    const requiresCloudAccount = settings?.backendMode === 'cloud';
     const cloudAccount = await window.electron.account.get();
-    if (!cloudAccount?.token) {
+    if (requiresCloudAccount && !cloudAccount?.token) {
       setError(
-        'Sign in to Kshana Cloud first so new projects can sync credits and sessions.',
+        'Sign in to Kshana Cloud first to create projects while using cloud mode.',
       );
       return;
     }
@@ -224,12 +227,24 @@ export default function NewProjectDialog({
     openProject,
     projectError,
     projectName,
+    settings?.backendMode,
     workspacePath,
   ]);
 
+  const requiresCloudAccount = settings?.backendMode === 'cloud';
   const cloudConnected = Boolean(account?.token);
   const formLocked =
-    isSubmitting || isProjectLoading || accountLoading || !cloudConnected;
+    isSubmitting ||
+    isProjectLoading ||
+    (requiresCloudAccount && (accountLoading || !cloudConnected));
+  let createButtonLabel = 'Create Project';
+  if (isSubmitting || isProjectLoading) {
+    createButtonLabel = 'Creating...';
+  } else if (requiresCloudAccount && accountLoading) {
+    createButtonLabel = 'Checking account…';
+  } else if (requiresCloudAccount && !cloudConnected) {
+    createButtonLabel = 'Sign in to create';
+  }
 
   if (!isOpen) {
     return null;
@@ -256,13 +271,13 @@ export default function NewProjectDialog({
           </button>
         </div>
 
-        {!accountLoading && !cloudConnected ? (
+        {!accountLoading && !cloudConnected && requiresCloudAccount ? (
           <div className={styles.cloudNotice}>
             <p className={styles.cloudNoticeTitle}>Sign in to Kshana Cloud</p>
             <p className={styles.cloudNoticeText}>
-              New projects need an active cloud account for credits and session
-              sync. Sign in below — your browser will open to log you in, then
-              you can finish creating the project here.
+              Cloud mode needs an active account for credits and session sync.
+              Sign in below — your browser will open to log you in, then you can
+              finish creating the project here.
             </p>
             <button
               type="button"
@@ -337,13 +352,7 @@ export default function NewProjectDialog({
             disabled={formLocked}
           >
             <Plus size={15} />
-            {isSubmitting || isProjectLoading
-              ? 'Creating...'
-              : accountLoading
-                ? 'Checking account…'
-                : !cloudConnected
-                  ? 'Sign in to create'
-                  : 'Create Project'}
+            {createButtonLabel}
           </button>
         </div>
       </div>

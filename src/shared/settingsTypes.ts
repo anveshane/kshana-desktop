@@ -1,10 +1,6 @@
 export type ComfyUIMode = 'inherit' | 'custom';
 export type BackendMode = 'local' | 'cloud';
-export type LLMProvider =
-  | 'lmstudio'
-  | 'gemini'
-  | 'openai'
-  | 'openrouter';
+export type LLMProvider = 'lmstudio' | 'gemini' | 'openai' | 'openrouter';
 export type ThemeId =
   | 'studio-neutral'
   | 'deep-forest-gold'
@@ -19,7 +15,13 @@ export interface AccountInfo {
   name?: string | null;
   /** Current credit balance (cached; call refreshBalance() to update) */
   credits: number;
-  /** Signed desktop JWT — 30-day TTL */
+  /** Current cloud plan id from Kshana Website. */
+  planId?: string;
+  /** Human-readable current cloud plan label. */
+  planLabel?: string;
+  /** Current cloud subscription status. */
+  subscriptionStatus?: string;
+  /** Signed desktop JWT. The website controls the TTL. */
   token: string;
 }
 

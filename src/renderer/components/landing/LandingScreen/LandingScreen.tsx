@@ -331,6 +331,9 @@ export default function LandingScreen() {
 
         <div className={styles.sidebarSection}>
           <p className={styles.sectionLabel}>Quick Actions</p>
+          <div className={styles.modeBadge}>
+            {settings?.backendMode === 'cloud' ? 'Cloud Mode' : 'Local Mode'}
+          </div>
           <button
             type="button"
             className={styles.newProjectButton}

@@ -11,6 +11,7 @@ import './utils/bootstrapRemotionRuntime';
  */
 import path from 'path';
 import fs from 'fs/promises';
+import { randomUUID } from 'crypto';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import log from 'electron-log';
 import { autoUpdater } from 'electron-updater';
@@ -45,6 +46,7 @@ import {
   clearAccount,
   refreshBalance,
 } from './accountManager';
+import { parseDesktopAuthToken } from './desktopAuthToken';
 import fileSystemManager from './fileSystemManager';
 import { remotionManager } from './remotionManager';
 import { generateWordCaptions } from './services/wordCaptionService';
@@ -100,6 +102,7 @@ if (app.isPackaged) {
 
 let mainWindow: BrowserWindow | null = null;
 const DEFAULT_BACKEND_SERVER_URL = 'http://localhost:8001';
+let pendingDesktopAuthState: string | null = null;
 let appUpdateStatus: AppUpdateStatus = {
   phase: 'idle',
   message: 'No update check yet',
@@ -175,18 +178,20 @@ async function resolveKshanaWebsiteUrl(): Promise<string> {
   return 'http://localhost:3000';
 }
 
+async function resolveKshanaWebsitePath(pathname: string): Promise<string> {
+  const websiteBase = await resolveKshanaWebsiteUrl();
+  return `${websiteBase}${pathname.startsWith('/') ? pathname : `/${pathname}`}`;
+}
+
 async function resolveCloudBackendServerUrl(): Promise<string> {
-  const runtimeConfigUrl = await getRuntimeConfigCloudServerUrl();
-  if (runtimeConfigUrl) {
-    return runtimeConfigUrl;
-  }
+  const websiteUrl = await resolveKshanaWebsiteUrl();
+  if (websiteUrl) return websiteUrl;
 
-  const legacyStoredUrl = normalizeServerUrl(getStoredServerUrl());
-  if (legacyStoredUrl) {
-    return legacyStoredUrl;
-  }
-
-  return DEFAULT_BACKEND_SERVER_URL;
+  return (
+    (await getRuntimeConfigCloudServerUrl()) ||
+    normalizeServerUrl(getStoredServerUrl()) ||
+    DEFAULT_BACKEND_SERVER_URL
+  );
 }
 
 type GuardedFileOp =
@@ -358,6 +363,13 @@ ipcMain.handle(
   async (_event, config?: ServerConnectionConfig): Promise<BackendState> => {
     try {
       const settings = getSettings();
+      if (settings.backendMode === 'cloud' && !getAccount()?.token) {
+        return {
+          status: 'error',
+          mode: 'cloud',
+          message: 'Sign in to Kshana Cloud before using the cloud backend.',
+        };
+      }
       const resolvedCloudServerUrl =
         config?.serverUrl || (await resolveCloudBackendServerUrl());
       return await backendManager.start(settings, resolvedCloudServerUrl);
@@ -376,6 +388,13 @@ ipcMain.handle(
   async (_event, config?: ServerConnectionConfig) => {
     try {
       const settings = getSettings();
+      if (settings.backendMode === 'cloud' && !getAccount()?.token) {
+        return {
+          status: 'error',
+          mode: 'cloud',
+          message: 'Sign in to Kshana Cloud before using the cloud backend.',
+        };
+      }
       const resolvedCloudServerUrl =
         config?.serverUrl || (await resolveCloudBackendServerUrl());
       return await backendManager.restart(settings, resolvedCloudServerUrl);
@@ -3384,14 +3403,20 @@ async function handleDeepLink(url: string): Promise<void> {
     if (parsed.hostname !== 'auth') return;
 
     const token = parsed.searchParams.get('token');
+    const state = parsed.searchParams.get('state');
     if (!token) return;
+    if (!state || state !== pendingDesktopAuthState) {
+      log.warn('[Account] Rejected desktop sign-in with invalid state');
+      return;
+    }
 
-    // Decode JWT payload without verifying (trust comes from HTTPS + state)
-    const parts = token.split('.');
-    if (parts.length !== 3) return;
-    const payload = JSON.parse(
-      Buffer.from(parts[1], 'base64url').toString('utf-8'),
-    ) as { sub?: string; email?: string; name?: string };
+    const payload = parseDesktopAuthToken(token);
+    if (!payload) {
+      log.warn('[Account] Rejected malformed or expired desktop token');
+      return;
+    }
+
+    pendingDesktopAuthState = null;
 
     setAccount({
       userId: payload.sub ?? '',
@@ -3438,9 +3463,10 @@ ipcMain.handle('account:get', () => {
 
 ipcMain.handle('account:sign-in', async () => {
   // Generate a random state token for CSRF protection
-  const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const state = randomUUID();
+  pendingDesktopAuthState = state;
   const websiteBase = await resolveKshanaWebsiteUrl();
-  const url = `${websiteBase}/auth/desktop?state=${state}`;
+  const url = `${websiteBase}/auth/desktop?state=${encodeURIComponent(state)}`;
   await shell.openExternal(url);
   return { opened: true };
 });
@@ -3456,6 +3482,16 @@ ipcMain.handle('account:refresh-balance', async () => {
   const balance = await refreshBalance(websiteBase);
   mainWindow?.webContents.send('account:changed');
   return { balance };
+});
+
+ipcMain.handle('account:get-billing-url', async () => {
+  return resolveKshanaWebsitePath('/billing');
+});
+
+ipcMain.handle('account:open-billing', async () => {
+  const url = await resolveKshanaWebsitePath('/billing');
+  await shell.openExternal(url);
+  return { opened: true, url };
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
