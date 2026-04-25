@@ -1,4 +1,3 @@
 {
-  "cloudServerUrl": "https://your-kshana-core-or-agent-host.example",
   "kshanaWebsiteUrl": "https://your-nextjs-site.example"
 }

@@ -531,6 +531,13 @@
   font-size: $font-size-sm;
 }
 
+.warningText {
+  margin: $spacing-sm 0 0;
+  color: $color-warning;
+  font-size: $font-size-sm;
+  line-height: 1.5;
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;

@@ -37,7 +37,6 @@ import backendManager from './backendManager';
 import {
   AppSettings,
   getSettings,
-  getStoredServerUrl,
   updateSettings,
 } from './settingsManager';
 import {
@@ -101,7 +100,6 @@ if (app.isPackaged) {
 }
 
 let mainWindow: BrowserWindow | null = null;
-const DEFAULT_BACKEND_SERVER_URL = 'http://localhost:8001';
 let pendingDesktopAuthState: string | null = null;
 let appUpdateStatus: AppUpdateStatus = {
   phase: 'idle',
@@ -111,8 +109,6 @@ let appUpdateStatus: AppUpdateStatus = {
 };
 
 interface RuntimeConfig {
-  cloudServerUrl?: string;
-  serverUrl?: string;
   /** Kshana website (Next.js): /auth/desktop, /api/credits/balance, etc. */
   kshanaWebsiteUrl?: string;
   /** Alias for kshanaWebsiteUrl */
@@ -160,12 +156,6 @@ function normalizeServerUrl(value?: string): string | undefined {
   }
 }
 
-async function getRuntimeConfigCloudServerUrl(): Promise<string | undefined> {
-  const parsed = await readRuntimeConfigOnce();
-  if (!parsed) return undefined;
-  return normalizeServerUrl(parsed.cloudServerUrl || parsed.serverUrl);
-}
-
 /** Website origin for cloud sign-in and billing APIs (not the agent backend URL). */
 async function resolveKshanaWebsiteUrl(): Promise<string> {
   const fromEnv = normalizeServerUrl(process.env.KSHANA_CLOUD_URL);
@@ -184,14 +174,7 @@ async function resolveKshanaWebsitePath(pathname: string): Promise<string> {
 }
 
 async function resolveCloudBackendServerUrl(): Promise<string> {
-  const websiteUrl = await resolveKshanaWebsiteUrl();
-  if (websiteUrl) return websiteUrl;
-
-  return (
-    (await getRuntimeConfigCloudServerUrl()) ||
-    normalizeServerUrl(getStoredServerUrl()) ||
-    DEFAULT_BACKEND_SERVER_URL
-  );
+  return resolveKshanaWebsiteUrl();
 }
 
 type GuardedFileOp =
@@ -353,8 +336,8 @@ ipcMain.handle(
   'backend:get-connection-info',
   async (): Promise<BackendConnectionInfo> => {
     const settings = getSettings();
-    const cloudServerUrl = await resolveCloudBackendServerUrl();
-    return backendManager.getConnectionInfo(settings, cloudServerUrl);
+    const kshanaWebsiteUrl = await resolveCloudBackendServerUrl();
+    return backendManager.getConnectionInfo(settings, kshanaWebsiteUrl);
   },
 );
 

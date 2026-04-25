@@ -4,6 +4,7 @@ import type {
   BackendState,
 } from '../../../shared/backendTypes';
 import type {
+  AccountInfo,
   AppSettings,
   LLMProvider,
   ThemeId,
@@ -143,6 +144,8 @@ export default function SettingsPanel({
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
   const [backendState, setBackendState] = useState<BackendState | null>(null);
   const [connectionInfo, setConnectionInfo] = useState<BackendConnectionInfo | null>(null);
+  const [account, setAccount] = useState<AccountInfo | null>(null);
+  const [cloudModeWarning, setCloudModeWarning] = useState<string | null>(null);
 
   useEffect(() => {
     setForm(normalizeConnectionSettings(settings));
@@ -191,6 +194,18 @@ export default function SettingsPanel({
     });
   }, [isVisible, refreshConnectionInfo]);
 
+  useEffect(() => {
+    if (!isVisible || !window.electron.account) return undefined;
+
+    window.electron.account.get().then(setAccount).catch(() => setAccount(null));
+    return window.electron.account.onChange((nextAccount) => {
+      setAccount(nextAccount);
+      if (nextAccount) {
+        setCloudModeWarning(null);
+      }
+    });
+  }, [isVisible]);
+
   if (!isVisible) {
     return null;
   }
@@ -199,6 +214,15 @@ export default function SettingsPanel({
     key: keyof AppSettings,
     value: string | number | undefined,
   ) => {
+    if (key === 'backendMode' && value === 'cloud' && !account) {
+      setCloudModeWarning('Sign in to Kshana Cloud before switching to Cloud mode.');
+      return;
+    }
+
+    if (key === 'backendMode') {
+      setCloudModeWarning(null);
+    }
+
     setForm((prev) => ({
       ...prev,
       [key]: value,
@@ -460,6 +484,9 @@ export default function SettingsPanel({
                       <span className={styles.modeOption}>Cloud</span>
                     </label>
                   </div>
+                  {cloudModeWarning && (
+                    <p className={styles.warningText}>{cloudModeWarning}</p>
+                  )}
                 </fieldset>
 
                 {isLocalMode ? (

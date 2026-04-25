@@ -1,7 +1,10 @@
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 jest.mock('react', () => jest.requireActual('react'));
 import SettingsPanel from './SettingsPanel';
+
+const accountGet = jest.fn();
+const accountOnChange = jest.fn();
 
 const baseSettings = {
   backendMode: 'local' as const,
@@ -24,6 +27,11 @@ const baseSettings = {
 
 describe('SettingsPanel', () => {
   beforeEach(() => {
+    accountGet.mockReset();
+    accountOnChange.mockReset();
+    accountGet.mockResolvedValue(null);
+    accountOnChange.mockReturnValue(jest.fn());
+
     Object.defineProperty(window, 'electron', {
       configurable: true,
       value: {
@@ -42,6 +50,18 @@ describe('SettingsPanel', () => {
             },
           }),
           onStateChange: jest.fn(() => jest.fn()),
+        },
+        account: {
+          get: accountGet,
+          signIn: jest.fn().mockResolvedValue({ opened: true }),
+          signOut: jest.fn().mockResolvedValue({ success: true }),
+          refreshBalance: jest.fn().mockResolvedValue({ balance: null }),
+          getBillingUrl: jest.fn().mockResolvedValue('https://kshana.example/billing'),
+          openBilling: jest.fn().mockResolvedValue({
+            opened: true,
+            url: 'https://kshana.example/billing',
+          }),
+          onChange: accountOnChange,
         },
       },
     });
@@ -70,6 +90,13 @@ describe('SettingsPanel', () => {
   });
 
   it('shows local provider fields and switches to read-only cloud details', async () => {
+    accountGet.mockResolvedValue({
+      userId: 'user-1',
+      email: 'user@example.com',
+      credits: 500,
+      token: 'desktop-token',
+    });
+
     await act(async () => {
       render(
         <SettingsPanel
@@ -102,7 +129,40 @@ describe('SettingsPanel', () => {
     ).toBeInTheDocument();
   });
 
+  it('blocks switching to cloud mode when no account is signed in', async () => {
+    await act(async () => {
+      render(
+        <SettingsPanel
+          isOpen
+          settings={baseSettings}
+          onClose={jest.fn()}
+          onThemeChange={jest.fn()}
+          onSaveConnection={jest.fn()}
+          isSavingConnection={false}
+          error={null}
+        />,
+      );
+    });
+
+    fireEvent.click(screen.getByText('Connection'));
+    fireEvent.click(screen.getByLabelText('Cloud'));
+
+    expect(screen.getByLabelText('Local')).toBeChecked();
+    expect(screen.getByLabelText('Cloud')).not.toBeChecked();
+    expect(
+      screen.getByText('Sign in to Kshana Cloud before switching to Cloud mode.'),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('ComfyUI URL')).toBeInTheDocument();
+  });
+
   it('keeps the status card on the current backend until save is triggered', async () => {
+    accountGet.mockResolvedValue({
+      userId: 'user-1',
+      email: 'user@example.com',
+      credits: 500,
+      token: 'desktop-token',
+    });
+
     await act(async () => {
       render(
         <SettingsPanel
