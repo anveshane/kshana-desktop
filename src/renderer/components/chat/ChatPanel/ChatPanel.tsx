@@ -2915,6 +2915,15 @@ export default function ChatPanel() {
           );
           break;
         }
+        case 'usage_fact': {
+          // Usage facts are billed by the website proxy in cloud mode.
+          // Desktop only acknowledges the event so it does not appear as unknown traffic.
+          break;
+        }
+        case 'billing_update': {
+          window.electron.account.refreshBalance().catch(() => null);
+          break;
+        }
         case 'session_timer': {
           setSessionTimer({
             visible: true,
