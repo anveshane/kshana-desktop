@@ -31,6 +31,7 @@
   display: flex;
   align-items: center;
   gap: $spacing-sm;
+  min-width: 0;
 }
 
 .brandIcon {
@@ -54,6 +55,8 @@
   color: $color-text-primary;
   font-size: $font-size-lg;
   font-weight: $font-weight-bold;
+  line-height: $line-height-tight;
+  white-space: nowrap;
 }
 
 .sidebarSection {
@@ -66,14 +69,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
-  border-radius: $radius-md;
+  flex: 0 0 auto;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: $radius-sm;
   border: 1px solid rgba(var(--color-accent-primary-rgb), 0.28);
   background: rgba(var(--color-accent-primary-rgb), 0.1);
   color: $color-text-primary;
-  font-size: $font-size-xs;
+  font-size: 10px;
   font-weight: $font-weight-bold;
-  letter-spacing: 0.6px;
+  line-height: 1;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 

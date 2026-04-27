@@ -89,13 +89,14 @@ describe('SettingsPanel', () => {
     expect(onThemeChange).toHaveBeenCalledWith('deep-forest-gold');
   });
 
-  it('shows local provider fields and switches to read-only cloud details', async () => {
+  it('asks for confirmation before switching to cloud mode', async () => {
     accountGet.mockResolvedValue({
       userId: 'user-1',
       email: 'user@example.com',
       credits: 500,
       token: 'desktop-token',
     });
+    const onSaveConnection = jest.fn().mockResolvedValue(true);
 
     await act(async () => {
       render(
@@ -104,7 +105,7 @@ describe('SettingsPanel', () => {
           settings={baseSettings}
           onClose={jest.fn()}
           onThemeChange={jest.fn()}
-          onSaveConnection={jest.fn()}
+          onSaveConnection={onSaveConnection}
           isSavingConnection={false}
           error={null}
         />,
@@ -120,13 +121,20 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(screen.getByLabelText('Cloud'));
 
-    expect(screen.queryByLabelText('ComfyUI URL')).not.toBeInTheDocument();
-    expect(screen.getByText('Managed Cloud Backend')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'The cloud backend URL is injected at release time and is not editable in the desktop app.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Switch to Cloud' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Local')).toBeChecked();
+    expect(screen.queryByText('Managed Cloud Backend')).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Save & Reconnect'));
+    });
+
+    expect(onSaveConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ backendMode: 'cloud' }),
+    );
+    expect(screen.getByLabelText('Cloud')).toBeChecked();
+    expect(screen.getByLabelText('ComfyUI URL')).toBeDisabled();
+    expect(screen.queryByText('Managed Cloud Backend')).not.toBeInTheDocument();
   });
 
   it('blocks switching to cloud mode when no account is signed in', async () => {
@@ -186,6 +194,7 @@ describe('SettingsPanel', () => {
 
     expect(screen.getByText('Connected to Local')).toBeInTheDocument();
     expect(screen.queryByText('http://127.0.0.1:8001')).not.toBeInTheDocument();
-    expect(screen.getByText('Managed Cloud Backend')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Switch to Cloud' })).toBeInTheDocument();
+    expect(screen.queryByText('Managed Cloud Backend')).not.toBeInTheDocument();
   });
 });

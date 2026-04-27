@@ -195,9 +195,10 @@ export default function LandingScreen() {
         return {
           path: project.path,
           name:
-            metadata?.manifestName ||
+            getProjectNameFromPath(project.path) ||
             project.name ||
-            getProjectNameFromPath(project.path),
+            metadata?.manifestName ||
+            project.path,
           lastOpened: project.lastOpened,
           description: metadata?.description || null,
           sceneCount: metadata?.sceneCount ?? null,
@@ -327,18 +328,17 @@ export default function LandingScreen() {
             <Play size={20} className={styles.playIcon} />
           </div>
           <h1 className={styles.brandTitle}>Kshana Desktop</h1>
+          <div className={styles.modeBadge}>
+            {settings?.backendMode === 'cloud' ? 'Cloud Mode' : 'Local Mode'}
+          </div>
         </div>
 
         <div className={styles.sidebarSection}>
           <p className={styles.sectionLabel}>Quick Actions</p>
-          <div className={styles.modeBadge}>
-            {settings?.backendMode === 'cloud' ? 'Cloud Mode' : 'Local Mode'}
-          </div>
           <button
             type="button"
             className={styles.newProjectButton}
             onClick={handleCreateNewProject}
-            disabled={isLoading || isProjectLoading}
           >
             <Plus size={16} />
             New Project
@@ -415,7 +415,6 @@ export default function LandingScreen() {
                     type="button"
                     className={styles.newProjectButton}
                     onClick={handleCreateNewProject}
-                    disabled={isLoading || isProjectLoading}
                   >
                     <Plus size={16} />
                     Create Project

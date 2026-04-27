@@ -57,8 +57,14 @@ export function useTimelineWebSocket(
 
           connectingRef.current = true;
           const baseUrl = backendState.serverUrl || `http://localhost:${backendState.port || 8001}`;
-          const wsUrl = `${baseUrl.replace(/^http/, 'ws')}/api/v1/ws/chat`;
-          const socket = new WebSocket(wsUrl);
+          const wsUrl = new URL('/api/v1/ws/chat', baseUrl.replace(/^http/, 'ws'));
+          if (backendState.mode === 'cloud') {
+            const account = await window.electron.account.get().catch(() => null);
+            if (account?.token) {
+              wsUrl.searchParams.set('desktopToken', account.token);
+            }
+          }
+          const socket = new WebSocket(wsUrl.toString());
 
           await new Promise<void>((resolve, reject) => {
             socket.onopen = () => {

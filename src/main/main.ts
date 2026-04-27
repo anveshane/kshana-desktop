@@ -30,6 +30,7 @@ import {
   normalizeIncomingPath,
   ProjectFileOpGuardError,
   resolveAndValidateProjectPath,
+  resolveValidationRoot,
 } from './utils/projectFileOpGuard';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
@@ -279,28 +280,16 @@ function throwFileOpError(context: FileOpErrorContext): never {
   throw createIpcFileOpError(errorCode, errorMessage);
 }
 
-function isAgentWireSource(meta?: FileOpMeta): boolean {
-  return meta?.source === 'agent_ws';
-}
-
 function resolveBootstrapValidationRoot(
   activeProjectRoot: string | null,
   fallbackPath: string | null,
   meta?: FileOpMeta,
 ): string | null {
-  if (activeProjectRoot && activeProjectRoot.trim()) {
-    return activeProjectRoot;
-  }
+  return resolveValidationRoot(activeProjectRoot, fallbackPath, meta);
+}
 
-  if (meta?.projectRoot && meta.projectRoot.trim()) {
-    return path.resolve(meta.projectRoot);
-  }
-
-  if (isAgentWireSource(meta) || !fallbackPath) {
-    return null;
-  }
-
-  return path.resolve(fallbackPath);
+function isAgentWireSource(meta?: FileOpMeta): boolean {
+  return meta?.source === 'agent_ws';
 }
 
 const broadcastAppUpdateStatus = (

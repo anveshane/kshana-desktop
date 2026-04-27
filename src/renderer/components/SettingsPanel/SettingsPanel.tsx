@@ -146,6 +146,10 @@ export default function SettingsPanel({
   const [connectionInfo, setConnectionInfo] = useState<BackendConnectionInfo | null>(null);
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [cloudModeWarning, setCloudModeWarning] = useState<string | null>(null);
+  const [pendingBackendMode, setPendingBackendMode] = useState<
+    AppSettings['backendMode'] | null
+  >(null);
+  const [isModeSwitchSaving, setIsModeSwitchSaving] = useState(false);
 
   useEffect(() => {
     setForm(normalizeConnectionSettings(settings));
@@ -220,7 +224,12 @@ export default function SettingsPanel({
     }
 
     if (key === 'backendMode') {
+      if (value === form.backendMode) {
+        return;
+      }
       setCloudModeWarning(null);
+      setPendingBackendMode(value as AppSettings['backendMode']);
+      return;
     }
 
     setForm((prev) => ({
@@ -229,9 +238,8 @@ export default function SettingsPanel({
     }));
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const normalized = normalizeConnectionSettings(form);
+  const saveConnectionSettings = async (nextForm: AppSettings) => {
+    const normalized = normalizeConnectionSettings(nextForm);
     await onSaveConnection({
       backendMode: normalized.backendMode,
       comfyuiMode: normalized.comfyuiUrl ? 'custom' : 'inherit',
@@ -249,6 +257,28 @@ export default function SettingsPanel({
       openRouterModel: normalized.openRouterModel,
     });
     void refreshConnectionInfo();
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    await saveConnectionSettings(form);
+  };
+
+  const handleConfirmModeSwitch = async () => {
+    if (!pendingBackendMode) return;
+
+    const nextForm = {
+      ...form,
+      backendMode: pendingBackendMode,
+    };
+    setIsModeSwitchSaving(true);
+    try {
+      setForm(nextForm);
+      await saveConnectionSettings(nextForm);
+      setPendingBackendMode(null);
+    } finally {
+      setIsModeSwitchSaving(false);
+    }
   };
 
   const handleOverlayClick = (event: React.MouseEvent) => {
@@ -279,15 +309,7 @@ export default function SettingsPanel({
     ? backendState?.status === 'error'
       ? 'Review the local provider settings below, then try Save & Restart again. You can switch to Cloud if you need to continue immediately.'
       : 'The app is currently using the local kshana-core server on localhost with the provider settings shown below.'
-    : 'The app is currently using the managed cloud backend shipped with this build.';
-  const submitLabel = isLocalMode
-    ? isSavingConnection
-      ? 'Restarting…'
-      : 'Save & Restart'
-    : isSavingConnection
-      ? 'Reconnecting…'
-      : 'Save & Reconnect';
-
+    : 'The app is connected to Kshana Cloud.';
   const renderProviderToggle = (
     provider: LLMProvider,
     label: string,
@@ -299,6 +321,7 @@ export default function SettingsPanel({
         name="llm-provider"
         value={provider}
         checked={form.llmProvider === provider}
+        disabled={!isLocalMode}
         onChange={(event) =>
           handleInput(
             'llmProvider',
@@ -309,6 +332,12 @@ export default function SettingsPanel({
       {label}
     </label>
   );
+
+  const pendingModeLabel =
+    pendingBackendMode === 'cloud' ? 'Cloud' : 'Local';
+  const currentModeLabel = form.backendMode === 'cloud' ? 'Cloud' : 'Local';
+  const confirmModeSwitchLabel =
+    pendingBackendMode === 'cloud' ? 'Save & Reconnect' : 'Save & Restart';
 
   const panelContent = (
     <div className={`${styles.panel} ${isEmbedded ? styles.embeddedPanel : ''}`}>
@@ -489,14 +518,18 @@ export default function SettingsPanel({
                   )}
                 </fieldset>
 
-                {isLocalMode ? (
-                  <>
+                <div
+                  className={`${styles.localSettings} ${
+                    !isLocalMode ? styles.localSettingsDisabled : ''
+                  }`}
+                >
                     <label className={styles.label}>
                       ComfyUI URL
                       <input
                         type="url"
                         className={styles.input}
                         value={form.comfyuiUrl}
+                        disabled={!isLocalMode}
                         onChange={(event) =>
                           handleInput('comfyuiUrl', event.target.value)
                         }
@@ -510,6 +543,7 @@ export default function SettingsPanel({
                         type="password"
                         className={styles.input}
                         value={form.comfyCloudApiKey}
+                        disabled={!isLocalMode}
                         onChange={(event) =>
                           handleInput('comfyCloudApiKey', event.target.value)
                         }
@@ -522,7 +556,7 @@ export default function SettingsPanel({
                       connections ignore it.
                     </p>
 
-                    <fieldset className={styles.fieldset}>
+                    <fieldset className={styles.fieldset} disabled={!isLocalMode}>
                       <legend>LLM Provider</legend>
                       <div className={styles.radios}>
                         {renderProviderToggle('gemini', 'Gemini')}
@@ -538,6 +572,7 @@ export default function SettingsPanel({
                             type="password"
                             className={styles.input}
                             value={form.googleApiKey}
+                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('googleApiKey', event.target.value)
                             }
@@ -551,6 +586,7 @@ export default function SettingsPanel({
                             type="text"
                             className={styles.input}
                             value={form.geminiModel}
+                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('geminiModel', event.target.value)
                             }
@@ -562,31 +598,35 @@ export default function SettingsPanel({
 
                     {form.llmProvider === 'openai' && (
                       <>
-                        <label className={styles.label}>
-                          API Key
-                          <input
-                            type="password"
-                            className={styles.input}
-                            value={form.openaiApiKey}
-                            onChange={(event) =>
-                              handleInput('openaiApiKey', event.target.value)
-                            }
-                            placeholder="sk-..."
-                          />
-                        </label>
-
-                        <label className={styles.label}>
-                          Base URL
+                        <div className={styles.label}>
+                          <div className={styles.labelRow}>
+                            <span>Base URL</span>
+                            <button
+                              type="button"
+                              className={styles.inlineButton}
+                              disabled={!isLocalMode}
+                              onClick={() =>
+                                handleInput(
+                                  'openaiBaseUrl',
+                                  emptySettings.openaiBaseUrl,
+                                )
+                              }
+                            >
+                              Use default OpenAI URL
+                            </button>
+                          </div>
                           <input
                             type="url"
                             className={styles.input}
                             value={form.openaiBaseUrl}
+                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('openaiBaseUrl', event.target.value)
                             }
                             placeholder="https://api.openai.com/v1"
+                            aria-label="Base URL"
                           />
-                        </label>
+                        </div>
 
                         <label className={styles.label}>
                           Model ID
@@ -594,29 +634,30 @@ export default function SettingsPanel({
                             type="text"
                             className={styles.input}
                             value={form.openaiModel}
+                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('openaiModel', event.target.value)
                             }
                             placeholder="gpt-4o"
                           />
                         </label>
-                        <p className={styles.infoText}>
-                          Use the default OpenAI URL, or point this at another OpenAI-compatible provider such as OpenRouter by changing the base URL.
-                        </p>
+
+                        <label className={styles.label}>
+                          API Key
+                          <input
+                            type="password"
+                            className={styles.input}
+                            value={form.openaiApiKey}
+                            disabled={!isLocalMode}
+                            onChange={(event) =>
+                              handleInput('openaiApiKey', event.target.value)
+                            }
+                            placeholder="sk-..."
+                          />
+                        </label>
                       </>
                     )}
-                  </>
-                ) : (
-                  <div className={styles.infoCard}>
-                    <div className={styles.infoTitle}>Managed Cloud Backend</div>
-                    <p className={styles.infoText}>
-                      The cloud backend URL is injected at release time and is not editable in the desktop app.
-                    </p>
-                    {connectionInfo?.note && (
-                      <p className={styles.infoText}>{connectionInfo.note}</p>
-                    )}
-                  </div>
-                )}
+                </div>
 
                 {error && <div className={styles.error}>{error}</div>}
               </>
@@ -633,18 +674,43 @@ export default function SettingsPanel({
                 {isEmbedded ? 'Back to Projects' : 'Close'}
               </button>
             )}
-            {activeTab === 'connection' && (
-              <button
-                type="submit"
-                className={styles.submitButton}
-                disabled={isSavingConnection}
-              >
-                {submitLabel}
-              </button>
-            )}
           </div>
         </form>
       </div>
+      {pendingBackendMode && (
+        <div className={styles.confirmBackdrop} role="presentation">
+          <div
+            className={styles.confirmDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Switch to ${pendingModeLabel}`}
+          >
+            <h3>Switch to {pendingModeLabel}?</h3>
+            <p>
+              This will change the backend from {currentModeLabel} to{' '}
+              {pendingModeLabel} and reconnect the desktop app.
+            </p>
+            <div className={styles.confirmActions}>
+              <button
+                type="button"
+                className={styles.cancelButton}
+                onClick={() => setPendingBackendMode(null)}
+                disabled={isModeSwitchSaving || isSavingConnection}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.submitButton}
+                onClick={handleConfirmModeSwitch}
+                disabled={isModeSwitchSaving || isSavingConnection}
+              >
+                {isModeSwitchSaving ? 'Saving…' : confirmModeSwitchLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 

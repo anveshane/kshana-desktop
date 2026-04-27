@@ -81,6 +81,7 @@ import {
   type ChatRestoreStatus,
 } from './chatPanelPersistenceUtils';
 import useQuestionTimerCancellation from './useQuestionTimerCancellation';
+import { getBackendStateForSettings } from '../../../utils/backendModeGuard';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
 
@@ -229,6 +230,19 @@ const resolveComfyUIOverride = (
   }
   return normalizeHttpUrl(settings?.comfyuiUrl);
 };
+
+const getCloudDesktopToken = async (
+  settings: AppSettings | null,
+): Promise<string | null> => {
+  if (settings?.backendMode !== 'cloud') {
+    return null;
+  }
+  const account = await window.electron.account.get().catch(() => null);
+  return account?.token ?? null;
+};
+
+const buildCloudAuthHeaders = (token: string | null): HeadersInit | undefined =>
+  token ? { Authorization: `Bearer ${token}` } : undefined;
 
 const getComfyUISettingsKey = (settings: AppSettings | null): string => {
   const mode = settings?.comfyuiMode ?? 'inherit';
@@ -397,10 +411,16 @@ export default function ChatPanel() {
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
+        const message =
+          typeof data.message === 'string'
+            ? data.message
+            : typeof data.error === 'string'
+              ? data.error
+              : 'Could not create cloud job.';
         throw new Error(
-          typeof data.error === 'string'
-            ? data.error
-            : 'Could not create cloud job.',
+          response.status === 402
+            ? `${message} Add credits to continue.`
+            : message,
         );
       }
 
@@ -682,13 +702,18 @@ export default function ChatPanel() {
 
   const fetchTemplateCatalog =
     useCallback(async (): Promise<TemplateCatalogResponse> => {
-      const backendState = await window.electron.backend.getState();
+      const settings =
+        appSettingsRef.current ??
+        (await window.electron.settings.get().catch(() => null));
+      const backendState = await getBackendStateForSettings(settings);
       const baseUrl =
         backendState.serverUrl ||
         `http://localhost:${backendState.port ?? 8001}`;
+      const token = await getCloudDesktopToken(settings);
       const response = await fetch(`${baseUrl}/api/v1/templates`, {
         method: 'GET',
         cache: 'no-store',
+        headers: buildCloudAuthHeaders(token),
       });
 
       if (!response.ok) {
@@ -1284,9 +1309,14 @@ export default function ChatPanel() {
       );
 
       try {
+        const settings =
+          appSettingsRef.current ??
+          (await window.electron.settings.get().catch(() => null));
+        const token = await getCloudDesktopToken(settings);
         const response = await fetch(url.toString(), {
           signal: AbortSignal.timeout(5000),
           cache: 'no-store',
+          headers: buildCloudAuthHeaders(token),
         });
         if (response.status === 404) {
           return null;
@@ -3889,7 +3919,14 @@ export default function ChatPanel() {
     };
 
     try {
-      const currentState = await window.electron.backend.getState();
+      const effectiveSettings =
+        appSettingsRef.current ??
+        (await window.electron.settings.get().catch(() => null));
+      if (!appSettingsRef.current && effectiveSettings) {
+        appSettingsRef.current = effectiveSettings;
+      }
+
+      const currentState = await getBackendStateForSettings(effectiveSettings);
       if (currentState.status !== 'ready') {
         const errorMsg = currentState.message
           ? `Backend not ready: ${currentState.message}`
@@ -3909,15 +3946,10 @@ export default function ChatPanel() {
         ? await getDesktopVersion().catch(() => null)
         : null;
       applyDesktopRemotionQueryParams(url, desktopVersion);
-      const effectiveSettings =
-        appSettingsRef.current ??
-        (await window.electron.settings.get().catch(() => null));
-      if (!appSettingsRef.current && effectiveSettings) {
-        appSettingsRef.current = effectiveSettings;
-      }
       const cloudJob = await createCloudJobForSession(baseUrl, effectiveSettings);
       if (cloudJob) {
         url.searchParams.set('cloudJobId', cloudJob.id);
+        url.searchParams.set('desktopToken', cloudJob.token);
       }
       const comfyUIUrl = resolveComfyUIOverride(effectiveSettings);
       if (comfyUIUrl) {

@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import LandingScreen from './LandingScreen';
 
-const mockOpenProject = jest.fn();
-const mockRefreshRecentProjects = jest.fn();
-const mockUpdateTheme = jest.fn();
-const mockSaveConnectionSettings = jest.fn();
-const mockClearError = jest.fn();
+const mockOpenProject = jest.fn<(path: string) => Promise<void>>();
+const mockRefreshRecentProjects = jest.fn<() => Promise<void>>();
+const mockUpdateTheme = jest.fn<(themeId: string) => Promise<void>>();
+const mockSaveConnectionSettings = jest.fn<() => Promise<boolean>>();
+const mockClearError = jest.fn<() => void>();
+let mockProjectLoading = false;
 
 const recentProjects = [
   {
@@ -27,7 +28,7 @@ jest.mock('../../../contexts/WorkspaceContext', () => ({
 
 jest.mock('../../../contexts/ProjectContext', () => ({
   useProject: () => ({
-    isLoading: false,
+    isLoading: mockProjectLoading,
   }),
 }));
 
@@ -65,10 +66,11 @@ describe('LandingScreen', () => {
     mockRenameProject.mockReset();
     mockDeleteProject.mockReset();
     mockGetVersion.mockReset();
+    mockProjectLoading = false;
 
     mockReadFile.mockResolvedValue(
       JSON.stringify({
-        title: 'Demo',
+        title: 'Stale Manifest Title',
         description: 'Test project',
         scenes: [],
         characters: [],
@@ -97,10 +99,22 @@ describe('LandingScreen', () => {
     });
   });
 
+  it('keeps new project available while project work is loading', async () => {
+    mockProjectLoading = true;
+
+    render(<LandingScreen />);
+
+    expect(
+      (await screen.findByRole('button', {
+        name: 'New Project',
+      })) as HTMLButtonElement,
+    ).toHaveProperty('disabled', false);
+  });
+
   it('opens the rename dialog from the project card and submits rename', async () => {
     render(<LandingScreen />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Rename Demo' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename demo' }));
     expect(
       screen.getByRole('dialog', { name: 'Rename project' }),
     ).not.toBeNull();
@@ -119,10 +133,17 @@ describe('LandingScreen', () => {
     expect(mockRefreshRecentProjects).toHaveBeenCalled();
   });
 
+  it('uses the project folder name instead of a stale manifest title', async () => {
+    render(<LandingScreen />);
+
+    expect(await screen.findByText('demo')).not.toBeNull();
+    expect(screen.queryByText('Stale Manifest Title')).toBeNull();
+  });
+
   it('opens the delete dialog from the project card and submits delete', async () => {
     render(<LandingScreen />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete Demo' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete demo' }));
     expect(
       screen.getByRole('dialog', { name: 'Delete project' }),
     ).not.toBeNull();
