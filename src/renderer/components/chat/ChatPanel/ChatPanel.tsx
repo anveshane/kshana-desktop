@@ -81,7 +81,10 @@ import {
   type ChatRestoreStatus,
 } from './chatPanelPersistenceUtils';
 import useQuestionTimerCancellation from './useQuestionTimerCancellation';
-import { getBackendStateForSettings } from '../../../utils/backendModeGuard';
+import {
+  getBackendBaseUrlForSettings,
+  getBackendStateForSettings,
+} from '../../../utils/backendModeGuard';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
 
@@ -241,7 +244,9 @@ const getCloudDesktopToken = async (
   return account?.token ?? null;
 };
 
-const buildCloudAuthHeaders = (token: string | null): HeadersInit | undefined =>
+const buildCloudAuthHeaders = (
+  token: string | null,
+): Record<string, string> | undefined =>
   token ? { Authorization: `Bearer ${token}` } : undefined;
 
 const getComfyUISettingsKey = (settings: AppSettings | null): string => {
@@ -706,9 +711,10 @@ export default function ChatPanel() {
         appSettingsRef.current ??
         (await window.electron.settings.get().catch(() => null));
       const backendState = await getBackendStateForSettings(settings);
-      const baseUrl =
-        backendState.serverUrl ||
-        `http://localhost:${backendState.port ?? 8001}`;
+      const baseUrl = await getBackendBaseUrlForSettings(
+        settings,
+        backendState,
+      );
       const token = await getCloudDesktopToken(settings);
       const response = await fetch(`${baseUrl}/api/v1/templates`, {
         method: 'GET',
@@ -1297,21 +1303,22 @@ export default function ChatPanel() {
 
   const fetchSessionInfo = useCallback(
     async (
-      sessionId: string,
+      lookupSessionId: string,
       backendState: BackendState,
     ): Promise<RemoteSessionInfo | null> => {
-      const baseUrl =
-        backendState.serverUrl ||
-        `http://localhost:${backendState.port ?? 8001}`;
+      const settings =
+        appSettingsRef.current ??
+        (await window.electron.settings.get().catch(() => null));
+      const baseUrl = await getBackendBaseUrlForSettings(
+        settings,
+        backendState,
+      );
       const url = new URL(
-        `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
+        `/api/v1/sessions/${encodeURIComponent(lookupSessionId)}`,
         baseUrl,
       );
 
       try {
-        const settings =
-          appSettingsRef.current ??
-          (await window.electron.settings.get().catch(() => null));
         const token = await getCloudDesktopToken(settings);
         const response = await fetch(url.toString(), {
           signal: AbortSignal.timeout(5000),
@@ -3943,9 +3950,10 @@ export default function ChatPanel() {
         throw new Error(errorMsg);
       }
 
-      const baseUrl =
-        currentState.serverUrl ||
-        `http://localhost:${currentState.port ?? 8001}`;
+      const baseUrl = await getBackendBaseUrlForSettings(
+        effectiveSettings,
+        currentState,
+      );
       const wsBase = baseUrl.replace(/^http/, 'ws');
       const url = new URL(DEFAULT_WS_PATH, wsBase);
       url.searchParams.set('channel', 'chat');

@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { getBackendStateForSettings } from './backendModeGuard';
-import type { BackendState } from '../../shared/backendTypes';
+import {
+  getBackendBaseUrlForSettings,
+  getBackendStateForSettings,
+} from './backendModeGuard';
+import type {
+  BackendConnectionInfo,
+  BackendState,
+} from '../../shared/backendTypes';
 import type { AppSettings } from '../../shared/settingsTypes';
 
 const baseSettings: AppSettings = {
@@ -24,16 +30,23 @@ const baseSettings: AppSettings = {
 
 describe('backendModeGuard', () => {
   const getState = jest.fn<() => Promise<BackendState>>();
+  const getConnectionInfo = jest.fn<() => Promise<BackendConnectionInfo>>();
   const restart = jest.fn<() => Promise<BackendState>>();
 
   beforeEach(() => {
     getState.mockReset();
+    getConnectionInfo.mockReset();
     restart.mockReset();
+    getConnectionInfo.mockResolvedValue({
+      selectedMode: 'local',
+      localBackendAvailable: true,
+    });
     Object.defineProperty(window, 'electron', {
       configurable: true,
       value: {
         backend: {
           getState,
+          getConnectionInfo,
           restart,
         },
       },
@@ -72,5 +85,100 @@ describe('backendModeGuard', () => {
       localState,
     );
     expect(restart).not.toHaveBeenCalled();
+  });
+
+  it('restarts cloud mode when current backend is stale local core', async () => {
+    getState.mockResolvedValue({
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://127.0.0.1:8000',
+    });
+    getConnectionInfo.mockResolvedValue({
+      selectedMode: 'cloud',
+      cloudServerUrl: 'http://localhost:8080',
+      effectiveServerUrl: 'http://localhost:8080',
+      localBackendAvailable: true,
+    });
+    restart.mockResolvedValue({
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://localhost:8080',
+    });
+
+    await expect(
+      getBackendStateForSettings({ ...baseSettings, backendMode: 'cloud' }),
+    ).resolves.toEqual({
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://localhost:8080',
+    });
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps cloud mode on localhost when it matches the configured website proxy', async () => {
+    const cloudState: BackendState = {
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://localhost:8080',
+    };
+    getState.mockResolvedValue(cloudState);
+    getConnectionInfo.mockResolvedValue({
+      selectedMode: 'cloud',
+      cloudServerUrl: 'http://localhost:8080',
+      effectiveServerUrl: 'http://localhost:8080',
+      localBackendAvailable: true,
+    });
+
+    await expect(
+      getBackendStateForSettings({ ...baseSettings, backendMode: 'cloud' }),
+    ).resolves.toEqual(cloudState);
+    expect(restart).not.toHaveBeenCalled();
+  });
+
+  it('returns the configured cloud URL even when the backend state carries stale core URL', async () => {
+    getState.mockResolvedValue({
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://127.0.0.1:3000',
+    });
+    getConnectionInfo.mockResolvedValue({
+      selectedMode: 'cloud',
+      cloudServerUrl: 'http://127.0.0.1:9000',
+      effectiveServerUrl: 'http://127.0.0.1:9000',
+      localBackendAvailable: true,
+    });
+    restart.mockResolvedValue({
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://127.0.0.1:3000',
+    });
+
+    await expect(
+      getBackendStateForSettings({ ...baseSettings, backendMode: 'cloud' }),
+    ).resolves.toEqual({
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://127.0.0.1:9000',
+    });
+  });
+
+  it('resolves cloud base URLs from connection info instead of stale backend state', async () => {
+    getConnectionInfo.mockResolvedValue({
+      selectedMode: 'cloud',
+      cloudServerUrl: 'http://127.0.0.1:9000',
+      effectiveServerUrl: 'http://127.0.0.1:9000',
+      localBackendAvailable: true,
+    });
+
+    await expect(
+      getBackendBaseUrlForSettings(
+        { ...baseSettings, backendMode: 'cloud' },
+        {
+          status: 'ready',
+          mode: 'cloud',
+          serverUrl: 'http://127.0.0.1:3000',
+        },
+      ),
+    ).resolves.toBe('http://127.0.0.1:9000');
   });
 });

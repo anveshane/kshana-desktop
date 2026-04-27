@@ -40,7 +40,10 @@ import {
 } from '../services/assets';
 import type { AppSettings } from '../../shared/settingsTypes';
 import { debugRendererLog, debugRendererWarn } from '../utils/debugLogger';
-import { getBackendStateForSettings } from '../utils/backendModeGuard';
+import {
+  getBackendBaseUrlForSettings,
+  getBackendStateForSettings,
+} from '../utils/backendModeGuard';
 import { useWorkspace } from './WorkspaceContext';
 
 /**
@@ -899,9 +902,7 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
       try {
         connectingRef.current = true;
-        const settings = await window.electron.settings
-          .get()
-          .catch(() => null);
+        const settings = await window.electron.settings.get().catch(() => null);
         const backendState = await getBackendStateForSettings(settings);
         const projectDirectoryForQuery = projectDirectory;
 
@@ -920,9 +921,10 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           return;
         }
 
-        const baseUrl =
-          backendState.serverUrl ||
-          `http://localhost:${backendState.port || 8001}`;
+        const baseUrl = await getBackendBaseUrlForSettings(
+          settings,
+          backendState,
+        );
         const wsBase = baseUrl.replace(/^http/, 'ws');
         const wsUrl = new URL('/api/v1/ws/chat', wsBase);
         wsUrl.searchParams.set('project_dir', projectDirectoryForQuery);

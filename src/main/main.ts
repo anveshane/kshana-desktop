@@ -116,29 +116,26 @@ interface RuntimeConfig {
   websiteUrl?: string;
 }
 
-let runtimeConfigReadPromise: Promise<RuntimeConfig | null> | null = null;
+async function readRuntimeConfig(): Promise<RuntimeConfig | null> {
+  const candidatePaths = app.isPackaged
+    ? [path.join(process.resourcesPath, 'assets', 'runtime-config.json')]
+    : [path.join(__dirname, '../../assets/runtime-config.json')];
 
-function readRuntimeConfigOnce(): Promise<RuntimeConfig | null> {
-  if (!runtimeConfigReadPromise) {
-    runtimeConfigReadPromise = (async () => {
-      const candidatePaths = app.isPackaged
-        ? [path.join(process.resourcesPath, 'assets', 'runtime-config.json')]
-        : [path.join(__dirname, '../../assets/runtime-config.json')];
-      for (const configPath of candidatePaths) {
-        try {
-          const raw = await fs.readFile(configPath, 'utf-8');
-          const parsed = JSON.parse(raw) as RuntimeConfig;
-          if (parsed && typeof parsed === 'object') {
-            return parsed;
-          }
-        } catch {
-          /* missing or invalid */
+  const configs = await Promise.all(
+    candidatePaths.map(async (configPath) => {
+      try {
+        const raw = await fs.readFile(configPath, 'utf-8');
+        const parsed = JSON.parse(raw) as RuntimeConfig;
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
         }
+      } catch {
+        /* missing or invalid */
       }
       return null;
-    })();
-  }
-  return runtimeConfigReadPromise;
+    }),
+  );
+  return configs.find((config): config is RuntimeConfig => Boolean(config)) ?? null;
 }
 
 function normalizeServerUrl(value?: string): string | undefined {
@@ -161,7 +158,7 @@ function normalizeServerUrl(value?: string): string | undefined {
 async function resolveKshanaWebsiteUrl(): Promise<string> {
   const fromEnv = normalizeServerUrl(process.env.KSHANA_CLOUD_URL);
   if (fromEnv) return fromEnv;
-  const parsed = await readRuntimeConfigOnce();
+  const parsed = await readRuntimeConfig();
   const fromFile = normalizeServerUrl(
     parsed?.kshanaWebsiteUrl || parsed?.websiteUrl,
   );
