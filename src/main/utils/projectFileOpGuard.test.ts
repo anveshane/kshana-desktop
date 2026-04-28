@@ -7,6 +7,7 @@ import {
   normalizeIncomingPath,
   ProjectFileOpGuardError,
   resolveAndValidateProjectPath,
+  resolveValidationRoot,
 } from './projectFileOpGuard';
 
 describe('projectFileOpGuard', () => {
@@ -55,6 +56,27 @@ describe('projectFileOpGuard', () => {
       '/Users/dev/project',
     );
     expect(resolved).toBe('/Users/dev/project/plans/plot.md');
+  });
+
+  it('prefers renderer project root over stale active project root', () => {
+    const root = resolveValidationRoot(
+      '/Users/dev/old-project',
+      '/Users/dev/new-project',
+      {
+        source: 'renderer',
+        projectRoot: '/Users/dev/new-project',
+      },
+    );
+
+    expect(root).toBe('/Users/dev/new-project');
+  });
+
+  it('does not use fallback paths for agent websocket operations', () => {
+    const root = resolveValidationRoot(null, '/Users/dev/project', {
+      source: 'agent_ws',
+    });
+
+    expect(root).toBeNull();
   });
 
   it('supports remote cross-os flow (windows-style emitted path -> posix project path)', () => {

@@ -81,6 +81,10 @@ import {
   type ChatRestoreStatus,
 } from './chatPanelPersistenceUtils';
 import useQuestionTimerCancellation from './useQuestionTimerCancellation';
+import {
+  getBackendBaseUrlForSettings,
+  getBackendStateForSettings,
+} from '../../../utils/backendModeGuard';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
 
@@ -230,6 +234,21 @@ const resolveComfyUIOverride = (
   return normalizeHttpUrl(settings?.comfyuiUrl);
 };
 
+const getCloudDesktopToken = async (
+  settings: AppSettings | null,
+): Promise<string | null> => {
+  if (settings?.backendMode !== 'cloud') {
+    return null;
+  }
+  const account = await window.electron.account.get().catch(() => null);
+  return account?.token ?? null;
+};
+
+const buildCloudAuthHeaders = (
+  token: string | null,
+): Record<string, string> | undefined =>
+  token ? { Authorization: `Bearer ${token}` } : undefined;
+
 const getComfyUISettingsKey = (settings: AppSettings | null): string => {
   const mode = settings?.comfyuiMode ?? 'inherit';
   const override =
@@ -344,7 +363,14 @@ export default function ChatPanel() {
   );
   const connectionBannerRef = useRef<{ key: string; at: number } | null>(null);
   const currentProjectDirectoryRef = useRef<string | null>(null);
+  const lastMissingProjectRootWarningAtRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
+  const cloudJobRef = useRef<{
+    id: string;
+    baseUrl: string;
+    token: string;
+    completed: boolean;
+  } | null>(null);
   const chatRestoreStateRef = useRef<ChatRestoreState>({
     projectDirectory: null,
     status: 'idle',
@@ -357,6 +383,93 @@ export default function ChatPanel() {
   const phaseDisplayNameRef = useRef<string | undefined>(undefined);
   const hasUserSentMessageRef = useRef(false);
   const isTaskRunningRef = useRef(false);
+
+  const createCloudJobForSession = useCallback(
+    async (baseUrl: string, settings: AppSettings | null) => {
+      if (settings?.backendMode !== 'cloud') {
+        cloudJobRef.current = null;
+        return null;
+      }
+
+      const account = await window.electron.account.get().catch(() => null);
+      if (!account?.token) {
+        throw new Error('Sign in to Kshana Cloud before using cloud mode.');
+      }
+
+      const response = await fetch(`${baseUrl}/api/cloud/jobs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${account.token}`,
+        },
+        body: JSON.stringify({
+          type: 'project',
+          seconds: selectedDuration ?? 60,
+          sessionId: sessionIdRef.current,
+          metadata: {
+            projectDirectory,
+            selectedTemplateId,
+            selectedStyleId,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const message =
+          typeof data.message === 'string'
+            ? data.message
+            : typeof data.error === 'string'
+              ? data.error
+              : 'Could not create cloud job.';
+        throw new Error(
+          response.status === 402
+            ? `${message} Add credits to continue.`
+            : message,
+        );
+      }
+
+      const data = (await response.json()) as { cloudJobId: string };
+      cloudJobRef.current = {
+        id: data.cloudJobId,
+        baseUrl,
+        token: account.token,
+        completed: false,
+      };
+      return cloudJobRef.current;
+    },
+    [projectDirectory, selectedDuration, selectedStyleId, selectedTemplateId],
+  );
+
+  const settleCloudJob = useCallback(
+    async (status: 'complete' | 'fail', details?: Record<string, unknown>) => {
+      const cloudJob = cloudJobRef.current;
+      if (!cloudJob || cloudJob.completed) {
+        return;
+      }
+
+      cloudJob.completed = true;
+      const endpoint =
+        status === 'complete'
+          ? `/api/cloud/jobs/${cloudJob.id}/complete`
+          : `/api/cloud/jobs/${cloudJob.id}/fail`;
+
+      try {
+        await fetch(`${cloudJob.baseUrl}${endpoint}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${cloudJob.token}`,
+          },
+          body: JSON.stringify(details ?? {}),
+        });
+        await window.electron.account.refreshBalance().catch(() => null);
+      } catch (error) {
+        console.warn('[ChatPanel] Failed to settle cloud job:', error);
+      }
+    },
+    [],
+  );
   const isStopPendingRef = useRef(false);
   const autonomousModeRef = useRef(false);
   const supportsProjectStateSyncRef = useRef(true);
@@ -594,13 +707,19 @@ export default function ChatPanel() {
 
   const fetchTemplateCatalog =
     useCallback(async (): Promise<TemplateCatalogResponse> => {
-      const backendState = await window.electron.backend.getState();
-      const baseUrl =
-        backendState.serverUrl ||
-        `http://localhost:${backendState.port ?? 8001}`;
+      const settings =
+        appSettingsRef.current ??
+        (await window.electron.settings.get().catch(() => null));
+      const backendState = await getBackendStateForSettings(settings);
+      const baseUrl = await getBackendBaseUrlForSettings(
+        settings,
+        backendState,
+      );
+      const token = await getCloudDesktopToken(settings);
       const response = await fetch(`${baseUrl}/api/v1/templates`, {
         method: 'GET',
         cache: 'no-store',
+        headers: buildCloudAuthHeaders(token),
       });
 
       if (!response.ok) {
@@ -1184,21 +1303,27 @@ export default function ChatPanel() {
 
   const fetchSessionInfo = useCallback(
     async (
-      sessionId: string,
+      lookupSessionId: string,
       backendState: BackendState,
     ): Promise<RemoteSessionInfo | null> => {
-      const baseUrl =
-        backendState.serverUrl ||
-        `http://localhost:${backendState.port ?? 8001}`;
+      const settings =
+        appSettingsRef.current ??
+        (await window.electron.settings.get().catch(() => null));
+      const baseUrl = await getBackendBaseUrlForSettings(
+        settings,
+        backendState,
+      );
       const url = new URL(
-        `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
+        `/api/v1/sessions/${encodeURIComponent(lookupSessionId)}`,
         baseUrl,
       );
 
       try {
+        const token = await getCloudDesktopToken(settings);
         const response = await fetch(url.toString(), {
           signal: AbortSignal.timeout(5000),
           cache: 'no-store',
+          headers: buildCloudAuthHeaders(token),
         });
         if (response.status === 404) {
           return null;
@@ -1798,6 +1923,35 @@ export default function ChatPanel() {
                 },
           ),
         );
+      };
+
+      const getAgentFileOpMeta = () => {
+        const projectRoot = currentProjectDirectoryRef.current;
+        if (!projectRoot) return null;
+        return {
+          opId,
+          source: 'agent_ws' as const,
+          projectRoot,
+        };
+      };
+
+      const rejectMissingProjectRoot = (
+        responseType: string,
+        responseRequestId: string,
+      ) => {
+        const reason =
+          'No active project root is available for backend file operations.';
+        sendRequestResponse(
+          responseType,
+          responseRequestId,
+          { success: false },
+          reason,
+        );
+        const now = Date.now();
+        if (now - lastMissingProjectRootWarningAtRef.current > 2000) {
+          lastMissingProjectRootWarningAtRef.current = now;
+          console.warn('[ChatPanel] Rejected backend file operation:', reason);
+        }
       };
 
       const getWirePath = (pathValue: unknown): string | null => {
@@ -2429,6 +2583,10 @@ export default function ChatPanel() {
             setAgentStatus('completed');
             setStatusMessage('Completed');
             setIsTaskRunning(false);
+            void settleCloudJob('complete', {
+              coreReference: sessionIdRef.current,
+              metadata: { status: responseStatus },
+            });
             if (isStopPendingRef.current) {
               resolveStopRequest(true);
             }
@@ -2441,6 +2599,7 @@ export default function ChatPanel() {
             setAgentStatus('waiting');
             setStatusMessage('Task cancelled');
             setIsTaskRunning(false);
+            void settleCloudJob('fail', { reason: 'cancelled' });
             resolveStopRequest(true);
             window.electron.logger.logStatusChange(
               'waiting',
@@ -2451,6 +2610,7 @@ export default function ChatPanel() {
             setAgentStatus('error');
             setStatusMessage('Agent reached maximum iterations');
             setIsTaskRunning(false);
+            void settleCloudJob('fail', { reason: 'max_iterations' });
             if (isStopPendingRef.current) {
               resolveStopRequest(false, 'Agent reached maximum iterations.');
             }
@@ -2467,6 +2627,7 @@ export default function ChatPanel() {
             setAgentStatus('error');
             setStatusMessage('Error');
             setIsTaskRunning(false);
+            void settleCloudJob('fail', { reason: 'error' });
             if (isStopPendingRef.current) {
               resolveStopRequest(false, 'Failed to stop task.');
             }
@@ -2759,6 +2920,15 @@ export default function ChatPanel() {
             notificationMessage,
             normalizeNotificationLevel(data.level),
           );
+          break;
+        }
+        case 'usage_fact': {
+          // Usage facts are billed by the website proxy in cloud mode.
+          // Desktop only acknowledges the event so it does not appear as unknown traffic.
+          break;
+        }
+        case 'billing_update': {
+          window.electron.account.refreshBalance().catch(() => null);
           break;
         }
         case 'session_timer': {
@@ -3078,11 +3248,13 @@ export default function ChatPanel() {
             appendSystemMessage(`⚠️ ${reason}`, 'error');
             break;
           }
+          const fileOpMeta = getAgentFileOpMeta();
+          if (!fileOpMeta) {
+            rejectMissingProjectRoot('file_read_response', requestId);
+            break;
+          }
           void window.electron.project
-            .readFileGuarded(requestedPath, {
-              opId,
-              source: 'agent_ws',
-            })
+            .readFileGuarded(requestedPath, fileOpMeta)
             .then((content) => {
               sendRequestResponse('file_read_response', requestId, { content });
             })
@@ -3108,11 +3280,13 @@ export default function ChatPanel() {
             appendSystemMessage(`⚠️ ${reason}`, 'error');
             break;
           }
+          const fileOpMeta = getAgentFileOpMeta();
+          if (!fileOpMeta) {
+            rejectMissingProjectRoot('file_list_response', requestId);
+            break;
+          }
           void window.electron.project
-            .listDirectory(requestedPath, {
-              opId,
-              source: 'agent_ws',
-            })
+            .listDirectory(requestedPath, fileOpMeta)
             .then((entries) => {
               sendRequestResponse('file_list_response', requestId, { entries });
             })
@@ -3137,11 +3311,13 @@ export default function ChatPanel() {
             });
             break;
           }
+          const fileOpMeta = getAgentFileOpMeta();
+          if (!fileOpMeta) {
+            rejectMissingProjectRoot('file_exists_response', requestId);
+            break;
+          }
           void window.electron.project
-            .statPath(requestedPath, {
-              opId,
-              source: 'agent_ws',
-            })
+            .statPath(requestedPath, fileOpMeta)
             .then(() => {
               sendRequestResponse('file_exists_response', requestId, {
                 exists: true,
@@ -3179,11 +3355,13 @@ export default function ChatPanel() {
             appendSystemMessage(`⚠️ ${reason}`, 'error');
             break;
           }
+          const fileOpMeta = getAgentFileOpMeta();
+          if (!fileOpMeta) {
+            rejectMissingProjectRoot('file_stat_response', requestId);
+            break;
+          }
           void window.electron.project
-            .statPath(requestedPath, {
-              opId,
-              source: 'agent_ws',
-            })
+            .statPath(requestedPath, fileOpMeta)
             .then((stat) => {
               sendRequestResponse('file_stat_response', requestId, stat);
             })
@@ -3209,11 +3387,13 @@ export default function ChatPanel() {
             appendSystemMessage(`⚠️ ${reason}`, 'error');
             break;
           }
+          const fileOpMeta = getAgentFileOpMeta();
+          if (!fileOpMeta) {
+            rejectMissingProjectRoot('file_buffer_response', requestId);
+            break;
+          }
           void window.electron.project
-            .readFileBufferGuarded(requestedPath, {
-              opId,
-              source: 'agent_ws',
-            })
+            .readFileBufferGuarded(requestedPath, fileOpMeta)
             .then((base64Data) => {
               sendRequestResponse('file_buffer_response', requestId, {
                 data: base64Data,
@@ -3272,11 +3452,13 @@ export default function ChatPanel() {
             break;
           }
           if (filePath && fileContent !== undefined) {
+            const fileOpMeta = getAgentFileOpMeta();
+            if (!fileOpMeta) {
+              rejectMissingProjectRoot('file_write_ack', fileWriteRequestId);
+              break;
+            }
             window.electron.project
-              .writeFile(filePath, fileContent, {
-                opId,
-                source: 'agent_ws',
-              })
+              .writeFile(filePath, fileContent, fileOpMeta)
               .then(() => {
                 if (fileWriteRequestId) {
                   sendRequestResponse('file_write_ack', fileWriteRequestId, {
@@ -3355,11 +3537,13 @@ export default function ChatPanel() {
             break;
           }
           if (binPath && binContent) {
+            const fileOpMeta = getAgentFileOpMeta();
+            if (!fileOpMeta) {
+              rejectMissingProjectRoot('file_write_ack', fileWriteRequestId);
+              break;
+            }
             window.electron.project
-              .writeFileBinary(binPath, binContent, {
-                opId,
-                source: 'agent_ws',
-              })
+              .writeFileBinary(binPath, binContent, fileOpMeta)
               .then(() => {
                 if (fileWriteRequestId) {
                   sendRequestResponse('file_write_ack', fileWriteRequestId, {
@@ -3441,11 +3625,13 @@ export default function ChatPanel() {
             break;
           }
           if (mkdirPath) {
+            const fileOpMeta = getAgentFileOpMeta();
+            if (!fileOpMeta) {
+              rejectMissingProjectRoot('file_write_ack', mkdirRequestId);
+              break;
+            }
             window.electron.project
-              .mkdir(mkdirPath, {
-                opId,
-                source: 'agent_ws',
-              })
+              .mkdir(mkdirPath, fileOpMeta)
               .then(() => {
                 if (mkdirRequestId) {
                   sendRequestResponse('file_write_ack', mkdirRequestId, {
@@ -3519,11 +3705,13 @@ export default function ChatPanel() {
             break;
           }
           if (rmPath) {
+            const fileOpMeta = getAgentFileOpMeta();
+            if (!fileOpMeta) {
+              rejectMissingProjectRoot('file_write_ack', rmRequestId);
+              break;
+            }
             window.electron.project
-              .delete(rmPath, {
-                opId,
-                source: 'agent_ws',
-              })
+              .delete(rmPath, fileOpMeta)
               .then(() => {
                 if (rmRequestId) {
                   sendRequestResponse('file_write_ack', rmRequestId, {
@@ -3627,10 +3815,17 @@ export default function ChatPanel() {
                   );
                 }
                 // eslint-disable-next-line no-await-in-loop
-                await window.electron.project.writeFile(opPath, opContent, {
-                  opId,
-                  source: 'agent_ws',
-                });
+                const fileOpMeta = getAgentFileOpMeta();
+                if (!fileOpMeta) {
+                  throw new Error(
+                    'No active project root is available for backend file operations.',
+                  );
+                }
+                await window.electron.project.writeFile(
+                  opPath,
+                  opContent,
+                  fileOpMeta,
+                );
               }
               sendRequestResponse('file_write_ack', requestId, {
                 success: true,
@@ -3740,7 +3935,14 @@ export default function ChatPanel() {
     };
 
     try {
-      const currentState = await window.electron.backend.getState();
+      const effectiveSettings =
+        appSettingsRef.current ??
+        (await window.electron.settings.get().catch(() => null));
+      if (!appSettingsRef.current && effectiveSettings) {
+        appSettingsRef.current = effectiveSettings;
+      }
+
+      const currentState = await getBackendStateForSettings(effectiveSettings);
       if (currentState.status !== 'ready') {
         const errorMsg = currentState.message
           ? `Backend not ready: ${currentState.message}`
@@ -3748,9 +3950,10 @@ export default function ChatPanel() {
         throw new Error(errorMsg);
       }
 
-      const baseUrl =
-        currentState.serverUrl ||
-        `http://localhost:${currentState.port ?? 8001}`;
+      const baseUrl = await getBackendBaseUrlForSettings(
+        effectiveSettings,
+        currentState,
+      );
       const wsBase = baseUrl.replace(/^http/, 'ws');
       const url = new URL(DEFAULT_WS_PATH, wsBase);
       url.searchParams.set('channel', 'chat');
@@ -3760,11 +3963,10 @@ export default function ChatPanel() {
         ? await getDesktopVersion().catch(() => null)
         : null;
       applyDesktopRemotionQueryParams(url, desktopVersion);
-      const effectiveSettings =
-        appSettingsRef.current ??
-        (await window.electron.settings.get().catch(() => null));
-      if (!appSettingsRef.current && effectiveSettings) {
-        appSettingsRef.current = effectiveSettings;
+      const cloudJob = await createCloudJobForSession(baseUrl, effectiveSettings);
+      if (cloudJob) {
+        url.searchParams.set('cloudJobId', cloudJob.id);
+        url.searchParams.set('desktopToken', cloudJob.token);
       }
       const comfyUIUrl = resolveComfyUIOverride(effectiveSettings);
       if (comfyUIUrl) {

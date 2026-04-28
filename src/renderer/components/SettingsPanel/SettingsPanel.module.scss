@@ -26,6 +26,7 @@
 .panel {
   @include panel-base;
   @include glassmorphism(0.95);
+  position: relative;
   width: min(840px, 92vw);
   max-height: min(88vh, 900px);
   border-radius: $radius-lg;
@@ -336,6 +337,34 @@
   font-size: $font-size-sm;
 }
 
+.labelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+}
+
+.inlineButton {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: $color-accent-primary;
+  font: inherit;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    text-decoration: none;
+  }
+}
+
 .input {
   width: 100%;
   padding: $spacing-md $spacing-lg;
@@ -522,6 +551,17 @@
   line-height: 1.5;
 }
 
+.localSettings {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+  transition: opacity $transition-fast;
+}
+
+.localSettingsDisabled {
+  opacity: 0.48;
+}
+
 .error {
   padding: $spacing-md $spacing-lg;
   border-radius: $radius-sm;
@@ -529,6 +569,13 @@
   border: 1px solid rgba(var(--color-error-rgb), 0.24);
   color: $color-error;
   font-size: $font-size-sm;
+}
+
+.warningText {
+  margin: $spacing-sm 0 0;
+  color: $color-warning;
+  font-size: $font-size-sm;
+  line-height: 1.5;
 }
 
 .actions {
@@ -546,6 +593,48 @@
 .submitButton {
   @include button-primary;
   min-width: 140px;
+}
+
+.confirmBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xl;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.confirmDialog {
+  width: min(420px, 100%);
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-md;
+  background: $color-bg-panel;
+  box-shadow: $shadow-lg;
+  padding: $spacing-xl;
+
+  h3 {
+    margin: 0 0 $spacing-sm;
+    color: $color-text-primary;
+    font-size: $font-size-lg;
+  }
+
+  p {
+    margin: 0;
+    color: $color-text-secondary;
+    font-size: $font-size-sm;
+    line-height: 1.5;
+  }
+}
+
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: $spacing-md;
+  margin-top: $spacing-xl;
 }
 
 @media (max-width: 860px) {

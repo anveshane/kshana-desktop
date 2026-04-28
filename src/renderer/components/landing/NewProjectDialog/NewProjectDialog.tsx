@@ -39,8 +39,8 @@ export default function NewProjectDialog({
 }: NewProjectDialogProps) {
   const {
     createProject,
+    closeProject,
     error: projectError,
-    isLoading: isProjectLoading,
   } = useProject();
   const { openProject } = useWorkspace();
 
@@ -88,6 +88,7 @@ export default function NewProjectDialog({
 
     setError(null);
     setIsSubmitting(true);
+    let didCreateProject = false;
     try {
       let projectDirectory = joinPath(normalizedWorkspacePath, trimmedName);
 
@@ -125,6 +126,7 @@ export default function NewProjectDialog({
       if (!created) {
         throw new Error(projectError || 'Project creation failed.');
       }
+      didCreateProject = true;
 
       try {
         window.localStorage.setItem(
@@ -138,12 +140,16 @@ export default function NewProjectDialog({
       await openProject(projectDirectory);
       onClose();
     } catch (err) {
+      if (didCreateProject) {
+        closeProject();
+      }
       setError((err as Error).message);
     } finally {
       setIsSubmitting(false);
     }
   }, [
     createProject,
+    closeProject,
     description,
     onClose,
     openProject,
@@ -151,6 +157,12 @@ export default function NewProjectDialog({
     projectName,
     workspacePath,
   ]);
+
+  const formLocked = isSubmitting;
+  let createButtonLabel = 'Create Project';
+  if (isSubmitting) {
+    createButtonLabel = 'Creating...';
+  }
 
   if (!isOpen) {
     return null;
@@ -171,7 +183,7 @@ export default function NewProjectDialog({
             className={styles.closeButton}
             onClick={onClose}
             aria-label="Close create project dialog"
-            disabled={isSubmitting || isProjectLoading}
+            disabled={isSubmitting}
           >
             <X size={16} />
           </button>
@@ -185,7 +197,7 @@ export default function NewProjectDialog({
             value={projectName}
             onChange={(event) => setProjectName(event.target.value)}
             placeholder="My Agentic Video Project"
-            disabled={isSubmitting || isProjectLoading}
+            disabled={formLocked}
             aria-label="Project name"
           />
 
@@ -197,7 +209,7 @@ export default function NewProjectDialog({
             onChange={(event) => setDescription(event.target.value)}
             placeholder="What this project is about..."
             rows={3}
-            disabled={isSubmitting || isProjectLoading}
+            disabled={formLocked}
             aria-label="Project description"
           />
 
@@ -212,7 +224,7 @@ export default function NewProjectDialog({
               type="button"
               className={styles.pickButton}
               onClick={handlePickWorkspace}
-              disabled={isSubmitting || isProjectLoading}
+              disabled={formLocked}
             >
               <FolderOpen size={15} />
               Choose Folder
@@ -227,7 +239,7 @@ export default function NewProjectDialog({
             type="button"
             className={styles.cancelButton}
             onClick={onClose}
-            disabled={isSubmitting || isProjectLoading}
+            disabled={isSubmitting}
           >
             Cancel
           </button>
@@ -235,12 +247,10 @@ export default function NewProjectDialog({
             type="button"
             className={styles.createButton}
             onClick={handleCreate}
-            disabled={isSubmitting || isProjectLoading}
+            disabled={formLocked}
           >
             <Plus size={15} />
-            {isSubmitting || isProjectLoading
-              ? 'Creating...'
-              : 'Create Project'}
+            {createButtonLabel}
           </button>
         </div>
       </div>

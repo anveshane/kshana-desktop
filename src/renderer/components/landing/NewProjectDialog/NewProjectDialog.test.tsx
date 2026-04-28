@@ -2,12 +2,17 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import NewProjectDialog from './NewProjectDialog';
 
-const mockCreateProject = jest.fn();
-const mockOpenProject = jest.fn();
+const mockCreateProject =
+  jest.fn<
+    (directory: string, name: string, description?: string) => Promise<boolean>
+  >();
+const mockCloseProject = jest.fn<() => void>();
+const mockOpenProject = jest.fn<(path: string) => Promise<void>>();
 
 jest.mock('../../../contexts/ProjectContext', () => ({
   useProject: () => ({
     createProject: mockCreateProject,
+    closeProject: mockCloseProject,
     error: null,
     isLoading: false,
   }),
@@ -20,12 +25,20 @@ jest.mock('../../../contexts/WorkspaceContext', () => ({
 }));
 
 describe('NewProjectDialog', () => {
-  const mockSelectDirectory = jest.fn();
-  const mockCreateFolder = jest.fn();
-  const mockCheckFileExists = jest.fn();
+  const mockSelectDirectory = jest.fn<() => Promise<string | null>>();
+  const mockCreateFolder =
+    jest.fn<
+      (
+        basePath: string,
+        relativePath: string,
+        meta?: unknown,
+      ) => Promise<string | null>
+    >();
+  const mockCheckFileExists = jest.fn<(path: string) => Promise<boolean>>();
 
   beforeEach(() => {
     mockCreateProject.mockReset();
+    mockCloseProject.mockReset();
     mockOpenProject.mockReset();
     mockSelectDirectory.mockReset();
     mockCreateFolder.mockReset();
@@ -49,6 +62,15 @@ describe('NewProjectDialog', () => {
 
   async function pickFolder(path: string) {
     mockSelectDirectory.mockResolvedValue(path);
+    await waitFor(() => {
+      expect(
+        (
+          screen.getByRole('button', {
+            name: 'Choose Folder',
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(false);
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Choose Folder' }));
     await waitFor(() => {
       expect(screen.getByText(path)).not.toBeNull();
@@ -113,6 +135,54 @@ describe('NewProjectDialog', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('allows unsigned users to create projects in local mode', async () => {
+    mockCheckFileExists.mockResolvedValue(false);
+
+    const onClose = jest.fn();
+    render(<NewProjectDialog isOpen onClose={onClose} />);
+
+    fireEvent.change(screen.getByLabelText('Project name'), {
+      target: { value: 'demo' },
+    });
+    await pickFolder('/projects');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
+
+    await waitFor(() => {
+      expect(mockCreateProject).toHaveBeenCalledWith(
+        '/projects/demo',
+        'demo',
+        undefined,
+      );
+    });
+    expect(mockOpenProject).toHaveBeenCalledWith('/projects/demo');
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('does not require cloud sign-in before creating a project', async () => {
+    mockCheckFileExists.mockResolvedValue(false);
+
+    const onClose = jest.fn();
+    render(<NewProjectDialog isOpen onClose={onClose} />);
+
+    fireEvent.change(screen.getByLabelText('Project name'), {
+      target: { value: 'demo' },
+    });
+    await pickFolder('/projects');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
+
+    await waitFor(() => {
+      expect(mockCreateProject).toHaveBeenCalledWith(
+        '/projects/demo',
+        'demo',
+        undefined,
+      );
+    });
+    expect(mockOpenProject).toHaveBeenCalledWith('/projects/demo');
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('creates a new project when no existing project is found', async () => {
     mockCheckFileExists.mockResolvedValue(false);
 
@@ -141,6 +211,35 @@ describe('NewProjectDialog', () => {
       'A test project',
     );
     expect(mockOpenProject).toHaveBeenCalledWith('/projects/demo');
+    expect(mockCloseProject).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('resets the created project state when opening the new folder fails', async () => {
+    mockCheckFileExists.mockResolvedValue(false);
+    mockOpenProject.mockRejectedValue(new Error('Unable to attach project'));
+
+    const onClose = jest.fn();
+    render(<NewProjectDialog isOpen onClose={onClose} />);
+
+    fireEvent.change(screen.getByLabelText('Project name'), {
+      target: { value: 'demo' },
+    });
+    await pickFolder('/projects');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Project' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Unable to attach project')).not.toBeNull();
+    });
+
+    expect(mockCreateProject).toHaveBeenCalledWith(
+      '/projects/demo',
+      'demo',
+      undefined,
+    );
+    expect(mockOpenProject).toHaveBeenCalledWith('/projects/demo');
+    expect(mockCloseProject).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

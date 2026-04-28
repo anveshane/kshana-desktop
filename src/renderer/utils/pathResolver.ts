@@ -191,6 +191,12 @@ export async function resolveAssetPathForDisplay(
     return trimmedPath;
   }
 
+  const cacheKey = `display:${trimmedPath}:${projectDirectory || ''}`;
+  const cached = pathCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.resolved;
+  }
+
   // ALWAYS resolve test asset paths to resources path in production or if detected
   // This ensures bundled assets load correctly
   if (isTestAssetPath(trimmedPath)) {
@@ -202,6 +208,7 @@ export async function resolveAssetPathForDisplay(
           `[PathResolver] Resolved test video: ${assetPath} -> ${result}`,
         );
       }
+      pathCache.set(cacheKey, { resolved: result, timestamp: Date.now() });
       return result;
     }
     // If resolution failed, fall through to project directory resolution
@@ -209,7 +216,9 @@ export async function resolveAssetPathForDisplay(
 
   // If assetPath is already absolute, use it directly
   if (trimmedPath.startsWith('/') || /^[A-Za-z]:/.test(trimmedPath)) {
-    return toFileUrl(trimmedPath);
+    const result = toFileUrl(trimmedPath);
+    pathCache.set(cacheKey, { resolved: result, timestamp: Date.now() });
+    return result;
   }
 
   // Otherwise, construct path relative to project directory
@@ -233,7 +242,9 @@ export async function resolveAssetPathForDisplay(
 
     // Handle paths that already start with .kshana
     if (cleanedPath.startsWith('.kshana/')) {
-      return toFileUrl(`${normalizedProjectDir}/${cleanedPath}`);
+      const result = toFileUrl(`${normalizedProjectDir}/${cleanedPath}`);
+      pathCache.set(cacheKey, { resolved: result, timestamp: Date.now() });
+      return result;
     }
 
     // Backend-format project assets and content live at the project root.
@@ -242,12 +253,16 @@ export async function resolveAssetPathForDisplay(
         /^(assets|characters|settings|props|plans|scenes|content)\//,
       )
     ) {
-      return toFileUrl(`${normalizedProjectDir}/${cleanedPath}`);
+      const result = toFileUrl(`${normalizedProjectDir}/${cleanedPath}`);
+      pathCache.set(cacheKey, { resolved: result, timestamp: Date.now() });
+      return result;
     }
 
     // Legacy agent-prefixed paths are still resolved for compatibility.
     if (cleanedPath.startsWith('agent/')) {
-      return toFileUrl(`${normalizedProjectDir}/.kshana/${cleanedPath}`);
+      const result = toFileUrl(`${normalizedProjectDir}/.kshana/${cleanedPath}`);
+      pathCache.set(cacheKey, { resolved: result, timestamp: Date.now() });
+      return result;
     }
 
     // Handle other relative paths
@@ -257,6 +272,7 @@ export async function resolveAssetPathForDisplay(
         `[PathResolver] Resolved project video: ${assetPath} -> ${result}`,
       );
     }
+    pathCache.set(cacheKey, { resolved: result, timestamp: Date.now() });
     return result;
   }
 
@@ -264,7 +280,9 @@ export async function resolveAssetPathForDisplay(
   debugRendererWarn(
     `[PathResolver] No project directory provided for relative path: ${trimmedPath}`,
   );
-  return toFileUrl(trimmedPath);
+  const result = toFileUrl(trimmedPath);
+  pathCache.set(cacheKey, { resolved: result, timestamp: Date.now() });
+  return result;
 }
 
 /**

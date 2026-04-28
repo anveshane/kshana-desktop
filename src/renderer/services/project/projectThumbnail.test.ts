@@ -19,9 +19,16 @@ function createAsset(overrides: Partial<AssetInfo> = {}): AssetInfo {
 
 describe('projectThumbnail', () => {
   const mockCheckFileExists = jest.fn<(filePath: string) => Promise<boolean>>();
-  const mockMkdir = jest.fn<(dirPath: string) => Promise<void>>();
+  const mockMkdir =
+    jest.fn<(dirPath: string, meta?: unknown) => Promise<void>>();
   const mockCopyFileExact =
-    jest.fn<(sourcePath: string, destinationPath: string) => Promise<void>>();
+    jest.fn<
+      (
+        sourcePath: string,
+        destinationPath: string,
+        meta?: unknown,
+      ) => Promise<void>
+    >();
 
   beforeEach(() => {
     mockCheckFileExists.mockReset();
@@ -90,10 +97,18 @@ describe('projectThumbnail', () => {
       manifest,
     );
 
-    expect(mockMkdir).toHaveBeenCalledWith('/projects/demo/.kshana/ui');
+    const fileOpMeta = {
+      source: 'renderer',
+      projectRoot: '/projects/demo',
+    };
+    expect(mockMkdir).toHaveBeenCalledWith(
+      '/projects/demo/.kshana/ui',
+      fileOpMeta,
+    );
     expect(mockCopyFileExact).toHaveBeenCalledWith(
       '/projects/demo/assets/images/scene1-shot1.png',
       '/projects/demo/.kshana/ui/thumbnail.png',
+      fileOpMeta,
     );
     expect(result.changed).toBe(true);
     expect(result.manifest.assets).toContainEqual(

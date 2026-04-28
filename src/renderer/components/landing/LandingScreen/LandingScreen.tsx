@@ -1,5 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FolderOpen, Plus, Play, Settings, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type FC, type SVGProps } from 'react';
+import {
+  FolderOpen as _FolderOpen,
+  Plus as _Plus,
+  Play as _Play,
+  Settings as _Settings,
+  Sparkles as _Sparkles,
+} from 'lucide-react';
+
+type LucideFC = FC<SVGProps<SVGSVGElement> & { size?: number | string }>;
+
+const FolderOpen = _FolderOpen as unknown as LucideFC;
+const Plus = _Plus as unknown as LucideFC;
+const Play = _Play as unknown as LucideFC;
+const Settings = _Settings as unknown as LucideFC;
+const Sparkles = _Sparkles as unknown as LucideFC;
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { safeJsonParse } from '../../../utils/safeJsonParse';
 import { useProject } from '../../../contexts/ProjectContext';
@@ -48,56 +62,48 @@ function joinPath(basePath: string, segment: string): string {
 
 async function findThumbnailPath(
   projectPath: string,
-  candidateIndex = 0,
 ): Promise<string | null> {
-  if (candidateIndex >= THUMBNAIL_CANDIDATES.length) {
-    return null;
-  }
+  const checks = await Promise.allSettled(
+    THUMBNAIL_CANDIDATES.map(async (candidate) => {
+      const fullPath = joinPath(projectPath, candidate);
+      const exists = await window.electron.project.checkFileExists(fullPath);
+      return exists ? fullPath : null;
+    }),
+  );
 
-  const fullPath = joinPath(projectPath, THUMBNAIL_CANDIDATES[candidateIndex]);
-  try {
-    const exists = await window.electron.project.checkFileExists(fullPath);
-    if (exists) {
-      return fullPath;
+  for (const result of checks) {
+    if (result.status === 'fulfilled' && result.value) {
+      return result.value;
     }
-  } catch {
-    // Ignore file existence check issues.
   }
 
-  return findThumbnailPath(projectPath, candidateIndex + 1);
+  return null;
 }
 
 async function loadSingleProjectMetadata(
   projectPath: string,
 ): Promise<ProjectMetadata> {
   const metadata: ProjectMetadata = {};
-  try {
-    const manifestContent = await window.electron.project.readFile(
-      joinPath(projectPath, 'project.json'),
-    );
-    if (manifestContent) {
-      const project = safeJsonParse<BackendProjectFile>(manifestContent);
+  const [projectContent, thumbnailPath] = await Promise.all([
+    window.electron.project
+      .readFile(joinPath(projectPath, 'project.json'))
+      .catch(() => null),
+    findThumbnailPath(projectPath),
+  ]);
+
+  if (projectContent) {
+    try {
+      const project = safeJsonParse<BackendProjectFile>(projectContent);
       metadata.manifestName = project.title;
       metadata.description = project.description ?? null;
+      metadata.sceneCount = project.scenes.length;
+      metadata.characterCount = project.characters.length;
+    } catch {
+      // Ignore malformed or missing project metadata.
     }
-  } catch {
-    // Ignore malformed or missing project metadata.
   }
 
-  try {
-    const projectContent = await window.electron.project.readFile(
-      joinPath(projectPath, 'project.json'),
-    );
-    if (projectContent) {
-      const agentProject = safeJsonParse<BackendProjectFile>(projectContent);
-      metadata.sceneCount = agentProject.scenes.length;
-      metadata.characterCount = agentProject.characters.length;
-    }
-  } catch {
-    // Ignore if this isn't a complete Kshana project yet.
-  }
-
-  metadata.thumbnailPath = await findThumbnailPath(projectPath);
+  metadata.thumbnailPath = thumbnailPath;
   return metadata;
 }
 
@@ -136,15 +142,12 @@ export default function LandingScreen() {
     let isActive = true;
 
     const loadMetadata = async () => {
-      const entries: Array<readonly [string, ProjectMetadata]> = [];
-      const loadSequentially = async (index: number): Promise<void> => {
-        if (index >= recentProjects.length) return;
-        const project = recentProjects[index];
-        const metadata = await loadSingleProjectMetadata(project.path);
-        entries.push([project.path, metadata] as const);
-        await loadSequentially(index + 1);
-      };
-      await loadSequentially(0);
+      const entries = await Promise.all(
+        recentProjects.map(async (project) => {
+          const metadata = await loadSingleProjectMetadata(project.path);
+          return [project.path, metadata] as const;
+        }),
+      );
 
       if (!isActive) return;
       setMetadataByPath(Object.fromEntries(entries));
@@ -192,9 +195,10 @@ export default function LandingScreen() {
         return {
           path: project.path,
           name:
-            metadata?.manifestName ||
+            getProjectNameFromPath(project.path) ||
             project.name ||
-            getProjectNameFromPath(project.path),
+            metadata?.manifestName ||
+            project.path,
           lastOpened: project.lastOpened,
           description: metadata?.description || null,
           sceneCount: metadata?.sceneCount ?? null,
@@ -324,6 +328,9 @@ export default function LandingScreen() {
             <Play size={20} className={styles.playIcon} />
           </div>
           <h1 className={styles.brandTitle}>Kshana Desktop</h1>
+          <div className={styles.modeBadge}>
+            {settings?.backendMode === 'cloud' ? 'Cloud Mode' : 'Local Mode'}
+          </div>
         </div>
 
         <div className={styles.sidebarSection}>
@@ -332,7 +339,6 @@ export default function LandingScreen() {
             type="button"
             className={styles.newProjectButton}
             onClick={handleCreateNewProject}
-            disabled={isLoading || isProjectLoading}
           >
             <Plus size={16} />
             New Project
@@ -409,7 +415,6 @@ export default function LandingScreen() {
                     type="button"
                     className={styles.newProjectButton}
                     onClick={handleCreateNewProject}
-                    disabled={isLoading || isProjectLoading}
                   >
                     <Plus size={16} />
                     Create Project

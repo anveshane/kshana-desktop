@@ -1066,6 +1066,9 @@ export function useTimelineData(
     audioReloadRequestIdRef.current = requestId;
     setIsAudioLoading(true);
 
+    const start =
+      process.env.NODE_ENV === 'development' ? performance.now() : 0;
+
     try {
       const audioDir = `${projectDirectory}/${PROJECT_PATHS.AGENT_AUDIO}`;
       const files = await window.electron.project.readTree(audioDir, 1);
@@ -1097,9 +1100,17 @@ export function useTimelineData(
       setIsAudioLoading(false);
 
       if (nextAudioFiles.length === 0) {
+        if (process.env.NODE_ENV === 'development') {
+          // eslint-disable-next-line no-console
+          console.debug(
+            `[perf][useTimelineData] reloadAudioFiles ${(performance.now() - start).toFixed(1)}ms (no_audio)`,
+          );
+        }
         return;
       }
 
+      const waveformStart =
+        process.env.NODE_ENV === 'development' ? performance.now() : 0;
       void attachWaveformPeaksToAudioFiles({
         audioFiles: nextAudioFiles,
         projectDirectory,
@@ -1111,6 +1122,12 @@ export function useTimelineData(
             return;
           }
           setAudioFiles(audioFilesWithWaveforms);
+          if (process.env.NODE_ENV === 'development') {
+            // eslint-disable-next-line no-console
+            console.debug(
+              `[perf][useTimelineData] attachWaveforms ${(performance.now() - waveformStart).toFixed(1)}ms`,
+            );
+          }
         })
         .catch((error) => {
           debugRendererDebug(
@@ -1118,6 +1135,13 @@ export function useTimelineData(
             error,
           );
         });
+
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.debug(
+          `[perf][useTimelineData] reloadAudioFiles(base) ${(performance.now() - start).toFixed(1)}ms`,
+        );
+      }
     } catch (error) {
       if (requestId !== audioReloadRequestIdRef.current) {
         return;

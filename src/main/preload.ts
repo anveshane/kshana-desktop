@@ -58,6 +58,7 @@ interface FileOpMeta {
   opId?: string | null;
   source?: 'agent_ws' | 'renderer';
   intent?: 'new_project_parent';
+  projectRoot?: string | null;
 }
 
 type AppUpdatePhase =
@@ -599,6 +600,12 @@ const accountBridge = {
   },
   refreshBalance(): Promise<{ balance: number | null }> {
     return ipcRenderer.invoke('account:refresh-balance');
+  },
+  getBillingUrl(): Promise<string> {
+    return ipcRenderer.invoke('account:get-billing-url');
+  },
+  openBilling(): Promise<{ opened: boolean; url: string }> {
+    return ipcRenderer.invoke('account:open-billing');
   },
   onChange(callback: (account: AccountInfo | null) => void) {
     const subscription = () => {

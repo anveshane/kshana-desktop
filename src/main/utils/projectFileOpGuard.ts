@@ -175,6 +175,39 @@ export function isSafeNewProjectFolderSegment(segment: string): boolean {
   return true;
 }
 
+interface ValidationRootMeta {
+  source?: 'agent_ws' | 'renderer';
+  projectRoot?: string | null;
+}
+
+/**
+ * Pick the root used for guarded filesystem operations.
+ *
+ * Renderer calls can carry the exact project root they are operating on. Prefer
+ * that root so stale watchers from a previous project do not reject a new or
+ * newly opened project. Backend/agent calls stay pinned to the active watcher
+ * root and never fall back to arbitrary absolute paths.
+ */
+export function resolveValidationRoot(
+  activeProjectRoot: string | null,
+  fallbackPath: string | null,
+  meta?: ValidationRootMeta,
+): string | null {
+  if (meta?.source === 'renderer' && meta.projectRoot?.trim()) {
+    return path.resolve(meta.projectRoot);
+  }
+
+  if (activeProjectRoot && activeProjectRoot.trim()) {
+    return path.resolve(activeProjectRoot);
+  }
+
+  if (meta?.source === 'agent_ws' || !fallbackPath) {
+    return null;
+  }
+
+  return path.resolve(fallbackPath);
+}
+
 function isPathWithinRoot(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
