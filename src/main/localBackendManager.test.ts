@@ -87,10 +87,34 @@ describe('buildLocalBackendEnv', () => {
     expect(env['OPENAI_BASE_URL']).toBe(
       'https://proxy.kshana.cloud/openai/api/v1',
     );
-    expect(env['OPENAI_API_KEY']).toBe('desktop-jwt');
-    expect(env['OPENAI_MODEL']).toBe('openai/gpt-4o-mini');
+    expect(env['OPENAI_API_KEY']).toBeUndefined();
+    expect(env['OPENAI_MODEL']).toBe('deepseek/deepseek-v4-flash');
     expect(env['OPENROUTER_BASE_URL']).toBeUndefined();
     expect(env['OPENROUTER_API_KEY']).toBeUndefined();
     expect(env['OPENROUTER_MODEL']).toBeUndefined();
+  });
+
+  it('allows the cloud proxy model to be overridden by env', () => {
+    const previous = process.env['KSHANA_CLOUD_OPENAI_MODEL'];
+    process.env['KSHANA_CLOUD_OPENAI_MODEL'] = 'z-ai/glm-5';
+    try {
+      const env = buildLocalBackendEnv(
+        {
+          ...baseSettings,
+          backendMode: 'cloud',
+        },
+        8123,
+        {
+          websiteUrl: 'https://app.kshana.cloud',
+          proxyBaseUrl: 'https://proxy.kshana.cloud/',
+          desktopToken: 'desktop-jwt',
+        },
+      );
+
+      expect(env['OPENAI_MODEL']).toBe('z-ai/glm-5');
+    } finally {
+      if (previous === undefined) delete process.env['KSHANA_CLOUD_OPENAI_MODEL'];
+      else process.env['KSHANA_CLOUD_OPENAI_MODEL'] = previous;
+    }
   });
 });

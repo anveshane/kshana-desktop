@@ -15,6 +15,7 @@ import type { AppSettings } from '../shared/settingsTypes';
 const HEALTH_ENDPOINT = '/api/v1/health';
 const DEFAULT_COMFYUI_URL = 'http://localhost:8000';
 const DEFAULT_OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+const DEFAULT_CLOUD_OPENAI_MODEL = 'deepseek/deepseek-v4-flash';
 const COMFY_CLOUD_HOST = 'cloud.comfy.org';
 
 function appendUrlPath(baseUrl: string, pathname: string): string {
@@ -125,11 +126,14 @@ export function buildLocalBackendEnv(
     // provider/env vars so *all* clients use the same protocol + base URL.
     env['LLM_PROVIDER'] = 'openai';
     env['OPENAI_BASE_URL'] = appendUrlPath(proxyBaseUrl, '/openai/api/v1');
-    env['OPENAI_API_KEY'] = desktopToken;
-    // In cloud mode we reuse the OpenRouter model picker as the upstream catalog.
+    // In cloud mode, prefer an explicit cloud model override. Falling back to a
+    // known-supported model avoids stale desktop settings pointing at retired
+    // OpenRouter aliases.
     env['OPENAI_MODEL'] =
-      settings.openRouterModel.trim() || 'z-ai/glm-4.7-flash';
+      process.env['KSHANA_CLOUD_OPENAI_MODEL']?.trim() ||
+      DEFAULT_CLOUD_OPENAI_MODEL;
 
+    delete env['OPENAI_API_KEY'];
     delete env['OPENROUTER_API_KEY'];
     delete env['OPENROUTER_BASE_URL'];
     delete env['OPENROUTER_MODEL'];
