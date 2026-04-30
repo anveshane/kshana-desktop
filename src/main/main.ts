@@ -62,6 +62,7 @@ import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
 import type {
   BackendConnectionInfo,
   BackendState,
+  CloudBackendRuntimeConfig,
   ServerConnectionConfig,
 } from '../shared/backendTypes';
 import * as desktopLogger from './services/DesktopLogger';
@@ -114,6 +115,16 @@ interface RuntimeConfig {
   kshanaWebsiteUrl?: string;
   /** Alias for kshanaWebsiteUrl */
   websiteUrl?: string;
+  /** Authenticated proxy base URL for paid upstream calls. */
+  kshanaProxyBaseUrl?: string;
+  /** Alias for kshanaProxyBaseUrl */
+  proxyBaseUrl?: string;
+  /** Legacy hosted kshana-core URL retained for dev/fallback metadata only. */
+  kshanaCoreUrl?: string;
+  /** Alias for kshanaCoreUrl */
+  coreUrl?: string;
+  /** Legacy key from older release pipelines. */
+  cloudServerUrl?: string;
 }
 
 async function readRuntimeConfig(): Promise<RuntimeConfig | null> {
@@ -166,13 +177,46 @@ async function resolveKshanaWebsiteUrl(): Promise<string> {
   return 'http://localhost:3000';
 }
 
+async function resolveKshanaProxyBaseUrl(): Promise<string> {
+  const fromEnv = normalizeServerUrl(process.env.KSHANA_PROXY_BASE_URL);
+  if (fromEnv) return fromEnv;
+  const parsed = await readRuntimeConfig();
+  const fromFile = normalizeServerUrl(
+    parsed?.kshanaProxyBaseUrl || parsed?.proxyBaseUrl,
+  );
+  if (fromFile) return fromFile;
+  return resolveKshanaWebsiteUrl();
+}
+
+async function resolveLegacyKshanaCoreUrl(): Promise<string | undefined> {
+  const fromEnv = normalizeServerUrl(process.env.KSHANA_CORE_URL);
+  if (fromEnv) return fromEnv;
+  const parsed = await readRuntimeConfig();
+  return normalizeServerUrl(
+    parsed?.kshanaCoreUrl || parsed?.coreUrl || parsed?.cloudServerUrl,
+  );
+}
+
 async function resolveKshanaWebsitePath(pathname: string): Promise<string> {
   const websiteBase = await resolveKshanaWebsiteUrl();
   return `${websiteBase}${pathname.startsWith('/') ? pathname : `/${pathname}`}`;
 }
 
-async function resolveCloudBackendServerUrl(): Promise<string> {
-  return resolveKshanaWebsiteUrl();
+async function resolveCloudBackendRuntime(
+  desktopToken?: string,
+  proxyOverride?: string,
+): Promise<CloudBackendRuntimeConfig> {
+  const [websiteUrl, configuredProxyBaseUrl, legacyCoreUrl] = await Promise.all([
+    resolveKshanaWebsiteUrl(),
+    resolveKshanaProxyBaseUrl(),
+    resolveLegacyKshanaCoreUrl(),
+  ]);
+  return {
+    websiteUrl,
+    proxyBaseUrl: normalizeServerUrl(proxyOverride) || configuredProxyBaseUrl,
+    desktopToken,
+    legacyCoreUrl,
+  };
 }
 
 type GuardedFileOp =
@@ -322,8 +366,8 @@ ipcMain.handle(
   'backend:get-connection-info',
   async (): Promise<BackendConnectionInfo> => {
     const settings = getSettings();
-    const kshanaWebsiteUrl = await resolveCloudBackendServerUrl();
-    return backendManager.getConnectionInfo(settings, kshanaWebsiteUrl);
+    const cloudRuntime = await resolveCloudBackendRuntime(getAccount()?.token);
+    return backendManager.getConnectionInfo(settings, cloudRuntime);
   },
 );
 
@@ -332,16 +376,19 @@ ipcMain.handle(
   async (_event, config?: ServerConnectionConfig): Promise<BackendState> => {
     try {
       const settings = getSettings();
-      if (settings.backendMode === 'cloud' && !getAccount()?.token) {
+      const account = getAccount();
+      if (settings.backendMode === 'cloud' && !account?.token) {
         return {
           status: 'error',
           mode: 'cloud',
-          message: 'Sign in to Kshana Cloud before using the cloud backend.',
+          message: 'Sign in to Kshana Cloud before using cloud credits.',
         };
       }
-      const resolvedCloudServerUrl =
-        config?.serverUrl || (await resolveCloudBackendServerUrl());
-      return await backendManager.start(settings, resolvedCloudServerUrl);
+      const cloudRuntime =
+        settings.backendMode === 'cloud'
+          ? await resolveCloudBackendRuntime(account?.token, config?.serverUrl)
+          : undefined;
+      return await backendManager.start(settings, cloudRuntime);
     } catch (error) {
       log.error(`Failed to start backend: ${(error as Error).message}`);
       return {
@@ -357,16 +404,19 @@ ipcMain.handle(
   async (_event, config?: ServerConnectionConfig) => {
     try {
       const settings = getSettings();
-      if (settings.backendMode === 'cloud' && !getAccount()?.token) {
+      const account = getAccount();
+      if (settings.backendMode === 'cloud' && !account?.token) {
         return {
           status: 'error',
           mode: 'cloud',
-          message: 'Sign in to Kshana Cloud before using the cloud backend.',
+          message: 'Sign in to Kshana Cloud before using cloud credits.',
         };
       }
-      const resolvedCloudServerUrl =
-        config?.serverUrl || (await resolveCloudBackendServerUrl());
-      return await backendManager.restart(settings, resolvedCloudServerUrl);
+      const cloudRuntime =
+        settings.backendMode === 'cloud'
+          ? await resolveCloudBackendRuntime(account?.token, config?.serverUrl)
+          : undefined;
+      return await backendManager.restart(settings, cloudRuntime);
     } catch (error) {
       log.error(`Failed to restart backend: ${(error as Error).message}`);
       return {
@@ -3342,8 +3392,11 @@ app.on('before-quit', () => {
 const bootstrapBackend = async () => {
   try {
     const settings = getSettings();
-    const resolvedCloudServerUrl = await resolveCloudBackendServerUrl();
-    await backendManager.start(settings, resolvedCloudServerUrl);
+    const cloudRuntime =
+      settings.backendMode === 'cloud'
+        ? await resolveCloudBackendRuntime(getAccount()?.token)
+        : undefined;
+    await backendManager.start(settings, cloudRuntime);
   } catch (error) {
     log.error(`Failed to start backend: ${(error as Error).message}`);
   }

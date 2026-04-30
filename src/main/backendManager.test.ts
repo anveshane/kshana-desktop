@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-const localStart = jest.fn<() => Promise<{ status: string; serverUrl?: string }>>();
-const localRestart = jest.fn<() => Promise<{ status: string; serverUrl?: string }>>();
+const localStart = jest.fn<() => Promise<{ status: string; serverUrl?: string; mode?: string }>>();
+const localRestart = jest.fn<() => Promise<{ status: string; serverUrl?: string; mode?: string }>>();
 const localStop = jest.fn<() => Promise<{ status: string }>>();
 const localIsAvailable = jest.fn<() => Promise<boolean>>();
 const localGetBundledVersionInfo = jest.fn<() => Promise<Record<string, string> | undefined>>();
@@ -19,6 +19,7 @@ jest.mock('./localBackendManager', () => ({
     isAvailable: localIsAvailable,
     getBundledVersionInfo: localGetBundledVersionInfo,
     currentServerUrl: 'http://127.0.0.1:8001',
+    status: { mode: 'local' },
   },
 }));
 
@@ -71,29 +72,37 @@ describe('backendManager', () => {
     });
     cloudDisconnect.mockResolvedValue({ status: 'stopped' });
 
-    const state = await backendManager.start(baseSettings, 'https://cloud.example.com');
+    const state = await backendManager.start(baseSettings);
 
     expect(localStart).toHaveBeenCalledWith(baseSettings);
     expect(cloudConnect).not.toHaveBeenCalled();
     expect(state.mode).toBe('local');
   });
 
-  it('connects to the cloud backend when cloud mode is selected', async () => {
-    localStop.mockResolvedValue({ status: 'stopped' });
-    cloudConnect.mockResolvedValue({
+  it('starts the bundled local backend with cloud runtime when cloud mode is selected', async () => {
+    cloudDisconnect.mockResolvedValue({ status: 'stopped' });
+    localRestart.mockResolvedValue({
       status: 'ready',
-      serverUrl: 'https://cloud.example.com',
+      mode: 'cloud',
+      serverUrl: 'http://127.0.0.1:8002',
     });
 
+    const cloudRuntime = {
+      websiteUrl: 'https://website.example.com',
+      proxyBaseUrl: 'https://proxy.example.com',
+      desktopToken: 'desktop-token',
+    };
     const state = await backendManager.start(
       { ...baseSettings, backendMode: 'cloud' },
-      'https://cloud.example.com',
+      cloudRuntime,
     );
 
-    expect(localStart).not.toHaveBeenCalled();
-    expect(cloudConnect).toHaveBeenCalledWith({
-      serverUrl: 'https://cloud.example.com',
-    });
+    expect(cloudDisconnect).toHaveBeenCalled();
+    expect(localRestart).toHaveBeenCalledWith(
+      { ...baseSettings, backendMode: 'cloud' },
+      cloudRuntime,
+    );
+    expect(cloudConnect).not.toHaveBeenCalled();
     expect(state.mode).toBe('cloud');
   });
 
@@ -103,10 +112,14 @@ describe('backendManager', () => {
       packageVersion: '0.1.0',
     });
 
-    const info = await backendManager.getConnectionInfo(baseSettings, 'https://cloud.example.com');
+    const info = await backendManager.getConnectionInfo(baseSettings, {
+      websiteUrl: 'https://cloud.example.com',
+      proxyBaseUrl: 'https://proxy.example.com',
+    });
 
     expect(info.effectiveServerUrl).toBe('http://127.0.0.1:8001');
     expect(info.cloudServerUrl).toBe('https://cloud.example.com');
+    expect(info.proxyBaseUrl).toBe('https://proxy.example.com');
     expect(info.selectedMode).toBe('local');
   });
 });
