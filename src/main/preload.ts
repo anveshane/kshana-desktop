@@ -618,6 +618,80 @@ const accountBridge = {
   },
 };
 
+// ─── kshana bridge — typed access to the embedded kshana-ink ──────────
+// Replaces the old WebSocket-based protocol (renderer → backend) with a
+// direct main-process IPC layer. Channel + payload shapes live in
+// `src/shared/kshanaIpc.ts`.
+import {
+  KSHANA_CHANNELS,
+  KSHANA_EVENT_CHANNEL,
+  type KshanaEvent,
+  type KshanaEventName,
+  type CreateSessionResponse,
+  type ConfigureProjectRequest,
+  type OkResponse,
+  type RunTaskRequest,
+  type SendResponseRequest,
+  type CancelTaskRequest,
+  type CancelTaskResponse,
+  type RedoNodeRequest,
+  type FocusProjectRequest,
+  type SetAutonomousRequest,
+  type DeleteSessionRequest,
+} from '../shared/kshanaIpc';
+
+const kshanaBridge = {
+  createSession(): Promise<CreateSessionResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.CREATE_SESSION);
+  },
+  configureProject(req: ConfigureProjectRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.CONFIGURE_PROJECT, req);
+  },
+  runTask(req: RunTaskRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.RUN_TASK, req);
+  },
+  sendResponse(req: SendResponseRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.SEND_RESPONSE, req);
+  },
+  cancelTask(req: CancelTaskRequest): Promise<CancelTaskResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.CANCEL_TASK, req);
+  },
+  redoNode(req: RedoNodeRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.REDO_NODE, req);
+  },
+  focusProject(req: FocusProjectRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.FOCUS_PROJECT, req);
+  },
+  setAutonomous(req: SetAutonomousRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.SET_AUTONOMOUS, req);
+  },
+  deleteSession(req: DeleteSessionRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.DELETE_SESSION, req);
+  },
+  /**
+   * Subscribe to streaming events from the embedded ConversationManager.
+   * Filter by eventName ('tool_call', 'media_generated', etc) — handlers
+   * only fire for matching events. Returns an unsubscribe function.
+   */
+  on(
+    eventName: KshanaEventName | '*',
+    cb: (event: KshanaEvent) => void,
+  ): () => void {
+    const listener = (_event: IpcRendererEvent, payload: KshanaEvent) => {
+      if (eventName === '*' || payload.eventName === eventName) {
+        cb(payload);
+      }
+    };
+    ipcRenderer.on(KSHANA_EVENT_CHANNEL, listener);
+    return () => {
+      ipcRenderer.removeListener(KSHANA_EVENT_CHANNEL, listener);
+    };
+  },
+};
+
+contextBridge.exposeInMainWorld('kshana', kshanaBridge);
+export type KshanaBridge = typeof kshanaBridge;
+
 const electronHandler = {
   ipcRenderer: {
     sendMessage(channel: Channels, ...args: unknown[]) {
