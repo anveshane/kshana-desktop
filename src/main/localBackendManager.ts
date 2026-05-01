@@ -54,7 +54,7 @@ function normalizePathValue(value?: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function getComfyUiUrl(settings: AppSettings): string {
+export function getComfyUiUrl(settings: AppSettings): string {
   if (settings.comfyuiMode === 'custom' && settings.comfyuiUrl.trim()) {
     return settings.comfyuiUrl.trim();
   }
