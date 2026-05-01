@@ -18,7 +18,6 @@
  * `KshanaCoreEvent` stream the IPC bridge can re-publish over
  * `webContents.send`.
  */
-import { app } from 'electron';
 import {
   ConversationManager,
   type ConversationManagerConfig,
@@ -124,9 +123,10 @@ export function applyEnvFromSettings(settings: AppSettings): void {
       break;
   }
 
-  if (app.isPackaged) {
-    process.env['NODE_ENV'] = 'production';
-  }
+  // NODE_ENV is set by the Electron build pipeline (webpack
+  // DefinePlugin replaces process.env.NODE_ENV at compile time);
+  // setting it at runtime is both redundant and triggers a terser
+  // "Invalid assignment" because the LHS gets constant-folded.
 }
 
 function isComfyCloudUrl(url: string): boolean {

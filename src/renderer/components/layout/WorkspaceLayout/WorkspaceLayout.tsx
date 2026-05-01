@@ -7,7 +7,11 @@ import {
 } from 'react-resizable-panels';
 import { ArrowLeft, MessageSquare } from 'lucide-react';
 import PreviewPanel from '../../preview/PreviewPanel/PreviewPanel';
-import ChatPanel from '../../chat/ChatPanel/ChatPanel';
+// Embedded mode (default since the main process now boots
+// kshana-ink in-process). Legacy WS-backed ChatPanel stays in tree
+// at ../../chat/ChatPanel/ChatPanel until a follow-up cleanup deletes
+// it. To roll back, swap the line below to the old import.
+import ChatPanel from '../../chat/ChatPanelEmbedded/ChatPanelEmbedded';
 import StatusBar from '../StatusBar/StatusBar';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import styles from './WorkspaceLayout.module.scss';
