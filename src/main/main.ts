@@ -3346,34 +3346,20 @@ app.on('before-quit', () => {
   } catch (error) {
     log.error(`Failed to stop embedded kshana: ${(error as Error).message}`);
   }
-  backendManager.stop().catch((error) => {
-    log.error(`Failed to stop backend: ${(error as Error).message}`);
-  });
 });
 
 const bootstrapBackend = async () => {
   try {
     const settings = getSettings();
-
-    // Embedded kshana-ink — replaces the spawned local backend. Starts
-    // synchronously (in-process), so the IPC bridge can register
-    // immediately and the renderer's window.kshana.* calls can land.
-    try {
-      kshanaCoreManager.start(settings);
-      if (mainWindow) {
-        registerKshanaIpcBridge(kshanaCoreManager, mainWindow);
-      }
-    } catch (err) {
-      log.error(`Failed to start embedded kshana: ${(err as Error).message}`);
+    // Embedded kshana-ink — the only backend path. Starts synchronously
+    // (in-process), so the IPC bridge can register immediately and the
+    // renderer's window.kshana.* calls can land.
+    kshanaCoreManager.start(settings);
+    if (mainWindow) {
+      registerKshanaIpcBridge(kshanaCoreManager, mainWindow);
     }
-
-    // Legacy backend path — kept alive during cutover. Phase 5 deletes
-    // it. Until then it runs in parallel but the renderer only talks
-    // to the embedded path via window.kshana.
-    const resolvedCloudServerUrl = await resolveCloudBackendServerUrl();
-    await backendManager.start(settings, resolvedCloudServerUrl);
   } catch (error) {
-    log.error(`Failed to start backend: ${(error as Error).message}`);
+    log.error(`Failed to start embedded kshana: ${(error as Error).message}`);
   }
 };
 

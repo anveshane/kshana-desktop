@@ -25,7 +25,7 @@ import {
 } from 'kshana-ink/manager';
 import type { LLMClientConfig } from 'kshana-ink/core/llm';
 import type { AppSettings } from '../shared/settingsTypes';
-import { getComfyUiUrl } from './localBackendManager';
+import { getComfyUiUrl, isComfyCloudUrl, withV1Suffix } from './utils/comfyUrl';
 
 /**
  * Single normalized event the IPC bridge publishes downstream.
@@ -127,14 +127,6 @@ export function applyEnvFromSettings(settings: AppSettings): void {
   // DefinePlugin replaces process.env.NODE_ENV at compile time);
   // setting it at runtime is both redundant and triggers a terser
   // "Invalid assignment" because the LHS gets constant-folded.
-}
-
-function isComfyCloudUrl(url: string): boolean {
-  return /(^|\.)cloud\.comfy\.org/.test(url);
-}
-
-function withV1Suffix(url: string): string {
-  return /\/v1\/?$/.test(url) ? url : `${url.replace(/\/$/, '')}/v1`;
 }
 
 /**
