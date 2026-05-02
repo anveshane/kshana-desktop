@@ -4,16 +4,14 @@ import type {
   BackendState,
 } from '../../../shared/backendTypes';
 import type {
-  AccountInfo,
   AppSettings,
   LLMProvider,
   ThemeId,
 } from '../../../shared/settingsTypes';
 import { DESKTOP_THEMES } from '../../themes';
 import styles from './SettingsPanel.module.scss';
-import AccountTab from './AccountTab';
 
-type SettingsTab = 'account' | 'appearance' | 'connection';
+type SettingsTab = 'appearance' | 'connection';
 
 type Props = {
   isOpen: boolean;
@@ -27,7 +25,6 @@ type Props = {
 };
 
 const emptySettings: AppSettings = {
-  backendMode: 'local',
   comfyuiMode: 'inherit',
   comfyuiUrl: '',
   comfyCloudApiKey: '',
@@ -52,7 +49,6 @@ function withV1Suffix(url: string): string {
 function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
   const next = input ?? emptySettings;
   const comfyuiUrl = (next.comfyuiUrl || '').trim();
-  const backendMode = next.backendMode === 'cloud' ? 'cloud' : 'local';
   const llmProvider =
     next.llmProvider === 'openrouter' || next.llmProvider === 'lmstudio'
       ? 'openai'
@@ -77,7 +73,6 @@ function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
   return {
     ...emptySettings,
     ...next,
-    backendMode,
     llmProvider,
     comfyuiMode: comfyuiUrl ? 'custom' : 'inherit',
     comfyuiUrl,
@@ -143,13 +138,7 @@ export default function SettingsPanel({
   const [form, setForm] = useState<AppSettings>(normalizeConnectionSettings(settings));
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
   const [backendState, setBackendState] = useState<BackendState | null>(null);
-  const [connectionInfo, setConnectionInfo] = useState<BackendConnectionInfo | null>(null);
-  const [account, setAccount] = useState<AccountInfo | null>(null);
-  const [cloudModeWarning, setCloudModeWarning] = useState<string | null>(null);
-  const [pendingBackendMode, setPendingBackendMode] = useState<
-    AppSettings['backendMode'] | null
-  >(null);
-  const [isModeSwitchSaving, setIsModeSwitchSaving] = useState(false);
+  const [, setConnectionInfo] = useState<BackendConnectionInfo | null>(null);
 
   useEffect(() => {
     setForm(normalizeConnectionSettings(settings));
@@ -157,7 +146,7 @@ export default function SettingsPanel({
 
   useEffect(() => {
     if (isVisible) {
-      setActiveTab('account');
+      setActiveTab('appearance');
     }
   }, [isVisible]);
 
@@ -198,18 +187,6 @@ export default function SettingsPanel({
     });
   }, [isVisible, refreshConnectionInfo]);
 
-  useEffect(() => {
-    if (!isVisible || !window.electron.account) return undefined;
-
-    window.electron.account.get().then(setAccount).catch(() => setAccount(null));
-    return window.electron.account.onChange((nextAccount) => {
-      setAccount(nextAccount);
-      if (nextAccount) {
-        setCloudModeWarning(null);
-      }
-    });
-  }, [isVisible]);
-
   if (!isVisible) {
     return null;
   }
@@ -218,20 +195,6 @@ export default function SettingsPanel({
     key: keyof AppSettings,
     value: string | number | undefined,
   ) => {
-    if (key === 'backendMode' && value === 'cloud' && !account) {
-      setCloudModeWarning('Sign in to Kshana Cloud before switching to Cloud mode.');
-      return;
-    }
-
-    if (key === 'backendMode') {
-      if (value === form.backendMode) {
-        return;
-      }
-      setCloudModeWarning(null);
-      setPendingBackendMode(value as AppSettings['backendMode']);
-      return;
-    }
-
     setForm((prev) => ({
       ...prev,
       [key]: value,
@@ -241,7 +204,6 @@ export default function SettingsPanel({
   const saveConnectionSettings = async (nextForm: AppSettings) => {
     const normalized = normalizeConnectionSettings(nextForm);
     await onSaveConnection({
-      backendMode: normalized.backendMode,
       comfyuiMode: normalized.comfyuiUrl ? 'custom' : 'inherit',
       comfyuiUrl: normalized.comfyuiUrl,
       comfyCloudApiKey: normalized.comfyCloudApiKey,
@@ -264,52 +226,24 @@ export default function SettingsPanel({
     await saveConnectionSettings(form);
   };
 
-  const handleConfirmModeSwitch = async () => {
-    if (!pendingBackendMode) return;
-
-    const nextForm = {
-      ...form,
-      backendMode: pendingBackendMode,
-    };
-    setIsModeSwitchSaving(true);
-    try {
-      setForm(nextForm);
-      await saveConnectionSettings(nextForm);
-      setPendingBackendMode(null);
-    } finally {
-      setIsModeSwitchSaving(false);
-    }
-  };
-
   const handleOverlayClick = (event: React.MouseEvent) => {
     if (event.target === event.currentTarget) {
       onClose();
     }
   };
 
-  const currentMode =
-    connectionInfo?.selectedMode ??
-    backendState?.mode ??
-    settings?.backendMode ??
-    form.backendMode;
-  const isLocalMode = form.backendMode === 'local';
-  const isCurrentLocalMode = currentMode === 'local';
   const statusLabel = formatStatusLabel(backendState?.status);
   const statusTone = getStatusTone(backendState?.status);
-  const statusHeadline = isCurrentLocalMode
-    ? backendState?.status === 'ready'
+  const statusHeadline =
+    backendState?.status === 'ready'
       ? 'Connected to Local'
       : backendState?.status === 'error'
         ? 'Local backend did not become ready'
-        : 'Starting Local backend'
-    : backendState?.status === 'ready'
-      ? 'Connected to Cloud'
-      : 'Connecting to Cloud';
-  const statusSupportText = isCurrentLocalMode
-    ? backendState?.status === 'error'
-      ? 'Review the local provider settings below, then try Save & Restart again. You can switch to Cloud if you need to continue immediately.'
-      : 'The app is currently using the local kshana-core server on localhost with the provider settings shown below.'
-    : 'The app is connected to Kshana Cloud.';
+        : 'Starting Local backend';
+  const statusSupportText =
+    backendState?.status === 'error'
+      ? 'Review the local provider settings below, then try Save & Restart again.'
+      : 'The app is currently using the local kshana-core server on localhost with the provider settings shown below.';
   const renderProviderToggle = (
     provider: LLMProvider,
     label: string,
@@ -321,7 +255,6 @@ export default function SettingsPanel({
         name="llm-provider"
         value={provider}
         checked={form.llmProvider === provider}
-        disabled={!isLocalMode}
         onChange={(event) =>
           handleInput(
             'llmProvider',
@@ -332,12 +265,6 @@ export default function SettingsPanel({
       {label}
     </label>
   );
-
-  const pendingModeLabel =
-    pendingBackendMode === 'cloud' ? 'Cloud' : 'Local';
-  const currentModeLabel = form.backendMode === 'cloud' ? 'Cloud' : 'Local';
-  const confirmModeSwitchLabel =
-    pendingBackendMode === 'cloud' ? 'Save & Reconnect' : 'Save & Restart';
 
   const panelContent = (
     <div className={`${styles.panel} ${isEmbedded ? styles.embeddedPanel : ''}`}>
@@ -362,16 +289,6 @@ export default function SettingsPanel({
         <aside className={styles.sidebar}>
           <button
             type="button"
-            className={`${styles.tabButton} ${activeTab === 'account' ? styles.tabButtonActive : ''}`}
-            onClick={() => setActiveTab('account')}
-          >
-            <span className={styles.tabLabel}>Account</span>
-            <span className={styles.tabDescription}>
-              Kshana Cloud sign-in &amp; credits
-            </span>
-          </button>
-          <button
-            type="button"
             className={`${styles.tabButton} ${activeTab === 'appearance' ? styles.tabButtonActive : ''}`}
             onClick={() => setActiveTab('appearance')}
           >
@@ -387,16 +304,14 @@ export default function SettingsPanel({
           >
             <span className={styles.tabLabel}>Connection</span>
             <span className={styles.tabDescription}>
-              Local and cloud backend configuration
+              Local backend configuration
             </span>
           </button>
         </aside>
 
         <form className={styles.form} onSubmit={handleSubmit}>
           <section className={styles.section}>
-            {activeTab === 'account' ? (
-              <AccountTab />
-            ) : activeTab === 'appearance' ? (
+            {activeTab === 'appearance' ? (
               <>
                 <div className={styles.sectionHeader}>
                   <h3>Appearance</h3>
@@ -437,7 +352,7 @@ export default function SettingsPanel({
               <>
                 <div className={styles.sectionHeader}>
                   <h3>Connection</h3>
-                  <p>Choose where the desktop app connects.</p>
+                  <p>Local backend and provider configuration.</p>
                 </div>
 
                 <div
@@ -470,7 +385,6 @@ export default function SettingsPanel({
                         {statusHeadline}
                       </div>
                       <p className={styles.statusSupportText}>{statusSupportText}</p>
-                      {/* Intentionally do not display internal cloud endpoint URL. */}
                     </div>
                     <div className={`${styles.statusBadge} ${styles[`statusBadge${statusTone.charAt(0).toUpperCase()}${statusTone.slice(1)}`]}`}>
                       <span className={styles.statusDot} />
@@ -487,49 +401,13 @@ export default function SettingsPanel({
                   )}
                 </div>
 
-                <fieldset className={`${styles.fieldset} ${styles.modeFieldset}`}>
-                  <legend>Backend Mode</legend>
-                  <div className={styles.modeSwitch} role="radiogroup" aria-label="Backend Mode">
-                    <label className={styles.radioLabel}>
-                      <input
-                        type="radio"
-                        className={styles.radioInput}
-                        name="backend-mode"
-                        value="local"
-                        checked={form.backendMode === 'local'}
-                        onChange={() => handleInput('backendMode', 'local')}
-                      />
-                      <span className={styles.modeOption}>Local</span>
-                    </label>
-                    <label className={styles.radioLabel}>
-                      <input
-                        type="radio"
-                        className={styles.radioInput}
-                        name="backend-mode"
-                        value="cloud"
-                        checked={form.backendMode === 'cloud'}
-                        onChange={() => handleInput('backendMode', 'cloud')}
-                      />
-                      <span className={styles.modeOption}>Cloud</span>
-                    </label>
-                  </div>
-                  {cloudModeWarning && (
-                    <p className={styles.warningText}>{cloudModeWarning}</p>
-                  )}
-                </fieldset>
-
-                <div
-                  className={`${styles.localSettings} ${
-                    !isLocalMode ? styles.localSettingsDisabled : ''
-                  }`}
-                >
+                <div className={styles.localSettings}>
                     <label className={styles.label}>
                       ComfyUI URL
                       <input
                         type="url"
                         className={styles.input}
                         value={form.comfyuiUrl}
-                        disabled={!isLocalMode}
                         onChange={(event) =>
                           handleInput('comfyuiUrl', event.target.value)
                         }
@@ -543,7 +421,6 @@ export default function SettingsPanel({
                         type="password"
                         className={styles.input}
                         value={form.comfyCloudApiKey}
-                        disabled={!isLocalMode}
                         onChange={(event) =>
                           handleInput('comfyCloudApiKey', event.target.value)
                         }
@@ -556,7 +433,7 @@ export default function SettingsPanel({
                       connections ignore it.
                     </p>
 
-                    <fieldset className={styles.fieldset} disabled={!isLocalMode}>
+                    <fieldset className={styles.fieldset}>
                       <legend>LLM Provider</legend>
                       <div className={styles.radios}>
                         {renderProviderToggle('gemini', 'Gemini')}
@@ -572,7 +449,6 @@ export default function SettingsPanel({
                             type="password"
                             className={styles.input}
                             value={form.googleApiKey}
-                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('googleApiKey', event.target.value)
                             }
@@ -586,7 +462,6 @@ export default function SettingsPanel({
                             type="text"
                             className={styles.input}
                             value={form.geminiModel}
-                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('geminiModel', event.target.value)
                             }
@@ -604,7 +479,6 @@ export default function SettingsPanel({
                             <button
                               type="button"
                               className={styles.inlineButton}
-                              disabled={!isLocalMode}
                               onClick={() =>
                                 handleInput(
                                   'openaiBaseUrl',
@@ -619,7 +493,6 @@ export default function SettingsPanel({
                             type="url"
                             className={styles.input}
                             value={form.openaiBaseUrl}
-                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('openaiBaseUrl', event.target.value)
                             }
@@ -634,7 +507,6 @@ export default function SettingsPanel({
                             type="text"
                             className={styles.input}
                             value={form.openaiModel}
-                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('openaiModel', event.target.value)
                             }
@@ -648,7 +520,6 @@ export default function SettingsPanel({
                             type="password"
                             className={styles.input}
                             value={form.openaiApiKey}
-                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('openaiApiKey', event.target.value)
                             }
@@ -665,52 +536,16 @@ export default function SettingsPanel({
           </section>
 
           <div className={styles.actions}>
-            {activeTab !== 'account' && (
-              <button
-                type="button"
-                className={styles.cancelButton}
-                onClick={onClose}
-              >
-                {isEmbedded ? 'Back to Projects' : 'Close'}
-              </button>
-            )}
+            <button
+              type="button"
+              className={styles.cancelButton}
+              onClick={onClose}
+            >
+              {isEmbedded ? 'Back to Projects' : 'Close'}
+            </button>
           </div>
         </form>
       </div>
-      {pendingBackendMode && (
-        <div className={styles.confirmBackdrop} role="presentation">
-          <div
-            className={styles.confirmDialog}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Switch to ${pendingModeLabel}`}
-          >
-            <h3>Switch to {pendingModeLabel}?</h3>
-            <p>
-              This will change the backend from {currentModeLabel} to{' '}
-              {pendingModeLabel} and reconnect the desktop app.
-            </p>
-            <div className={styles.confirmActions}>
-              <button
-                type="button"
-                className={styles.cancelButton}
-                onClick={() => setPendingBackendMode(null)}
-                disabled={isModeSwitchSaving || isSavingConnection}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className={styles.submitButton}
-                onClick={handleConfirmModeSwitch}
-                disabled={isModeSwitchSaving || isSavingConnection}
-              >
-                {isModeSwitchSaving ? 'Saving…' : confirmModeSwitchLabel}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 

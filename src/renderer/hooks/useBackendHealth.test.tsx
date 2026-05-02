@@ -12,7 +12,6 @@ jest.mock('../contexts/WorkspaceContext', () => ({
 
 function TestComponent() {
   useBackendHealth({
-    backendMode: 'local',
     comfyuiMode: 'inherit',
     comfyuiUrl: '',
     comfyCloudApiKey: '',

@@ -1,7 +1,6 @@
 import Store from 'electron-store';
 import type {
   AppSettings,
-  BackendMode,
   ComfyUIMode,
   LLMProvider,
   ThemeId,
@@ -18,7 +17,6 @@ const DEFAULT_OPENAI_MODEL = 'gpt-4o';
 const DEFAULT_OPENROUTER_MODEL = 'z-ai/glm-4.7-flash';
 
 const defaults: AppSettings = {
-  backendMode: 'local',
   comfyuiMode: 'inherit',
   comfyuiUrl: '',
   comfyCloudApiKey: '',
@@ -69,10 +67,6 @@ function normalizeThemeId(value: unknown): ThemeId {
   return DEFAULT_THEME_ID;
 }
 
-function normalizeBackendMode(value: unknown): BackendMode {
-  return value === 'cloud' ? 'cloud' : 'local';
-}
-
 function normalizeLLMProvider(value: unknown): LLMProvider {
   switch (value) {
     case 'gemini':
@@ -97,7 +91,6 @@ function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings
   const comfyCloudApiKey = normalizeString(value?.comfyCloudApiKey);
   const explicitMode = normalizeComfyUIMode(value?.comfyuiMode);
   const themeId = normalizeThemeId(value?.themeId);
-  const backendMode = normalizeBackendMode(value?.backendMode);
   const llmProvider = normalizeLLMProvider(value?.llmProvider);
   const lmStudioUrl = normalizeString(value?.lmStudioUrl, DEFAULT_LM_STUDIO_URL);
   const lmStudioModel = normalizeString(
@@ -134,7 +127,6 @@ function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings
     : derivedMode;
 
   const normalized: AppSettings = {
-    backendMode,
     comfyuiMode: normalizedMode,
     comfyuiUrl: normalizedMode === 'custom' ? comfyuiUrl : '',
     comfyCloudApiKey,
@@ -179,7 +171,6 @@ export const updateSettings = (patch: Partial<AppSettings>): AppSettings => {
 export {
   normalizeSettings,
   normalizeThemeId,
-  normalizeBackendMode,
   normalizeLLMProvider,
   DEFAULT_THEME_ID,
 };

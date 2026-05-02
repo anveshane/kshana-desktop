@@ -8,7 +8,6 @@ import {
 import type { AppSettings } from '../../shared/settingsTypes';
 
 const baseSettings: AppSettings = {
-  backendMode: 'local',
   comfyuiMode: 'inherit',
   comfyuiUrl: '',
   comfyCloudApiKey: '',

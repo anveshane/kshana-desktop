@@ -354,15 +354,6 @@ const fakeElectron = {
   app: {
     getVersion: () => Promise.resolve('0.0.0-test'),
   },
-  account: {
-    get: () => Promise.resolve(null),
-    signIn: () => Promise.resolve({ opened: false }),
-    signOut: () => Promise.resolve({ success: true }),
-    refreshBalance: () => Promise.resolve({ balance: null }),
-    getBillingUrl: () => Promise.resolve(''),
-    openBilling: () => Promise.resolve({ opened: false, url: '' }),
-    onChange: () => () => {},
-  },
 };
 
 // ── Test API ─────────────────────────────────────────────────────────

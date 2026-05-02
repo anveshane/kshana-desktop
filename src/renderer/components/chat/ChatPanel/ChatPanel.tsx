@@ -81,10 +81,6 @@ import {
   type ChatRestoreStatus,
 } from './chatPanelPersistenceUtils';
 import useQuestionTimerCancellation from './useQuestionTimerCancellation';
-import {
-  getBackendBaseUrlForSettings,
-  getBackendStateForSettings,
-} from '../../../utils/backendModeGuard';
 import { pathBasename } from '../../../utils/pathNormalizer';
 import styles from './ChatPanel.module.scss';
 
@@ -234,21 +230,6 @@ const resolveComfyUIOverride = (
   return normalizeHttpUrl(settings?.comfyuiUrl);
 };
 
-const getCloudDesktopToken = async (
-  settings: AppSettings | null,
-): Promise<string | null> => {
-  if (settings?.backendMode !== 'cloud') {
-    return null;
-  }
-  const account = await window.electron.account.get().catch(() => null);
-  return account?.token ?? null;
-};
-
-const buildCloudAuthHeaders = (
-  token: string | null,
-): Record<string, string> | undefined =>
-  token ? { Authorization: `Bearer ${token}` } : undefined;
-
 const getComfyUISettingsKey = (settings: AppSettings | null): string => {
   const mode = settings?.comfyuiMode ?? 'inherit';
   const override =
@@ -365,12 +346,6 @@ export default function ChatPanel() {
   const currentProjectDirectoryRef = useRef<string | null>(null);
   const lastMissingProjectRootWarningAtRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
-  const cloudJobRef = useRef<{
-    id: string;
-    baseUrl: string;
-    token: string;
-    completed: boolean;
-  } | null>(null);
   const chatRestoreStateRef = useRef<ChatRestoreState>({
     projectDirectory: null,
     status: 'idle',
@@ -384,92 +359,6 @@ export default function ChatPanel() {
   const hasUserSentMessageRef = useRef(false);
   const isTaskRunningRef = useRef(false);
 
-  const createCloudJobForSession = useCallback(
-    async (baseUrl: string, settings: AppSettings | null) => {
-      if (settings?.backendMode !== 'cloud') {
-        cloudJobRef.current = null;
-        return null;
-      }
-
-      const account = await window.electron.account.get().catch(() => null);
-      if (!account?.token) {
-        throw new Error('Sign in to Kshana Cloud before using cloud mode.');
-      }
-
-      const response = await fetch(`${baseUrl}/api/cloud/jobs`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${account.token}`,
-        },
-        body: JSON.stringify({
-          type: 'project',
-          seconds: selectedDuration ?? 60,
-          sessionId: sessionIdRef.current,
-          metadata: {
-            projectDirectory,
-            selectedTemplateId,
-            selectedStyleId,
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        const message =
-          typeof data.message === 'string'
-            ? data.message
-            : typeof data.error === 'string'
-              ? data.error
-              : 'Could not create cloud job.';
-        throw new Error(
-          response.status === 402
-            ? `${message} Add credits to continue.`
-            : message,
-        );
-      }
-
-      const data = (await response.json()) as { cloudJobId: string };
-      cloudJobRef.current = {
-        id: data.cloudJobId,
-        baseUrl,
-        token: account.token,
-        completed: false,
-      };
-      return cloudJobRef.current;
-    },
-    [projectDirectory, selectedDuration, selectedStyleId, selectedTemplateId],
-  );
-
-  const settleCloudJob = useCallback(
-    async (status: 'complete' | 'fail', details?: Record<string, unknown>) => {
-      const cloudJob = cloudJobRef.current;
-      if (!cloudJob || cloudJob.completed) {
-        return;
-      }
-
-      cloudJob.completed = true;
-      const endpoint =
-        status === 'complete'
-          ? `/api/cloud/jobs/${cloudJob.id}/complete`
-          : `/api/cloud/jobs/${cloudJob.id}/fail`;
-
-      try {
-        await fetch(`${cloudJob.baseUrl}${endpoint}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${cloudJob.token}`,
-          },
-          body: JSON.stringify(details ?? {}),
-        });
-        await window.electron.account.refreshBalance().catch(() => null);
-      } catch (error) {
-        console.warn('[ChatPanel] Failed to settle cloud job:', error);
-      }
-    },
-    [],
-  );
   const isStopPendingRef = useRef(false);
   const autonomousModeRef = useRef(false);
   const supportsProjectStateSyncRef = useRef(true);
@@ -707,19 +596,16 @@ export default function ChatPanel() {
 
   const fetchTemplateCatalog =
     useCallback(async (): Promise<TemplateCatalogResponse> => {
-      const settings =
-        appSettingsRef.current ??
-        (await window.electron.settings.get().catch(() => null));
-      const backendState = await getBackendStateForSettings(settings);
-      const baseUrl = await getBackendBaseUrlForSettings(
-        settings,
-        backendState,
-      );
-      const token = await getCloudDesktopToken(settings);
+      const backendState = await window.electron.backend
+        .getState()
+        .catch(() => null);
+      const baseUrl = backendState?.serverUrl;
+      if (!baseUrl) {
+        throw new Error('Backend is not ready.');
+      }
       const response = await fetch(`${baseUrl}/api/v1/templates`, {
         method: 'GET',
         cache: 'no-store',
-        headers: buildCloudAuthHeaders(token),
       });
 
       if (!response.ok) {
@@ -1306,24 +1192,19 @@ export default function ChatPanel() {
       lookupSessionId: string,
       backendState: BackendState,
     ): Promise<RemoteSessionInfo | null> => {
-      const settings =
-        appSettingsRef.current ??
-        (await window.electron.settings.get().catch(() => null));
-      const baseUrl = await getBackendBaseUrlForSettings(
-        settings,
-        backendState,
-      );
+      const baseUrl = backendState.serverUrl;
+      if (!baseUrl) {
+        return null;
+      }
       const url = new URL(
         `/api/v1/sessions/${encodeURIComponent(lookupSessionId)}`,
         baseUrl,
       );
 
       try {
-        const token = await getCloudDesktopToken(settings);
         const response = await fetch(url.toString(), {
           signal: AbortSignal.timeout(5000),
           cache: 'no-store',
-          headers: buildCloudAuthHeaders(token),
         });
         if (response.status === 404) {
           return null;
@@ -2583,10 +2464,6 @@ export default function ChatPanel() {
             setAgentStatus('completed');
             setStatusMessage('Completed');
             setIsTaskRunning(false);
-            void settleCloudJob('complete', {
-              coreReference: sessionIdRef.current,
-              metadata: { status: responseStatus },
-            });
             if (isStopPendingRef.current) {
               resolveStopRequest(true);
             }
@@ -2599,7 +2476,6 @@ export default function ChatPanel() {
             setAgentStatus('waiting');
             setStatusMessage('Task cancelled');
             setIsTaskRunning(false);
-            void settleCloudJob('fail', { reason: 'cancelled' });
             resolveStopRequest(true);
             window.electron.logger.logStatusChange(
               'waiting',
@@ -2610,7 +2486,6 @@ export default function ChatPanel() {
             setAgentStatus('error');
             setStatusMessage('Agent reached maximum iterations');
             setIsTaskRunning(false);
-            void settleCloudJob('fail', { reason: 'max_iterations' });
             if (isStopPendingRef.current) {
               resolveStopRequest(false, 'Agent reached maximum iterations.');
             }
@@ -2627,7 +2502,6 @@ export default function ChatPanel() {
             setAgentStatus('error');
             setStatusMessage('Error');
             setIsTaskRunning(false);
-            void settleCloudJob('fail', { reason: 'error' });
             if (isStopPendingRef.current) {
               resolveStopRequest(false, 'Failed to stop task.');
             }
@@ -2920,15 +2794,6 @@ export default function ChatPanel() {
             notificationMessage,
             normalizeNotificationLevel(data.level),
           );
-          break;
-        }
-        case 'usage_fact': {
-          // Usage facts are billed by the website proxy in cloud mode.
-          // Desktop only acknowledges the event so it does not appear as unknown traffic.
-          break;
-        }
-        case 'billing_update': {
-          window.electron.account.refreshBalance().catch(() => null);
           break;
         }
         case 'session_timer': {
@@ -3942,18 +3807,17 @@ export default function ChatPanel() {
         appSettingsRef.current = effectiveSettings;
       }
 
-      const currentState = await getBackendStateForSettings(effectiveSettings);
-      if (currentState.status !== 'ready') {
-        const errorMsg = currentState.message
+      const currentState = await window.electron.backend
+        .getState()
+        .catch(() => null);
+      if (!currentState || currentState.status !== 'ready' || !currentState.serverUrl) {
+        const errorMsg = currentState?.message
           ? `Backend not ready: ${currentState.message}`
-          : `Backend not ready (status: ${currentState.status})`;
+          : `Backend not ready (status: ${currentState?.status ?? 'unknown'})`;
         throw new Error(errorMsg);
       }
 
-      const baseUrl = await getBackendBaseUrlForSettings(
-        effectiveSettings,
-        currentState,
-      );
+      const baseUrl = currentState.serverUrl;
       const wsBase = baseUrl.replace(/^http/, 'ws');
       const url = new URL(DEFAULT_WS_PATH, wsBase);
       url.searchParams.set('channel', 'chat');
@@ -3963,11 +3827,6 @@ export default function ChatPanel() {
         ? await getDesktopVersion().catch(() => null)
         : null;
       applyDesktopRemotionQueryParams(url, desktopVersion);
-      const cloudJob = await createCloudJobForSession(baseUrl, effectiveSettings);
-      if (cloudJob) {
-        url.searchParams.set('cloudJobId', cloudJob.id);
-        url.searchParams.set('desktopToken', cloudJob.token);
-      }
       const comfyUIUrl = resolveComfyUIOverride(effectiveSettings);
       if (comfyUIUrl) {
         url.searchParams.set('comfyui_url', comfyUIUrl);

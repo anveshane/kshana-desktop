@@ -4,7 +4,6 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import type {
   BackendConnectionInfo,
   BackendState,
-  ServerConnectionConfig,
 } from '../shared/backendTypes';
 import type { AppSettings } from '../shared/settingsTypes';
 import type {
@@ -22,7 +21,6 @@ import type {
   RemotionServerRenderProgress,
 } from '../shared/remotionTypes';
 import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
-import type { AccountInfo } from '../shared/settingsTypes';
 
 interface WordTimestamp {
   text: string;
@@ -82,8 +80,8 @@ export interface AppUpdateStatus {
 export type Channels = 'ipc-example';
 
 const backendBridge = {
-  start(config: ServerConnectionConfig = { serverUrl: 'http://localhost:8001' }): Promise<BackendState> {
-    return ipcRenderer.invoke('backend:start', config);
+  start(): Promise<BackendState> {
+    return ipcRenderer.invoke('backend:start');
   },
   restart(): Promise<BackendState> {
     return ipcRenderer.invoke('backend:restart');
@@ -588,36 +586,6 @@ const appBridge = {
   },
 };
 
-const accountBridge = {
-  get(): Promise<AccountInfo | null> {
-    return ipcRenderer.invoke('account:get');
-  },
-  signIn(): Promise<{ opened: boolean }> {
-    return ipcRenderer.invoke('account:sign-in');
-  },
-  signOut(): Promise<{ success: boolean }> {
-    return ipcRenderer.invoke('account:sign-out');
-  },
-  refreshBalance(): Promise<{ balance: number | null }> {
-    return ipcRenderer.invoke('account:refresh-balance');
-  },
-  getBillingUrl(): Promise<string> {
-    return ipcRenderer.invoke('account:get-billing-url');
-  },
-  openBilling(): Promise<{ opened: boolean; url: string }> {
-    return ipcRenderer.invoke('account:open-billing');
-  },
-  onChange(callback: (account: AccountInfo | null) => void) {
-    const subscription = () => {
-      ipcRenderer.invoke('account:get').then(callback).catch(() => {});
-    };
-    ipcRenderer.on('account:changed', subscription);
-    return () => {
-      ipcRenderer.removeListener('account:changed', subscription);
-    };
-  },
-};
-
 // ─── kshana bridge — typed access to the embedded kshana-ink ──────────
 // Replaces the old WebSocket-based protocol (renderer → backend) with a
 // direct main-process IPC layer. Channel + payload shapes live in
@@ -717,7 +685,6 @@ const electronHandler = {
   logger: loggerBridge,
   updates: updateBridge,
   app: appBridge,
-  account: accountBridge,
 };
 
 contextBridge.exposeInMainWorld('electron', electronHandler);
