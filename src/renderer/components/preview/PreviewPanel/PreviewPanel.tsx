@@ -6,7 +6,7 @@ import {
   useMemo,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import { ChevronUp, FolderKanban, Clapperboard, FileCode2 } from 'lucide-react';
+import { ChevronUp, FolderKanban, Clapperboard, FileCode2, Layers } from 'lucide-react';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import { useProject } from '../../../contexts/ProjectContext';
 import { TimelineDataProvider } from '../../../contexts/TimelineDataContext';
@@ -14,6 +14,7 @@ import { useAppSettings } from '../../../contexts/AppSettingsContext';
 import { useBackendHealth } from '../../../hooks/useBackendHealth';
 import type { SceneVersions } from '../../../types/kshana/timeline';
 import AssetsView from '../AssetsView/AssetsView';
+import StoryboardView from '../StoryboardView/StoryboardView';
 import VideoLibraryView from '../VideoLibraryView/VideoLibraryView';
 import PlansView from '../PlansView/PlansView';
 import TimelinePanel from '../TimelinePanel/TimelinePanel';
@@ -43,6 +44,11 @@ export default function PreviewPanel() {
         id: 'video-library' as const,
         label: 'Library',
         icon: Clapperboard,
+      },
+      {
+        id: 'storyboard' as const,
+        label: 'Storyboard',
+        icon: Layers,
       },
       {
         id: 'assets' as const,
@@ -167,8 +173,7 @@ export default function PreviewPanel() {
 
   const renderActiveContent = () => (
     <div className={styles.content}>
-      {/* Storyboard view hidden for now */}
-      {/* {activeTab === 'storyboard' && <StoryboardView />} */}
+      {activeTab === 'storyboard' && <StoryboardView />}
       {activeTab === 'assets' && <AssetsView />}
       {activeTab === 'video-library' && (
         <VideoLibraryView
