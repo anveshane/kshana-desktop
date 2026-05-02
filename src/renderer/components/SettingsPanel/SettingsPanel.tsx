@@ -1,8 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
-import type {
-  BackendConnectionInfo,
-  BackendState,
-} from '../../../shared/backendTypes';
+import { useEffect, useState } from 'react';
 import type {
   AppSettings,
   LLMProvider,
@@ -90,38 +86,6 @@ function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
   };
 }
 
-function formatStatusLabel(status?: string): string {
-  switch (status) {
-    case 'ready':
-      return 'Ready';
-    case 'starting':
-      return 'Starting';
-    case 'connecting':
-      return 'Connecting';
-    case 'error':
-      return 'Error';
-    case 'stopped':
-      return 'Stopped';
-    default:
-      return 'Idle';
-  }
-}
-
-function getStatusTone(
-  status?: string,
-): 'success' | 'warning' | 'error' | 'neutral' {
-  switch (status) {
-    case 'ready':
-      return 'success';
-    case 'starting':
-    case 'connecting':
-      return 'warning';
-    case 'error':
-      return 'error';
-    default:
-      return 'neutral';
-  }
-}
 
 export default function SettingsPanel({
   isOpen,
@@ -137,9 +101,6 @@ export default function SettingsPanel({
   const isVisible = isEmbedded || isOpen;
   const [form, setForm] = useState<AppSettings>(normalizeConnectionSettings(settings));
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
-  const [backendState, setBackendState] = useState<BackendState | null>(null);
-  const [, setConnectionInfo] = useState<BackendConnectionInfo | null>(null);
-
   useEffect(() => {
     setForm(normalizeConnectionSettings(settings));
   }, [settings, isVisible]);
@@ -163,29 +124,6 @@ export default function SettingsPanel({
     return () => window.removeEventListener('keydown', handleEscape);
   }, [isOpen, isSavingConnection, onClose, isEmbedded]);
 
-  const refreshConnectionInfo = useCallback(async () => {
-    try {
-      const [state, info] = await Promise.all([
-        window.electron.backend.getState(),
-        window.electron.backend.getConnectionInfo(),
-      ]);
-      setBackendState(state);
-      setConnectionInfo(info);
-    } catch (nextError) {
-      console.error('Failed to refresh backend connection info', nextError);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isVisible) return undefined;
-
-    void refreshConnectionInfo();
-
-    return window.electron.backend.onStateChange((state) => {
-      setBackendState(state);
-      void refreshConnectionInfo();
-    });
-  }, [isVisible, refreshConnectionInfo]);
 
   if (!isVisible) {
     return null;
@@ -218,7 +156,6 @@ export default function SettingsPanel({
       openRouterApiKey: normalized.openRouterApiKey,
       openRouterModel: normalized.openRouterModel,
     });
-    void refreshConnectionInfo();
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -232,18 +169,6 @@ export default function SettingsPanel({
     }
   };
 
-  const statusLabel = formatStatusLabel(backendState?.status);
-  const statusTone = getStatusTone(backendState?.status);
-  const statusHeadline =
-    backendState?.status === 'ready'
-      ? 'Connected to Local'
-      : backendState?.status === 'error'
-        ? 'Local backend did not become ready'
-        : 'Starting Local backend';
-  const statusSupportText =
-    backendState?.status === 'error'
-      ? 'Review the local provider settings below, then try Save & Restart again.'
-      : 'The app is currently using the local kshana-core server on localhost with the provider settings shown below.';
   const renderProviderToggle = (
     provider: LLMProvider,
     label: string,
@@ -353,52 +278,6 @@ export default function SettingsPanel({
                 <div className={styles.sectionHeader}>
                   <h3>Connection</h3>
                   <p>Local backend and provider configuration.</p>
-                </div>
-
-                <div
-                  className={`${styles.statusCard} ${
-                    statusTone === 'warning'
-                        ? styles.statusCardWarning
-                        : statusTone === 'error'
-                          ? styles.statusCardError
-                          : ''
-                  }`}
-                >
-                  <div className={styles.statusTopRow}>
-                    <div>
-                      <div
-                        className={`${styles.statusHeader} ${
-                          statusTone === 'error'
-                              ? styles.statusHeaderError
-                              : ''
-                        }`}
-                      >
-                        Connection Status
-                      </div>
-                      <div
-                        className={`${styles.statusHeadline} ${
-                          statusTone === 'error'
-                              ? styles.statusHeadlineError
-                              : ''
-                        }`}
-                      >
-                        {statusHeadline}
-                      </div>
-                      <p className={styles.statusSupportText}>{statusSupportText}</p>
-                    </div>
-                    <div className={`${styles.statusBadge} ${styles[`statusBadge${statusTone.charAt(0).toUpperCase()}${statusTone.slice(1)}`]}`}>
-                      <span className={styles.statusDot} />
-                      {statusLabel}
-                    </div>
-                  </div>
-                  {backendState?.message && (
-                    <div className={styles.statusGrid}>
-                      <div className={styles.statusItemFull}>
-                        <span className={styles.statusLabel}>Details</span>
-                        <span className={styles.statusMessage}>{backendState.message}</span>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className={styles.localSettings}>
