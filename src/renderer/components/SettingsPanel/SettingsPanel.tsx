@@ -198,7 +198,15 @@ export default function SettingsPanel({
           <h2>Settings</h2>
           <p>Adjust app preferences from one place.</p>
         </div>
-        {!isEmbedded && (
+        {isEmbedded ? (
+          <button
+            type="button"
+            className={styles.cancelButton}
+            onClick={onClose}
+          >
+            Back to Projects
+          </button>
+        ) : (
           <button
             type="button"
             className={styles.closeButton}
@@ -414,15 +422,8 @@ export default function SettingsPanel({
             )}
           </section>
 
-          <div className={styles.actions}>
-            <button
-              type="button"
-              className={styles.cancelButton}
-              onClick={onClose}
-            >
-              {isEmbedded ? 'Back to Projects' : 'Close'}
-            </button>
-            {activeTab === 'connection' && (
+          {activeTab === 'connection' && (
+            <div className={styles.actions}>
               <button
                 type="submit"
                 className={styles.submitButton}
@@ -430,8 +431,8 @@ export default function SettingsPanel({
               >
                 {isSavingConnection ? 'Saving…' : 'Save & Restart'}
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </form>
       </div>
     </div>
