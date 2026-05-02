@@ -18,7 +18,7 @@ const configuration: Configuration = {
   externals: [
     ...Object.keys(externals || {}),
     ({ request }: { request?: string }, callback: (err?: Error | null, result?: string) => void) => {
-      if (request && /^kshana-ink(\/|$)/.test(request)) {
+      if (request && /^kshana-core(\/|$)/.test(request)) {
         return callback(null, `commonjs ${request}`);
       }
       callback();

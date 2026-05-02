@@ -22,8 +22,8 @@ import type {
   ConversationManager,
   ConversationManagerConfig,
   ConversationEvents,
-} from 'kshana-ink/manager';
-import type { LLMClientConfig } from 'kshana-ink/core/llm';
+} from 'kshana-core/manager';
+import type { LLMClientConfig } from 'kshana-core/core/llm';
 import type { AppSettings } from '../shared/settingsTypes';
 import { getComfyUiUrl, isComfyCloudUrl, withV1Suffix } from './utils/comfyUrl';
 
@@ -59,7 +59,7 @@ type ManagerModule = {
  * exported `__setManagerLoader` to inject the mock module.
  */
 let loadManagerModule: () => Promise<ManagerModule> = () =>
-  import(/* webpackIgnore: true */ 'kshana-ink/manager') as Promise<ManagerModule>;
+  import(/* webpackIgnore: true */ 'kshana-core/manager') as Promise<ManagerModule>;
 
 /** Test seam — replace the loader so unit tests can supply a fake. */
 export function __setManagerLoader(loader: () => Promise<ManagerModule>): void {
