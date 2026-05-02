@@ -9,6 +9,7 @@ export type ScenarioSurface = 'chat' | 'landing' | 'workspace';
 export interface Scenario {
   project?: { name: string; directory?: string };
   surface?: ScenarioSurface;
+  bridgeReturns?: Record<string, unknown>;
   rules: Array<{
     on: { channel: string; match?: string };
     emit: Array<{ after?: number; event: string; data: unknown }>;

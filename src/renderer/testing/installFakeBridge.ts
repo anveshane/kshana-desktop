@@ -69,6 +69,13 @@ export interface Scenario {
   project?: { name: string; directory?: string };
   /** Which renderer surface to mount. Defaults to `chat`. */
   surface?: ScenarioSurface;
+  /**
+   * Override the return value of `electron.*` bridge calls before the
+   * renderer mounts. Equivalent to calling `setBridgeReturn` for each
+   * entry, but applied synchronously inside `loadScenario` so that
+   * mount-time loads (e.g. `recentProjects`) see the seeded value.
+   */
+  bridgeReturns?: Record<string, unknown>;
   rules: ScenarioRule[];
 }
 
@@ -140,10 +147,22 @@ const state: BridgeState = {
   electronListeners: new Map(),
 };
 
-function bridgeReturn<T>(path: string, fallback: T): T {
-  return state.bridgeReturns.has(path)
-    ? (state.bridgeReturns.get(path) as T)
-    : fallback;
+/**
+ * Resolve the override (if any) for a given dotted bridge path.
+ *
+ * Override may be:
+ *   - a literal value (returned as-is)
+ *   - a function `(...args) => value` (called with the bridge call's args
+ *     so tests can express path-dependent logic, e.g. checkFileExists
+ *     returning true for project dirs but false for `*.json` probes)
+ */
+function bridgeReturn<T>(path: string, fallback: T, args?: unknown[]): T {
+  if (!state.bridgeReturns.has(path)) return fallback;
+  const override = state.bridgeReturns.get(path);
+  if (typeof override === 'function') {
+    return (override as (...a: unknown[]) => T)(...(args ?? []));
+  }
+  return override as T;
 }
 
 function subscribeElectron(
@@ -401,7 +420,9 @@ const fakeElectron = {
     readFileBufferGuarded: () => Promise.resolve(''),
     checkFileExists: (p: string) => {
       record('project.checkFileExists', p);
-      return Promise.resolve(bridgeReturn('project.checkFileExists', true));
+      return Promise.resolve(
+        bridgeReturn('project.checkFileExists', true, [p]),
+      );
     },
     listDirectory: () => Promise.resolve([]),
     statPath: () =>
@@ -423,8 +444,8 @@ const fakeElectron = {
       record('project.createFile', p);
       return Promise.resolve(bridgeReturn('project.createFile', p));
     },
-    createFolder: (parent: string, name: string) => {
-      record('project.createFolder', { parent, name });
+    createFolder: (parent: string, name: string, opts?: unknown) => {
+      record('project.createFolder', { parent, name, opts });
       return Promise.resolve(
         bridgeReturn('project.createFolder', `${parent}/${name}`),
       );
@@ -568,6 +589,11 @@ const testApi: KshanaTestApi = {
           scenario.project.directory ??
           `/tmp/${scenario.project.name}.kshana`,
       };
+    }
+    if (scenario.bridgeReturns) {
+      for (const [path, value] of Object.entries(scenario.bridgeReturns)) {
+        state.bridgeReturns.set(path, value);
+      }
     }
   },
   loadScenarioByName(name: string): boolean {
