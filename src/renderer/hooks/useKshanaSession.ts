@@ -48,7 +48,10 @@ export interface KshanaSessionApi {
   configureProject: (
     opts: ConfigureProjectOpts,
   ) => Promise<{ ok: boolean; error?: string }>;
-  focusProject: (projectName: string) => Promise<{ ok: boolean; error?: string }>;
+  focusProject: (
+    projectName: string,
+    projectDir?: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   setAutonomous: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
   sendResponse: (response: string, toolCallId?: string) => Promise<{ ok: boolean; error?: string }>;
 
@@ -154,10 +157,14 @@ export function useKshanaSession(): KshanaSessionApi {
   );
 
   const focusProject = useCallback<KshanaSessionApi['focusProject']>(
-    async (projectName) => {
+    async (projectName, projectDir) => {
       const id = sessionIdRef.current;
       if (!id) return { ok: false, error: 'Session not yet created' };
-      return window.kshana.focusProject({ sessionId: id, projectName });
+      return window.kshana.focusProject({
+        sessionId: id,
+        projectName,
+        ...(projectDir ? { projectDir } : {}),
+      });
     },
     [],
   );

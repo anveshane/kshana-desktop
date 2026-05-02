@@ -12,6 +12,7 @@
  * No direct Electron imports outside of `ipcMain` and the BrowserWindow
  * type — the bridge is mostly plumbing and stays thin.
  */
+import path from 'path';
 import { ipcMain, type BrowserWindow } from 'electron';
 import {
   KSHANA_CHANNELS,
@@ -134,6 +135,15 @@ export function registerKshanaIpcBridge(
   ipcMain.handle(
     KSHANA_CHANNELS.FOCUS_PROJECT,
     (_event, req: FocusProjectRequest): OkResponse => {
+      // The desktop sends the user-selected project's absolute path.
+      // Pin KSHANA_PROJECTS_DIR to its parent so the embedded core's
+      // filesystem helpers (and focusSessionProject's project.json
+      // read) resolve to the same folder the user opened — not to
+      // wherever the desktop was launched from. Backwards-compat:
+      // older callers that omit projectDir leave the env untouched.
+      if (req.projectDir) {
+        process.env['KSHANA_PROJECTS_DIR'] = path.dirname(req.projectDir);
+      }
       manager.focusSessionProject(req.sessionId, req.projectName);
       return { ok: true };
     },

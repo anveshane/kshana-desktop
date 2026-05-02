@@ -3075,7 +3075,10 @@ const isDebug =
   process.env.NODE_ENV === 'development' || process.env.DEBUG_PROD === 'true';
 
 if (isDebug) {
-  require('electron-debug').default();
+  // Install reload + inspect-element keyboard shortcuts, but DON'T
+  // auto-open DevTools on every BrowserWindow. Devs can still toggle
+  // them with Cmd+Opt+I / Ctrl+Shift+I when they want.
+  require('electron-debug').default({ showDevTools: false });
 }
 
 const installExtensions = async () => {
@@ -3351,10 +3354,17 @@ app.on('before-quit', () => {
 const bootstrapBackend = async () => {
   try {
     const settings = getSettings();
+    // Tell kshana-ink we're inside the packaged Electron build so its
+    // path defaults flip from REPO_ROOT (dev) to ~/Kshana (user data
+    // dir). Must be set BEFORE kshanaCoreManager.start, which calls
+    // loadDevEnv → getProjectsDir() to decide where to chdir.
+    if (app.isPackaged) {
+      process.env['KSHANA_PACKAGED'] = '1';
+    }
     // Embedded kshana-ink — the only backend path. Starts synchronously
     // (in-process), so the IPC bridge can register immediately and the
     // renderer's window.kshana.* calls can land.
-    kshanaCoreManager.start(settings);
+    await kshanaCoreManager.start(settings);
     if (mainWindow) {
       registerKshanaIpcBridge(kshanaCoreManager, mainWindow);
     }

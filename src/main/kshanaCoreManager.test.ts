@@ -89,17 +89,39 @@ class FakeConversationManager {
   deleteSession(_sessionId: string): void {}
 }
 
-jest.mock('kshana-ink/manager', () => ({
-  ConversationManager: FakeConversationManager,
-}));
-
 jest.mock('electron', () => ({
   app: { isPackaged: false },
 }));
 
 // Imported AFTER the jest.mock calls so the mock binds.
 // eslint-disable-next-line @typescript-eslint/no-require-imports, import/first
-const { KshanaCoreManager } = require('./kshanaCoreManager') as typeof import('./kshanaCoreManager');
+const { KshanaCoreManager, __setManagerLoader } = require('./kshanaCoreManager') as typeof import('./kshanaCoreManager');
+
+// Inject the FakeConversationManager via the loader seam — production code
+// uses a `webpackIgnore` dynamic import to load the real ESM bundle;
+// tests bypass that by substituting the loader.
+// FakeConversationManager only implements the surface KshanaCoreManager
+// calls. Cast through `unknown` to skip TS structural checks against
+// the real ConversationManager class — the production facade only
+// touches the methods the fake provides.
+// graceful-fs's process.chdir polyfill validates the target path with
+// fs.realpathSync, so the fakes must point to existing directories.
+// Use the home dir and the os tmpdir — both always exist and are
+// distinct on every platform Jest runs on.
+import os from 'os';
+const FAKE_INK_ROOT = os.homedir();
+const FAKE_PROJECTS_DIR = os.tmpdir();
+const mockLoadDevEnv = jest.fn(() => ({
+  loaded: false,
+  path: null,
+  vars: [] as string[],
+  root: FAKE_INK_ROOT,
+  projectsDir: FAKE_PROJECTS_DIR,
+}));
+__setManagerLoader(async () => ({
+  ConversationManager: FakeConversationManager,
+  loadDevEnv: mockLoadDevEnv,
+} as unknown as Parameters<typeof __setManagerLoader>[0] extends () => Promise<infer M> ? M : never));
 
 const baseSettings: AppSettings = {
   backendMode: 'local',
@@ -131,9 +153,9 @@ beforeEach(() => {
 });
 
 describe('KshanaCoreManager', () => {
-  it('start() writes LLM_PROVIDER and OPENAI_API_KEY to process.env BEFORE constructing ConversationManager', () => {
+  it('start() writes LLM_PROVIDER and OPENAI_API_KEY to process.env BEFORE constructing ConversationManager', async () => {
     const mgr = new KshanaCoreManager();
-    mgr.start(baseSettings);
+    await mgr.start(baseSettings);
 
     expect(mockState.envSnapshots).toHaveLength(1);
     expect(mockState.envSnapshots[0]?.LLM_PROVIDER).toBe('openai');
@@ -142,7 +164,7 @@ describe('KshanaCoreManager', () => {
 
   it('runTask forwards onToolCall events to the supplied eventCb with the original payload', async () => {
     const mgr = new KshanaCoreManager();
-    mgr.start(baseSettings);
+    await mgr.start(baseSettings);
     const sessionId = mgr.createSession();
     const events: Array<{ eventName: string; sessionId: string; data: unknown }> = [];
 
@@ -156,7 +178,7 @@ describe('KshanaCoreManager', () => {
 
   it('runTask also forwards onAgentResponse events', async () => {
     const mgr = new KshanaCoreManager();
-    mgr.start(baseSettings);
+    await mgr.start(baseSettings);
     const sessionId = mgr.createSession();
     const events: Array<{ eventName: string }> = [];
 
@@ -165,15 +187,15 @@ describe('KshanaCoreManager', () => {
     expect(events.find((e) => e.eventName === 'agent_response')).toBeDefined();
   });
 
-  it('cancelTask returns false when the session does not exist', () => {
+  it('cancelTask returns false when the session does not exist', async () => {
     const mgr = new KshanaCoreManager();
-    mgr.start(baseSettings);
+    await mgr.start(baseSettings);
     expect(mgr.cancelTask('does-not-exist')).toBe(false);
   });
 
   it('redoNode forwards editedPrompt unchanged to the underlying ConversationManager', async () => {
     const mgr = new KshanaCoreManager();
-    mgr.start(baseSettings);
+    await mgr.start(baseSettings);
     const sessionId = mgr.createSession();
     const result = await mgr.redoNode(sessionId, 'shot_image:scene_1_shot_4', {
       editedPrompt: 'a brand new prompt',
@@ -184,11 +206,11 @@ describe('KshanaCoreManager', () => {
     });
   });
 
-  it('restart() calls shutdown() then constructs a fresh ConversationManager', () => {
+  it('restart() calls shutdown() then constructs a fresh ConversationManager', async () => {
     const mgr = new KshanaCoreManager();
-    mgr.start(baseSettings);
+    await mgr.start(baseSettings);
     expect(mockState.envSnapshots).toHaveLength(1);
-    mgr.restart({ ...baseSettings, llmProvider: 'gemini', googleApiKey: 'g-key' });
+    await mgr.restart({ ...baseSettings, llmProvider: 'gemini', googleApiKey: 'g-key' });
     expect(mockState.shutdownCalls).toBe(1);
     expect(mockState.envSnapshots).toHaveLength(2);
     expect(mockState.envSnapshots[1]?.LLM_PROVIDER).toBe('gemini');
@@ -204,11 +226,45 @@ describe('KshanaCoreManager', () => {
 
   it('stop() calls shutdown() and subsequent runTask returns failed', async () => {
     const mgr = new KshanaCoreManager();
-    mgr.start(baseSettings);
+    await mgr.start(baseSettings);
     const sessionId = mgr.createSession();
     mgr.stop();
     expect(mockState.shutdownCalls).toBe(1);
     const result = await mgr.runTask(sessionId, 'task', {}, () => {});
     expect(result.status).toBe('failed');
+  });
+
+  it('start() exposes projectsDir via KSHANA_PROJECTS_DIR env (works dev + packaged, no global chdir)', async () => {
+    // kshana-ink's loadProject / projectFileIO / projectExists default
+    // basePath to process.cwd(). We can't chdir process-globally —
+    // kshana-desktop's main process has many `process.cwd()` callers
+    // that would silently break. Instead we surface the right base
+    // via KSHANA_PROJECTS_DIR; kshana-ink's path defaults read it.
+    delete process.env['KSHANA_PROJECTS_DIR'];
+    const mgr = new KshanaCoreManager();
+    await mgr.start(baseSettings);
+    expect(process.env['KSHANA_PROJECTS_DIR']).toBe(FAKE_PROJECTS_DIR);
+  });
+
+  it('start() does NOT clobber pre-existing process.env values when AppSettings has empty strings', async () => {
+    // Pre-populate the env as kshana-ink/.env would. Setting must
+    // pass through untouched when the matching AppSettings field is
+    // empty — otherwise dev users with a working .env get
+    // "No API key found" because applyEnvFromSettings overwrites
+    // OPENAI_API_KEY (etc.) with "".
+    process.env['OPENAI_API_KEY'] = 'sk-from-dotenv';
+    process.env['OPENROUTER_API_KEY'] = 'sk-from-dotenv-or';
+    const emptySettings: AppSettings = {
+      ...baseSettings,
+      llmProvider: 'openai',
+      openaiApiKey: '',
+      openRouterApiKey: '',
+    };
+
+    const mgr = new KshanaCoreManager();
+    await mgr.start(emptySettings);
+
+    expect(process.env['OPENAI_API_KEY']).toBe('sk-from-dotenv');
+    expect(process.env['OPENROUTER_API_KEY']).toBe('sk-from-dotenv-or');
   });
 });

@@ -18,14 +18,53 @@
  * `KshanaCoreEvent` stream the IPC bridge can re-publish over
  * `webContents.send`.
  */
-import {
+import type {
   ConversationManager,
-  type ConversationManagerConfig,
-  type ConversationEvents,
+  ConversationManagerConfig,
+  ConversationEvents,
 } from 'kshana-ink/manager';
 import type { LLMClientConfig } from 'kshana-ink/core/llm';
 import type { AppSettings } from '../shared/settingsTypes';
 import { getComfyUiUrl, isComfyCloudUrl, withV1Suffix } from './utils/comfyUrl';
+
+type ManagerModule = {
+  ConversationManager: new (config: ConversationManagerConfig) => ConversationManager;
+  /**
+   * Optional in tests where the loader injects a stub. In production
+   * the real bundle always exports it.
+   *
+   * Returns:
+   *   - `root`: the kshana-ink package root (debug only)
+   *   - `projectsDir`: where projects live, computed by kshana-ink's
+   *     `getProjectsDir()`. We chdir to this so the package's
+   *     filesystem helpers (which default to process.cwd()) line up.
+   *     Honours KSHANA_PROJECTS_DIR override and the
+   *     KSHANA_PACKAGED=1 → ~/Kshana mapping.
+   */
+  loadDevEnv?: (root?: string) => {
+    loaded: boolean;
+    path: string | null;
+    vars: string[];
+    root: string;
+    projectsDir: string;
+  };
+};
+
+/**
+ * kshana-ink's embed entries are ESM-only (transitive deps
+ * `@mariozechner/pi-coding-agent` and `pi-ai` ship ESM with no CJS
+ * `require` exports). The `webpackIgnore: true` magic comment tells
+ * webpack to leave this dynamic import alone so Node's runtime ESM
+ * loader handles it natively. Tests substitute this loader via the
+ * exported `__setManagerLoader` to inject the mock module.
+ */
+let loadManagerModule: () => Promise<ManagerModule> = () =>
+  import(/* webpackIgnore: true */ 'kshana-ink/manager') as Promise<ManagerModule>;
+
+/** Test seam — replace the loader so unit tests can supply a fake. */
+export function __setManagerLoader(loader: () => Promise<ManagerModule>): void {
+  loadManagerModule = loader;
+}
 
 /**
  * Single normalized event the IPC bridge publishes downstream.
@@ -78,48 +117,60 @@ export interface RunResult {
  * Exported for testing.
  */
 export function applyEnvFromSettings(settings: AppSettings): void {
+  // Set env vars from settings, but only when the setting has a
+  // non-empty value. Empty strings are treated as "use whatever is
+  // already in process.env" — so dev users with kshana-ink/.env
+  // loaded via loadDevEnv() see their keys come through. The
+  // packaged build supplies all values via AppSettings UI, so this
+  // skip-on-empty rule is a no-op there.
+  const setIfPresent = (key: string, value: string | undefined) => {
+    const trimmed = value?.trim();
+    if (trimmed) process.env[key] = trimmed;
+  };
+
   const comfyUiUrl = getComfyUiUrl(settings);
-  process.env['COMFYUI_BASE_URL'] = comfyUiUrl;
+  setIfPresent('COMFYUI_BASE_URL', comfyUiUrl);
 
   if (isComfyCloudUrl(comfyUiUrl) && settings.comfyCloudApiKey.trim()) {
     process.env['COMFY_CLOUD_API_KEY'] = settings.comfyCloudApiKey.trim();
-  } else {
-    delete process.env['COMFY_CLOUD_API_KEY'];
   }
+  // Note: we no longer `delete COMFY_CLOUD_API_KEY` when the user is
+  // not on a cloud URL — that previously clobbered `.env`-supplied
+  // keys for dev users on local ComfyUI.
 
-  const projectDir = settings.projectDir?.trim();
-  if (projectDir) {
-    process.env['KSHANA_PROJECT_DIR'] = projectDir;
-  }
+  setIfPresent('KSHANA_PROJECT_DIR', settings.projectDir);
 
   switch (settings.llmProvider) {
     case 'gemini':
       process.env['LLM_PROVIDER'] = 'gemini';
-      process.env['GOOGLE_API_KEY'] = settings.googleApiKey.trim();
-      process.env['GEMINI_MODEL'] =
-        settings.geminiModel.trim() || 'gemini-2.5-flash';
+      setIfPresent('GOOGLE_API_KEY', settings.googleApiKey);
+      setIfPresent('GEMINI_MODEL', settings.geminiModel || 'gemini-2.5-flash');
       break;
     case 'openai':
       process.env['LLM_PROVIDER'] = 'openai';
-      process.env['OPENAI_API_KEY'] = settings.openaiApiKey.trim();
-      process.env['OPENAI_BASE_URL'] =
-        settings.openaiBaseUrl.trim() || 'https://api.openai.com/v1';
-      process.env['OPENAI_MODEL'] = settings.openaiModel.trim() || 'gpt-4o';
+      setIfPresent('OPENAI_API_KEY', settings.openaiApiKey);
+      setIfPresent(
+        'OPENAI_BASE_URL',
+        settings.openaiBaseUrl || 'https://api.openai.com/v1',
+      );
+      setIfPresent('OPENAI_MODEL', settings.openaiModel || 'gpt-4o');
       break;
     case 'openrouter':
       process.env['LLM_PROVIDER'] = 'openrouter';
-      process.env['OPENROUTER_API_KEY'] = settings.openRouterApiKey.trim();
-      process.env['OPENROUTER_MODEL'] =
-        settings.openRouterModel.trim() || 'z-ai/glm-4.7-flash';
+      setIfPresent('OPENROUTER_API_KEY', settings.openRouterApiKey);
+      setIfPresent(
+        'OPENROUTER_MODEL',
+        settings.openRouterModel || 'z-ai/glm-4.7-flash',
+      );
       break;
     case 'lmstudio':
     default:
       process.env['LLM_PROVIDER'] = 'lmstudio';
-      process.env['LMSTUDIO_BASE_URL'] = withV1Suffix(
-        settings.lmStudioUrl.trim() || 'http://127.0.0.1:1234',
+      setIfPresent(
+        'LMSTUDIO_BASE_URL',
+        withV1Suffix(settings.lmStudioUrl || 'http://127.0.0.1:1234'),
       );
-      process.env['LMSTUDIO_MODEL'] =
-        settings.lmStudioModel.trim() || 'qwen3';
+      setIfPresent('LMSTUDIO_MODEL', settings.lmStudioModel || 'qwen3');
       break;
   }
 
@@ -213,18 +264,49 @@ export function buildEventsAdapter(
 
 export class KshanaCoreManager {
   private cm: ConversationManager | null = null;
+  private managerModule: ManagerModule | null = null;
 
   /**
    * Construct the embedded ConversationManager. Sets process.env
    * from settings BEFORE constructing the manager so any tool that
    * reads env vars at construction time sees the right values.
+   *
+   * Async because the manager bundle is ESM and loaded via dynamic
+   * import (CJS Electron main → ESM kshana-ink). Subsequent calls
+   * reuse the cached module reference.
    */
-  start(settings: AppSettings): void {
+  async start(settings: AppSettings): Promise<void> {
+    if (!this.managerModule) {
+      this.managerModule = await loadManagerModule();
+    }
+    // Load kshana-ink/.env BEFORE applying AppSettings so the
+    // settings UI's explicit values still win for any field the user
+    // has filled in. Loaded values fill the gaps (LLM_TIER_*,
+    // GROQ_*, OpenRouter keys, etc. that the desktop UI doesn't
+    // model). In packaged builds the .env doesn't ship, so this is
+    // a no-op there.
+    const devEnv = this.managerModule.loadDevEnv?.();
+    // kshana-ink's filesystem helpers (projectFileIO, loadProject)
+    // default basePath to `process.cwd()`. Embedded in Electron, cwd
+    // points at kshana-desktop/ — not where projects live.
+    //
+    // Setting KSHANA_PROJECTS_DIR exposes the right basePath via env;
+    // kshana-ink reads this in `getProjectsDir()` and (per the
+    // companion fix in projectFileIO) uses it as the default basePath
+    // when no session-context override is in scope.
+    //
+    // Using an env var (instead of process.chdir) is critical because
+    // many handlers in kshana-desktop's main process call
+    // `process.cwd()` directly for path normalization — chdir-ing
+    // globally would silently break those.
+    if (devEnv?.projectsDir) {
+      process.env['KSHANA_PROJECTS_DIR'] = devEnv.projectsDir;
+    }
     applyEnvFromSettings(settings);
     const config: ConversationManagerConfig = {
       llmConfig: buildLLMConfig(settings),
     };
-    this.cm = new ConversationManager(config);
+    this.cm = new this.managerModule.ConversationManager(config);
   }
 
   /** Tear down the manager. Safe to call when not started. */
@@ -236,9 +318,9 @@ export class KshanaCoreManager {
   }
 
   /** Replace the manager (used when settings change). */
-  restart(settings: AppSettings): void {
+  async restart(settings: AppSettings): Promise<void> {
     this.stop();
-    this.start(settings);
+    await this.start(settings);
   }
 
   /** Whether `start()` has run and the manager is alive. */

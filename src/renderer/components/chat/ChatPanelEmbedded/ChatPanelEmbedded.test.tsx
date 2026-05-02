@@ -14,6 +14,28 @@
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { KshanaEvent, KshanaEventName } from '../../../../shared/kshanaIpc';
+
+// Mock the workspace context — the chat panel reads `projectName`
+// from it so it can auto-bind the kshana session to the current
+// project. Default: no project selected; individual tests override.
+let mockWorkspaceProjectName: string | null = null;
+jest.mock('../../../contexts/WorkspaceContext', () => ({
+  useWorkspace: () => ({
+    projectDirectory: mockWorkspaceProjectName ? `/tmp/${mockWorkspaceProjectName}.kshana` : null,
+    projectName: mockWorkspaceProjectName,
+  }),
+}));
+
+// react-markdown is ESM-only; Jest's CJS env can't transform its
+// `export` syntax. Replace it with a passthrough <div> for tests —
+// behavior we care about is that the assistant text reaches the DOM.
+jest.mock('react-markdown', () => ({
+  __esModule: true,
+  default: ({ children }: { children?: string }) => <div>{children}</div>,
+}));
+jest.mock('remark-gfm', () => ({ __esModule: true, default: () => null }));
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports, import/first
 import ChatPanelEmbedded from './ChatPanelEmbedded';
 
 type EventListener = (e: KshanaEvent) => void;
@@ -43,6 +65,7 @@ function publishEvent(eventName: KshanaEventName, data: unknown): void {
 }
 
 beforeEach(() => {
+  mockWorkspaceProjectName = null;
   mockState = {
     runTaskCalls: [],
     cancelCalls: [],
@@ -163,6 +186,134 @@ describe('ChatPanelEmbedded', () => {
       const img = screen.getByRole('img');
       expect(img).toHaveAttribute('alt', expect.stringMatching(/noir|s1shot1/i));
     });
+  });
+
+  it('auto-focuses the workspace project on the kshana session once both are ready', async () => {
+    // The user has navigated into a project (chhaya_60s_anime) — the
+    // workspace context exposes that as `projectName`. The chat panel
+    // must tell the embedded core which project the user is in,
+    // otherwise runTask throws "Session agent not configured" because
+    // the session has no agent attached yet.
+    mockWorkspaceProjectName = 'chhaya_60s_anime';
+
+    render(<ChatPanelEmbedded />);
+
+    await waitFor(() => {
+      const focusProject = (window as unknown as {
+        kshana: { focusProject: jest.Mock };
+      }).kshana.focusProject;
+      expect(focusProject).toHaveBeenCalledWith({
+        sessionId: 's-1',
+        projectName: 'chhaya_60s_anime',
+        // The mock workspace exposes the dir as /tmp/<name>.kshana — the
+        // panel passes it through so the bridge can pin KSHANA_PROJECTS_DIR.
+        projectDir: '/tmp/chhaya_60s_anime.kshana',
+      });
+    });
+  });
+
+  it('does not call focusProject when no project is selected', async () => {
+    mockWorkspaceProjectName = null;
+    render(<ChatPanelEmbedded />);
+    await waitFor(() => screen.getByRole('textbox'));
+    const focusProject = (window as unknown as {
+      kshana: { focusProject: jest.Mock };
+    }).kshana.focusProject;
+    expect(focusProject).not.toHaveBeenCalled();
+  });
+
+  it('tool_result event updates the matching tool card from in_progress to completed', async () => {
+    const { container } = render(<ChatPanelEmbedded />);
+    await waitFor(() => screen.getByRole('textbox'));
+    await waitFor(() => {
+      expect(mockState.listeners.some((l) => l.active)).toBe(true);
+    });
+
+    act(() => {
+      publishEvent('tool_call', {
+        toolCallId: 'tc-42',
+        toolName: 'kshana_list_items',
+        arguments: {},
+        status: 'in_progress',
+      });
+    });
+
+    // Compact card: in_progress = ⋯ glyph; completed = ✓.
+    await waitFor(() => {
+      expect(container.textContent).toContain('⋯');
+    });
+    expect(container.textContent).not.toContain('✓');
+
+    act(() => {
+      publishEvent('tool_result', {
+        toolCallId: 'tc-42',
+        toolName: 'kshana_list_items',
+        result: { items: [] },
+        isError: false,
+      });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('✓');
+      expect(container.textContent).not.toContain('⋯');
+    });
+  });
+
+  it('stream_chunk followed by agent_response with same text shows only one bubble (no duplicate)', async () => {
+    // Real agent flow: chunks stream in, the final agent_response
+    // arrives with the full text. The panel must not append a second
+    // bubble — the streaming bubble already contains the same text.
+    const { container } = render(<ChatPanelEmbedded />);
+    await waitFor(() => screen.getByRole('textbox'));
+    await waitFor(() => {
+      expect(mockState.listeners.some((l) => l.active)).toBe(true);
+    });
+
+    act(() => {
+      publishEvent('stream_chunk', { content: 'Looking at the project. ', done: false });
+    });
+    act(() => {
+      publishEvent('stream_chunk', { content: 'Found 38 assets.', done: true });
+    });
+    act(() => {
+      publishEvent('agent_response', {
+        output: 'Looking at the project. Found 38 assets.',
+        status: 'completed',
+      });
+    });
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('Looking at the project. Found 38 assets.');
+    });
+    // The full text should appear EXACTLY once — not duplicated by
+    // both the streaming bubble and the final agent_response.
+    const matches = container.textContent?.match(/Looking at the project\. Found 38 assets\./g) ?? [];
+    expect(matches.length).toBe(1);
+  });
+
+  it('stream_chunk events accumulate into a single assistant message that grows as chunks arrive', async () => {
+    render(<ChatPanelEmbedded />);
+    await waitFor(() => screen.getByRole('textbox'));
+    await waitFor(() => {
+      expect(mockState.listeners.some((l) => l.active)).toBe(true);
+    });
+
+    act(() => {
+      publishEvent('stream_chunk', { content: 'Hello ', done: false });
+    });
+    act(() => {
+      publishEvent('stream_chunk', { content: 'world!', done: false });
+    });
+    act(() => {
+      publishEvent('stream_chunk', { content: '', done: true });
+    });
+
+    // The two chunks merged into one assistant message — NOT two separate
+    // bubbles labelled "Hello " and "world!".
+    await waitFor(() => {
+      expect(screen.getByText(/Hello world!/i)).toBeInTheDocument();
+    });
+    expect(screen.queryAllByText(/^Hello $/).length).toBe(0);
   });
 
   it('cancel button calls window.kshana.cancelTask while running', async () => {

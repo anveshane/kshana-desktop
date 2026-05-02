@@ -202,6 +202,36 @@ describe('kshanaIpcBridge', () => {
     expect(result).toEqual({ ok: true });
   });
 
+  it('focusProject sets KSHANA_PROJECTS_DIR to dirname(projectDir) so kshana-ink looks in the right place', async () => {
+    // Real desktop scenario: user opens
+    //   /Users/foo/MyVideos/storyA.kshana
+    // The bridge must update KSHANA_PROJECTS_DIR=/Users/foo/MyVideos/
+    // so the embedded core's project.json read resolves correctly.
+    delete process.env['KSHANA_PROJECTS_DIR'];
+    registerKshanaIpcBridge(
+      fakeManager as unknown as import('./kshanaCoreManager').KshanaCoreManager,
+      browserWindowMock as unknown as import('electron').BrowserWindow,
+    );
+    const focusHandler = handlerRegistry.get(KSHANA_CHANNELS.FOCUS_PROJECT)!;
+    await focusHandler({} as never, {
+      sessionId: 's-1',
+      projectName: 'storyA',
+      projectDir: '/Users/foo/MyVideos/storyA.kshana',
+    });
+    expect(process.env['KSHANA_PROJECTS_DIR']).toBe('/Users/foo/MyVideos');
+  });
+
+  it('focusProject without projectDir leaves KSHANA_PROJECTS_DIR untouched (backwards-compat)', async () => {
+    process.env['KSHANA_PROJECTS_DIR'] = '/preset/dir';
+    registerKshanaIpcBridge(
+      fakeManager as unknown as import('./kshanaCoreManager').KshanaCoreManager,
+      browserWindowMock as unknown as import('electron').BrowserWindow,
+    );
+    const focusHandler = handlerRegistry.get(KSHANA_CHANNELS.FOCUS_PROJECT)!;
+    await focusHandler({} as never, { sessionId: 's-1', projectName: 'storyA' });
+    expect(process.env['KSHANA_PROJECTS_DIR']).toBe('/preset/dir');
+  });
+
   it('handler invocations are isolated — calls do not leak between channels', async () => {
     registerKshanaIpcBridge(
       fakeManager as unknown as import('./kshanaCoreManager').KshanaCoreManager,

@@ -108,6 +108,15 @@ export interface RedoNodeRequest {
 export interface FocusProjectRequest {
   sessionId: string;
   projectName: string;
+  /**
+   * Absolute path to the user-selected `.kshana` directory. Optional
+   * for backwards-compatibility, but desktop callers should pass it
+   * so kshana-ink looks in the right parent (the folder the user
+   * actually opened) instead of falling back to its hardcoded
+   * `getProjectsDir()`. The bridge derives `dirname(projectDir)` and
+   * stashes it in `KSHANA_PROJECTS_DIR` for the embedded core.
+   */
+  projectDir?: string;
 }
 
 export interface SetAutonomousRequest {
