@@ -114,12 +114,5 @@ test.describe('Feature: Storyboard view', () => {
       await expect(page.getByText('Resolution')).toBeVisible({ timeout: 5_000 });
     });
 
-    test.fixme(
-      'When the user clicks a shot card, Then the shot opens in the detail view',
-      async () => {
-        // StoryboardView.handleExpand is a console.log stub — no
-        // navigation or detail view is implemented yet.
-      },
-    );
   });
 });
