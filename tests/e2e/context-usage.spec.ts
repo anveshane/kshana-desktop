@@ -1,32 +1,63 @@
 /**
  * Wave 6 — Context-usage indicator reacts to token-usage events.
  *
- * **FEATURE GAP:** `context_usage` is a defined `KshanaEventName` in
- * `src/shared/kshanaIpc.ts`, but no component in the codebase
- * renders a token-usage indicator. `ChatPanelEmbedded.handleEvent`
- * has no `context_usage` case, and grepping the renderer for any
- * "context_usage" or "tokenUsage" UI found nothing.
- *
- * Both cases stay as test.fixme until a context-usage indicator is
- * added to `ChatPanelEmbedded` (or any mounted component).
+ * ChatPanelEmbedded now handles `context_usage` events by updating a
+ * footer indicator showing token count and percentage. When usage
+ * reaches ≥ 80% the indicator turns red.
  */
-import { test } from './fixtures';
+import { test, expect } from './fixtures';
 
 test.describe('Feature: Context-usage indicator', () => {
   test.describe('Given a chat panel with no usage info', () => {
-    test.fixme(
-      'When context_usage {used, limit} fires below 80%, Then a neutral indicator shows the ratio',
-      async () => {
-        // context_usage is a KshanaEventName but no UI renders it.
-        // This test pins a missing behavior — implement the indicator first.
-      },
-    );
+    test('When context_usage {used, limit} fires below 80%, Then a neutral indicator shows the ratio', async ({
+      page,
+      bootInline,
+    }) => {
+      // Given
+      await bootInline({
+        surface: 'chat',
+        project: { name: 'noir', directory: '/tmp/noir.kshana' },
+        rules: [],
+      });
 
-    test.fixme(
-      'When usage crosses 80%, Then a warning-tone indicator appears',
-      async () => {
-        // Same gap — no context-usage UI exists anywhere in the renderer.
-      },
-    );
+      // When — emit context usage at 50%
+      await page.evaluate(() => {
+        window.__kshanaTest!.emit('context_usage', { used: 50_000, limit: 100_000 });
+      });
+
+      // Then — indicator visible with ratio and percent
+      await expect(page.getByLabel('Context usage')).toBeVisible({
+        timeout: 3_000,
+      });
+      await expect(page.getByLabel('Context usage')).toContainText('50%');
+    });
+
+    test('When usage crosses 80%, Then a warning-tone indicator appears', async ({
+      page,
+      bootInline,
+    }) => {
+      // Given
+      await bootInline({
+        surface: 'chat',
+        project: { name: 'noir', directory: '/tmp/noir.kshana' },
+        rules: [],
+      });
+
+      // When — emit context usage at 85%
+      await page.evaluate(() => {
+        window.__kshanaTest!.emit('context_usage', { used: 85_000, limit: 100_000 });
+      });
+
+      // Then — indicator shows the percentage
+      await expect(page.getByLabel('Context usage')).toBeVisible({
+        timeout: 3_000,
+      });
+      await expect(page.getByLabel('Context usage')).toContainText('85%');
+      // Warning color is applied inline; verify via computed style
+      const color = await page
+        .getByLabel('Context usage')
+        .evaluate((el) => (el as HTMLElement).style.color);
+      expect(color).toBe('rgb(208, 90, 90)');
+    });
   });
 });

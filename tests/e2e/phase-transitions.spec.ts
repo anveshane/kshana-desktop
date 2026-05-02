@@ -1,34 +1,71 @@
 /**
  * Wave 6 — Phase indicator reacts to phase_transition events.
  *
- * **COMPONENT GAP:** The phase transition banner is rendered in
- * `MessageList.tsx` (inside the legacy WebSocket-backed `ChatPanel`).
- * The banner fires when a message carries `_phaseTransition` metadata
- * — a shape populated by ChatPanel's streaming pipeline. Neither
- * `ChatPanelEmbedded` nor its `handleEvent` function has any
- * `phase_transition` handling.
- *
- * Both cases stay as test.fixme until `ChatPanelEmbedded` surfaces
- * phase transitions or a test surface mounts the full `ChatPanel` +
- * `MessageList`.
+ * ChatPanelEmbedded now handles `phase_transition` events by
+ * appending a `role='phase'` row to the message list. The row
+ * renders the phase name and optional status text.
  */
-import { test } from './fixtures';
+import { test, expect } from './fixtures';
 
 test.describe('Feature: Phase indicator', () => {
   test.describe('Given a chat panel with no active phase', () => {
-    test.fixme(
-      'When phase_transition events fire, Then the phase indicator updates to each new phase in order',
-      async () => {
-        // Phase banner is in MessageList (full ChatPanel only).
-        // ChatPanelEmbedded.handleEvent has no phase_transition case.
-      },
-    );
+    test('When phase_transition events fire, Then the phase indicator updates to each new phase in order', async ({
+      page,
+      bootInline,
+    }) => {
+      // Given
+      await bootInline({
+        surface: 'chat',
+        project: { name: 'noir', directory: '/tmp/noir.kshana' },
+        rules: [],
+      });
 
-    test.fixme(
-      'When the final phase emits "completed", Then the indicator clears or shows the completed state',
-      async () => {
-        // Same gap.
-      },
-    );
+      // When — emit two phase transitions directly
+      await page.evaluate(() => {
+        window.__kshanaTest!.emit('phase_transition', {
+          phase: 'Planning',
+          status: 'started',
+        });
+      });
+      await page.evaluate(() => {
+        window.__kshanaTest!.emit('phase_transition', {
+          phase: 'Generation',
+          status: 'started',
+        });
+      });
+
+      // Then — both phase rows visible in order
+      await expect(page.getByText('Planning · started')).toBeVisible({
+        timeout: 3_000,
+      });
+      await expect(page.getByText('Generation · started')).toBeVisible({
+        timeout: 3_000,
+      });
+    });
+
+    test('When the final phase emits "completed", Then the indicator shows the completed state', async ({
+      page,
+      bootInline,
+    }) => {
+      // Given
+      await bootInline({
+        surface: 'chat',
+        project: { name: 'noir', directory: '/tmp/noir.kshana' },
+        rules: [],
+      });
+
+      // When
+      await page.evaluate(() => {
+        window.__kshanaTest!.emit('phase_transition', {
+          phase: 'Generation',
+          status: 'completed',
+        });
+      });
+
+      // Then
+      await expect(page.getByText('Generation · completed')).toBeVisible({
+        timeout: 3_000,
+      });
+    });
   });
 });

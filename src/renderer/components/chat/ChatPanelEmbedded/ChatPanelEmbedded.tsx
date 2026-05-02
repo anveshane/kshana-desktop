@@ -13,15 +13,20 @@
  *     `tool_result` lands.
  *   - Inline media generated via `media_generated`.
  *   - Notifications: small system row.
+ *   - agent_question: inline question prompt with option buttons.
+ *   - phase_transition: phase banner system message.
+ *   - context_usage: footer token-usage indicator.
+ *   - backend:state error: dismissible connection-error banner.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useKshanaSession } from '../../../hooks/useKshanaSession';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import type { KshanaEvent } from '../../../../shared/kshanaIpc';
+import type { PersistedChatMessage } from '../../../../shared/chatTypes';
 
-type Role = 'user' | 'assistant' | 'tool' | 'system' | 'media';
+type Role = 'user' | 'assistant' | 'tool' | 'system' | 'media' | 'question' | 'phase';
 type ToolStatus = 'in_progress' | 'completed' | 'error';
 
 interface ChatMessage {
@@ -37,6 +42,16 @@ interface ChatMessage {
   mediaProject?: string;
   /** Streaming bubbles aren't yet finalized; agent_response replaces text. */
   streaming?: boolean;
+  /** agent_question fields */
+  question?: string;
+  options?: string[];
+  defaultOption?: string;
+  answered?: boolean;
+}
+
+interface ContextUsage {
+  used: number;
+  limit: number;
 }
 
 let nextMessageId = 1;
@@ -65,6 +80,9 @@ export default function ChatPanelEmbedded() {
   const { projectName, projectDirectory } = useWorkspace();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [autonomousMode, setAutonomousMode] = useState(false);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   // Tracks the id of the currently-streaming assistant message so
   // multiple `stream_chunk` events accumulate into one bubble instead
@@ -75,7 +93,7 @@ export default function ChatPanelEmbedded() {
   useEffect(() => {
     if (!session.sessionId) return;
     const unsubscribe = session.subscribe('*', (event: KshanaEvent) => {
-      handleEvent(event, setMessages, streamingMsgIdRef);
+      handleEvent(event, setMessages, streamingMsgIdRef, setContextUsage);
     });
     return unsubscribe;
   }, [session.sessionId, session.subscribe]);
@@ -87,6 +105,20 @@ export default function ChatPanelEmbedded() {
     // that's outside the kshana-ink package's default getProjectsDir().
     session.focusProject(projectName, projectDirectory ?? undefined).catch(() => {});
   }, [session.sessionId, projectName, projectDirectory, session.focusProject]);
+
+  // Subscribe to backend state changes to surface connection errors.
+  useEffect(() => {
+    const api = window.electron?.backend;
+    if (!api?.onStateChange) return;
+    const unsubscribe = api.onStateChange((state: { status: string; message?: string }) => {
+      if (state.status === 'error') {
+        setConnectionError(state.message ?? 'Connection error');
+      } else if (state.status === 'ready') {
+        setConnectionError(null);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Auto-scroll to the latest message. (jsdom in tests omits scrollIntoView.)
   useEffect(() => {
@@ -109,8 +141,44 @@ export default function ChatPanelEmbedded() {
     await session.cancel();
   };
 
+  const handleToggleAutonomous = useCallback(async () => {
+    const next = !autonomousMode;
+    setAutonomousMode(next);
+    await session.setAutonomous(next);
+  }, [autonomousMode, session]);
+
+  const handleExport = useCallback(async () => {
+    if (!projectDirectory || !session.sessionId) return;
+    const exportMessages: PersistedChatMessage[] = messages
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({
+        id: m.id,
+        role: m.role as 'user' | 'assistant',
+        type: 'text',
+        content: m.text ?? '',
+        timestamp: Date.now(),
+      }));
+    await window.electron.project.exportChatJson({
+      exportedAt: new Date().toISOString(),
+      projectDirectory,
+      sessionId: session.sessionId,
+      messages: exportMessages,
+    });
+  }, [projectDirectory, session.sessionId, messages]);
+
+  const handleSelectOption = useCallback(async (questionId: string, option: string) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === questionId ? { ...m, answered: true } : m)),
+    );
+    await session.sendResponse(option);
+  }, [session]);
+
   const isRunning = session.status === 'running';
   const isReady = session.sessionId !== null && session.status !== 'connecting';
+
+  const contextPct = contextUsage
+    ? Math.round((contextUsage.used / contextUsage.limit) * 100)
+    : null;
 
   return (
     <div
@@ -129,18 +197,66 @@ export default function ChatPanelEmbedded() {
         {session.error ? ` · ${session.error}` : ''}
       </header>
 
+      {connectionError && (
+        <div
+          role="alert"
+          aria-label="Connection error"
+          style={{
+            padding: '6px 12px',
+            background: 'rgba(160,40,40,0.25)',
+            borderBottom: '1px solid #a02828',
+            fontSize: 12,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <span>⚠ Connection error: {connectionError}</span>
+          <button
+            type="button"
+            aria-label="Dismiss connection error"
+            onClick={() => setConnectionError(null)}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: '0 4px' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
         {messages.length === 0 ? (
           <div style={{ opacity: 0.5, fontSize: 13, textAlign: 'center', marginTop: 32 }}>
             Type a task to begin.
           </div>
         ) : (
-          messages.map((m) => <MessageRow key={m.id} message={m} />)
+          messages.map((m) =>
+            m.role === 'question' ? (
+              <QuestionRow
+                key={m.id}
+                message={m}
+                onSelect={(opt) => handleSelectOption(m.id, opt)}
+              />
+            ) : (
+              <MessageRow key={m.id} message={m} />
+            ),
+          )
         )}
         <div ref={messagesEndRef} />
       </div>
 
       <footer style={{ padding: 10, borderTop: '1px solid #2a2c30', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {contextPct !== null && (
+          <div
+            aria-label="Context usage"
+            style={{
+              fontSize: 11,
+              color: contextPct >= 80 ? '#d05a5a' : '#5cba6a',
+              opacity: 0.8,
+            }}
+          >
+            Context: {contextUsage!.used.toLocaleString()} / {contextUsage!.limit.toLocaleString()} tokens ({contextPct}%)
+          </div>
+        )}
         <textarea
           ref={inputRef}
           value={input}
@@ -167,7 +283,30 @@ export default function ChatPanelEmbedded() {
             boxSizing: 'border-box',
           }}
         />
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={handleToggleAutonomous}
+            aria-pressed={autonomousMode}
+            title="Toggle autonomous mode"
+            disabled={!isReady}
+            style={{
+              ...chipBtnStyle(autonomousMode ? '#5a7a3a' : '#3a3c40'),
+              marginRight: 'auto',
+            }}
+          >
+            AUTO
+          </button>
+          <button
+            type="button"
+            onClick={handleExport}
+            aria-label="Export chat history as JSON"
+            title="Export chat history as JSON"
+            disabled={!isReady || messages.length === 0}
+            style={chipBtnStyle('#3a4a5a')}
+          >
+            Export Chat
+          </button>
           {isRunning && (
             <button type="button" onClick={handleCancel} style={chipBtnStyle('#a13a3a')}>
               Cancel
@@ -183,6 +322,54 @@ export default function ChatPanelEmbedded() {
           </button>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function QuestionRow({
+  message: m,
+  onSelect,
+}: {
+  message: ChatMessage;
+  onSelect: (option: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        background: 'rgba(100,140,200,0.10)',
+        border: '1px solid rgba(100,140,200,0.25)',
+        borderRadius: 8,
+        padding: '8px 12px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 500 }}>{m.question}</div>
+      {m.options && m.options.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {m.options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              disabled={m.answered}
+              onClick={() => onSelect(opt)}
+              style={{
+                background: 'rgba(100,140,200,0.2)',
+                border: '1px solid rgba(100,140,200,0.4)',
+                borderRadius: 4,
+                color: 'inherit',
+                cursor: m.answered ? 'default' : 'pointer',
+                fontSize: 12,
+                padding: '3px 10px',
+                opacity: m.answered ? 0.5 : 1,
+              }}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -250,6 +437,22 @@ function MessageRow({ message: m }: { message: ChatMessage }) {
     return (
       <div style={{ padding: '2px 4px', fontSize: 11, opacity: 0.6, fontStyle: 'italic' }}>
         {m.text}
+      </div>
+    );
+  }
+  if (m.role === 'phase') {
+    return (
+      <div
+        aria-label="Phase transition"
+        style={{
+          padding: '3px 8px',
+          fontSize: 11,
+          background: 'rgba(100,100,200,0.12)',
+          borderLeft: '2px solid rgba(100,100,200,0.5)',
+          color: 'rgba(180,180,255,0.85)',
+        }}
+      >
+        ▶ {m.text}
       </div>
     );
   }
@@ -372,6 +575,7 @@ function handleEvent(
   event: KshanaEvent,
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
   streamingMsgIdRef: React.RefObject<string | null>,
+  setContextUsage: React.Dispatch<React.SetStateAction<ContextUsage | null>>,
 ): void {
   switch (event.eventName) {
     case 'tool_call': {
@@ -488,6 +692,46 @@ function handleEvent(
           text: `[${data.level ?? 'info'}] ${data.message}`,
         },
       ]);
+      return;
+    }
+    case 'agent_question': {
+      const data = event.data as {
+        question?: string;
+        options?: string[];
+        defaultOption?: string;
+      };
+      if (!data.question) return;
+      streamingMsgIdRef.current = null;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: newMessageId(),
+          role: 'question',
+          question: data.question,
+          options: data.options ?? [],
+          defaultOption: data.defaultOption,
+          answered: false,
+        },
+      ]);
+      return;
+    }
+    case 'phase_transition': {
+      const data = event.data as { phase?: string; status?: string };
+      if (!data.phase) return;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: newMessageId(),
+          role: 'phase',
+          text: `${data.phase}${data.status ? ` · ${data.status}` : ''}`,
+        },
+      ]);
+      return;
+    }
+    case 'context_usage': {
+      const data = event.data as { used?: number; limit?: number };
+      if (typeof data.used !== 'number' || typeof data.limit !== 'number') return;
+      setContextUsage({ used: data.used, limit: data.limit });
       return;
     }
     default:

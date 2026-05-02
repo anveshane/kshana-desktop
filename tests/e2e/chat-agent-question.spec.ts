@@ -1,43 +1,70 @@
 /**
  * Wave 5 — Agent-asks-user question flow.
  *
- * **COMPONENT GAP:** `agent_question` is handled in the legacy
- * WebSocket-backed `ChatPanel` (src/renderer/components/chat/ChatPanel),
- * which renders `QuestionPrompt` with option buttons and wires
- * `sendResponse` on click. However, neither the `chat` nor the
- * `workspace` test surface currently mounts that component — both
- * render `ChatPanelEmbedded`, which does not handle `agent_question`
- * events at all (no `agent_question` case in handleEvent).
- *
- * All cases stay as test.fixme until either:
- *   (a) `ChatPanelEmbedded` gains `agent_question` support, or
- *   (b) a test surface that mounts the full `ChatPanel` is wired up.
+ * ChatPanelEmbedded now handles `agent_question` events:
+ * the question renders as a QuestionRow with option buttons;
+ * clicking an option calls `session.sendResponse(option)` and
+ * marks the row as answered (buttons disabled).
  */
-import { test } from './fixtures';
+import { test, expect } from './fixtures';
 
 test.describe('Feature: Agent question prompt', () => {
   test.describe('Given a scenario emits agent_question with options after runTask', () => {
-    test.fixme(
-      'When the question renders, Then the question text and each option button are visible',
-      async () => {
-        // ChatPanelEmbedded.handleEvent has no agent_question case.
-        // Full ChatPanel (which has QuestionPrompt) is not mounted in tests.
-      },
-    );
+    test('When the question renders, Then the question text and each option button are visible', async ({
+      page,
+      bootWithScenario,
+    }) => {
+      // Given
+      await bootWithScenario('agent-question.json');
 
-    test.fixme(
-      'When the user clicks an option, Then sendResponse is called with that option text',
-      async () => {
-        // Same gap — QuestionPrompt / sendResponse path unreachable
-        // from any current test surface.
-      },
-    );
+      // When — trigger the question
+      await page.getByPlaceholder(/Type a task and press send/i).fill('ask me something');
+      await page.getByRole('button', { name: 'Send' }).click();
+
+      // Then — question text visible
+      await expect(page.getByText('Which style do you prefer?')).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // And — each option button visible
+      await expect(page.getByRole('button', { name: 'Noir' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Cinematic' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Documentary' })).toBeVisible();
+    });
+
+    test('When the user clicks an option, Then sendResponse is called with that option text', async ({
+      page,
+      bootWithScenario,
+    }) => {
+      // Given
+      await bootWithScenario('agent-question.json');
+      await page.getByPlaceholder(/Type a task and press send/i).fill('ask me something');
+      await page.getByRole('button', { name: 'Send' }).click();
+      await expect(page.getByText('Which style do you prefer?')).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // When
+      await page.getByRole('button', { name: 'Cinematic' }).click();
+
+      // Then — sendResponse recorded with the selected option
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const calls = window.__kshanaTest!.getCalls('sendResponse');
+              return calls.map((c) => (c.args as { response: string }).response);
+            }),
+          { timeout: 5_000 },
+        )
+        .toContain('Cinematic');
+    });
 
     test.fixme(
       'When the question has a defaultOption and a timeout fires, Then sendResponse is called with the default',
       async () => {
-        // Same gap. Also requires ChatPanel's auto-timeout logic
-        // (cancelActiveQuestionTimer / effectiveAutoApproveTimeoutMs).
+        // Auto-timeout on agent_question is not implemented in
+        // ChatPanelEmbedded — QuestionRow has no countdown timer.
       },
     );
   });

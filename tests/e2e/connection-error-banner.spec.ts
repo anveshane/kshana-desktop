@@ -1,38 +1,67 @@
 /**
- * Wave 6 — Connection-error banner inside the workspace surface.
+ * Wave 6 — Connection-error banner inside the chat panel.
  *
- * **COMPONENT GAP:** There is no top-level error banner in the
- * workspace layout for backend connection errors. The only place a
- * backend:state error is surfaced is inside `SettingsPanel.tsx` (the
- * Connection tab status card), which is already covered by
- * `settings-backend-status.spec.ts`.
- *
- * The legacy `ChatPanel` has `appendConnectionBanner` which adds an
- * in-chat system message, but `ChatPanelEmbedded` (the currently
- * mounted panel) has no `backend:state` subscription at all.
- *
- * Both cases stay as test.fixme until either a top-level workspace
- * error banner is added, or `ChatPanelEmbedded` subscribes to
- * `backend:state` and surfaces connection errors inline.
+ * ChatPanelEmbedded now subscribes to `window.electron.backend.onStateChange`.
+ * When status is "error" it renders a dismissible banner (role="alert").
+ * When status returns to "ready" the banner clears automatically.
  */
-import { test } from './fixtures';
+import { test, expect } from './fixtures';
+
+async function pushBackendState(
+  page: import('./fixtures').Page,
+  state: { status: string; message?: string; serverUrl?: string },
+) {
+  await page.evaluate((s) => {
+    window.__kshanaTest!.setBridgeReturn('backend.getState', s);
+    window.__kshanaTest!.emitElectron('backend:state', s);
+  }, state);
+}
 
 test.describe('Feature: Connection error surfacing', () => {
-  test.describe('Given backend state is "ready" inside the workspace', () => {
-    test.fixme(
-      'When backend:state {status: "error", message: "X"} fires, Then an error banner appears with the message',
-      async () => {
-        // No top-level workspace error banner exists.
-        // SettingsPanel status card (covered in settings-backend-status.spec.ts)
-        // is the only backend-error surface today.
-      },
-    );
+  test.describe('Given backend state is "ready" inside the chat panel', () => {
+    test('When backend:state {status: "error", message: "ENGINE_DOWN"} fires, Then an error banner appears with the message', async ({
+      page,
+      bootInline,
+    }) => {
+      // Given
+      await bootInline({
+        surface: 'chat',
+        project: { name: 'noir', directory: '/tmp/noir.kshana' },
+        rules: [],
+      });
 
-    test.fixme(
-      'When state returns to "ready" afterward, Then the banner clears',
-      async () => {
-        // Same gap — no dismissible banner to clear.
-      },
-    );
+      // When
+      await pushBackendState(page, {
+        status: 'error',
+        message: 'ENGINE_DOWN',
+      });
+
+      // Then — error banner visible
+      await expect(page.getByRole('alert')).toBeVisible({ timeout: 3_000 });
+      await expect(page.getByRole('alert')).toContainText('ENGINE_DOWN');
+    });
+
+    test('When state returns to "ready" afterward, Then the banner clears', async ({
+      page,
+      bootInline,
+    }) => {
+      // Given — put it in error state first
+      await bootInline({
+        surface: 'chat',
+        project: { name: 'noir', directory: '/tmp/noir.kshana' },
+        rules: [],
+      });
+      await pushBackendState(page, { status: 'error', message: 'ENGINE_DOWN' });
+      await expect(page.getByRole('alert')).toBeVisible({ timeout: 3_000 });
+
+      // When — state recovers
+      await pushBackendState(page, {
+        status: 'ready',
+        serverUrl: 'http://127.0.0.1:8001',
+      });
+
+      // Then — banner gone
+      await expect(page.getByRole('alert')).not.toBeVisible({ timeout: 3_000 });
+    });
   });
 });
