@@ -76,6 +76,15 @@ export interface Scenario {
    * mount-time loads (e.g. `recentProjects`) see the seeded value.
    */
   bridgeReturns?: Record<string, unknown>;
+  /**
+   * Seed per-path return values for `window.electron.project.readFile`.
+   * Each key is matched as a path suffix or substring against the actual
+   * path argument. The value is the raw file content string (or null to
+   * simulate a missing file). Checked before `bridgeReturns['project.readFile']`.
+   *
+   * Example: `{ 'project.json': JSON.stringify(myProjectData) }`
+   */
+  fileReturns?: Record<string, string | null>;
   rules: ScenarioRule[];
 }
 
@@ -328,15 +337,6 @@ function noop(): void {}
 function noopAsync(): Promise<void> {
   return Promise.resolve();
 }
-function emptyTree() {
-  return Promise.resolve({
-    name: 'fake-project',
-    path: state.project.directory ?? '/tmp/fake-project.kshana',
-    type: 'directory' as const,
-    children: [],
-  });
-}
-
 // Most renderer-facing electron channels are stubbed with empty defaults.
 // For each channel we expose two tools to tests: (1) `getCalls(name)` to
 // assert the call happened with the right args, and (2) `setBridgeReturn`
@@ -435,9 +435,28 @@ const fakeElectron = {
     getAudioDuration: () => Promise.resolve(0),
     getAudioWaveform: () => Promise.resolve({ peaks: [], duration: 0 }),
     generateWordCaptions: () => Promise.resolve({ success: false }),
-    readTree: emptyTree,
+    readTree: (p: string) => {
+      record('project.readTree', p);
+      return Promise.resolve(
+        bridgeReturn('project.readTree', {
+          name: 'fake-project',
+          path: state.project.directory ?? '/tmp/fake-project.kshana',
+          type: 'directory' as const,
+          children: [],
+        }, [p]),
+      );
+    },
     readFile: (p: string) => {
       record('project.readFile', p);
+      const fileReturns = state.scenario.fileReturns;
+      if (fileReturns) {
+        const normalized = p.replace(/\\/g, '/');
+        for (const [pattern, content] of Object.entries(fileReturns)) {
+          if (normalized === pattern || normalized.endsWith(`/${pattern}`) || normalized.includes(pattern)) {
+            return Promise.resolve(content);
+          }
+        }
+      }
       return Promise.resolve(bridgeReturn('project.readFile', null, [p]));
     },
     readFileGuarded: () => Promise.resolve(''),

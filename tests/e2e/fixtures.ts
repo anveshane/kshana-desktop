@@ -10,6 +10,8 @@ export interface Scenario {
   project?: { name: string; directory?: string };
   surface?: ScenarioSurface;
   bridgeReturns?: Record<string, unknown>;
+  /** Per-path file content for `window.electron.project.readFile`. Keys are matched as path suffixes. */
+  fileReturns?: Record<string, string | null>;
   rules: Array<{
     on: { channel: string; match?: string };
     emit: Array<{ after?: number; event: string; data: unknown }>;
