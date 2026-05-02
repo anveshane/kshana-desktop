@@ -161,6 +161,7 @@ const configuration: webpack.Configuration = {
      */
     new webpack.EnvironmentPlugin({
       NODE_ENV: 'development',
+      KSHANA_TEST_BRIDGE: '0',
     }),
 
     new webpack.LoaderOptionsPlugin({
@@ -201,6 +202,16 @@ const configuration: webpack.Configuration = {
       verbose: true,
     },
     setupMiddlewares(middlewares) {
+      // KSHANA_TEST_BRIDGE=1 ⇒ Layer-2 e2e mode: serve only the renderer
+      // bundle (no preload, no Electron main). The renderer entry installs
+      // an in-process fake `window.kshana` / `window.electron` instead.
+      if (process.env.KSHANA_TEST_BRIDGE === '1') {
+        console.log(
+          '[test-bridge] renderer-only dev server (no preload, no Electron)',
+        );
+        return middlewares;
+      }
+
       console.log('Starting preload.js builder...');
       const preloadProcess = spawn('npm', ['run', 'start:preload'], {
         shell: true,
