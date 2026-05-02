@@ -436,7 +436,10 @@ const fakeElectron = {
     getAudioWaveform: () => Promise.resolve({ peaks: [], duration: 0 }),
     generateWordCaptions: () => Promise.resolve({ success: false }),
     readTree: emptyTree,
-    readFile: () => Promise.resolve(null),
+    readFile: (p: string) => {
+      record('project.readFile', p);
+      return Promise.resolve(bridgeReturn('project.readFile', null, [p]));
+    },
     readFileGuarded: () => Promise.resolve(''),
     readFileBufferGuarded: () => Promise.resolve(''),
     checkFileExists: (p: string) => {
