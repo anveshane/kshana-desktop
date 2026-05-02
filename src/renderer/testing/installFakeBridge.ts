@@ -381,7 +381,28 @@ const fakeElectron = {
   settings: {
     get: () => {
       record('settings.get', undefined);
-      return Promise.resolve(bridgeReturn('settings.get', {}));
+      // Default to a full AppSettings shape so renderer code that reads
+      // `settings.llmProvider` etc. on first load doesn't see undefined.
+      // Tests can override per-key via `bridgeReturns: { 'settings.get': {...} }`.
+      return Promise.resolve(
+        bridgeReturn('settings.get', {
+          themeId: 'studio-neutral',
+          comfyuiMode: 'inherit',
+          comfyuiUrl: '',
+          comfyCloudApiKey: '',
+          comfyuiTimeout: 1800,
+          llmProvider: 'openai',
+          lmStudioUrl: 'http://127.0.0.1:1234',
+          lmStudioModel: 'qwen3',
+          googleApiKey: '',
+          geminiModel: 'gemini-2.5-flash',
+          openaiApiKey: '',
+          openaiBaseUrl: 'https://api.openai.com/v1',
+          openaiModel: 'gpt-4o',
+          openRouterApiKey: '',
+          openRouterModel: 'z-ai/glm-4.7-flash',
+        }),
+      );
     },
     update: (patch: unknown) => {
       record('settings.update', patch);

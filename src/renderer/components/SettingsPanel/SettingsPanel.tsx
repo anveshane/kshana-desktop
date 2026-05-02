@@ -543,6 +543,15 @@ export default function SettingsPanel({
             >
               {isEmbedded ? 'Back to Projects' : 'Close'}
             </button>
+            {activeTab === 'connection' && (
+              <button
+                type="submit"
+                className={styles.submitButton}
+                disabled={isSavingConnection}
+              >
+                {isSavingConnection ? 'Saving…' : 'Save & Restart'}
+              </button>
+            )}
           </div>
         </form>
       </div>
