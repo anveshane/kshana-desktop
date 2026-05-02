@@ -3174,13 +3174,13 @@ const createWindow = async () => {
   // Add error handlers for debugging
   mainWindow.webContents.on(
     'did-fail-load',
-    (event, errorCode, errorDescription, validatedURL) => {
+    (_event, errorCode, errorDescription, validatedURL) => {
       log.error(`Failed to load: ${errorCode} - ${errorDescription}`);
       log.error(`URL: ${validatedURL || htmlPath}`);
     },
   );
 
-  mainWindow.webContents.on('render-process-gone', (event, details) => {
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
     log.error(`Renderer process gone: ${details.reason}`);
   });
 

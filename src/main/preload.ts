@@ -425,7 +425,7 @@ const remotionBridge = {
   getJob(jobId: string): Promise<RemotionJob | null> {
     return ipcRenderer.invoke('remotion:get-job', jobId);
   },
-  renderFromServerRequest(
+  async renderFromServerRequest(
     projectDirectory: string,
     request: RemotionServerRenderRequest,
     onProgress?: (progress: RemotionServerRenderProgress) => void,
@@ -446,17 +446,17 @@ const remotionBridge = {
       ipcRenderer.on('remotion:server-progress', subscription);
     }
 
-    return ipcRenderer
-      .invoke(
+    try {
+      return await ipcRenderer.invoke(
         'remotion:render-from-server-request',
         projectDirectory,
         request,
-      )
-      .finally(() => {
-        if (onProgress) {
-          ipcRenderer.removeListener('remotion:server-progress', subscription);
-        }
-      });
+      );
+    } finally {
+      if (onProgress) {
+        ipcRenderer.removeListener('remotion:server-progress', subscription);
+      }
+    }
   },
   onProgress(callback: (progress: RemotionProgress) => void) {
     const subscription = (_event: IpcRendererEvent, progress: RemotionProgress) =>

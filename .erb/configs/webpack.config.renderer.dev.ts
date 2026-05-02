@@ -1,4 +1,5 @@
-import 'webpack-dev-server';
+import type { Configuration } from 'webpack';
+import type WebpackDevServer from 'webpack-dev-server';
 import path from 'path';
 import fs from 'fs';
 import webpack from './webpack.instance';
@@ -38,7 +39,7 @@ if (
   execSync('npm run postinstall');
 }
 
-const configuration: webpack.Configuration = {
+const configuration: Configuration = {
   devtool: 'inline-source-map',
 
   mode: 'development',
@@ -201,7 +202,7 @@ const configuration: webpack.Configuration = {
     historyApiFallback: {
       verbose: true,
     },
-    setupMiddlewares(middlewares) {
+    setupMiddlewares(middlewares: WebpackDevServer.Middleware[]) {
       // KSHANA_TEST_BRIDGE=1 ⇒ Layer-2 e2e mode: serve only the renderer
       // bundle (no preload, no Electron main). The renderer entry installs
       // an in-process fake `window.kshana` / `window.electron` instead.

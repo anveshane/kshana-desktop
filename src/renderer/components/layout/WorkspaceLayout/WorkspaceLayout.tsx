@@ -57,7 +57,7 @@ export default function WorkspaceLayout() {
   // Keyboard shortcut: Cmd+I for chat
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const isMac = /mac/i.test(navigator.userAgent);
       const modifier = isMac ? e.metaKey : e.ctrlKey;
 
       if (modifier && e.key.toLowerCase() === 'i') {

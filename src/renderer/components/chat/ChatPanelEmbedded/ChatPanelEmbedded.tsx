@@ -371,7 +371,7 @@ function messageBubbleStyle(bg: string, align: 'flex-start' | 'flex-end'): React
 function handleEvent(
   event: KshanaEvent,
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
-  streamingMsgIdRef: React.MutableRefObject<string | null>,
+  streamingMsgIdRef: React.RefObject<string | null>,
 ): void {
   switch (event.eventName) {
     case 'tool_call': {

@@ -170,7 +170,7 @@ function tryExecGitCommand(repoPath: string, command: string): string | undefine
 class LocalBackendManager extends EventEmitter {
   private child?: ChildProcessWithoutNullStreams;
 
-  private state: BackendState = { status: 'idle', mode: 'local' };
+  private state: BackendState = { status: 'idle' };
 
   private port = 0;
 
@@ -185,7 +185,7 @@ class LocalBackendManager extends EventEmitter {
   }
 
   private updateState(next: BackendState) {
-    this.state = { ...next, mode: 'local' };
+    this.state = next;
     this.emit('state', this.state);
   }
 
