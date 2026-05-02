@@ -59,13 +59,5 @@ test.describe('Feature: Agent question prompt', () => {
         )
         .toContain('Cinematic');
     });
-
-    test.fixme(
-      'When the question has a defaultOption and a timeout fires, Then sendResponse is called with the default',
-      async () => {
-        // Auto-timeout on agent_question is not implemented in
-        // ChatPanelEmbedded — QuestionRow has no countdown timer.
-      },
-    );
   });
 });

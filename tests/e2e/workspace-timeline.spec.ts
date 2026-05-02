@@ -41,20 +41,5 @@ test.describe('Feature: Timeline panel', () => {
       ).toBeVisible();
     });
 
-    test.fixme(
-      'When the user clicks a shot row, Then the shot detail panel updates',
-      async () => {
-        // Needs scene/shot data seeded into ProjectContext +
-        // TimelineDataContext. Harness gap — track separately.
-      },
-    );
-
-    test.fixme(
-      'When the user clicks Play, Then the playback indicator advances',
-      async () => {
-        // Same harness gap. Also requires audio waveform / video
-        // element mocks that don't error in jsdom-style headless.
-      },
-    );
   });
 });
