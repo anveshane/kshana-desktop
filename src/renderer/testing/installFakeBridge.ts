@@ -52,9 +52,23 @@ export interface ScenarioRule {
   emit: ScenarioEmit[];
 }
 
+/**
+ * Which renderer surface the test bridge should mount.
+ *
+ * - `chat` (default) — `ChatPanelEmbedded` only, project auto-opened from
+ *   the scenario. Used by all the existing chat-flow specs.
+ * - `landing` — full `<App />`, NO project auto-opened. Used by Landing
+ *   screen + Settings tests that navigate from there.
+ * - `workspace` — full `<App />`, project auto-opened. Used by tests that
+ *   need the full WorkspaceLayout (Timeline, Assets, Storyboard, etc.).
+ */
+export type ScenarioSurface = 'chat' | 'landing' | 'workspace';
+
 export interface Scenario {
-  /** Pre-set project so ChatPanelEmbedded auto-focuses on mount. */
+  /** Pre-set project so the test surface auto-focuses on mount (chat / workspace). */
   project?: { name: string; directory?: string };
+  /** Which renderer surface to mount. Defaults to `chat`. */
+  surface?: ScenarioSurface;
   rules: ScenarioRule[];
 }
 
@@ -75,6 +89,22 @@ export interface KshanaTestApi {
   emit(eventName: KshanaEventName, data: unknown): void;
   getCalls(channel?: string): RecordedCall[];
   getProject(): { name: string | null; directory: string | null };
+  /** Which surface the scenario asked for. Read by TestApp on mount. */
+  getSurface(): ScenarioSurface;
+  /**
+   * Override the return value of an `electron.*` bridge call by dotted
+   * path, e.g. `'project.getRecent'` or `'settings.get'`. Required for
+   * tests that need a non-empty initial state — the default fakes return
+   * `[]` / `{}` / `null`.
+   */
+  setBridgeReturn(path: string, value: unknown): void;
+  /**
+   * Fire an event into a subscribed `electron.*` listener. Use to drive
+   * UI reactions to backend state, file changes, settings updates, etc.
+   * `channel` examples: `'backend:state'`, `'settings:updated'`,
+   * `'project:file-change'`, `'project:manifest-written'`.
+   */
+  emitElectron(channel: string, payload: unknown): void;
   reset(): void;
 }
 
@@ -93,6 +123,10 @@ interface BridgeState {
   sessionId: string;
   project: { name: string | null; directory: string | null };
   timers: Set<ReturnType<typeof setTimeout>>;
+  /** Per-path override values for `electron.*` bridge calls. */
+  bridgeReturns: Map<string, unknown>;
+  /** Subscribed listeners keyed by channel (`backend:state`, etc.). */
+  electronListeners: Map<string, Set<(payload: unknown) => void>>;
 }
 
 const state: BridgeState = {
@@ -102,7 +136,38 @@ const state: BridgeState = {
   sessionId: 'test-session-1',
   project: { name: null, directory: null },
   timers: new Set(),
+  bridgeReturns: new Map(),
+  electronListeners: new Map(),
 };
+
+function bridgeReturn<T>(path: string, fallback: T): T {
+  return state.bridgeReturns.has(path)
+    ? (state.bridgeReturns.get(path) as T)
+    : fallback;
+}
+
+function subscribeElectron(
+  channel: string,
+  cb: (payload: unknown) => void,
+): () => void {
+  let set = state.electronListeners.get(channel);
+  if (!set) {
+    set = new Set();
+    state.electronListeners.set(channel, set);
+  }
+  set.add(cb);
+  return () => {
+    state.electronListeners.get(channel)?.delete(cb);
+  };
+}
+
+function fireElectron(channel: string, payload: unknown): void {
+  const set = state.electronListeners.get(channel);
+  if (!set) return;
+  for (const cb of Array.from(set)) {
+    cb(payload);
+  }
+}
 
 function record(channel: string, args: unknown): void {
   state.calls.push({ channel, args, at: Date.now() });
@@ -253,6 +318,17 @@ function emptyTree() {
   });
 }
 
+// Most renderer-facing electron channels are stubbed with empty defaults.
+// For each channel we expose two tools to tests: (1) `getCalls(name)` to
+// assert the call happened with the right args, and (2) `setBridgeReturn`
+// to override the default return value (e.g. seed a non-empty
+// recent-projects list before LandingScreen renders).
+//
+// The naming convention for `record()` / `bridgeReturn()` is the dotted
+// path under `window.electron`, e.g. `project.getRecent`. Tests use the
+// same path with `getCalls('project.getRecent')` and
+// `setBridgeReturn('project.getRecent', […])`.
+
 const fakeElectron = {
   ipcRenderer: {
     sendMessage: noop,
@@ -260,22 +336,62 @@ const fakeElectron = {
     once: noop,
   },
   backend: {
-    start: () => Promise.resolve({ status: 'idle' }),
-    restart: () => Promise.resolve({ status: 'idle' }),
-    stop: () => Promise.resolve({ status: 'idle' }),
-    getState: () => Promise.resolve({ status: 'idle' }),
-    getConnectionInfo: () => Promise.resolve({}),
-    onStateChange: () => () => {},
+    start: () => {
+      record('backend.start', undefined);
+      return Promise.resolve(bridgeReturn('backend.start', { status: 'idle' }));
+    },
+    restart: () => {
+      record('backend.restart', undefined);
+      return Promise.resolve(bridgeReturn('backend.restart', { status: 'idle' }));
+    },
+    stop: () => {
+      record('backend.stop', undefined);
+      return Promise.resolve(bridgeReturn('backend.stop', { status: 'idle' }));
+    },
+    getState: () => {
+      record('backend.getState', undefined);
+      return Promise.resolve(bridgeReturn('backend.getState', { status: 'idle' }));
+    },
+    getConnectionInfo: () => {
+      record('backend.getConnectionInfo', undefined);
+      return Promise.resolve(bridgeReturn('backend.getConnectionInfo', {}));
+    },
+    onStateChange: (cb: (payload: unknown) => void) =>
+      subscribeElectron('backend:state', cb),
   },
   settings: {
-    get: () => Promise.resolve({}),
-    update: () => Promise.resolve({}),
-    onChange: () => () => {},
+    get: () => {
+      record('settings.get', undefined);
+      return Promise.resolve(bridgeReturn('settings.get', {}));
+    },
+    update: (patch: unknown) => {
+      record('settings.update', patch);
+      // Mirror the patch as the next `get()` so subsequent reads see it.
+      const merged = {
+        ...(state.bridgeReturns.get('settings.get') as object | undefined ?? {}),
+        ...(patch as object),
+      };
+      state.bridgeReturns.set('settings.get', merged);
+      return Promise.resolve(bridgeReturn('settings.update', merged));
+    },
+    onChange: (cb: (payload: unknown) => void) =>
+      subscribeElectron('settings:updated', cb),
   },
   project: {
-    selectDirectory: () => Promise.resolve(state.project.directory),
-    selectVideoFile: () => Promise.resolve(null),
-    selectAudioFile: () => Promise.resolve(null),
+    selectDirectory: () => {
+      record('project.selectDirectory', undefined);
+      return Promise.resolve(
+        bridgeReturn('project.selectDirectory', state.project.directory),
+      );
+    },
+    selectVideoFile: () => {
+      record('project.selectVideoFile', undefined);
+      return Promise.resolve(bridgeReturn('project.selectVideoFile', null));
+    },
+    selectAudioFile: () => {
+      record('project.selectAudioFile', undefined);
+      return Promise.resolve(bridgeReturn('project.selectAudioFile', null));
+    },
     getAudioDuration: () => Promise.resolve(0),
     getAudioWaveform: () => Promise.resolve({ peaks: [], duration: 0 }),
     generateWordCaptions: () => Promise.resolve({ success: false }),
@@ -283,7 +399,10 @@ const fakeElectron = {
     readFile: () => Promise.resolve(null),
     readFileGuarded: () => Promise.resolve(''),
     readFileBufferGuarded: () => Promise.resolve(''),
-    checkFileExists: () => Promise.resolve(true),
+    checkFileExists: (p: string) => {
+      record('project.checkFileExists', p);
+      return Promise.resolve(bridgeReturn('project.checkFileExists', true));
+    },
     listDirectory: () => Promise.resolve([]),
     statPath: () =>
       Promise.resolve({ isFile: false, isDirectory: true, size: 0 }),
@@ -292,42 +411,111 @@ const fakeElectron = {
       Promise.resolve({ files: {}, directories: [], projectRoot: '' }),
     mkdir: noopAsync,
     readFileBase64: () => Promise.resolve(null),
-    writeFile: noopAsync,
-    writeFileBinary: noopAsync,
-    createFile: () => Promise.resolve(null),
-    createFolder: () => Promise.resolve(null),
+    writeFile: (p: string, contents: unknown) => {
+      record('project.writeFile', { path: p, contents });
+      return Promise.resolve();
+    },
+    writeFileBinary: (p: string) => {
+      record('project.writeFileBinary', { path: p });
+      return Promise.resolve();
+    },
+    createFile: (p: string) => {
+      record('project.createFile', p);
+      return Promise.resolve(bridgeReturn('project.createFile', p));
+    },
+    createFolder: (parent: string, name: string) => {
+      record('project.createFolder', { parent, name });
+      return Promise.resolve(
+        bridgeReturn('project.createFolder', `${parent}/${name}`),
+      );
+    },
     rename: (p: string) => Promise.resolve(p),
-    delete: noopAsync,
+    delete: (p: string) => {
+      record('project.delete', p);
+      return Promise.resolve();
+    },
     move: (p: string) => Promise.resolve(p),
     copy: (p: string) => Promise.resolve(p),
     copyFileExact: noopAsync,
-    revealInFinder: noopAsync,
-    watchDirectory: noopAsync,
+    revealInFinder: (p: string) => {
+      record('project.revealInFinder', p);
+      return Promise.resolve();
+    },
+    watchDirectory: (p: string) => {
+      record('project.watchDirectory', p);
+      return Promise.resolve();
+    },
     watchManifest: noopAsync,
     watchImagePlacements: noopAsync,
     watchInfographicPlacements: noopAsync,
     refreshAssets: () => Promise.resolve({ success: true }),
     unwatchDirectory: noopAsync,
-    getRecent: () => Promise.resolve([]),
-    addRecent: noopAsync,
-    removeRecent: noopAsync,
-    renameProject: (p: string) => Promise.resolve(p),
-    deleteProject: noopAsync,
+    getRecent: () => {
+      record('project.getRecent', undefined);
+      return Promise.resolve(bridgeReturn('project.getRecent', []));
+    },
+    addRecent: (p: unknown) => {
+      record('project.addRecent', p);
+      return Promise.resolve();
+    },
+    removeRecent: (p: unknown) => {
+      record('project.removeRecent', p);
+      return Promise.resolve();
+    },
+    renameProject: (oldPath: string, newName: string) => {
+      record('project.renameProject', { oldPath, newName });
+      return Promise.resolve(
+        bridgeReturn('project.renameProject', `${oldPath}/${newName}`),
+      );
+    },
+    deleteProject: (p: string) => {
+      record('project.deleteProject', p);
+      return Promise.resolve();
+    },
     getResourcesPath: () => Promise.resolve(''),
-    saveVideoFile: () => Promise.resolve(null),
-    exportChatJson: () => Promise.resolve({ ok: true }),
-    composeTimelineVideo: () => Promise.resolve({ success: false }),
-    exportCapcut: () => Promise.resolve({ success: false }),
-    onFileChange: () => () => {},
-    onManifestWritten: () => () => {},
+    saveVideoFile: (p: unknown) => {
+      record('project.saveVideoFile', p);
+      return Promise.resolve(bridgeReturn('project.saveVideoFile', null));
+    },
+    exportChatJson: (p: unknown) => {
+      record('project.exportChatJson', p);
+      return Promise.resolve(bridgeReturn('project.exportChatJson', { ok: true }));
+    },
+    composeTimelineVideo: (p: unknown) => {
+      record('project.composeTimelineVideo', p);
+      return Promise.resolve(
+        bridgeReturn('project.composeTimelineVideo', { success: false }),
+      );
+    },
+    exportCapcut: (p: unknown) => {
+      record('project.exportCapcut', p);
+      return Promise.resolve(bridgeReturn('project.exportCapcut', { success: false }));
+    },
+    onFileChange: (cb: (payload: unknown) => void) =>
+      subscribeElectron('project:file-change', cb),
+    onManifestWritten: (cb: (payload: unknown) => void) =>
+      subscribeElectron('project:manifest-written', cb),
   },
   remotion: {
-    renderInfographics: () => Promise.resolve({ jobId: 'fake' }),
-    cancelJob: noopAsync,
+    renderInfographics: (p: unknown) => {
+      record('remotion.renderInfographics', p);
+      return Promise.resolve(bridgeReturn('remotion.renderInfographics', { jobId: 'fake' }));
+    },
+    cancelJob: (jobId: string) => {
+      record('remotion.cancelJob', jobId);
+      return Promise.resolve();
+    },
     getJob: () => Promise.resolve(null),
-    renderFromServerRequest: () => Promise.resolve({ success: false }),
-    onProgress: () => () => {},
-    onJobComplete: () => () => {},
+    renderFromServerRequest: (p: unknown) => {
+      record('remotion.renderFromServerRequest', p);
+      return Promise.resolve(
+        bridgeReturn('remotion.renderFromServerRequest', { success: false }),
+      );
+    },
+    onProgress: (cb: (payload: unknown) => void) =>
+      subscribeElectron('remotion:progress', cb),
+    onJobComplete: (cb: (payload: unknown) => void) =>
+      subscribeElectron('remotion:job-complete', cb),
   },
   logger: {
     init: noopAsync,
@@ -345,14 +533,26 @@ const fakeElectron = {
       Promise.resolve({ uiLog: '', phaseLog: '', workflowLog: '' }),
   },
   updates: {
-    getStatus: () =>
-      Promise.resolve({ phase: 'idle', checkedAt: Date.now() }),
-    checkNow: () =>
-      Promise.resolve({ phase: 'not-available', checkedAt: Date.now() }),
-    onStatusChange: () => () => {},
+    getStatus: () => {
+      record('updates.getStatus', undefined);
+      return Promise.resolve(
+        bridgeReturn('updates.getStatus', { phase: 'idle', checkedAt: Date.now() }),
+      );
+    },
+    checkNow: () => {
+      record('updates.checkNow', undefined);
+      return Promise.resolve(
+        bridgeReturn('updates.checkNow', { phase: 'not-available', checkedAt: Date.now() }),
+      );
+    },
+    onStatusChange: (cb: (payload: unknown) => void) =>
+      subscribeElectron('updates:status', cb),
   },
   app: {
-    getVersion: () => Promise.resolve('0.0.0-test'),
+    getVersion: () => {
+      record('app.getVersion', undefined);
+      return Promise.resolve(bridgeReturn('app.getVersion', '0.0.0-test'));
+    },
   },
 };
 
@@ -394,6 +594,15 @@ const testApi: KshanaTestApi = {
   getProject() {
     return { ...state.project };
   },
+  getSurface(): ScenarioSurface {
+    return state.scenario.surface ?? 'chat';
+  },
+  setBridgeReturn(path: string, value: unknown): void {
+    state.bridgeReturns.set(path, value);
+  },
+  emitElectron(channel: string, payload: unknown): void {
+    fireElectron(channel, payload);
+  },
   reset(): void {
     for (const t of state.timers) clearTimeout(t);
     state.timers.clear();
@@ -401,6 +610,8 @@ const testApi: KshanaTestApi = {
     state.listeners = [];
     state.calls = [];
     state.project = { name: null, directory: null };
+    state.bridgeReturns.clear();
+    state.electronListeners.clear();
   },
 };
 
