@@ -5,6 +5,9 @@ const localRestart = jest.fn<() => Promise<{ status: string; serverUrl?: string;
 const localStop = jest.fn<() => Promise<{ status: string }>>();
 const localIsAvailable = jest.fn<() => Promise<boolean>>();
 const localGetBundledVersionInfo = jest.fn<() => Promise<Record<string, string> | undefined>>();
+let mockLocalStatus: { mode: string; status?: string; serverUrl?: string } = {
+  mode: 'local',
+};
 
 const cloudConnect = jest.fn<() => Promise<{ status: string; serverUrl?: string }>>();
 const cloudDisconnect = jest.fn<() => Promise<{ status: string }>>();
@@ -19,7 +22,9 @@ jest.mock('./localBackendManager', () => ({
     isAvailable: localIsAvailable,
     getBundledVersionInfo: localGetBundledVersionInfo,
     currentServerUrl: 'http://127.0.0.1:8001',
-    status: { mode: 'local' },
+    get status() {
+      return mockLocalStatus;
+    },
   },
 }));
 
@@ -63,6 +68,7 @@ describe('backendManager', () => {
     localGetBundledVersionInfo.mockReset();
     cloudConnect.mockReset();
     cloudDisconnect.mockReset();
+    mockLocalStatus = { mode: 'local' };
   });
 
   it('starts the bundled local backend when local mode is selected', async () => {
@@ -103,6 +109,91 @@ describe('backendManager', () => {
       cloudRuntime,
     );
     expect(cloudConnect).not.toHaveBeenCalled();
+    expect(state.mode).toBe('cloud');
+  });
+
+  it('restarts the cloud backend when the desktop token changes', async () => {
+    cloudDisconnect.mockResolvedValue({ status: 'stopped' });
+    localRestart.mockResolvedValue({
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://127.0.0.1:8002',
+    });
+    localStart.mockResolvedValue({
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://127.0.0.1:8002',
+    });
+
+    const cloudSettings = { ...baseSettings, backendMode: 'cloud' as const };
+    await backendManager.start(cloudSettings, {
+      websiteUrl: 'https://website.example.com',
+      proxyBaseUrl: 'https://proxy.example.com',
+      desktopToken: 'old-token',
+    });
+
+    mockLocalStatus = { mode: 'cloud', status: 'ready' };
+    localRestart.mockClear();
+    localStart.mockClear();
+    cloudDisconnect.mockClear();
+
+    const nextRuntime = {
+      websiteUrl: 'https://website.example.com',
+      proxyBaseUrl: 'https://proxy.example.com',
+      desktopToken: 'new-token',
+    };
+    const state = await backendManager.start(cloudSettings, nextRuntime);
+
+    expect(cloudDisconnect).toHaveBeenCalled();
+    expect(localRestart).toHaveBeenCalledWith(cloudSettings, nextRuntime);
+    expect(localStart).not.toHaveBeenCalled();
+    expect(state.mode).toBe('cloud');
+  });
+
+  it('does not restart the cloud backend when the runtime identity is unchanged', async () => {
+    cloudDisconnect.mockResolvedValue({ status: 'stopped' });
+    localRestart.mockResolvedValue({
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://127.0.0.1:8002',
+    });
+    localStart.mockResolvedValue({
+      status: 'ready',
+      mode: 'cloud',
+      serverUrl: 'http://127.0.0.1:8002',
+    });
+
+    const cloudSettings = { ...baseSettings, backendMode: 'cloud' as const };
+    const runtime = {
+      websiteUrl: 'https://website.example.com',
+      proxyBaseUrl: 'https://proxy.example.com',
+      desktopToken: 'same-token',
+    };
+
+    await backendManager.start(cloudSettings, runtime);
+
+    mockLocalStatus = { mode: 'cloud', status: 'ready' };
+    localRestart.mockClear();
+    localStart.mockClear();
+
+    await backendManager.start(cloudSettings, runtime);
+
+    expect(localRestart).not.toHaveBeenCalled();
+    expect(localStart).toHaveBeenCalledWith(cloudSettings, runtime);
+  });
+
+  it('stops an existing cloud backend when cloud runtime credentials are missing', async () => {
+    cloudDisconnect.mockResolvedValue({ status: 'stopped' });
+    localStop.mockResolvedValue({ status: 'stopped' });
+    mockLocalStatus = { mode: 'cloud', status: 'ready' };
+
+    const state = await backendManager.start(
+      { ...baseSettings, backendMode: 'cloud' },
+      undefined,
+    );
+
+    expect(localStop).toHaveBeenCalled();
+    expect(state.status).toBe('error');
     expect(state.mode).toBe('cloud');
   });
 

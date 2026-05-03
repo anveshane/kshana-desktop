@@ -80,7 +80,7 @@ describe('buildLocalBackendEnv', () => {
     expect(env['KSHANA_CLOUD_TOKEN']).toBe('desktop-jwt');
     expect(env['KSHANA_PROJECT_DIR']).toBe('/projects/demo');
     expect(env['COMFY_MODE']).toBe('cloud');
-    expect(env['COMFY_CLOUD_URL']).toBe('https://proxy.kshana.cloud/comfy');
+    expect(env['COMFY_CLOUD_URL']).toBe('https://proxy.kshana.cloud/comfy/api');
     expect(env['COMFY_CLOUD_AUTH_TOKEN']).toBe('desktop-jwt');
     expect(env['COMFY_CLOUD_API_KEY']).toBeUndefined();
     expect(env['LLM_PROVIDER']).toBe('openai');

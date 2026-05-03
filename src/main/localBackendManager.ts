@@ -120,7 +120,7 @@ export function buildLocalBackendEnv(
     env['KSHANA_PROXY_BASE_URL'] = proxyBaseUrl;
     env['KSHANA_CLOUD_TOKEN'] = desktopToken;
     env['COMFY_MODE'] = 'cloud';
-    env['COMFY_CLOUD_URL'] = appendUrlPath(proxyBaseUrl, '/comfy');
+    env['COMFY_CLOUD_URL'] = appendUrlPath(proxyBaseUrl, '/comfy/api');
     env['COMFY_CLOUD_AUTH_TOKEN'] = desktopToken;
     // OpenRouter is OpenAI-compatible, but we standardize on the OpenAI
     // provider/env vars so *all* clients use the same protocol + base URL.

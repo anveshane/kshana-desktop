@@ -41,6 +41,10 @@ import {
   updateSettings,
 } from './settingsManager';
 import {
+  shouldRestartCloudBackendForAccountChange,
+  shouldStopCloudBackendOnSignOut,
+} from './accountBackendSync';
+import {
   getAccount,
   setAccount,
   clearAccount,
@@ -3439,6 +3443,7 @@ async function handleDeepLink(url: string): Promise<void> {
     }
 
     pendingDesktopAuthState = null;
+    const previousAccount = getAccount();
 
     setAccount({
       userId: payload.sub ?? '',
@@ -3451,6 +3456,29 @@ async function handleDeepLink(url: string): Promise<void> {
     // Fetch balance immediately so the Account tab shows it
     const websiteBase = await resolveKshanaWebsiteUrl();
     await refreshBalance(websiteBase);
+
+    const settings = getSettings();
+    if (
+      shouldRestartCloudBackendForAccountChange(
+        settings,
+        previousAccount,
+        token,
+      )
+    ) {
+      try {
+        const cloudRuntime = await resolveCloudBackendRuntime(token);
+        const state = await backendManager.restart(settings, cloudRuntime);
+        if (state.status === 'error') {
+          log.error(
+            `[Account] Cloud backend restart failed after sign-in: ${state.message ?? 'unknown error'}`,
+          );
+        }
+      } catch (error) {
+        log.error(
+          `[Account] Cloud backend restart failed after sign-in: ${(error as Error).message}`,
+        );
+      }
+    }
 
     // Notify renderer that account changed
     mainWindow?.webContents.send('account:changed');
@@ -3494,7 +3522,22 @@ ipcMain.handle('account:sign-in', async () => {
 });
 
 ipcMain.handle('account:sign-out', async () => {
+  const settings = getSettings();
   clearAccount();
+  if (shouldStopCloudBackendOnSignOut(settings)) {
+    try {
+      const state = await backendManager.stop();
+      if (state.status === 'error') {
+        log.error(
+          `[Account] Cloud backend stop failed after sign-out: ${state.message ?? 'unknown error'}`,
+        );
+      }
+    } catch (error) {
+      log.error(
+        `[Account] Cloud backend stop failed after sign-out: ${(error as Error).message}`,
+      );
+    }
+  }
   mainWindow?.webContents.send('account:changed');
   return { success: true };
 });

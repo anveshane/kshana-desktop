@@ -16,10 +16,26 @@ function annotateState(state: BackendState, mode: AppSettings['backendMode']): B
   };
 }
 
+function getCloudRuntimeIdentity(
+  runtime?: CloudBackendRuntimeConfig,
+): string | null {
+  if (!runtime?.desktopToken || !runtime.proxyBaseUrl || !runtime.websiteUrl) {
+    return null;
+  }
+
+  return JSON.stringify({
+    desktopToken: runtime.desktopToken,
+    proxyBaseUrl: runtime.proxyBaseUrl,
+    websiteUrl: runtime.websiteUrl,
+  });
+}
+
 class BackendManager extends EventEmitter {
   private state: BackendState = { status: 'idle', mode: 'local' };
 
   private selectedMode: AppSettings['backendMode'] = 'local';
+
+  private activeCloudRuntimeIdentity: string | null = null;
 
   constructor() {
     super();
@@ -58,6 +74,7 @@ class BackendManager extends EventEmitter {
 
     if (settings.backendMode === 'local') {
       await serverConnectionManager.disconnect();
+      this.activeCloudRuntimeIdentity = null;
       const state =
         localBackendManager.status?.mode === 'cloud'
           ? await localBackendManager.restart(settings)
@@ -68,7 +85,16 @@ class BackendManager extends EventEmitter {
     }
 
     await serverConnectionManager.disconnect();
-    if (!cloudRuntime?.proxyBaseUrl || !cloudRuntime.desktopToken) {
+    const nextCloudRuntimeIdentity = getCloudRuntimeIdentity(cloudRuntime);
+    if (
+      !cloudRuntime?.proxyBaseUrl ||
+      !cloudRuntime.desktopToken ||
+      !nextCloudRuntimeIdentity
+    ) {
+      this.activeCloudRuntimeIdentity = null;
+      if (localBackendManager.status?.mode === 'cloud') {
+        await localBackendManager.stop();
+      }
       const nextState: BackendState = {
         status: 'error',
         mode: 'cloud',
@@ -78,10 +104,18 @@ class BackendManager extends EventEmitter {
       return nextState;
     }
 
-    const state =
-      localBackendManager.status?.mode === 'local'
-        ? await localBackendManager.restart(settings, cloudRuntime)
-        : await localBackendManager.start(settings, cloudRuntime);
+    const shouldRestartLocalBackend =
+      localBackendManager.status?.mode === 'local' ||
+      this.activeCloudRuntimeIdentity !== nextCloudRuntimeIdentity;
+
+    if (shouldRestartLocalBackend) {
+      this.activeCloudRuntimeIdentity = null;
+    }
+
+    const state = shouldRestartLocalBackend
+      ? await localBackendManager.restart(settings, cloudRuntime)
+      : await localBackendManager.start(settings, cloudRuntime);
+    this.activeCloudRuntimeIdentity = nextCloudRuntimeIdentity;
     const nextState = annotateState(state, 'cloud');
     this.updateState(nextState);
     return nextState;
@@ -94,6 +128,7 @@ class BackendManager extends EventEmitter {
     if (settings.backendMode === 'local') {
       await serverConnectionManager.disconnect();
       this.selectedMode = 'local';
+      this.activeCloudRuntimeIdentity = null;
       const state = await localBackendManager.restart(settings);
       const nextState = annotateState(state, 'local');
       this.updateState(nextState);
@@ -102,7 +137,16 @@ class BackendManager extends EventEmitter {
 
     this.selectedMode = 'cloud';
     await serverConnectionManager.disconnect();
-    if (!cloudRuntime?.proxyBaseUrl || !cloudRuntime.desktopToken) {
+    const nextCloudRuntimeIdentity = getCloudRuntimeIdentity(cloudRuntime);
+    if (
+      !cloudRuntime?.proxyBaseUrl ||
+      !cloudRuntime.desktopToken ||
+      !nextCloudRuntimeIdentity
+    ) {
+      this.activeCloudRuntimeIdentity = null;
+      if (localBackendManager.status?.mode === 'cloud') {
+        await localBackendManager.stop();
+      }
       const nextState: BackendState = {
         status: 'error',
         mode: 'cloud',
@@ -112,7 +156,9 @@ class BackendManager extends EventEmitter {
       return nextState;
     }
 
+    this.activeCloudRuntimeIdentity = null;
     const state = await localBackendManager.restart(settings, cloudRuntime);
+    this.activeCloudRuntimeIdentity = nextCloudRuntimeIdentity;
     const nextState = annotateState(state, 'cloud');
     this.updateState(nextState);
     return nextState;
@@ -121,6 +167,7 @@ class BackendManager extends EventEmitter {
   async stop(): Promise<BackendState> {
     if (this.selectedMode === 'local' || this.selectedMode === 'cloud') {
       await serverConnectionManager.disconnect();
+      this.activeCloudRuntimeIdentity = null;
       const state = await localBackendManager.stop();
       const nextState = annotateState(state, this.selectedMode);
       this.updateState(nextState);
