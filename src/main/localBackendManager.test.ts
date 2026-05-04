@@ -9,7 +9,6 @@ jest.mock('electron', () => ({
 }));
 
 const baseSettings: AppSettings = {
-  backendMode: 'local',
   comfyuiMode: 'inherit',
   comfyuiUrl: '',
   comfyCloudApiKey: '',

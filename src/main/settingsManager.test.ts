@@ -13,7 +13,6 @@ import {
 } from './settingsManager';
 
 const baseSettings = {
-  backendMode: 'local' as const,
   comfyuiMode: 'inherit' as const,
   comfyuiUrl: '',
   comfyCloudApiKey: '',
@@ -66,7 +65,6 @@ describe('settingsManager theme normalization', () => {
       openRouterModel: 'openrouter/model',
     });
 
-    expect(normalized.backendMode).toBe('local');
     expect(normalized.llmProvider).toBe('openrouter');
     expect(normalized.openRouterApiKey).toBe('sk-or-v1-test');
     expect('preferredLocalPort' in normalized).toBe(false);

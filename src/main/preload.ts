@@ -4,7 +4,6 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import type {
   BackendConnectionInfo,
   BackendState,
-  ServerConnectionConfig,
 } from '../shared/backendTypes';
 import type { AppSettings } from '../shared/settingsTypes';
 import type {
@@ -22,7 +21,6 @@ import type {
   RemotionServerRenderProgress,
 } from '../shared/remotionTypes';
 import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
-import type { AccountInfo } from '../shared/settingsTypes';
 
 interface WordTimestamp {
   text: string;
@@ -82,8 +80,8 @@ export interface AppUpdateStatus {
 export type Channels = 'ipc-example';
 
 const backendBridge = {
-  start(config: ServerConnectionConfig = { serverUrl: 'http://localhost:8001' }): Promise<BackendState> {
-    return ipcRenderer.invoke('backend:start', config);
+  start(): Promise<BackendState> {
+    return ipcRenderer.invoke('backend:start');
   },
   restart(): Promise<BackendState> {
     return ipcRenderer.invoke('backend:restart');
@@ -427,7 +425,7 @@ const remotionBridge = {
   getJob(jobId: string): Promise<RemotionJob | null> {
     return ipcRenderer.invoke('remotion:get-job', jobId);
   },
-  renderFromServerRequest(
+  async renderFromServerRequest(
     projectDirectory: string,
     request: RemotionServerRenderRequest,
     onProgress?: (progress: RemotionServerRenderProgress) => void,
@@ -448,17 +446,17 @@ const remotionBridge = {
       ipcRenderer.on('remotion:server-progress', subscription);
     }
 
-    return ipcRenderer
-      .invoke(
+    try {
+      return await ipcRenderer.invoke(
         'remotion:render-from-server-request',
         projectDirectory,
         request,
-      )
-      .finally(() => {
-        if (onProgress) {
-          ipcRenderer.removeListener('remotion:server-progress', subscription);
-        }
-      });
+      );
+    } finally {
+      if (onProgress) {
+        ipcRenderer.removeListener('remotion:server-progress', subscription);
+      }
+    }
   },
   onProgress(callback: (progress: RemotionProgress) => void) {
     const subscription = (_event: IpcRendererEvent, progress: RemotionProgress) =>
@@ -588,35 +586,79 @@ const appBridge = {
   },
 };
 
-const accountBridge = {
-  get(): Promise<AccountInfo | null> {
-    return ipcRenderer.invoke('account:get');
+// ─── kshana bridge — typed access to the embedded kshana-ink ──────────
+// Replaces the old WebSocket-based protocol (renderer → backend) with a
+// direct main-process IPC layer. Channel + payload shapes live in
+// `src/shared/kshanaIpc.ts`.
+import {
+  KSHANA_CHANNELS,
+  KSHANA_EVENT_CHANNEL,
+  type KshanaEvent,
+  type KshanaEventName,
+  type CreateSessionResponse,
+  type ConfigureProjectRequest,
+  type OkResponse,
+  type RunTaskRequest,
+  type SendResponseRequest,
+  type CancelTaskRequest,
+  type CancelTaskResponse,
+  type RedoNodeRequest,
+  type FocusProjectRequest,
+  type SetAutonomousRequest,
+  type DeleteSessionRequest,
+} from '../shared/kshanaIpc';
+
+const kshanaBridge = {
+  createSession(): Promise<CreateSessionResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.CREATE_SESSION);
   },
-  signIn(): Promise<{ opened: boolean }> {
-    return ipcRenderer.invoke('account:sign-in');
+  configureProject(req: ConfigureProjectRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.CONFIGURE_PROJECT, req);
   },
-  signOut(): Promise<{ success: boolean }> {
-    return ipcRenderer.invoke('account:sign-out');
+  runTask(req: RunTaskRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.RUN_TASK, req);
   },
-  refreshBalance(): Promise<{ balance: number | null }> {
-    return ipcRenderer.invoke('account:refresh-balance');
+  sendResponse(req: SendResponseRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.SEND_RESPONSE, req);
   },
-  getBillingUrl(): Promise<string> {
-    return ipcRenderer.invoke('account:get-billing-url');
+  cancelTask(req: CancelTaskRequest): Promise<CancelTaskResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.CANCEL_TASK, req);
   },
-  openBilling(): Promise<{ opened: boolean; url: string }> {
-    return ipcRenderer.invoke('account:open-billing');
+  redoNode(req: RedoNodeRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.REDO_NODE, req);
   },
-  onChange(callback: (account: AccountInfo | null) => void) {
-    const subscription = () => {
-      ipcRenderer.invoke('account:get').then(callback).catch(() => {});
+  focusProject(req: FocusProjectRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.FOCUS_PROJECT, req);
+  },
+  setAutonomous(req: SetAutonomousRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.SET_AUTONOMOUS, req);
+  },
+  deleteSession(req: DeleteSessionRequest): Promise<OkResponse> {
+    return ipcRenderer.invoke(KSHANA_CHANNELS.DELETE_SESSION, req);
+  },
+  /**
+   * Subscribe to streaming events from the embedded ConversationManager.
+   * Filter by eventName ('tool_call', 'media_generated', etc) — handlers
+   * only fire for matching events. Returns an unsubscribe function.
+   */
+  on(
+    eventName: KshanaEventName | '*',
+    cb: (event: KshanaEvent) => void,
+  ): () => void {
+    const listener = (_event: IpcRendererEvent, payload: KshanaEvent) => {
+      if (eventName === '*' || payload.eventName === eventName) {
+        cb(payload);
+      }
     };
-    ipcRenderer.on('account:changed', subscription);
+    ipcRenderer.on(KSHANA_EVENT_CHANNEL, listener);
     return () => {
-      ipcRenderer.removeListener('account:changed', subscription);
+      ipcRenderer.removeListener(KSHANA_EVENT_CHANNEL, listener);
     };
   },
 };
+
+contextBridge.exposeInMainWorld('kshana', kshanaBridge);
+export type KshanaBridge = typeof kshanaBridge;
 
 const electronHandler = {
   ipcRenderer: {
@@ -643,7 +685,6 @@ const electronHandler = {
   logger: loggerBridge,
   updates: updateBridge,
   app: appBridge,
-  account: accountBridge,
 };
 
 contextBridge.exposeInMainWorld('electron', electronHandler);

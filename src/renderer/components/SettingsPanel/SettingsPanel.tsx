@@ -1,19 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
-  BackendConnectionInfo,
-  BackendState,
-} from '../../../shared/backendTypes';
-import type {
-  AccountInfo,
   AppSettings,
   LLMProvider,
   ThemeId,
 } from '../../../shared/settingsTypes';
 import { DESKTOP_THEMES } from '../../themes';
 import styles from './SettingsPanel.module.scss';
-import AccountTab from './AccountTab';
 
-type SettingsTab = 'account' | 'appearance' | 'connection';
+type SettingsTab = 'appearance' | 'connection';
 
 type Props = {
   isOpen: boolean;
@@ -27,7 +21,6 @@ type Props = {
 };
 
 const emptySettings: AppSettings = {
-  backendMode: 'local',
   comfyuiMode: 'inherit',
   comfyuiUrl: '',
   comfyCloudApiKey: '',
@@ -52,7 +45,6 @@ function withV1Suffix(url: string): string {
 function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
   const next = input ?? emptySettings;
   const comfyuiUrl = (next.comfyuiUrl || '').trim();
-  const backendMode = next.backendMode === 'cloud' ? 'cloud' : 'local';
   const llmProvider =
     next.llmProvider === 'openrouter' || next.llmProvider === 'lmstudio'
       ? 'openai'
@@ -77,7 +69,6 @@ function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
   return {
     ...emptySettings,
     ...next,
-    backendMode,
     llmProvider,
     comfyuiMode: comfyuiUrl ? 'custom' : 'inherit',
     comfyuiUrl,
@@ -95,38 +86,6 @@ function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
   };
 }
 
-function formatStatusLabel(status?: string): string {
-  switch (status) {
-    case 'ready':
-      return 'Ready';
-    case 'starting':
-      return 'Starting';
-    case 'connecting':
-      return 'Connecting';
-    case 'error':
-      return 'Error';
-    case 'stopped':
-      return 'Stopped';
-    default:
-      return 'Idle';
-  }
-}
-
-function getStatusTone(
-  status?: string,
-): 'success' | 'warning' | 'error' | 'neutral' {
-  switch (status) {
-    case 'ready':
-      return 'success';
-    case 'starting':
-    case 'connecting':
-      return 'warning';
-    case 'error':
-      return 'error';
-    default:
-      return 'neutral';
-  }
-}
 
 export default function SettingsPanel({
   isOpen,
@@ -142,22 +101,13 @@ export default function SettingsPanel({
   const isVisible = isEmbedded || isOpen;
   const [form, setForm] = useState<AppSettings>(normalizeConnectionSettings(settings));
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
-  const [backendState, setBackendState] = useState<BackendState | null>(null);
-  const [connectionInfo, setConnectionInfo] = useState<BackendConnectionInfo | null>(null);
-  const [account, setAccount] = useState<AccountInfo | null>(null);
-  const [cloudModeWarning, setCloudModeWarning] = useState<string | null>(null);
-  const [pendingBackendMode, setPendingBackendMode] = useState<
-    AppSettings['backendMode'] | null
-  >(null);
-  const [isModeSwitchSaving, setIsModeSwitchSaving] = useState(false);
-
   useEffect(() => {
     setForm(normalizeConnectionSettings(settings));
   }, [settings, isVisible]);
 
   useEffect(() => {
     if (isVisible) {
-      setActiveTab('account');
+      setActiveTab('appearance');
     }
   }, [isVisible]);
 
@@ -174,41 +124,6 @@ export default function SettingsPanel({
     return () => window.removeEventListener('keydown', handleEscape);
   }, [isOpen, isSavingConnection, onClose, isEmbedded]);
 
-  const refreshConnectionInfo = useCallback(async () => {
-    try {
-      const [state, info] = await Promise.all([
-        window.electron.backend.getState(),
-        window.electron.backend.getConnectionInfo(),
-      ]);
-      setBackendState(state);
-      setConnectionInfo(info);
-    } catch (nextError) {
-      console.error('Failed to refresh backend connection info', nextError);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isVisible) return undefined;
-
-    void refreshConnectionInfo();
-
-    return window.electron.backend.onStateChange((state) => {
-      setBackendState(state);
-      void refreshConnectionInfo();
-    });
-  }, [isVisible, refreshConnectionInfo]);
-
-  useEffect(() => {
-    if (!isVisible || !window.electron.account) return undefined;
-
-    window.electron.account.get().then(setAccount).catch(() => setAccount(null));
-    return window.electron.account.onChange((nextAccount) => {
-      setAccount(nextAccount);
-      if (nextAccount) {
-        setCloudModeWarning(null);
-      }
-    });
-  }, [isVisible]);
 
   if (!isVisible) {
     return null;
@@ -218,20 +133,6 @@ export default function SettingsPanel({
     key: keyof AppSettings,
     value: string | number | undefined,
   ) => {
-    if (key === 'backendMode' && value === 'cloud' && !account) {
-      setCloudModeWarning('Sign in to Kshana Cloud before switching to Cloud mode.');
-      return;
-    }
-
-    if (key === 'backendMode') {
-      if (value === form.backendMode) {
-        return;
-      }
-      setCloudModeWarning(null);
-      setPendingBackendMode(value as AppSettings['backendMode']);
-      return;
-    }
-
     setForm((prev) => ({
       ...prev,
       [key]: value,
@@ -241,7 +142,6 @@ export default function SettingsPanel({
   const saveConnectionSettings = async (nextForm: AppSettings) => {
     const normalized = normalizeConnectionSettings(nextForm);
     await onSaveConnection({
-      backendMode: normalized.backendMode,
       comfyuiMode: normalized.comfyuiUrl ? 'custom' : 'inherit',
       comfyuiUrl: normalized.comfyuiUrl,
       comfyCloudApiKey: normalized.comfyCloudApiKey,
@@ -256,29 +156,11 @@ export default function SettingsPanel({
       openRouterApiKey: normalized.openRouterApiKey,
       openRouterModel: normalized.openRouterModel,
     });
-    void refreshConnectionInfo();
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     await saveConnectionSettings(form);
-  };
-
-  const handleConfirmModeSwitch = async () => {
-    if (!pendingBackendMode) return;
-
-    const nextForm = {
-      ...form,
-      backendMode: pendingBackendMode,
-    };
-    setIsModeSwitchSaving(true);
-    try {
-      setForm(nextForm);
-      await saveConnectionSettings(nextForm);
-      setPendingBackendMode(null);
-    } finally {
-      setIsModeSwitchSaving(false);
-    }
   };
 
   const handleOverlayClick = (event: React.MouseEvent) => {
@@ -287,29 +169,6 @@ export default function SettingsPanel({
     }
   };
 
-  const currentMode =
-    connectionInfo?.selectedMode ??
-    backendState?.mode ??
-    settings?.backendMode ??
-    form.backendMode;
-  const isLocalMode = form.backendMode === 'local';
-  const isCurrentLocalMode = currentMode === 'local';
-  const statusLabel = formatStatusLabel(backendState?.status);
-  const statusTone = getStatusTone(backendState?.status);
-  const statusHeadline = isCurrentLocalMode
-    ? backendState?.status === 'ready'
-      ? 'Connected to Local'
-      : backendState?.status === 'error'
-        ? 'Local backend did not become ready'
-        : 'Starting Local backend'
-    : backendState?.status === 'ready'
-      ? 'Connected to Cloud'
-      : 'Connecting to Cloud';
-  const statusSupportText = isCurrentLocalMode
-    ? backendState?.status === 'error'
-      ? 'Review the local provider settings below, then try Save & Restart again. You can switch to Cloud if you need to continue immediately.'
-      : 'The app is currently using the local kshana-core server on localhost with the provider settings shown below.'
-    : 'The app is connected to Kshana Cloud.';
   const renderProviderToggle = (
     provider: LLMProvider,
     label: string,
@@ -321,7 +180,6 @@ export default function SettingsPanel({
         name="llm-provider"
         value={provider}
         checked={form.llmProvider === provider}
-        disabled={!isLocalMode}
         onChange={(event) =>
           handleInput(
             'llmProvider',
@@ -333,12 +191,6 @@ export default function SettingsPanel({
     </label>
   );
 
-  const pendingModeLabel =
-    pendingBackendMode === 'cloud' ? 'Cloud' : 'Local';
-  const currentModeLabel = form.backendMode === 'cloud' ? 'Cloud' : 'Local';
-  const confirmModeSwitchLabel =
-    pendingBackendMode === 'cloud' ? 'Save & Reconnect' : 'Save & Restart';
-
   const panelContent = (
     <div className={`${styles.panel} ${isEmbedded ? styles.embeddedPanel : ''}`}>
       <div className={styles.header}>
@@ -346,7 +198,15 @@ export default function SettingsPanel({
           <h2>Settings</h2>
           <p>Adjust app preferences from one place.</p>
         </div>
-        {!isEmbedded && (
+        {isEmbedded ? (
+          <button
+            type="button"
+            className={styles.cancelButton}
+            onClick={onClose}
+          >
+            Back to Projects
+          </button>
+        ) : (
           <button
             type="button"
             className={styles.closeButton}
@@ -360,16 +220,6 @@ export default function SettingsPanel({
 
       <div className={styles.content}>
         <aside className={styles.sidebar}>
-          <button
-            type="button"
-            className={`${styles.tabButton} ${activeTab === 'account' ? styles.tabButtonActive : ''}`}
-            onClick={() => setActiveTab('account')}
-          >
-            <span className={styles.tabLabel}>Account</span>
-            <span className={styles.tabDescription}>
-              Kshana Cloud sign-in &amp; credits
-            </span>
-          </button>
           <button
             type="button"
             className={`${styles.tabButton} ${activeTab === 'appearance' ? styles.tabButtonActive : ''}`}
@@ -387,16 +237,14 @@ export default function SettingsPanel({
           >
             <span className={styles.tabLabel}>Connection</span>
             <span className={styles.tabDescription}>
-              Local and cloud backend configuration
+              Local backend configuration
             </span>
           </button>
         </aside>
 
         <form className={styles.form} onSubmit={handleSubmit}>
           <section className={styles.section}>
-            {activeTab === 'account' ? (
-              <AccountTab />
-            ) : activeTab === 'appearance' ? (
+            {activeTab === 'appearance' ? (
               <>
                 <div className={styles.sectionHeader}>
                   <h3>Appearance</h3>
@@ -437,99 +285,16 @@ export default function SettingsPanel({
               <>
                 <div className={styles.sectionHeader}>
                   <h3>Connection</h3>
-                  <p>Choose where the desktop app connects.</p>
+                  <p>Local backend and provider configuration.</p>
                 </div>
 
-                <div
-                  className={`${styles.statusCard} ${
-                    statusTone === 'warning'
-                        ? styles.statusCardWarning
-                        : statusTone === 'error'
-                          ? styles.statusCardError
-                          : ''
-                  }`}
-                >
-                  <div className={styles.statusTopRow}>
-                    <div>
-                      <div
-                        className={`${styles.statusHeader} ${
-                          statusTone === 'error'
-                              ? styles.statusHeaderError
-                              : ''
-                        }`}
-                      >
-                        Connection Status
-                      </div>
-                      <div
-                        className={`${styles.statusHeadline} ${
-                          statusTone === 'error'
-                              ? styles.statusHeadlineError
-                              : ''
-                        }`}
-                      >
-                        {statusHeadline}
-                      </div>
-                      <p className={styles.statusSupportText}>{statusSupportText}</p>
-                      {/* Intentionally do not display internal cloud endpoint URL. */}
-                    </div>
-                    <div className={`${styles.statusBadge} ${styles[`statusBadge${statusTone.charAt(0).toUpperCase()}${statusTone.slice(1)}`]}`}>
-                      <span className={styles.statusDot} />
-                      {statusLabel}
-                    </div>
-                  </div>
-                  {backendState?.message && (
-                    <div className={styles.statusGrid}>
-                      <div className={styles.statusItemFull}>
-                        <span className={styles.statusLabel}>Details</span>
-                        <span className={styles.statusMessage}>{backendState.message}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <fieldset className={`${styles.fieldset} ${styles.modeFieldset}`}>
-                  <legend>Backend Mode</legend>
-                  <div className={styles.modeSwitch} role="radiogroup" aria-label="Backend Mode">
-                    <label className={styles.radioLabel}>
-                      <input
-                        type="radio"
-                        className={styles.radioInput}
-                        name="backend-mode"
-                        value="local"
-                        checked={form.backendMode === 'local'}
-                        onChange={() => handleInput('backendMode', 'local')}
-                      />
-                      <span className={styles.modeOption}>Local</span>
-                    </label>
-                    <label className={styles.radioLabel}>
-                      <input
-                        type="radio"
-                        className={styles.radioInput}
-                        name="backend-mode"
-                        value="cloud"
-                        checked={form.backendMode === 'cloud'}
-                        onChange={() => handleInput('backendMode', 'cloud')}
-                      />
-                      <span className={styles.modeOption}>Cloud</span>
-                    </label>
-                  </div>
-                  {cloudModeWarning && (
-                    <p className={styles.warningText}>{cloudModeWarning}</p>
-                  )}
-                </fieldset>
-
-                <div
-                  className={`${styles.localSettings} ${
-                    !isLocalMode ? styles.localSettingsDisabled : ''
-                  }`}
-                >
+                <div className={styles.localSettings}>
                     <label className={styles.label}>
                       ComfyUI URL
                       <input
                         type="url"
                         className={styles.input}
                         value={form.comfyuiUrl}
-                        disabled={!isLocalMode}
                         onChange={(event) =>
                           handleInput('comfyuiUrl', event.target.value)
                         }
@@ -543,7 +308,6 @@ export default function SettingsPanel({
                         type="password"
                         className={styles.input}
                         value={form.comfyCloudApiKey}
-                        disabled={!isLocalMode}
                         onChange={(event) =>
                           handleInput('comfyCloudApiKey', event.target.value)
                         }
@@ -556,7 +320,7 @@ export default function SettingsPanel({
                       connections ignore it.
                     </p>
 
-                    <fieldset className={styles.fieldset} disabled={!isLocalMode}>
+                    <fieldset className={styles.fieldset}>
                       <legend>LLM Provider</legend>
                       <div className={styles.radios}>
                         {renderProviderToggle('gemini', 'Gemini')}
@@ -572,7 +336,6 @@ export default function SettingsPanel({
                             type="password"
                             className={styles.input}
                             value={form.googleApiKey}
-                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('googleApiKey', event.target.value)
                             }
@@ -586,7 +349,6 @@ export default function SettingsPanel({
                             type="text"
                             className={styles.input}
                             value={form.geminiModel}
-                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('geminiModel', event.target.value)
                             }
@@ -604,7 +366,6 @@ export default function SettingsPanel({
                             <button
                               type="button"
                               className={styles.inlineButton}
-                              disabled={!isLocalMode}
                               onClick={() =>
                                 handleInput(
                                   'openaiBaseUrl',
@@ -619,7 +380,6 @@ export default function SettingsPanel({
                             type="url"
                             className={styles.input}
                             value={form.openaiBaseUrl}
-                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('openaiBaseUrl', event.target.value)
                             }
@@ -634,7 +394,6 @@ export default function SettingsPanel({
                             type="text"
                             className={styles.input}
                             value={form.openaiModel}
-                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('openaiModel', event.target.value)
                             }
@@ -648,7 +407,6 @@ export default function SettingsPanel({
                             type="password"
                             className={styles.input}
                             value={form.openaiApiKey}
-                            disabled={!isLocalMode}
                             onChange={(event) =>
                               handleInput('openaiApiKey', event.target.value)
                             }
@@ -664,53 +422,19 @@ export default function SettingsPanel({
             )}
           </section>
 
-          <div className={styles.actions}>
-            {activeTab !== 'account' && (
+          {activeTab === 'connection' && (
+            <div className={styles.actions}>
               <button
-                type="button"
-                className={styles.cancelButton}
-                onClick={onClose}
-              >
-                {isEmbedded ? 'Back to Projects' : 'Close'}
-              </button>
-            )}
-          </div>
-        </form>
-      </div>
-      {pendingBackendMode && (
-        <div className={styles.confirmBackdrop} role="presentation">
-          <div
-            className={styles.confirmDialog}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Switch to ${pendingModeLabel}`}
-          >
-            <h3>Switch to {pendingModeLabel}?</h3>
-            <p>
-              This will change the backend from {currentModeLabel} to{' '}
-              {pendingModeLabel} and reconnect the desktop app.
-            </p>
-            <div className={styles.confirmActions}>
-              <button
-                type="button"
-                className={styles.cancelButton}
-                onClick={() => setPendingBackendMode(null)}
-                disabled={isModeSwitchSaving || isSavingConnection}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
+                type="submit"
                 className={styles.submitButton}
-                onClick={handleConfirmModeSwitch}
-                disabled={isModeSwitchSaving || isSavingConnection}
+                disabled={isSavingConnection}
               >
-                {isModeSwitchSaving ? 'Saving…' : confirmModeSwitchLabel}
+                {isSavingConnection ? 'Saving…' : 'Save & Restart'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          )}
+        </form>
+      </div>
     </div>
   );
 

@@ -38,12 +38,7 @@ import {
   type ImageProjectionSnapshot,
   type ImageSyncTriggerSource,
 } from '../services/assets';
-import type { AppSettings } from '../../shared/settingsTypes';
 import { debugRendererLog, debugRendererWarn } from '../utils/debugLogger';
-import {
-  getBackendBaseUrlForSettings,
-  getBackendStateForSettings,
-} from '../utils/backendModeGuard';
 import { useWorkspace } from './WorkspaceContext';
 
 /**
@@ -249,14 +244,6 @@ function normalizeProjectDirectoryPath(
   if (!input) return null;
   const normalized = input.trim().replace(/\\/g, '/').replace(/\/+$/, '');
   return normalized || null;
-}
-
-async function getCloudDesktopToken(settings: AppSettings | null): Promise<string | null> {
-  if (settings?.backendMode !== 'cloud') {
-    return null;
-  }
-  const account = await window.electron.account.get().catch(() => null);
-  return account?.token ?? null;
 }
 
 function getImageSyncV2Flag(): boolean {
@@ -902,8 +889,9 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
       try {
         connectingRef.current = true;
-        const settings = await window.electron.settings.get().catch(() => null);
-        const backendState = await getBackendStateForSettings(settings);
+        const backendState = await window.electron.backend
+          .getState()
+          .catch(() => null);
         const projectDirectoryForQuery = projectDirectory;
 
         if (!projectDirectoryForQuery) {
@@ -911,28 +899,20 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
           return;
         }
 
-        if (backendState.status !== 'ready') {
+        if (!backendState || backendState.status !== 'ready' || !backendState.serverUrl) {
           connectingRef.current = false;
           debugRendererLog('[ProjectContext][ws_connect] Backend not ready', {
             source,
-            backendStatus: backendState.status,
+            backendStatus: backendState?.status,
           });
           scheduleAssetSocketReconnect('backend_not_ready');
           return;
         }
 
-        const baseUrl = await getBackendBaseUrlForSettings(
-          settings,
-          backendState,
-        );
-        const wsBase = baseUrl.replace(/^http/, 'ws');
+        const wsBase = backendState.serverUrl.replace(/^http/, 'ws');
         const wsUrl = new URL('/api/v1/ws/chat', wsBase);
         wsUrl.searchParams.set('project_dir', projectDirectoryForQuery);
         wsUrl.searchParams.set('channel', 'assets');
-        const desktopToken = await getCloudDesktopToken(settings);
-        if (desktopToken) {
-          wsUrl.searchParams.set('desktopToken', desktopToken);
-        }
         const ws = new WebSocket(wsUrl.toString());
         wsRef.current = ws;
         currentProjectDirRef.current = normalizedProjectDirectory;

@@ -1,5 +1,3 @@
-import type { BackendMode } from './settingsTypes';
-
 export type BackendStatus =
   | 'idle'
   | 'connecting'
@@ -16,18 +14,6 @@ export interface BackendState {
   message?: string;
   port?: number;
   serverUrl?: string;
-  mode?: BackendMode;
-}
-
-/**
- * Configuration for connecting to an external kshana-core server.
- * All LLM / provider config now lives on the server side.
- */
-export interface ServerConnectionConfig {
-  /** Full base URL of the kshana-core server, e.g. "http://localhost:8001" */
-  serverUrl: string;
-  /** Automatically reconnect on disconnect (default: true) */
-  autoReconnect?: boolean;
 }
 
 export interface BundledVersionInfo {
@@ -38,9 +24,7 @@ export interface BundledVersionInfo {
 }
 
 export interface BackendConnectionInfo {
-  selectedMode: BackendMode;
   effectiveServerUrl?: string;
-  cloudServerUrl?: string;
   localServerUrl?: string;
   localBackendAvailable: boolean;
   bundledVersion?: BundledVersionInfo;
