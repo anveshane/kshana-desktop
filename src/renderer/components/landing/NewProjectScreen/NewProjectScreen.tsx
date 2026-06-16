@@ -22,6 +22,10 @@ import type {
   ReferenceImagePayload,
   ReferenceImageRole,
 } from '../../../../shared/attachmentTypes';
+import type {
+  DheeCloudMediaModel,
+  DheeCloudModelsResult,
+} from '../../../../shared/cloudModelsTypes';
 import {
   attachmentsFromSelectResponse,
   isReferenceImageLikeAttachment,
@@ -96,6 +100,10 @@ interface NewProjectScreenProps {
 
 const STORY_INPUT_ID = 'story_input';
 const WORDS_PER_SECOND_NARRATION = 2.5;
+const MEDIA_MODEL_INPUTS: Record<string, 'image' | 'video'> = {
+  imageModel: 'image',
+  videoModel: 'video',
+};
 
 // Rotating noun in the hero question. Pure teasing copy — shows the
 // breadth of what kshana can produce as bundles grow beyond narrative
@@ -179,6 +187,81 @@ function mergeSetupReferenceAttachments(
   return next;
 }
 
+function mediaModelKindForInput(
+  decl: BundleInputDecl,
+): 'image' | 'video' | null {
+  const inputName = decl.field ?? decl.id;
+  return MEDIA_MODEL_INPUTS[inputName] ?? null;
+}
+
+function cloudModelOptionLabel(model: DheeCloudMediaModel): string {
+  if (model.label && model.label !== model.modelId) {
+    return `${model.label} · ${model.modelId}`;
+  }
+  return model.modelId ?? model.id;
+}
+
+function cloudModelOptions(
+  cloudModels: DheeCloudModelsResult | null,
+  kind: 'image' | 'video',
+): BundleInputOption[] {
+  if (cloudModels?.status !== 'ok') return [];
+  const models = kind === 'image' ? cloudModels.image : cloudModels.video;
+  const seen = new Set<string>();
+
+  return models.reduce<BundleInputOption[]>((options, model) => {
+    if (model.provider !== 'openrouter' || !model.modelId) return options;
+    if (seen.has(model.modelId)) return options;
+    seen.add(model.modelId);
+    options.push({
+      value: model.modelId,
+      label: cloudModelOptionLabel(model),
+    });
+    return options;
+  }, []);
+}
+
+function withCurrentValueOption(
+  options: BundleInputOption[],
+  currentValue: unknown,
+): BundleInputOption[] {
+  if (
+    typeof currentValue !== 'string' &&
+    typeof currentValue !== 'number' &&
+    typeof currentValue !== 'boolean'
+  ) {
+    return options;
+  }
+
+  const value = String(currentValue);
+  if (!value || options.some((option) => String(option.value) === value)) {
+    return options;
+  }
+
+  return [{ value, label: `Current: ${value}` }, ...options];
+}
+
+function cloudMediaDecl(
+  decl: BundleInputDecl,
+  value: unknown,
+  cloudModels: DheeCloudModelsResult | null,
+): BundleInputDecl {
+  const kind = mediaModelKindForInput(decl);
+  if (!kind || decl.allowCustom) return decl;
+
+  const modelOptions = cloudModelOptions(cloudModels, kind);
+  if (modelOptions.length === 0) return decl;
+
+  const options = withCurrentValueOption(modelOptions, value ?? decl.default);
+
+  return {
+    ...decl,
+    control: 'select',
+    options,
+    allowCustom: false,
+  };
+}
+
 export default function NewProjectScreen({
   isOpen,
   onClose,
@@ -243,6 +326,9 @@ export default function NewProjectScreen({
   const [setupReferenceAttachments, setSetupReferenceAttachments] = useState<
     Attachment[]
   >([]);
+  const [cloudModels, setCloudModels] = useState<DheeCloudModelsResult | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [nounIndex, setNounIndex] = useState(0);
 
@@ -313,6 +399,27 @@ export default function NewProjectScreen({
       cancelled = true;
     };
   }, [isOpen, loadBundles]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    let cancelled = false;
+    const bridge = window.electron.cloudModels;
+
+    (async () => {
+      try {
+        const models = await bridge.get();
+        if (!cancelled) setCloudModels(models);
+      } catch {
+        if (!cancelled) {
+          setCloudModels({ status: 'error', image: [], video: [] });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   // ESC closes.
   useEffect(() => {
@@ -842,14 +949,17 @@ export default function NewProjectScreen({
 
               {(selectedBundle.inputs ?? [])
                 .filter((decl) => decl.kind === 'project')
-                .map((decl) => (
-                  <FormRow
-                    key={decl.id}
-                    decl={decl}
-                    value={inputValues[decl.id]}
-                    onChange={(v) => handleInputChange(decl.id, v)}
-                  />
-                ))}
+                .map((decl) => {
+                  const value = inputValues[decl.id];
+                  return (
+                    <FormRow
+                      key={decl.id}
+                      decl={cloudMediaDecl(decl, value, cloudModels)}
+                      value={value}
+                      onChange={(v) => handleInputChange(decl.id, v)}
+                    />
+                  );
+                })}
 
               {/* Non-story file inputs (e.g. an optional style-guide that
                   becomes plans/world_style.md verbatim) render as their own
@@ -1051,6 +1161,7 @@ export function FormRow({
         ) : control === 'select' && decl.options ? (
           <>
             <select
+              aria-label={label}
               className={styles.select}
               value={showCustom ? CUSTOM_SENTINEL : String(value ?? '')}
               onChange={(e) => {
@@ -1075,6 +1186,7 @@ export function FormRow({
             {showCustom && (
               <input
                 type="text"
+                aria-label={`${label} custom`}
                 className={styles.textInput}
                 style={{ marginTop: 6, width: '100%' }}
                 placeholder={decl.placeholder ?? 'Describe your own style…'}
@@ -1086,6 +1198,7 @@ export function FormRow({
         ) : control === 'number' ? (
           <input
             type="number"
+            aria-label={label}
             className={styles.textInput}
             style={{ maxWidth: 160 }}
             value={value === undefined || value === null ? '' : String(value)}
@@ -1094,6 +1207,7 @@ export function FormRow({
         ) : (
           <input
             type="text"
+            aria-label={label}
             className={styles.textInput}
             placeholder={decl.placeholder ?? ''}
             value={value === undefined || value === null ? '' : String(value)}

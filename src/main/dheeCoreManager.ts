@@ -50,6 +50,7 @@ import { buildCompletedNudge, buildFailedNudge, buildGatedNudge, buildStopAtRevi
 import { pathToFileURL } from 'url';
 import { getComfyUiUrl, isComfyCloudUrl } from './utils/comfyUrl';
 import { applyRuntimeAnalyticsConfig } from './cloudRuntimeConfig';
+import { reportOpenRouterMediaUsage } from './cloudMediaUsage';
 import {
   freeComfyBeforeLocalLlm,
   unloadLocalLlmBeforeLocalComfy,
@@ -2887,13 +2888,44 @@ export class dheeCoreManager {
     offs.push(
       runner.on('asset', (e) => {
         if (!matches(e)) return;
-        const evt = e as { kind?: string; filePath?: string; nodeId?: string; toolName?: string };
-        if (!isMediaPath(evt.filePath)) return;
-        const kind = mediaKindFromRunner(evt.kind, evt.filePath);
+        const evt = e as {
+          kind?: string;
+          filePath?: string;
+          nodeId?: string;
+          toolName?: string;
+          metadata?: Record<string, unknown>;
+        };
+        const filePath = evt.filePath;
+        if (typeof filePath !== 'string' || !isMediaPath(filePath)) return;
+        const kind = mediaKindFromRunner(evt.kind, filePath);
+        const cloudAuth = this.lastCloudAuth;
+        if (cloudAuth?.desktopToken && cloudAuth.websiteUrl) {
+          void reportOpenRouterMediaUsage({
+            websiteUrl: cloudAuth.websiteUrl,
+            token: cloudAuth.desktopToken,
+            taskId,
+            sessionId,
+            ...(normalizedProjectDir ? { projectDir: normalizedProjectDir } : {}),
+            kind,
+            filePath,
+            ...(evt.nodeId ? { nodeId: evt.nodeId } : {}),
+            ...(evt.toolName ? { toolName: evt.toolName } : {}),
+            ...(evt.metadata ? { metadata: evt.metadata } : {}),
+          }).then((result) => {
+            if (result.status === 'error') {
+              log.warn('[wireRunnerTaskEvents] OpenRouter media usage report failed', {
+                taskId,
+                nodeId: evt.nodeId,
+                httpStatus: result.httpStatus,
+                errorMessage: result.errorMessage,
+              });
+            }
+          });
+        }
         emit('media_generated', {
           kind,
-          path: evt.filePath,
-          filePath: evt.filePath,
+          path: filePath,
+          filePath,
           ...(evt.nodeId ? { nodeId: evt.nodeId } : {}),
           ...(evt.toolName ? { toolName: evt.toolName } : {}),
         });
@@ -2901,7 +2933,7 @@ export class dheeCoreManager {
           customMessageRecord({
             type: 'media',
             kind,
-            path: evt.filePath,
+            path: filePath,
             source: 'runner',
             ...(projectName ? { project: projectName } : {}),
           }),

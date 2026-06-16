@@ -28,6 +28,7 @@ import type {
   ApiWorkflowValidation,
   ParameterMapping,
 } from '../shared/bundleConfigTypes';
+import type { DheeCloudModelsResult } from '../shared/cloudModelsTypes';
 
 // ─── dhee bridge — typed access to the embedded dhee-ink ──────────
 // Replaces the old WebSocket-based protocol (renderer → backend) with a
@@ -709,6 +710,12 @@ const accountBridge = {
   },
 };
 
+const cloudModelsBridge = {
+  get(): Promise<DheeCloudModelsResult> {
+    return ipcRenderer.invoke('cloud-models:get');
+  },
+};
+
 const dheeBridge = {
   createSession(req?: CreateSessionRequest): Promise<CreateSessionResponse> {
     return ipcRenderer.invoke(dhee_CHANNELS.CREATE_SESSION, req);
@@ -935,6 +942,7 @@ const electronHandler = {
   updates: updateBridge,
   app: appBridge,
   account: accountBridge,
+  cloudModels: cloudModelsBridge,
 };
 
 contextBridge.exposeInMainWorld('electron', electronHandler);

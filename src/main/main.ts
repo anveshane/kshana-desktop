@@ -57,6 +57,7 @@ import {
   refreshBalance,
   setAccount,
 } from './accountManager';
+import { fetchDheeCloudModels } from './cloudModels';
 import {
   completeOnboarding,
   getOnboardingState,
@@ -104,6 +105,8 @@ const BUILTIN_RUNNER_TOOLS = [
   'ffmpeg.shot_clip',
   'ffmpeg.concat',
   'vlm.judge',
+  'openrouter.image',
+  'openrouter.video',
 ] as const;
 import type { FileChangeEvent } from '../shared/fileSystemTypes';
 import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';
@@ -236,17 +239,11 @@ async function resolvedheeWebsitePath(pathname: string): Promise<string> {
 }
 
 async function getCloudAuthRuntime(settings: AppSettings) {
-  // Cloud auth surfaces if ANY backend lane wants cloud — the token
-  // + website URL are shared between LLM / ComfyUI / VLM proxy
-  // routing. applyEnvFromSettings then gates per-lane on
-  // settings.llmBackend / .comfyBackend / .vlmBackend.
-  if (
-    settings.llmBackend !== 'cloud' &&
-    settings.comfyBackend !== 'cloud' &&
-    settings.vlmBackend !== 'cloud'
-  ) {
-    return null;
-  }
+  // Cloud auth is cached in the core manager whenever the user is
+  // signed in. applyEnvFromSettings still gates LLM/Comfy/VLM routing
+  // on the individual backend lanes, while media runners can use the
+  // same token to report Dhee Cloud catalog usage after completion.
+  void settings;
   const account = getAccount();
   if (!account?.token) return null;
   if (!parseDesktopAuthToken(account.token)) return null;
@@ -4069,6 +4066,18 @@ ipcMain.handle('account:refresh-balance', async () => {
   }
   broadcastAccountChanged();
   return result;
+});
+
+ipcMain.handle('cloud-models:get', async () => {
+  const account = getAccount();
+  if (!account?.token || !parseDesktopAuthToken(account.token)) {
+    return { status: 'signed_out', image: [], video: [] };
+  }
+
+  return fetchDheeCloudModels({
+    websiteUrl: await resolvedheeWebsiteUrl(),
+    token: account.token,
+  });
 });
 
 ipcMain.handle('account:get-billing-url', async () => {

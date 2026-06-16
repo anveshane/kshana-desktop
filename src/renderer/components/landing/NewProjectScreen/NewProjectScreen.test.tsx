@@ -39,18 +39,89 @@ const youtubeBundle = {
   ],
 };
 
+const openrouterMediaBundle = {
+  id: 'openrouter_youtube_documentary',
+  version: '0.1.0',
+  bundleSource: 'user:openrouter_youtube_documentary',
+  sourceScheme: 'user',
+  displayName: 'OpenRouter Documentary',
+  summary: 'Documentary generation with OpenRouter media models.',
+  pickerEligible: true,
+  inputs: [
+    {
+      id: 'story_input',
+      kind: 'file',
+      path: 'inputs/story.md',
+      required: true,
+      placeholder: 'Documentary idea...',
+    },
+    {
+      id: 'imageModel',
+      kind: 'project',
+      field: 'imageModel',
+      default: 'google/gemini-2.5-flash-image',
+      label: 'Image Model',
+      control: 'text',
+      placeholder: 'google/gemini-2.5-flash-image',
+    },
+    {
+      id: 'videoModel',
+      kind: 'project',
+      field: 'videoModel',
+      default: 'google/veo-3.1',
+      label: 'Video Model',
+      control: 'text',
+      placeholder: 'google/veo-3.1',
+    },
+  ],
+};
+
+const cloudMediaModels = {
+  status: 'ok',
+  image: [
+    {
+      id: 'bytedance-seed/seedream-4.5',
+      provider: 'openrouter',
+      label: 'Seedream 4.5',
+      workflowId: null,
+      modelId: 'bytedance-seed/seedream-4.5',
+      unitType: 'run',
+      runtimePriced: false,
+      actualCostPriced: true,
+      partnerCatalogPriced: false,
+      creditsPerUnit: 17,
+      pricingRuleId: 'openrouter-image-seedream-45',
+    },
+  ],
+  video: [
+    {
+      id: 'bytedance/seedance-2.0',
+      provider: 'openrouter',
+      label: 'Seedance 2.0',
+      workflowId: null,
+      modelId: 'bytedance/seedance-2.0',
+      unitType: 'second',
+      runtimePriced: false,
+      actualCostPriced: true,
+      partnerCatalogPriced: false,
+      creditsPerUnit: 28.2492,
+      pricingRuleId: 'openrouter-video-seedance-20',
+    },
+  ],
+};
+
 describe('NewProjectScreen bundle packages', () => {
   const listBundles = jest.fn<() => Promise<unknown[]>>();
   const installBundlePackage =
     jest.fn<(payload: unknown) => Promise<unknown>>();
-  const searchNpmBundles =
-    jest.fn<(payload?: unknown) => Promise<unknown>>();
+  const searchNpmBundles = jest.fn<(payload?: unknown) => Promise<unknown>>();
   const initialize =
     jest.fn<(payload: unknown) => Promise<{ ok: true; projectDir: string }>>();
   const createFolder = jest.fn<() => Promise<string | null>>();
   const selectAttachment = jest.fn<(payload: unknown) => Promise<unknown>>();
   const importReferenceImages =
     jest.fn<(payload: unknown) => Promise<unknown>>();
+  const getCloudModels = jest.fn<() => Promise<unknown>>();
 
   beforeEach(() => {
     mockOpenProject.mockReset();
@@ -61,6 +132,7 @@ describe('NewProjectScreen bundle packages', () => {
     createFolder.mockReset();
     selectAttachment.mockReset();
     importReferenceImages.mockReset();
+    getCloudModels.mockReset();
     window.sessionStorage.clear();
 
     mockOpenProject.mockResolvedValue(undefined);
@@ -71,6 +143,11 @@ describe('NewProjectScreen bundle packages', () => {
     });
     selectAttachment.mockResolvedValue({ ok: false });
     importReferenceImages.mockResolvedValue({ ok: true, attachments: [] });
+    getCloudModels.mockResolvedValue({
+      status: 'signed_out',
+      image: [],
+      video: [],
+    });
     // The picker auto-searches npm on open — default to no published hits.
     searchNpmBundles.mockResolvedValue({ ok: true, hits: [] });
 
@@ -95,6 +172,9 @@ describe('NewProjectScreen bundle packages', () => {
           initialize,
           selectAttachment,
           importReferenceImages,
+        },
+        cloudModels: {
+          get: getCloudModels,
         },
       },
     });
@@ -132,7 +212,9 @@ describe('NewProjectScreen bundle packages', () => {
     await waitFor(() =>
       expect(screen.getByText('Youtube Short Bundle')).not.toBeNull(),
     );
-    fireEvent.click(screen.getByRole('button', { name: /install \+ runners/i }));
+    fireEvent.click(
+      screen.getByRole('button', { name: /install \+ runners/i }),
+    );
 
     await waitFor(() =>
       expect(screen.getByText('YouTube Short')).not.toBeNull(),
@@ -244,5 +326,145 @@ describe('NewProjectScreen bundle packages', () => {
         }),
       );
     });
+  });
+
+  it('renders cloud media model dropdowns and persists selected OpenRouter model ids', async () => {
+    listBundles.mockResolvedValue([openrouterMediaBundle]);
+    getCloudModels.mockResolvedValue(cloudMediaModels);
+
+    render(<NewProjectScreen isOpen onClose={jest.fn()} />);
+
+    await waitFor(() => screen.getByText('OpenRouter Documentary'));
+    fireEvent.click(screen.getByText('OpenRouter Documentary'));
+
+    const imageSelect = await screen.findByRole('combobox', {
+      name: /image model/i,
+    });
+    const videoSelect = await screen.findByRole('combobox', {
+      name: /video model/i,
+    });
+
+    expect(
+      screen.getByRole('option', {
+        name: /bytedance-seed\/seedream-4\.5/i,
+      }),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole('option', {
+        name: /bytedance\/seedance-2\.0/i,
+      }),
+    ).not.toBeNull();
+
+    fireEvent.change(imageSelect, {
+      target: { value: 'bytedance-seed/seedream-4.5' },
+    });
+    fireEvent.change(videoSelect, {
+      target: { value: 'bytedance/seedance-2.0' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Documentary idea...'), {
+      target: {
+        value: 'A filmmaker investigates a hidden archive beneath the city.',
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^roll/i }));
+
+    await waitFor(() => {
+      expect(initialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bundleId: 'openrouter_youtube_documentary',
+          inputs: expect.objectContaining({
+            imageModel: 'bytedance-seed/seedream-4.5',
+            videoModel: 'bytedance/seedance-2.0',
+          }),
+        }),
+      );
+    });
+  });
+
+  it('falls back to text model inputs when the user is signed out', async () => {
+    listBundles.mockResolvedValue([openrouterMediaBundle]);
+    getCloudModels.mockResolvedValue({
+      status: 'signed_out',
+      image: [],
+      video: [],
+    });
+
+    render(<NewProjectScreen isOpen onClose={jest.fn()} />);
+
+    await waitFor(() => screen.getByText('OpenRouter Documentary'));
+    fireEvent.click(screen.getByText('OpenRouter Documentary'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/image model/i).getAttribute('type')).toBe(
+        'text',
+      );
+      expect(screen.getByLabelText(/video model/i).getAttribute('type')).toBe(
+        'text',
+      );
+    });
+    expect(screen.queryByRole('combobox', { name: /image model/i })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: /video model/i })).toBeNull();
+  });
+
+  it('falls back to text model inputs when cloud model lookup fails', async () => {
+    listBundles.mockResolvedValue([openrouterMediaBundle]);
+    getCloudModels.mockRejectedValue(new Error('network down'));
+
+    render(<NewProjectScreen isOpen onClose={jest.fn()} />);
+
+    await waitFor(() => screen.getByText('OpenRouter Documentary'));
+    fireEvent.click(screen.getByText('OpenRouter Documentary'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/image model/i).getAttribute('type')).toBe(
+        'text',
+      );
+      expect(screen.getByLabelText(/video model/i).getAttribute('type')).toBe(
+        'text',
+      );
+    });
+  });
+
+  it('keeps text model inputs when the bundle allows custom model ids', async () => {
+    const customModelBundle = {
+      ...openrouterMediaBundle,
+      inputs: openrouterMediaBundle.inputs.map((input) =>
+        input.id === 'imageModel' || input.id === 'videoModel'
+          ? { ...input, allowCustom: true }
+          : input,
+      ),
+    };
+    listBundles.mockResolvedValue([customModelBundle]);
+    getCloudModels.mockResolvedValue(cloudMediaModels);
+
+    render(<NewProjectScreen isOpen onClose={jest.fn()} />);
+
+    await waitFor(() => screen.getByText('OpenRouter Documentary'));
+    fireEvent.click(screen.getByText('OpenRouter Documentary'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/image model/i).getAttribute('type')).toBe(
+        'text',
+      );
+      expect(screen.getByLabelText(/video model/i).getAttribute('type')).toBe(
+        'text',
+      );
+    });
+    expect(screen.queryByRole('combobox', { name: /image model/i })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: /video model/i })).toBeNull();
+  });
+
+  it('leaves existing non-media project inputs unchanged', async () => {
+    listBundles.mockResolvedValue([youtubeBundle]);
+    getCloudModels.mockResolvedValue(cloudMediaModels);
+
+    render(<NewProjectScreen isOpen onClose={jest.fn()} />);
+
+    await waitFor(() => screen.getByText('YouTube Short'));
+    fireEvent.click(screen.getByText('YouTube Short'));
+
+    await waitFor(() => screen.getByText('Duration'));
+    expect(screen.getByRole('button', { name: '30s' })).not.toBeNull();
+    expect(screen.queryByRole('combobox', { name: /duration/i })).toBeNull();
   });
 });

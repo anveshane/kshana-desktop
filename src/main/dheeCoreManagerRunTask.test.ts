@@ -15,6 +15,13 @@ jest.mock('electron', () => ({
   app: { isPackaged: false },
 }));
 
+type AnyAsync = (...args: unknown[]) => Promise<unknown>;
+const mockReportOpenRouterMediaUsage = jest.fn<AnyAsync>();
+
+jest.mock('./cloudMediaUsage', () => ({
+  reportOpenRouterMediaUsage: mockReportOpenRouterMediaUsage,
+}));
+
 // Imported AFTER the jest.mock call so the mock binds.
 // eslint-disable-next-line @typescript-eslint/no-require-imports, import/first
 const {
@@ -75,6 +82,8 @@ beforeEach(() => {
   lastDispatched = null;
   activeTask = null;
   runnerEmitter.removeAllListeners();
+  mockReportOpenRouterMediaUsage.mockReset();
+  mockReportOpenRouterMediaUsage.mockResolvedValue({ status: 'ok', httpStatus: 200, body: {} });
 });
 
 describe('dheeCoreManager.runTask (Phase 6.2 rewire)', () => {
@@ -161,6 +170,49 @@ describe('dheeCoreManager.runTask (Phase 6.2 rewire)', () => {
     expect(names).toContain('tool_result');
     expect(names).toContain('notification');
     expect(names).not.toContain('status');
+  });
+
+  it('reports OpenRouter media asset usage to Dhee Cloud when runner metadata includes usage cost', async () => {
+    const mgr = new dheeCoreManager();
+    mgr.__setCloudAuthForTesting({
+      websiteUrl: 'https://dhee.test',
+      desktopToken: 'desktop-token',
+    });
+    await mgr.focusSessionProject('s-media', 'p', '/tmp/p');
+    const promise = mgr.runTask('s-media', 'go', {}, () => {});
+    await Promise.resolve();
+
+    emitRunnerEvent('asset', {
+      kind: 'image',
+      filePath: 'assets/images/segment_1.png',
+      nodeId: 'segment_image:segment_1',
+      toolName: 'openrouter.image',
+      metadata: {
+        provider: 'openrouter',
+        model: 'bytedance-seed/seedream-4.5',
+        responseId: 'chatcmpl_seedream',
+        usage: { cost: 0.04 },
+      },
+    });
+    emitRunnerEvent('completed', {});
+    await promise;
+
+    expect(mockReportOpenRouterMediaUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        websiteUrl: 'https://dhee.test',
+        token: 'desktop-token',
+        sessionId: 's-media',
+        projectDir: '/tmp/p',
+        kind: 'image',
+        filePath: 'assets/images/segment_1.png',
+        nodeId: 'segment_image:segment_1',
+        toolName: 'openrouter.image',
+        metadata: expect.objectContaining({
+          provider: 'openrouter',
+          usage: { cost: 0.04 },
+        }),
+      }),
+    );
   });
 
   it('errors clearly when runTask is called for a session that has never been focused', async () => {

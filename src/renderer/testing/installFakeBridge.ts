@@ -682,6 +682,18 @@ const fakeElectron = {
     onChange: (cb: (payload: unknown) => void) =>
       subscribeElectron('account:changed', cb),
   },
+  cloudModels: {
+    get: () => {
+      record('cloudModels.get', undefined);
+      return Promise.resolve(
+        bridgeReturn('cloudModels.get', {
+          status: 'signed_out',
+          image: [],
+          video: [],
+        }),
+      );
+    },
+  },
   onboarding: {
     getState: () => {
       record('onboarding.getState', undefined);

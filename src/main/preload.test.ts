@@ -301,6 +301,14 @@ describe('preload context-isolation contract', () => {
     expect(invokeCalls.map((c) => c.channel)).toEqual(['app:get-version']);
   });
 
+  it('electron.cloudModels.get forwards to the cloud-models:get channel', () => {
+    const electron = exposed.get('electron') as Record<string, unknown>;
+    const cloudModels = electron.cloudModels as Record<string, (...a: unknown[]) => unknown>;
+    invokeCalls.length = 0;
+    cloudModels.get();
+    expect(invokeCalls.map((c) => c.channel)).toEqual(['cloud-models:get']);
+  });
+
   it('electron.project.selectDirectory forwards to the project:select-directory channel', () => {
     const electron = exposed.get('electron') as Record<string, unknown>;
     const project = electron.project as Record<string, (...a: unknown[]) => unknown>;
@@ -354,6 +362,7 @@ describe('preload context-isolation contract', () => {
         'account',
         'app',
         'bundleConfig',
+        'cloudModels',
         'ipcRenderer',
         'logger',
         'logs',
