@@ -194,6 +194,9 @@ beforeEach(() => {
   delete process.env['OPENAI_MODEL'];
   delete process.env['dhee_CLOUD'];
   delete process.env['dhee_CLOUD_URL'];
+  delete process.env['dhee_CLOUD_TOKEN'];
+  delete process.env['DHEE_CLOUD_URL'];
+  delete process.env['DHEE_CLOUD_TOKEN'];
   delete process.env['LLM_CONTEXT_TOKENS'];
   delete process.env['COMFY_MODE'];
   delete process.env['COMFY_CLOUD_API_KEY'];
@@ -315,6 +318,28 @@ describe('dheeCoreManager', () => {
     expect(process.env['dhee_CLOUD_URL']).toBeUndefined();
   });
 
+  it('signed-in local lanes expose Dhee Cloud media runner credentials without enabling cloud lanes', async () => {
+    const mgr = new dheeCoreManager();
+    await mgr.start(
+      {
+        ...baseSettings,
+        llmBackend: 'local',
+        comfyBackend: 'local',
+        vlmBackend: 'local',
+      },
+      {
+        websiteUrl: 'https://desktop.example.test/',
+        desktopToken: 'desktop-jwt',
+      },
+    );
+
+    expect(process.env['dhee_CLOUD']).toBeUndefined();
+    expect(process.env['DHEE_CLOUD_URL']).toBe('https://desktop.example.test');
+    expect(process.env['DHEE_CLOUD_TOKEN']).toBe('desktop-jwt');
+    expect(process.env['dhee_CLOUD_URL']).toBe('https://desktop.example.test');
+    expect(process.env['dhee_CLOUD_TOKEN']).toBe('desktop-jwt');
+  });
+
   it('dhee Cloud auth overrides user comfyuiUrl: signed-in token wins over a local-mode setting', async () => {
     // The user has a local ComfyUI URL configured AND a valid dhee
     // Cloud session. Today the cloud override silently takes
@@ -361,6 +386,9 @@ describe('dheeCoreManager', () => {
     // absent — the Settings panel is the canonical LLM source.
     expect(process.env['dhee_CLOUD']).toBe('true');
     expect(process.env['dhee_CLOUD_URL']).toBe('https://desktop.example.test');
+    expect(process.env['dhee_CLOUD_TOKEN']).toBe('desktop-jwt');
+    expect(process.env['DHEE_CLOUD_URL']).toBe('https://desktop.example.test');
+    expect(process.env['DHEE_CLOUD_TOKEN']).toBe('desktop-jwt');
     expect(process.env['COMFY_MODE']).toBe('cloud');
     expect(process.env['COMFYUI_BASE_URL']).toBe(
       'https://desktop.example.test/comfy/api',
@@ -368,7 +396,6 @@ describe('dheeCoreManager', () => {
     expect(process.env['COMFY_CLOUD_API_KEY']).toBe('desktop-jwt');
     expect(process.env['COMFYUI_TIMEOUT']).toBe('1800');
     expect(process.env['dhee_PROXY_BASE_URL']).toBeUndefined();
-    expect(process.env['dhee_CLOUD_TOKEN']).toBeUndefined();
     expect(process.env['COMFY_CLOUD_AUTH_TOKEN']).toBeUndefined();
   });
 

@@ -15,13 +15,6 @@ jest.mock('electron', () => ({
   app: { isPackaged: false },
 }));
 
-type AnyAsync = (...args: unknown[]) => Promise<unknown>;
-const mockReportOpenRouterMediaUsage = jest.fn<AnyAsync>();
-
-jest.mock('./cloudMediaUsage', () => ({
-  reportOpenRouterMediaUsage: mockReportOpenRouterMediaUsage,
-}));
-
 // Imported AFTER the jest.mock call so the mock binds.
 // eslint-disable-next-line @typescript-eslint/no-require-imports, import/first
 const {
@@ -82,8 +75,6 @@ beforeEach(() => {
   lastDispatched = null;
   activeTask = null;
   runnerEmitter.removeAllListeners();
-  mockReportOpenRouterMediaUsage.mockReset();
-  mockReportOpenRouterMediaUsage.mockResolvedValue({ status: 'ok', httpStatus: 200, body: {} });
 });
 
 describe('dheeCoreManager.runTask (Phase 6.2 rewire)', () => {
@@ -172,14 +163,15 @@ describe('dheeCoreManager.runTask (Phase 6.2 rewire)', () => {
     expect(names).not.toContain('status');
   });
 
-  it('reports OpenRouter media asset usage to Dhee Cloud when runner metadata includes usage cost', async () => {
+  it('forwards media asset events without post-hoc OpenRouter billing reports', async () => {
     const mgr = new dheeCoreManager();
     mgr.__setCloudAuthForTesting({
       websiteUrl: 'https://dhee.test',
       desktopToken: 'desktop-token',
     });
     await mgr.focusSessionProject('s-media', 'p', '/tmp/p');
-    const promise = mgr.runTask('s-media', 'go', {}, () => {});
+    const events: Array<{ eventName: string; data: unknown }> = [];
+    const promise = mgr.runTask('s-media', 'go', {}, (event) => events.push(event));
     await Promise.resolve();
 
     emitRunnerEvent('asset', {
@@ -197,19 +189,14 @@ describe('dheeCoreManager.runTask (Phase 6.2 rewire)', () => {
     emitRunnerEvent('completed', {});
     await promise;
 
-    expect(mockReportOpenRouterMediaUsage).toHaveBeenCalledWith(
+    expect(events).toContainEqual(
       expect.objectContaining({
-        websiteUrl: 'https://dhee.test',
-        token: 'desktop-token',
-        sessionId: 's-media',
-        projectDir: '/tmp/p',
-        kind: 'image',
-        filePath: 'assets/images/segment_1.png',
-        nodeId: 'segment_image:segment_1',
-        toolName: 'openrouter.image',
-        metadata: expect.objectContaining({
-          provider: 'openrouter',
-          usage: { cost: 0.04 },
+        eventName: 'media_generated',
+        data: expect.objectContaining({
+          kind: 'image',
+          filePath: 'assets/images/segment_1.png',
+          nodeId: 'segment_image:segment_1',
+          toolName: 'openrouter.image',
         }),
       }),
     );

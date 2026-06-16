@@ -105,8 +105,8 @@ const BUILTIN_RUNNER_TOOLS = [
   'ffmpeg.shot_clip',
   'ffmpeg.concat',
   'vlm.judge',
-  'openrouter.image',
-  'openrouter.video',
+  'dhee.cloud.image',
+  'dhee.cloud.video',
 ] as const;
 import type { FileChangeEvent } from '../shared/fileSystemTypes';
 import type { ChatExportPayload, ChatExportResult } from '../shared/chatTypes';

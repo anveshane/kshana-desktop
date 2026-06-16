@@ -50,7 +50,6 @@ import { buildCompletedNudge, buildFailedNudge, buildGatedNudge, buildStopAtRevi
 import { pathToFileURL } from 'url';
 import { getComfyUiUrl, isComfyCloudUrl } from './utils/comfyUrl';
 import { applyRuntimeAnalyticsConfig } from './cloudRuntimeConfig';
-import { reportOpenRouterMediaUsage } from './cloudMediaUsage';
 import {
   freeComfyBeforeLocalLlm,
   unloadLocalLlmBeforeLocalComfy,
@@ -1099,6 +1098,9 @@ function clearCloudProxyEnv(): boolean {
   const wasUsingDesktopCloudProxy = process.env.dhee_CLOUD === 'true';
   delete process.env.dhee_CLOUD;
   delete process.env.dhee_CLOUD_URL;
+  delete process.env.dhee_CLOUD_TOKEN;
+  delete process.env.DHEE_CLOUD_URL;
+  delete process.env.DHEE_CLOUD_TOKEN;
   delete process.env.LLM_CONTEXT_TOKENS;
   if (wasUsingDesktopCloudProxy) {
     // Cloud auth no longer touches OPENAI_* — Settings is the canonical
@@ -1158,12 +1160,20 @@ export function applyEnvFromSettings(
     if (!settings.vlmModel?.trim()) delete process.env.VLM_MODEL;
   }
 
+  // Dhee Cloud media runners are selected per project, not by a global
+  // backend lane. Expose signed-in cloud auth whenever available; the
+  // runner still only uses it when a bundle depends on dhee.cloud.*.
+  if (haveCloudAuth) {
+    process.env.DHEE_CLOUD_URL = cloudWebsiteUrl!;
+    process.env.DHEE_CLOUD_TOKEN = cloudToken!;
+    process.env.dhee_CLOUD_URL = cloudWebsiteUrl!;
+    process.env.dhee_CLOUD_TOKEN = cloudToken!;
+  }
+
   // Cloud identity env (consumed by analytics, billing, etc.) fires
-  // whenever ANY lane is on cloud — they share the same desktop token
-  // + website URL.
+  // whenever ANY backend lane is on cloud.
   if (useCloudLLM || useCloudComfy || useCloudVLM) {
     process.env.dhee_CLOUD = 'true';
-    process.env.dhee_CLOUD_URL = cloudWebsiteUrl!;
   }
 
   // Resolved ComfyUI base URL for this run — the Dhee Cloud proxy in
@@ -2898,30 +2908,6 @@ export class dheeCoreManager {
         const filePath = evt.filePath;
         if (typeof filePath !== 'string' || !isMediaPath(filePath)) return;
         const kind = mediaKindFromRunner(evt.kind, filePath);
-        const cloudAuth = this.lastCloudAuth;
-        if (cloudAuth?.desktopToken && cloudAuth.websiteUrl) {
-          void reportOpenRouterMediaUsage({
-            websiteUrl: cloudAuth.websiteUrl,
-            token: cloudAuth.desktopToken,
-            taskId,
-            sessionId,
-            ...(normalizedProjectDir ? { projectDir: normalizedProjectDir } : {}),
-            kind,
-            filePath,
-            ...(evt.nodeId ? { nodeId: evt.nodeId } : {}),
-            ...(evt.toolName ? { toolName: evt.toolName } : {}),
-            ...(evt.metadata ? { metadata: evt.metadata } : {}),
-          }).then((result) => {
-            if (result.status === 'error') {
-              log.warn('[wireRunnerTaskEvents] OpenRouter media usage report failed', {
-                taskId,
-                nodeId: evt.nodeId,
-                httpStatus: result.httpStatus,
-                errorMessage: result.errorMessage,
-              });
-            }
-          });
-        }
         emit('media_generated', {
           kind,
           path: filePath,
