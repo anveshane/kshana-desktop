@@ -426,6 +426,230 @@
   gap: $spacing-md;
 }
 
+.connectionPresetGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $spacing-md;
+}
+
+.connectionPresetCard {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: $spacing-sm;
+  min-height: 118px;
+  padding: $spacing-md;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.42);
+  border-radius: $radius-md;
+  background: rgba(var(--color-bg-panel-soft-rgb), 0.14);
+  color: $color-text-primary;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    box-shadow $transition-fast;
+
+  &:hover:not(:disabled) {
+    border-color: rgba(var(--color-accent-primary-rgb), 0.5);
+    background: rgba(var(--color-bg-panel-soft-rgb), 0.26);
+  }
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+}
+
+.connectionPresetCardActive {
+  border-color: rgba(var(--color-accent-primary-rgb), 0.58);
+  background: rgba(var(--color-accent-primary-rgb), 0.1);
+  box-shadow: inset 0 0 0 1px rgba(var(--color-accent-primary-rgb), 0.14);
+}
+
+.connectionPresetTopRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $spacing-sm;
+}
+
+.connectionPresetTitle {
+  color: $color-text-primary;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+}
+
+.connectionPresetText {
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  line-height: 1.45;
+}
+
+.connectionPresetStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.25);
+  border-radius: $radius-sm;
+  background: rgba(var(--color-text-primary-rgb), 0.03);
+}
+
+.advancedDetails {
+  border: 1px solid $color-panel-border;
+  border-radius: $radius-sm;
+  background: rgba(var(--color-bg-panel-soft-rgb), 0.08);
+  overflow: hidden;
+}
+
+.advancedSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+  padding: $spacing-md;
+  color: $color-text-primary;
+  cursor: pointer;
+  list-style: none;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+}
+
+.advancedSummaryTitle,
+.advancedSummaryDescription {
+  display: block;
+}
+
+.advancedSummaryTitle {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-semibold;
+}
+
+.advancedSummaryDescription {
+  margin-top: 2px;
+  color: $color-text-muted;
+  font-size: $font-size-xs;
+  line-height: 1.4;
+}
+
+.advancedDetailsBody {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+  padding: 0 $spacing-md $spacing-md;
+}
+
+.runnerDefaultGroup {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+  padding: $spacing-sm 0 $spacing-md;
+  border-bottom: 1px solid rgba(var(--color-border-subtle-rgb), 0.6);
+
+  &:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+}
+
+.runnerCount,
+.runnerEmptyState,
+.runnerPreferenceTool {
+  color: $color-text-muted;
+  font-size: $font-size-xs;
+}
+
+.runnerEmptyState {
+  margin: 0;
+}
+
+.runnerPreferenceList {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+}
+
+.runnerPreferenceRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm;
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.28);
+  border-radius: $radius-sm;
+  background: rgba(var(--color-bg-panel-soft-rgb), 0.14);
+}
+
+.runnerPreferenceMeta {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: $spacing-sm;
+}
+
+.runnerPreferenceRank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: $radius-sm;
+  background: rgba(var(--color-text-primary-rgb), 0.08);
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+}
+
+.runnerPreferenceName {
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
+.runnerPreferenceTool {
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.runnerPreferenceActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $spacing-xs;
+  flex-wrap: wrap;
+}
+
+.runnerActionButton {
+  border: 1px solid rgba(var(--color-border-strong-rgb), 0.45);
+  border-radius: $radius-sm;
+  padding: 5px 8px;
+  background: rgba(var(--color-text-primary-rgb), 0.04);
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition:
+    border-color $transition-fast,
+    color $transition-fast,
+    background-color $transition-fast;
+
+  &:hover:not(:disabled) {
+    border-color: rgba(var(--color-accent-primary-rgb), 0.5);
+    background: rgba(var(--color-accent-primary-rgb), 0.1);
+    color: $color-text-primary;
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
 .inlineButton {
   border: 0;
   padding: 0;

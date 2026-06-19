@@ -28,6 +28,8 @@ import type {
   FocusProjectRequest,
   SetAutonomousRequest,
   DeleteSessionRequest,
+  PreviewBundleRunnerPlanRequest,
+  SwitchRunnerRequest,
 } from '../../shared/dheeIpc';
 
 // ── Scenario shape ───────────────────────────────────────────────────
@@ -325,6 +327,42 @@ const fakedhee = {
   deleteSession(req: DeleteSessionRequest): Promise<OkResponse> {
     record('deleteSession', req);
     return Promise.resolve({ ok: true });
+  },
+  listRunners() {
+    record('listRunners', undefined);
+    return Promise.resolve(
+      bridgeReturn('dhee.listRunners', {
+        ok: true,
+        runners: [],
+      }),
+    );
+  },
+  previewBundleRunnerPlan(req: PreviewBundleRunnerPlanRequest) {
+    record('previewBundleRunnerPlan', req);
+    return Promise.resolve(
+      bridgeReturn('dhee.previewBundleRunnerPlan', {
+        ok: true,
+        plan: {
+          bundleId: 'fake_bundle',
+          nodes: [],
+          runnerCatalog: [],
+          overrides: [],
+        },
+      }),
+    );
+  },
+  switchRunner(req: SwitchRunnerRequest) {
+    record('switchRunner', req);
+    return Promise.resolve(
+      bridgeReturn('dhee.switchRunner', {
+        ok: true,
+        nodeId: req.nodeId,
+        itemId: req.itemId,
+        scope: req.scope ?? (req.itemId ? 'instance' : 'node'),
+        toTool: req.toTool,
+        regenerated: Boolean(req.regenerate),
+      }),
+    );
   },
   on(
     eventName: dheeEventName | '*',

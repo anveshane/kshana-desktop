@@ -10,6 +10,10 @@ import type {
 } from '../shared/providerDiagnosticsTypes';
 import { getComfyUiUrl, withV1Suffix } from './utils/comfyUrl';
 import { isLocalLlmUrl } from '../shared/localUrl';
+import {
+  canUseHostedComfy,
+  hostedComfyUnavailableReason,
+} from '../shared/hostedMediaEntitlement';
 
 const DEFAULT_TIMEOUT_MS = 3500;
 const MODEL_WARM_TIMEOUT_MS = 180_000;
@@ -145,19 +149,20 @@ async function comfyDiagnostic(
   account: AccountInfo | null,
 ): Promise<ProviderDiagnosticItem> {
   if (settings.comfyBackend === 'cloud') {
-    return account
-      ? {
-          id: 'comfyui',
-          label: 'ComfyUI',
-          status: 'ready',
-          message: 'Configured for Dhee Cloud.',
-        }
-      : {
-          id: 'comfyui',
-          label: 'ComfyUI',
-          status: 'warning',
-          message: 'Cloud ComfyUI needs a Dhee account sign-in.',
-        };
+    if (canUseHostedComfy(account)) {
+      return {
+        id: 'comfyui',
+        label: 'ComfyUI',
+        status: 'ready',
+        message: 'Configured for Dhee Cloud hosted ComfyUI.',
+      };
+    }
+    return {
+      id: 'comfyui',
+      label: 'ComfyUI',
+      status: 'warning',
+      message: hostedComfyUnavailableReason(account),
+    };
   }
 
   const url = getComfyUiUrl(settings);

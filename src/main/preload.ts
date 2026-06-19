@@ -71,13 +71,19 @@ import {
   type DeleteWorkflowResponse,
   type ValidateWorkflowRequest,
   type ValidateWorkflowResponse,
+  type ListRunnersResponse,
+  type PreviewBundleRunnerPlanRequest,
+  type PreviewBundleRunnerPlanResponse,
   type ResolveBundleRequest,
   type ResolveBundleResponse,
+  type RunnerOverrideInput,
   type ResolveInstanceGraphRequest,
   type ResolveInstanceGraphResponse,
   type ListVersionsRequest,
   type ListVersionsResponse,
   type SelectVersionRequest,
+  type SwitchRunnerRequest,
+  type SwitchRunnerResponse,
   type WriteNodeContentRequest,
   type WriteNodeContentResponse,
   type ClearChatHistoryRequest,
@@ -311,6 +317,7 @@ const projectBridge = {
     description?: string;
     inputs?: Record<string, unknown>;
     referenceImages?: ReferenceImagePayload[];
+    runnerOverrides?: RunnerOverrideInput[];
   }): Promise<{ ok: true; projectDir: string } | { ok: false; error: string }> {
     return ipcRenderer.invoke('project:initialize', payload);
   },
@@ -790,6 +797,17 @@ const dheeBridge = {
     validate(req: ValidateWorkflowRequest): Promise<ValidateWorkflowResponse> {
       return ipcRenderer.invoke(dhee_CHANNELS.VALIDATE_WORKFLOW, req);
     },
+  },
+  listRunners(): Promise<ListRunnersResponse> {
+    return ipcRenderer.invoke(dhee_CHANNELS.LIST_RUNNERS);
+  },
+  previewBundleRunnerPlan(
+    req: PreviewBundleRunnerPlanRequest,
+  ): Promise<PreviewBundleRunnerPlanResponse> {
+    return ipcRenderer.invoke(dhee_CHANNELS.PREVIEW_BUNDLE_RUNNER_PLAN, req);
+  },
+  switchRunner(req: SwitchRunnerRequest): Promise<SwitchRunnerResponse> {
+    return ipcRenderer.invoke(dhee_CHANNELS.SWITCH_RUNNER, req);
   },
   /**
    * Resolve a project.json `bundleSource` value (e.g.

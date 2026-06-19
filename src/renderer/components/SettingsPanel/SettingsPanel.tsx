@@ -4,14 +4,20 @@ import type {
   AppSettings,
   LLMProvider,
   LLMTierConfig,
+  RunnerDefaultKind,
   ThemeId,
 } from '../../../shared/settingsTypes';
+import type { RunnerCatalogEntry } from '../../../shared/dheeIpc';
 import type {
   LlmModelInfo,
   ProviderDiagnosticItem,
   ProviderDiagnosticsSnapshot,
   ProviderDiagnosticStatus,
 } from '../../../shared/providerDiagnosticsTypes';
+import {
+  canUseHostedComfy,
+  hostedComfyUnavailableReason,
+} from '../../../shared/hostedMediaEntitlement';
 import { useFirstRunSetup } from '../../contexts/FirstRunSetupContext';
 import { ComboList } from '../ui';
 import AccountTab from './AccountTab';
@@ -23,6 +29,7 @@ type SettingsTab =
   | 'connection'
   | 'workflows'
   | 'diagnostics';
+type InitialSettingsTab = SettingsTab | 'runners';
 
 interface LogsBridge {
   getDir(): Promise<string>;
@@ -48,7 +55,7 @@ function formatBytes(n: number): string {
 type Props = {
   isOpen: boolean;
   variant?: 'modal' | 'embedded';
-  initialTab?: SettingsTab;
+  initialTab?: InitialSettingsTab;
   settings: AppSettings | null;
   onClose: () => void;
   onThemeChange: (themeId: ThemeId) => Promise<void> | void;
@@ -104,8 +111,19 @@ const emptySettings: AppSettings = {
   llmUseSameForAllTiers: true,
   llmTierMedium: { ...emptyTierConfig },
   llmTierLight: { ...emptyTierConfig },
+  runnerDefaults: {},
   budgetCapUsd: 5,
 };
+
+const DHEE_CLOUD_RUNNER_DEFAULTS: NonNullable<AppSettings['runnerDefaults']> = {
+  text: ['dhee.cloud.text'],
+  image: ['dhee.cloud.image'],
+  video: ['dhee.cloud.video'],
+};
+
+function normalizeInitialTab(tab: InitialSettingsTab): SettingsTab {
+  return tab === 'runners' ? 'connection' : tab;
+}
 
 function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
   const next = input ?? emptySettings;
@@ -132,6 +150,7 @@ function normalizeConnectionSettings(input: AppSettings | null): AppSettings {
     openaiApiKey: next.openaiApiKey ?? '',
     openaiBaseUrl: next.openaiBaseUrl?.trim() || emptySettings.openaiBaseUrl,
     openaiModel: next.openaiModel?.trim() || emptySettings.openaiModel,
+    runnerDefaults: next.runnerDefaults ?? {},
   };
 }
 
@@ -145,15 +164,35 @@ function deriveBackendMode(
     : 'local';
 }
 
-function canAccountUseHostedComfy(account: AccountInfo | null): boolean {
+function hasRunnerDefaults(defaults: AppSettings['runnerDefaults']): boolean {
+  return Object.values(defaults ?? {}).some((tools) => (tools ?? []).length > 0);
+}
+
+function hasDheeCloudRunnerDefaults(
+  defaults: AppSettings['runnerDefaults'],
+): boolean {
   return (
-    account?.subscriptionStatus === 'active' &&
-    (
-      account.planId === 'standard_20' ||
-      account.planId === 'creator_35' ||
-      account.planId === 'pro_100'
-    )
+    defaults?.text?.[0] === 'dhee.cloud.text' &&
+    defaults?.image?.[0] === 'dhee.cloud.image' &&
+    defaults?.video?.[0] === 'dhee.cloud.video'
   );
+}
+
+function removeHostedMediaRunnerDefaults(
+  defaults: AppSettings['runnerDefaults'],
+): AppSettings['runnerDefaults'] {
+  const next: NonNullable<AppSettings['runnerDefaults']> = {};
+  for (const [kind, tools] of Object.entries(defaults ?? {}) as Array<
+    [RunnerDefaultKind, string[] | undefined]
+  >) {
+    const filtered = (tools ?? []).filter(
+      (tool) => tool !== 'dhee.cloud.image' && tool !== 'dhee.cloud.video',
+    );
+    if (filtered.length > 0) {
+      next[kind] = filtered;
+    }
+  }
+  return next;
 }
 
 function getAccountBridge() {
@@ -215,8 +254,11 @@ export default function SettingsPanel({
   const [providerDiagnosticsBusy, setProviderDiagnosticsBusy] = useState(false);
   const [modelLists, setModelLists] = useState<Record<string, ModelListState>>({});
   const [modelWarmStates, setModelWarmStates] = useState<Record<string, ModelWarmState>>({});
-  const canUseHostedComfy = canAccountUseHostedComfy(account);
-  const isComfyBlockedByPlan = Boolean(account) && !canUseHostedComfy;
+  const [runnerCatalog, setRunnerCatalog] = useState<RunnerCatalogEntry[]>([]);
+  const [runnerCatalogError, setRunnerCatalogError] = useState<string | null>(null);
+  const [runnerDefaultsOpen, setRunnerDefaultsOpen] = useState(false);
+  const canUseHostedComfyForAccount = canUseHostedComfy(account);
+  const isComfyBlockedByPlan = Boolean(account) && !canUseHostedComfyForAccount;
 
   useEffect(() => {
     if (activeTab !== 'diagnostics') return;
@@ -227,6 +269,34 @@ export default function SettingsPanel({
       .then(setLogsDir)
       .catch(() => setLogsDir(null));
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!isVisible || activeTab !== 'connection' || !runnerDefaultsOpen) return;
+    if (!window.dhee?.listRunners) {
+      setRunnerCatalogError('Runner catalog is unavailable in this build.');
+      return;
+    }
+    let cancelled = false;
+    window.dhee
+      .listRunners()
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          setRunnerCatalog(result.runners ?? []);
+          setRunnerCatalogError(null);
+        } else {
+          setRunnerCatalogError(result.error ?? 'Runner catalog is unavailable.');
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setRunnerCatalogError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, isVisible, runnerDefaultsOpen]);
 
   const handleRevealLogs = async () => {
     const bridge = getLogsBridge();
@@ -390,7 +460,7 @@ export default function SettingsPanel({
 
   useEffect(() => {
     if (isVisible) {
-      setActiveTab(initialTab);
+      setActiveTab(normalizeInitialTab(initialTab));
     }
   }, [initialTab, isVisible]);
 
@@ -424,8 +494,17 @@ export default function SettingsPanel({
   useEffect(() => {
     if (!isComfyBlockedByPlan) return;
     setForm((prev) => {
-      if (prev.comfyBackend !== 'cloud') return prev;
-      const next = { ...prev, comfyBackend: 'local' as const };
+      const runnerDefaults = removeHostedMediaRunnerDefaults(
+        prev.runnerDefaults,
+      );
+      if (prev.comfyBackend !== 'cloud') {
+        return { ...prev, runnerDefaults };
+      }
+      const next = {
+        ...prev,
+        comfyBackend: 'local' as const,
+        runnerDefaults,
+      };
       return { ...next, backendMode: deriveBackendMode(next) };
     });
   }, [isComfyBlockedByPlan]);
@@ -465,25 +544,110 @@ export default function SettingsPanel({
     if (isLaneToggle && value === 'cloud' && !account) {
       return;
     }
-    if (key === 'comfyBackend' && value === 'cloud' && !canUseHostedComfy) {
+    if (key === 'comfyBackend' && value === 'cloud' && !canUseHostedComfyForAccount) {
       return;
     }
 
+    setForm((prev) => {
+      const next = {
+        ...prev,
+        [key]: value,
+      };
+      return isLaneToggle
+        ? { ...next, backendMode: deriveBackendMode(next) }
+        : next;
+    });
+  };
+
+  const stageLocalPreset = () => {
     setForm((prev) => ({
       ...prev,
-      [key]: value,
+      backendMode: 'local',
+      llmBackend: 'local',
+      comfyBackend: 'local',
+      vlmBackend: 'local',
+      runnerDefaults: {},
     }));
+  };
+
+  const stageDheeCloudPreset = async () => {
+    if (!account) {
+      await handleInlineSignIn();
+      return;
+    }
+    if (!canUseHostedComfyForAccount) {
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      backendMode: 'cloud',
+      llmBackend: 'cloud',
+      comfyBackend: 'cloud',
+      vlmBackend: 'cloud',
+      runnerDefaults: DHEE_CLOUD_RUNNER_DEFAULTS,
+    }));
+  };
+
+  const setRunnerDefaultsForKind = (
+    kind: RunnerDefaultKind,
+    tools: string[],
+  ) => {
+    setForm((prev) => {
+      const nextDefaults = { ...(prev.runnerDefaults ?? {}) };
+      const uniqueTools = Array.from(
+        new Set(tools.map((tool) => tool.trim()).filter(Boolean)),
+      );
+      if (uniqueTools.length > 0) {
+        nextDefaults[kind] = uniqueTools;
+      } else {
+        delete nextDefaults[kind];
+      }
+      return { ...prev, runnerDefaults: nextDefaults };
+    });
+  };
+
+  const handleAddRunnerDefault = (kind: RunnerDefaultKind, tool: string) => {
+    if (!tool) return;
+    setRunnerDefaultsForKind(kind, [
+      ...(form.runnerDefaults?.[kind] ?? []),
+      tool,
+    ]);
+  };
+
+  const handleMoveRunnerDefault = (
+    kind: RunnerDefaultKind,
+    index: number,
+    direction: -1 | 1,
+  ) => {
+    const current = [...(form.runnerDefaults?.[kind] ?? [])];
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= current.length) return;
+    [current[index], current[nextIndex]] = [current[nextIndex], current[index]];
+    setRunnerDefaultsForKind(kind, current);
+  };
+
+  const handleRemoveRunnerDefault = (
+    kind: RunnerDefaultKind,
+    index: number,
+  ) => {
+    const current = [...(form.runnerDefaults?.[kind] ?? [])];
+    current.splice(index, 1);
+    setRunnerDefaultsForKind(kind, current);
   };
 
   const saveConnectionSettings = async (nextForm: AppSettings) => {
     const normalized = normalizeConnectionSettings(nextForm);
-    const comfyBackend = canUseHostedComfy ? normalized.comfyBackend : 'local';
+    const comfyBackend = canUseHostedComfyForAccount ? normalized.comfyBackend : 'local';
     const backendMode = deriveBackendMode({ ...normalized, comfyBackend });
+    const runnerDefaults = canUseHostedComfyForAccount
+      ? normalized.runnerDefaults ?? {}
+      : removeHostedMediaRunnerDefaults(normalized.runnerDefaults);
     await onSaveConnection({
       backendMode,
       llmBackend: normalized.llmBackend,
       comfyBackend,
       vlmBackend: normalized.vlmBackend,
+      runnerDefaults,
       comfyuiMode: normalized.comfyuiUrl ? 'custom' : 'inherit',
       comfyuiUrl: normalized.comfyuiUrl,
       singleGpuMode: normalized.singleGpuMode,
@@ -536,26 +700,37 @@ export default function SettingsPanel({
   // when llmBackend='cloud'. The two are independent — flipping one
   // doesn't affect the other.
   const isComfyCloudMode =
-    form.comfyBackend === 'cloud' && !isComfyBlockedByPlan;
+    form.comfyBackend === 'cloud' && canUseHostedComfyForAccount;
   const isLlmCloudMode = form.llmBackend === 'cloud';
   const isVlmCloudMode = form.vlmBackend === 'cloud';
   // VLM judge master switch (moved here from the retired Appearance tab).
   // Reads persisted settings and saves immediately on toggle — its own
   // value, independent of the connection form's Save & Restart.
   const isVlmJudgeOn = settings?.vlmJudge ?? emptySettings.vlmJudge;
+  const connectionPreset =
+    form.llmBackend === 'local' &&
+    form.comfyBackend === 'local' &&
+    form.vlmBackend === 'local' &&
+    !hasRunnerDefaults(form.runnerDefaults)
+      ? 'local'
+      : form.llmBackend === 'cloud' &&
+          form.comfyBackend === 'cloud' &&
+          form.vlmBackend === 'cloud' &&
+          hasDheeCloudRunnerDefaults(form.runnerDefaults)
+        ? 'cloud'
+        : 'custom';
   let comfyCloudToggleTitle: string | undefined;
   if (!account) {
     comfyCloudToggleTitle = 'Sign in to Dhee Cloud to enable Cloud mode';
   } else if (isComfyBlockedByPlan) {
-    comfyCloudToggleTitle =
-      'Your current plan uses bring-your-own ComfyUI for image and video';
+    comfyCloudToggleTitle = hostedComfyUnavailableReason(account);
   }
   let comfyInfoText = 'Image / video jobs run on the ComfyUI server below.';
   if (isComfyBlockedByPlan) {
     comfyInfoText =
-      'Starter and Free accounts bring their own ComfyUI endpoint for image and video. Configure your ComfyUI server below.';
+      'Hosted Dhee Cloud ComfyUI is not included in your current plan. Configure a local or BYO ComfyUI endpoint below.';
   } else if (isComfyCloudMode) {
-    comfyInfoText = 'Image / video jobs run on Dhee Cloud (uses credits).';
+    comfyInfoText = 'Image / video jobs run on Dhee Cloud hosted ComfyUI (uses credits).';
   }
   const statusLabel = isCloudReady || !isCloudMode ? 'Ready' : 'Sign in';
   const statusBadgeClass = isCloudReady || !isCloudMode
@@ -566,6 +741,17 @@ export default function SettingsPanel({
       ? 'Connected to Cloud'
       : 'Cloud sign-in required'
     : 'Connected to Local';
+  const presetStatusLabel =
+    connectionPreset === 'local'
+      ? 'Local / BYO'
+      : connectionPreset === 'cloud'
+        ? 'Dhee Cloud'
+        : 'Custom';
+  const cloudPresetHelper = !account
+    ? 'Sign in to use Dhee Cloud credits for text, image, and video.'
+    : isComfyBlockedByPlan
+      ? hostedComfyUnavailableReason(account)
+      : 'Dhee Cloud handles text, image, and video defaults for new projects.';
 
   const renderModelIdInput = (opts: {
     id: string;
@@ -824,6 +1010,181 @@ export default function SettingsPanel({
     </div>
   );
 
+  const runnerKindRows: Array<{ kind: RunnerDefaultKind; label: string }> = [
+    { kind: 'text', label: 'Text' },
+    { kind: 'image', label: 'Image' },
+    { kind: 'video', label: 'Video' },
+    { kind: 'audio', label: 'Audio' },
+  ];
+
+  const renderRunnerDefaults = () => (
+    <details className={styles.advancedDetails} open={runnerDefaultsOpen}>
+      <summary
+        className={styles.advancedSummary}
+        onClick={(event) => {
+          event.preventDefault();
+          setRunnerDefaultsOpen((open) => !open);
+        }}
+      >
+        <span>
+          <span className={styles.advancedSummaryTitle}>
+            Advanced runner defaults
+          </span>
+          <span className={styles.advancedSummaryDescription}>
+            Optional per-output preferences for new projects.
+          </span>
+        </span>
+        <span className={styles.runnerCount}>
+          {hasRunnerDefaults(form.runnerDefaults) ? 'Custom' : 'Bundle default'}
+        </span>
+      </summary>
+      <div className={styles.advancedDetailsBody}>
+        {runnerCatalogError ? (
+          <div className={styles.error}>{runnerCatalogError}</div>
+        ) : null}
+        <fieldset className={styles.fieldset}>
+          <legend>Defaults</legend>
+          {runnerKindRows.map(({ kind, label }) => {
+            const options = runnerCatalog
+              .filter((runner) => runner.kinds.includes(kind))
+              .sort(
+                (a, b) =>
+                  Number(b.registered) - Number(a.registered) ||
+                  a.tool.localeCompare(b.tool),
+              );
+            const selectedTools = form.runnerDefaults?.[kind] ?? [];
+            const addOptions = options.filter(
+              (runner) => !selectedTools.includes(runner.tool),
+            );
+            return (
+              <div key={kind} className={styles.runnerDefaultGroup}>
+                <div className={styles.labelRow}>
+                  <span>{label}</span>
+                  <span className={styles.runnerCount}>
+                    {selectedTools.length === 0
+                      ? 'Bundle default'
+                      : `${selectedTools.length} preferred`}
+                  </span>
+                </div>
+                {selectedTools.length > 0 ? (
+                  <div className={styles.runnerPreferenceList}>
+                    {selectedTools.map((tool, index) => {
+                      const selectedRunner = runnerCatalog.find(
+                        (runner) => runner.tool === tool,
+                      );
+                      const statusClass = !selectedRunner
+                        ? styles.statusBadgeNeutral
+                        : selectedRunner.registered
+                          ? styles.statusBadgeSuccess
+                          : styles.statusBadgeWarning;
+                      const statusLabelText = !selectedRunner
+                        ? 'Unknown'
+                        : selectedRunner.registered
+                          ? 'Ready'
+                          : 'Needs setup';
+                      return (
+                        <div
+                          key={`${kind}-${tool}`}
+                          className={styles.runnerPreferenceRow}
+                        >
+                          <div className={styles.runnerPreferenceMeta}>
+                            <span className={styles.runnerPreferenceRank}>
+                              {index + 1}
+                            </span>
+                            <div>
+                              <div className={styles.runnerPreferenceName}>
+                                {selectedRunner?.displayName ?? tool}
+                              </div>
+                              <div className={styles.runnerPreferenceTool}>
+                                {tool}
+                              </div>
+                            </div>
+                          </div>
+                          <div className={styles.runnerPreferenceActions}>
+                            <span
+                              className={`${styles.statusBadge} ${statusClass}`}
+                            >
+                              <span className={styles.statusDot} />
+                              {statusLabelText}
+                            </span>
+                            <button
+                              type="button"
+                              className={styles.runnerActionButton}
+                              onClick={() =>
+                                handleMoveRunnerDefault(kind, index, -1)
+                              }
+                              disabled={index === 0}
+                            >
+                              Up
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.runnerActionButton}
+                              onClick={() =>
+                                handleMoveRunnerDefault(kind, index, 1)
+                              }
+                              disabled={index === selectedTools.length - 1}
+                            >
+                              Down
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.runnerActionButton}
+                              onClick={() =>
+                                handleRemoveRunnerDefault(kind, index)
+                              }
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className={styles.runnerEmptyState}>
+                    Uses the runner declared by each bundle node.
+                  </p>
+                )}
+                <label className={styles.label}>
+                  Add runner
+                  <select
+                    className={styles.input}
+                    value=""
+                    onChange={(event) =>
+                      handleAddRunnerDefault(kind, event.target.value)
+                    }
+                    disabled={addOptions.length === 0}
+                  >
+                    <option value="">
+                      {addOptions.length === 0
+                        ? 'No more runners'
+                        : 'Choose runner'}
+                    </option>
+                    {addOptions.map((runner) => (
+                      <option key={runner.tool} value={runner.tool}>
+                        {runner.displayName} · {runner.tool}
+                        {runner.registered ? '' : ' · needs setup'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            );
+          })}
+        </fieldset>
+        <div className={styles.statusCard}>
+          <div className={styles.statusHeader}>Canonical Dhee Cloud tools</div>
+          <p className={styles.statusSupportText}>
+            Text, image, and video Dhee Cloud runners are named{' '}
+            <code>dhee.cloud.text</code>, <code>dhee.cloud.image</code>, and{' '}
+            <code>dhee.cloud.video</code>.
+          </p>
+        </div>
+      </div>
+    </details>
+  );
+
   const panelContent = (
     <div
       className={`${styles.panel} ${isEmbedded ? styles.embeddedPanel : ''}`}
@@ -982,7 +1343,89 @@ export default function SettingsPanel({
               <>
                 <div className={styles.sectionHeader}>
                   <h3>Connection</h3>
-                  <p>Choose BYO keys or Dhee Cloud credits for paid calls.</p>
+                  <p>Choose local providers or Dhee Cloud credits for paid calls.</p>
+                </div>
+
+                <div
+                  className={styles.connectionPresetGrid}
+                  role="group"
+                  aria-label="Connection presets"
+                >
+                  <button
+                    type="button"
+                    className={`${styles.connectionPresetCard} ${
+                      connectionPreset === 'local'
+                        ? styles.connectionPresetCardActive
+                        : ''
+                    }`}
+                    aria-pressed={connectionPreset === 'local'}
+                    onClick={stageLocalPreset}
+                  >
+                    <div className={styles.connectionPresetTopRow}>
+                      <span className={styles.connectionPresetTitle}>
+                        Local / BYO
+                      </span>
+                      {connectionPreset === 'local' ? (
+                        <span
+                          className={`${styles.statusBadge} ${styles.statusBadgeSuccess}`}
+                        >
+                          <span className={styles.statusDot} />
+                          Active
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className={styles.connectionPresetText}>
+                      Use your configured LLM, ComfyUI, and VLM providers.
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`${styles.connectionPresetCard} ${
+                      connectionPreset === 'cloud'
+                        ? styles.connectionPresetCardActive
+                        : ''
+                    }`}
+                    aria-pressed={connectionPreset === 'cloud'}
+                    disabled={Boolean(account) && !canUseHostedComfyForAccount}
+                    onClick={() => void stageDheeCloudPreset()}
+                  >
+                    <div className={styles.connectionPresetTopRow}>
+                      <span className={styles.connectionPresetTitle}>
+                        Dhee Cloud
+                      </span>
+                      {connectionPreset === 'cloud' ? (
+                        <span
+                          className={`${styles.statusBadge} ${styles.statusBadgeSuccess}`}
+                        >
+                          <span className={styles.statusDot} />
+                          Active
+                        </span>
+                      ) : !account ? (
+                        <span
+                          className={`${styles.statusBadge} ${styles.statusBadgeWarning}`}
+                        >
+                          <span className={styles.statusDot} />
+                          Sign in
+                        </span>
+                      ) : isComfyBlockedByPlan ? (
+                        <span
+                          className={`${styles.statusBadge} ${styles.statusBadgeWarning}`}
+                        >
+                          <span className={styles.statusDot} />
+                          Plan
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className={styles.connectionPresetText}>
+                      {cloudPresetHelper}
+                    </span>
+                  </button>
+                </div>
+
+                <div className={styles.connectionPresetStatus}>
+                  <span className={styles.statusMetaLabel}>Route preset</span>
+                  <span className={styles.statusValue}>{presetStatusLabel}</span>
                 </div>
 
                 <div className={styles.statusCard}>
@@ -1034,7 +1477,7 @@ export default function SettingsPanel({
                       <input
                         type="checkbox"
                         checked={isComfyCloudMode}
-                        disabled={!canUseHostedComfy}
+                        disabled={!canUseHostedComfyForAccount}
                         onChange={(event) =>
                           handleInput(
                             'comfyBackend',
@@ -1494,6 +1937,8 @@ export default function SettingsPanel({
                     </p>
                   )}
                 </fieldset>
+
+                {renderRunnerDefaults()}
 
                 {error && <div className={styles.error}>{error}</div>}
               </>

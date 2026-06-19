@@ -6,6 +6,7 @@ import type {
   ComfyUIMode,
   LLMProvider,
   LLMTierConfig,
+  RunnerDefaults,
   ThemeId,
 } from '../shared/settingsTypes';
 import {
@@ -65,6 +66,7 @@ const defaults: AppSettings = {
   llmUseSameForAllTiers: true,
   llmTierMedium: { ...DEFAULT_TIER_CONFIG },
   llmTierLight: { ...DEFAULT_TIER_CONFIG },
+  runnerDefaults: {},
   budgetCapUsd: DEFAULT_BUDGET_CAP_USD,
 };
 
@@ -140,6 +142,38 @@ function normalizeString(value: unknown, fallback = ''): string {
   return value.trim();
 }
 
+function normalizeRunnerTool(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('dhee.clod.')) {
+    return `dhee.cloud.${trimmed.slice('dhee.clod.'.length)}`;
+  }
+  return trimmed;
+}
+
+function normalizeRunnerDefaults(value: unknown): RunnerDefaults {
+  const defaults: RunnerDefaults = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return defaults;
+  }
+  for (const kind of ['text', 'image', 'video', 'audio'] as const) {
+    const raw = (value as Record<string, unknown>)[kind];
+    if (!Array.isArray(raw)) continue;
+    const seen = new Set<string>();
+    const tools: string[] = [];
+    for (const item of raw) {
+      if (typeof item !== 'string') continue;
+      const tool = normalizeRunnerTool(item);
+      if (!tool || seen.has(tool)) continue;
+      seen.add(tool);
+      tools.push(tool);
+    }
+    if (tools.length > 0) {
+      defaults[kind] = tools;
+    }
+  }
+  return defaults;
+}
+
 function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   const comfyuiUrl = normalizeComfyUIUrl(value?.comfyuiUrl);
   // Backend lanes: prefer the new explicit fields. If they're absent
@@ -201,6 +235,9 @@ function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings
       : true;
   const llmTierMedium = normalizeTierConfig(value?.llmTierMedium);
   const llmTierLight = normalizeTierConfig(value?.llmTierLight);
+  const runnerDefaults = normalizeRunnerDefaults(
+    (value as { runnerDefaults?: unknown } | null | undefined)?.runnerDefaults,
+  );
 
   // Budget cap (USD) stamped into new projects. A finite number ≥ 0 is
   // honored (0 = no cap); anything else (missing, negative, non-finite,
@@ -267,6 +304,7 @@ function normalizeSettings(value: Partial<AppSettings> | undefined): AppSettings
     llmUseSameForAllTiers,
     llmTierMedium,
     llmTierLight,
+    runnerDefaults,
     budgetCapUsd,
   };
 

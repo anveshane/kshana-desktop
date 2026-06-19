@@ -105,6 +105,12 @@ export const dhee_CHANNELS = {
    * dhee-core's bundleSource helpers.
    */
   RESOLVE_BUNDLE: 'dhee:resolveBundle',
+  /** Installed/known runner catalog, including canonical Dhee Cloud ids. */
+  LIST_RUNNERS: 'dhee:listRunners',
+  /** Preview how runner defaults apply to a bundle before project creation. */
+  PREVIEW_BUNDLE_RUNNER_PLAN: 'dhee:previewBundleRunnerPlan',
+  /** Append a runner override event, optionally regenerating the target. */
+  SWITCH_RUNNER: 'dhee:switchRunner',
   /**
    * Resolve the per-instance dependency graph projection of a
    * project's event log. The Inspector Cards view consumes this
@@ -573,6 +579,119 @@ export interface ValidateWorkflowResponse {
   error?: string;
 }
 
+// ── RUNNER SWITCHING ──────────────────────────────────────────────────
+
+export type RunnerDefaultKind = 'text' | 'image' | 'video' | 'audio';
+
+export type RunnerDefaults = Partial<Record<RunnerDefaultKind, string[]>>;
+
+export interface RuntimeBinding {
+  configKey: string;
+  fromInput: string;
+}
+
+export interface RunnerOverrideInput {
+  nodeId: string;
+  toTool: string;
+  configOverride?: Record<string, unknown>;
+  generatedConfigOverride?: Record<string, unknown>;
+  runtimeBindings?: RuntimeBinding[];
+  reason?: string;
+}
+
+export interface RunnerCatalogEntry {
+  tool: string;
+  displayName: string;
+  description?: string;
+  kinds: RunnerDefaultKind[];
+  outputFormats: Array<'md' | 'json' | 'image' | 'video' | 'audio' | 'text'>;
+  registered: boolean;
+  credentials?: string[];
+}
+
+export interface ListRunnersResponse {
+  ok: boolean;
+  runners?: RunnerCatalogEntry[];
+  error?: string;
+}
+
+export type RunnerCompatibilityStatus =
+  | 'ready'
+  | 'current'
+  | 'blocked'
+  | 'warning'
+  | 'needs_setup';
+
+export interface RunnerPlanCandidate {
+  tool: string;
+  toTool: string;
+  ok: boolean;
+  status: RunnerCompatibilityStatus;
+  reason: string;
+  warning?: string;
+  displayName?: string;
+  registered: boolean;
+  outputFormats: Array<'md' | 'json' | 'image' | 'video' | 'audio' | 'text'>;
+  configOverride?: Record<string, unknown>;
+  runtimeBindings?: RuntimeBinding[];
+}
+
+export interface BundleRunnerPlanNode {
+  nodeId: string;
+  displayName?: string;
+  outputFormat: 'md' | 'json' | 'image' | 'video' | 'audio' | 'text';
+  currentTool: string;
+  proposedTool?: string;
+  status: RunnerCompatibilityStatus;
+  reason: string;
+  candidates: RunnerPlanCandidate[];
+  override?: RunnerOverrideInput;
+}
+
+export interface BundleRunnerPlan {
+  bundleId: string;
+  nodes: BundleRunnerPlanNode[];
+  runnerCatalog: RunnerCatalogEntry[];
+  overrides: RunnerOverrideInput[];
+}
+
+export interface PreviewBundleRunnerPlanRequest {
+  bundleSource: string;
+  runnerDefaults?: RunnerDefaults;
+}
+
+export interface PreviewBundleRunnerPlanResponse {
+  ok: boolean;
+  plan?: BundleRunnerPlan;
+  error?: string;
+}
+
+export interface SwitchRunnerRequest {
+  projectDir: string;
+  nodeId: string;
+  itemId?: string;
+  toTool: string;
+  scope?: 'node' | 'instance';
+  force?: boolean;
+  regenerate?: boolean;
+  configOverride?: Record<string, unknown>;
+  runtimeBindings?: RuntimeBinding[];
+}
+
+export interface SwitchRunnerResponse {
+  ok: boolean;
+  nodeId?: string;
+  itemId?: string;
+  scope?: 'node' | 'instance';
+  fromTool?: string;
+  toTool?: string;
+  status?: RunnerCompatibilityStatus | 'forced';
+  reason?: string;
+  warning?: string;
+  regenerated?: boolean;
+  error?: string;
+}
+
 // ── RESOLVE_BUNDLE ────────────────────────────────────────────────────
 
 export interface ResolveBundleRequest {
@@ -761,6 +880,7 @@ export interface ResolveBundleResponse {
        * cockpit reads `sourcePlan[itemKey].length` — no node names baked in.
        */
       itemKey?: string;
+      runner?: { tool: string };
       outputs: { format: string; pattern: string };
       /**
        * Upstream dependencies — used by the Inspector Canvas to draw

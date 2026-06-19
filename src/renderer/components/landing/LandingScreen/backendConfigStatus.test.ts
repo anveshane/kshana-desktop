@@ -42,6 +42,24 @@ const account: AccountInfo = {
   token: 'tok',
 };
 
+const standardAccount: AccountInfo = {
+  ...account,
+  planId: 'standard_20',
+  subscriptionStatus: 'active',
+};
+
+const creatorAccount: AccountInfo = {
+  ...account,
+  planId: 'creator_35',
+  subscriptionStatus: 'active',
+};
+
+const proAccount: AccountInfo = {
+  ...account,
+  planId: 'pro_100',
+  subscriptionStatus: 'active',
+};
+
 describe('checkLaneConfigured — LLM lane', () => {
   it('local + openai with key → configured', () => {
     expect(
@@ -143,7 +161,7 @@ describe('checkLaneConfigured — Comfy lane', () => {
     expect(out.reason).toMatch(/ComfyUI URL/);
   });
 
-  it('cloud needs BOTH account AND Comfy Cloud API key', () => {
+  it('cloud needs a signed-in Standard, Creator, or Pro account and no separate Comfy API key', () => {
     expect(
       checkLaneConfigured(
         'comfy',
@@ -154,15 +172,24 @@ describe('checkLaneConfigured — Comfy lane', () => {
     expect(
       checkLaneConfigured(
         'comfy',
-        baseSettings({ comfyBackend: 'cloud', comfyCloudApiKey: 'cck' }),
-        null,
-      ).configured,
-    ).toBe(false);
+        baseSettings({ comfyBackend: 'cloud' }),
+        account,
+      ).reason,
+    ).toMatch(/Standard, Creator, or Pro/);
+    for (const eligibleAccount of [standardAccount, creatorAccount, proAccount]) {
+      expect(
+        checkLaneConfigured(
+          'comfy',
+          baseSettings({ comfyBackend: 'cloud' }),
+          eligibleAccount,
+        ).configured,
+      ).toBe(true);
+    }
     expect(
       checkLaneConfigured(
         'comfy',
-        baseSettings({ comfyBackend: 'cloud', comfyCloudApiKey: 'cck' }),
-        account,
+        baseSettings({ comfyBackend: 'cloud', comfyCloudApiKey: '' }),
+        standardAccount,
       ).configured,
     ).toBe(true);
   });

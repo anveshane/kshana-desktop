@@ -34,6 +34,12 @@ const account: AccountInfo = {
   token: 'jwt',
 };
 
+const standardAccount: AccountInfo = {
+  ...account,
+  planId: 'standard_20',
+  subscriptionStatus: 'active',
+};
+
 describe('probeLlm — API-key requirement', () => {
   const realFetch = global.fetch;
   afterEach(() => {
@@ -313,7 +319,7 @@ describe('runProviderDiagnostics — snapshot shaping', () => {
     expect(comfy.detail).toBe('HTTP 502');
   });
 
-  it('comfyui cloud-backed is ready with account, warning without', async () => {
+  it('comfyui cloud-backed is ready only with a hosted media entitlement', async () => {
     global.fetch = jest.fn(async () => ({
       ok: true,
       status: 200,
@@ -323,7 +329,17 @@ describe('runProviderDiagnostics — snapshot shaping', () => {
       makeSettings({ comfyBackend: 'cloud' }),
       account,
     );
-    expect(findItem(withAcct, 'comfyui').status).toBe('ready');
+    expect(findItem(withAcct, 'comfyui').status).toBe('warning');
+    expect(findItem(withAcct, 'comfyui').message).toMatch(/Standard, Creator, or Pro/);
+
+    const withEligiblePlan = await runProviderDiagnostics(
+      makeSettings({ comfyBackend: 'cloud' }),
+      standardAccount,
+    );
+    expect(findItem(withEligiblePlan, 'comfyui')).toMatchObject({
+      status: 'ready',
+      message: 'Configured for Dhee Cloud hosted ComfyUI.',
+    });
 
     const noAcct = await runProviderDiagnostics(
       makeSettings({ comfyBackend: 'cloud' }),

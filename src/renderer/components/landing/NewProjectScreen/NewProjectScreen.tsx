@@ -28,6 +28,10 @@ import {
   referenceImagesFromAttachments,
   withReferenceImageRole,
 } from '../../../../shared/attachmentTypes';
+import type {
+  BundleRunnerPlan,
+  RunnerOverrideInput,
+} from '../../../../shared/dheeIpc';
 import { useWorkspace } from '../../../contexts/WorkspaceContext';
 import {
   buildDefaultWorkspaceFolder,
@@ -243,6 +247,9 @@ export default function NewProjectScreen({
   const [setupReferenceAttachments, setSetupReferenceAttachments] = useState<
     Attachment[]
   >([]);
+  const [runnerPlan, setRunnerPlan] = useState<BundleRunnerPlan | null>(null);
+  const [runnerPlanLoading, setRunnerPlanLoading] = useState(false);
+  const [runnerPlanError, setRunnerPlanError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nounIndex, setNounIndex] = useState(0);
 
@@ -381,6 +388,46 @@ export default function NewProjectScreen({
       return next;
     });
     return undefined;
+  }, [selectedBundle]);
+
+  useEffect(() => {
+    if (!selectedBundle) {
+      setRunnerPlan(null);
+      setRunnerPlanError(null);
+      setRunnerPlanLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setRunnerPlanLoading(true);
+    setRunnerPlanError(null);
+    const bundleSource =
+      selectedBundle.bundleSource ?? `built-in:${selectedBundle.id}`;
+    (async () => {
+      try {
+        const settings = await window.electron.settings.get();
+        const result = await window.dhee.previewBundleRunnerPlan({
+          bundleSource,
+          runnerDefaults: settings.runnerDefaults ?? {},
+        });
+        if (cancelled) return;
+        if (result.ok) {
+          setRunnerPlan(result.plan ?? null);
+        } else {
+          setRunnerPlan(null);
+          setRunnerPlanError(result.error ?? 'Runner compatibility preview failed.');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setRunnerPlan(null);
+          setRunnerPlanError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!cancelled) setRunnerPlanLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedBundle]);
 
   const storyText = String(inputValues[STORY_INPUT_ID] ?? '');
@@ -572,6 +619,7 @@ export default function NewProjectScreen({
       }
 
       // 2. Populate project.json + bundle inputs.
+      const runnerOverrides: RunnerOverrideInput[] = runnerPlan?.overrides ?? [];
       const result = await window.electron.project.initialize({
         projectDir: created,
         name: title.trim(),
@@ -580,6 +628,7 @@ export default function NewProjectScreen({
           selectedBundle.bundleSource ?? `built-in:${selectedBundleId}`,
         inputs: inputValues,
         ...(referenceImages.length > 0 ? { referenceImages } : {}),
+        ...(runnerOverrides.length > 0 ? { runnerOverrides } : {}),
       });
       if (!result.ok) {
         setError(result.error);
@@ -605,6 +654,7 @@ export default function NewProjectScreen({
     workspacePath,
     productionNumber,
     inputValues,
+    runnerPlan,
     setupReferenceAttachments,
     openProject,
     onClose,
@@ -879,6 +929,61 @@ export default function NewProjectScreen({
               <hr className={styles.divider} style={{ marginTop: '40px' }} />
               <h3 className={styles.sectionLabel}>Compatibility</h3>
               <BundleConfigurator bundleId={selectedBundle.id} />
+              <div className={styles.runnerReview}>
+                <div className={styles.runnerReviewHeader}>
+                  <span>Runners</span>
+                  <span>
+                    {runnerPlanLoading
+                      ? 'Checking'
+                      : runnerPlan
+                        ? `${runnerPlan.overrides.length} override${runnerPlan.overrides.length === 1 ? '' : 's'}`
+                        : 'Bundle defaults'}
+                  </span>
+                </div>
+                {runnerPlanError ? (
+                  <div className={styles.runnerReviewError}>{runnerPlanError}</div>
+                ) : runnerPlanLoading ? (
+                  <div className={styles.runnerReviewEmpty}>Checking runner defaults…</div>
+                ) : runnerPlan && runnerPlan.nodes.some((node) => node.candidates.length > 0) ? (
+                  <div className={styles.runnerRows}>
+                    {runnerPlan.nodes
+                      .filter((node) => node.candidates.length > 0)
+                      .map((node) => (
+                        <div key={node.nodeId} className={styles.runnerRow}>
+                          <div>
+                            <div className={styles.runnerNodeName}>
+                              {node.displayName ?? node.nodeId}
+                            </div>
+                            <div className={styles.runnerNodeMeta}>
+                              {node.currentTool}
+                              {node.proposedTool && node.proposedTool !== node.currentTool
+                                ? ` → ${node.proposedTool}`
+                                : ''}
+                            </div>
+                          </div>
+                          <div className={styles.runnerStatusBlock}>
+                            <span
+                              className={`${styles.runnerStatus} ${
+                                node.status === 'ready' || node.status === 'current'
+                                  ? styles.runnerStatusReady
+                                  : node.status === 'needs_setup' || node.status === 'warning'
+                                    ? styles.runnerStatusWarn
+                                    : styles.runnerStatusBlocked
+                              }`}
+                            >
+                              {node.status.replace('_', ' ')}
+                            </span>
+                            <span className={styles.runnerReason}>{node.reason}</span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                ) : (
+                  <div className={styles.runnerReviewEmpty}>
+                    Bundle runners will be used for this project.
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setShowByo((v) => !v)}

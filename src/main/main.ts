@@ -1593,6 +1593,14 @@ type ProjectInitModule = {
 	    inputs?: Record<string, unknown>;
 	    referenceImages?: ReferenceImagePayload[];
 	    budgetCapUsd?: number;
+	    runnerOverrides?: Array<{
+	      nodeId: string;
+	      toTool: string;
+	      configOverride?: Record<string, unknown>;
+	      generatedConfigOverride?: Record<string, unknown>;
+	      runtimeBindings?: Array<{ configKey: string; fromInput: string }>;
+	      reason?: string;
+	    }>;
 	  }) =>
     | { ok: true; projectDir: string }
     | { ok: false; error: string };
@@ -1669,6 +1677,14 @@ ipcMain.handle(
 	      description?: string;
 	      inputs?: Record<string, unknown>;
 	      referenceImages?: ReferenceImagePayload[];
+	      runnerOverrides?: Array<{
+	        nodeId: string;
+	        toTool: string;
+	        configOverride?: Record<string, unknown>;
+	        generatedConfigOverride?: Record<string, unknown>;
+	        runtimeBindings?: Array<{ configKey: string; fromInput: string }>;
+	        reason?: string;
+	      }>;
 	    },
   ): Promise<{ ok: true; projectDir: string } | { ok: false; error: string }> => {
     try {

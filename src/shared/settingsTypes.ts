@@ -1,5 +1,7 @@
 export type ComfyUIMode = 'inherit' | 'custom';
 export type BackendMode = 'local' | 'cloud';
+export type RunnerDefaultKind = 'text' | 'image' | 'video' | 'audio';
+export type RunnerDefaults = Partial<Record<RunnerDefaultKind, string[]>>;
 /**
  * One backend lane (LLM or ComfyUI) routing target. The two lanes are
  * independent: a user can keep ComfyUI local while sending paid LLM
@@ -142,6 +144,11 @@ export interface AppSettings {
   llmTierLight: LLMTierConfig;
   /** Global desktop theme selection. */
   themeId: ThemeId;
+  /**
+   * Ordered global runner preferences by output lane. Applied only when
+   * bundle/node compatibility passes; otherwise the bundle runner stays.
+   */
+  runnerDefaults?: RunnerDefaults;
   projectDir?: string;
   /**
    * Pi-agent oversight: when true, pi-agent is auto-engaged on

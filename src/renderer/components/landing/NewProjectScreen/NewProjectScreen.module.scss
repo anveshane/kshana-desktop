@@ -499,6 +499,120 @@
   }
 }
 
+// ─── Runner compatibility review ─────────────────────────────────────
+
+.runnerReview {
+  margin-top: 18px;
+  border: 1px solid var(--slate-border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.runnerReviewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--slate-border);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--slate-fg-muted);
+}
+
+.runnerRows {
+  display: flex;
+  flex-direction: column;
+}
+
+.runnerRow {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.9fr) minmax(0, 1.5fr);
+  gap: 18px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--slate-border);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+}
+
+.runnerNodeName {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--slate-fg);
+}
+
+.runnerNodeMeta,
+.runnerReason,
+.runnerReviewEmpty,
+.runnerReviewError {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--slate-fg-muted);
+}
+
+.runnerNodeMeta {
+  margin-top: 4px;
+  word-break: break-word;
+}
+
+.runnerStatusBlock {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.runnerStatus {
+  flex: 0 0 auto;
+  border: 1px solid var(--slate-border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.runnerStatusReady {
+  color: var(--color-success);
+  border-color: rgba(var(--color-success-rgb), 0.38);
+  background: rgba(var(--color-success-rgb), 0.1);
+}
+
+.runnerStatusWarn {
+  color: var(--color-warning);
+  border-color: rgba(var(--color-warning-rgb), 0.38);
+  background: rgba(var(--color-warning-rgb), 0.1);
+}
+
+.runnerStatusBlocked {
+  color: var(--slate-rec);
+  border-color: rgba(232, 69, 56, 0.38);
+  background: rgba(232, 69, 56, 0.08);
+}
+
+.runnerReason {
+  min-width: 0;
+}
+
+.runnerReviewEmpty,
+.runnerReviewError {
+  padding: 12px 14px;
+}
+
+.runnerReviewError {
+  color: var(--slate-rec);
+}
+
 // ─── Text input ───────────────────────────────────────────────────
 
 .textInput {

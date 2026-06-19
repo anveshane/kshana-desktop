@@ -60,3 +60,83 @@
   background: var(--color-border-subtle);
   margin: 2px 0;
 }
+
+.switchPanel {
+  position: fixed;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 24px));
+  background: var(--color-bg-panel-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  padding: 12px;
+  font-family: 'SF Pro Display', 'Inter', system-ui, sans-serif;
+}
+
+.switchTitle {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.switchSelect {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 4px;
+  background: var(--color-bg-panel-soft);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.switchForce {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.switchError {
+  margin-top: 10px;
+  color: var(--color-error);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.switchActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.switchButton,
+.switchButtonPrimary {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  padding: 7px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.switchButton {
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.switchButtonPrimary {
+  background: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+  color: var(--color-bg-app);
+  font-weight: 700;
+}
+
+.switchButton:disabled,
+.switchButtonPrimary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

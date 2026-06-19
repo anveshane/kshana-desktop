@@ -61,10 +61,15 @@ import {
   type DeleteWorkflowResponse,
   type ValidateWorkflowRequest,
   type ValidateWorkflowResponse,
+  type ListRunnersResponse,
+  type PreviewBundleRunnerPlanRequest,
+  type PreviewBundleRunnerPlanResponse,
   type ClearChatHistoryRequest,
   type ClearChatHistoryResponse,
   type GetHistoryRequest,
   type GetHistoryResponse,
+  type SwitchRunnerRequest,
+  type SwitchRunnerResponse,
 } from '../shared/dheeIpc';
 import {
   appendReferenceImagesToTask,
@@ -439,6 +444,71 @@ export function registerdheeIpcBridge(
     },
   );
 
+  // ── Runner switching ────────────────────────────────────────────────
+
+  ipcMain.handle(
+    dhee_CHANNELS.LIST_RUNNERS,
+    async (): Promise<ListRunnersResponse> => {
+      try {
+        const dagMod = (await import(/* webpackIgnore: true */ 'dhee-core/dag')) as unknown as {
+          listRunnerCatalog: () => Promise<NonNullable<ListRunnersResponse['runners']>>;
+        };
+        return { ok: true, runners: await dagMod.listRunnerCatalog() };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    dhee_CHANNELS.PREVIEW_BUNDLE_RUNNER_PLAN,
+    async (
+      _event,
+      req: PreviewBundleRunnerPlanRequest,
+    ): Promise<PreviewBundleRunnerPlanResponse> => {
+      try {
+        const dagMod = (await import(/* webpackIgnore: true */ 'dhee-core/dag')) as unknown as {
+          previewBundleRunnerPlanFromSource: (
+            input: PreviewBundleRunnerPlanRequest,
+          ) => Promise<NonNullable<PreviewBundleRunnerPlanResponse['plan']>>;
+        };
+        return { ok: true, plan: await dagMod.previewBundleRunnerPlanFromSource(req) };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    dhee_CHANNELS.SWITCH_RUNNER,
+    async (_event, req: SwitchRunnerRequest): Promise<SwitchRunnerResponse> => {
+      try {
+        const dagMod = (await import(/* webpackIgnore: true */ 'dhee-core/dag')) as unknown as {
+          switchRunnerForProject: (input: Omit<SwitchRunnerRequest, 'regenerate'>) => Promise<SwitchRunnerResponse>;
+        };
+        const { regenerate: shouldRegenerate, ...switchReq } = req;
+        const switched = await dagMod.switchRunnerForProject(switchReq);
+        if (!switched.ok) return switched;
+        if (!shouldRegenerate) return { ...switched, regenerated: false };
+        const redo = await manager.redoNode(undefined, req.nodeId, {
+          projectDir: req.projectDir,
+          ...(req.itemId ? { itemId: req.itemId } : {}),
+        });
+        if (!redo.ok) {
+          return {
+            ...switched,
+            ok: false,
+            regenerated: false,
+            error: redo.error ?? 'Runner switched, but regeneration failed.',
+          };
+        }
+        return { ...switched, regenerated: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
+
   // Resolve a bundleSource URI to its parsed bundle definition. The
   // renderer's PromptsView / AssetsView / etc. use this to discover
   // which nodes produce which capability — keeps the desktop bundle-
@@ -476,6 +546,7 @@ export function registerdheeIpcBridge(
             headlineField?: string;
             itemSource?: string;
             itemKey?: string;
+            runner?: { tool?: string };
             outputs: { format: string; pattern: string };
             inputs?: Array<{ from: string }>;
           }>;
@@ -507,6 +578,7 @@ export function registerdheeIpcBridge(
               // count. Bundle-agnostic: just itemSource + itemKey.
               ...(n.itemSource ? { itemSource: n.itemSource } : {}),
               ...(n.itemKey ? { itemKey: n.itemKey } : {}),
+              ...(n.runner?.tool ? { runner: { tool: n.runner.tool } } : {}),
               outputs: { format: n.outputs.format, pattern: n.outputs.pattern },
               inputs: (n.inputs ?? []).map((i) => ({ from: i.from })),
             })),

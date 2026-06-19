@@ -49,6 +49,7 @@ const baseSettings = {
     googleApiKey: '',
     geminiModel: 'gemini-2.5-flash',
   },
+  runnerDefaults: {},
 };
 
 describe('SettingsPanel', () => {
@@ -56,6 +57,10 @@ describe('SettingsPanel', () => {
     Object.defineProperty(window, 'electron', {
       configurable: true,
       value: {},
+    });
+    Object.defineProperty(window, 'dhee', {
+      configurable: true,
+      value: undefined,
     });
   });
 
@@ -78,6 +83,16 @@ describe('SettingsPanel', () => {
     // was removed. No tab button, no theme cards.
     expect(screen.queryByText('Appearance')).toBeNull();
     expect(screen.queryByText('Deep Forest & Gold')).toBeNull();
+    expect(screen.queryByText('Runners')).toBeNull();
+    const presetGroup = screen.getByRole('group', {
+      name: 'Connection presets',
+    });
+    expect(
+      within(presetGroup).getByRole('button', { name: /Local \/ BYO/i }),
+    ).toBeInTheDocument();
+    expect(
+      within(presetGroup).getByRole('button', { name: /Dhee Cloud/i }),
+    ).toBeInTheDocument();
   });
 
   it('exposes the VLM judge toggle in the Connection tab and saves on change', async () => {
@@ -188,9 +203,212 @@ describe('SettingsPanel', () => {
     expect(comfyCloudCheckbox.checked).toBe(false);
     expect(
       screen.getByText(
-        /Starter and Free accounts bring their own ComfyUI endpoint/i,
+        /Hosted Dhee Cloud ComfyUI is not included in your current plan/i,
       ),
     ).toBeInTheDocument();
+  });
+
+  it('stages the Dhee Cloud preset and saves canonical runner defaults for eligible accounts', async () => {
+    Object.defineProperty(window, 'electron', {
+      configurable: true,
+      value: {
+        account: {
+          get: jest.fn().mockResolvedValue({
+            userId: 'user_1',
+            email: 'standard@example.com',
+            credits: 7000,
+            planId: 'standard_20',
+            planLabel: 'Standard',
+            subscriptionStatus: 'active',
+            token: 'desktop-jwt',
+          }),
+          getBillingUrl: jest.fn().mockResolvedValue(''),
+          getAuthStatus: jest.fn().mockResolvedValue('idle'),
+          signIn: jest.fn(),
+          signOut: jest.fn(),
+          refreshBalance: jest.fn(),
+          openBilling: jest.fn(),
+          onChange: () => () => {},
+          onAuthStatusChange: () => () => {},
+        },
+      },
+    });
+    const onSave = jest.fn().mockResolvedValue(true);
+
+    await act(async () => {
+      render(
+        <SettingsPanel
+          isOpen
+          settings={baseSettings}
+          onClose={jest.fn()}
+          onThemeChange={jest.fn()}
+          onSaveConnection={onSave}
+          isSavingConnection={false}
+          error={null}
+        />,
+      );
+    });
+
+    expect(
+      await screen.findByText(/Dhee Cloud handles text, image, and video/i),
+    ).toBeInTheDocument();
+
+    const presetGroup = screen.getByRole('group', {
+      name: 'Connection presets',
+    });
+    await act(async () => {
+      fireEvent.click(
+        within(presetGroup).getByRole('button', { name: /Dhee Cloud/i }),
+      );
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Save & Restart/i }));
+
+    expect(onSave).toHaveBeenCalled();
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      backendMode: 'cloud',
+      llmBackend: 'cloud',
+      comfyBackend: 'cloud',
+      vlmBackend: 'cloud',
+      runnerDefaults: {
+        text: ['dhee.cloud.text'],
+        image: ['dhee.cloud.image'],
+        video: ['dhee.cloud.video'],
+      },
+    });
+  });
+
+  it('stages the Local preset and clears global runner defaults', async () => {
+    const onSave = jest.fn().mockResolvedValue(true);
+
+    await act(async () => {
+      render(
+        <SettingsPanel
+          isOpen
+          settings={{
+            ...baseSettings,
+            backendMode: 'cloud',
+            llmBackend: 'cloud',
+            comfyBackend: 'cloud',
+            vlmBackend: 'cloud',
+            runnerDefaults: {
+              text: ['dhee.cloud.text'],
+              image: ['dhee.cloud.image'],
+              video: ['dhee.cloud.video'],
+            },
+          }}
+          onClose={jest.fn()}
+          onThemeChange={jest.fn()}
+          onSaveConnection={onSave}
+          isSavingConnection={false}
+          error={null}
+        />,
+      );
+    });
+
+    const presetGroup = screen.getByRole('group', {
+      name: 'Connection presets',
+    });
+    fireEvent.click(
+      within(presetGroup).getByRole('button', { name: /Local \/ BYO/i }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Save & Restart/i }));
+
+    expect(onSave).toHaveBeenCalled();
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      backendMode: 'local',
+      llmBackend: 'local',
+      comfyBackend: 'local',
+      vlmBackend: 'local',
+      runnerDefaults: {},
+    });
+  });
+
+  it('shows Custom as the route preset for mixed settings', async () => {
+    await act(async () => {
+      render(
+        <SettingsPanel
+          isOpen
+          settings={{
+            ...baseSettings,
+            backendMode: 'cloud',
+            llmBackend: 'cloud',
+            comfyBackend: 'local',
+            vlmBackend: 'local',
+          }}
+          onClose={jest.fn()}
+          onThemeChange={jest.fn()}
+          onSaveConnection={jest.fn()}
+          isSavingConnection={false}
+          error={null}
+        />,
+      );
+    });
+
+    expect(screen.getByText('Route preset')).toBeInTheDocument();
+    expect(screen.getByText('Custom')).toBeInTheDocument();
+  });
+
+  it('keeps runner defaults collapsed under Connection and saves edits through Save & Restart', async () => {
+    const listRunners = jest.fn().mockResolvedValue({
+      ok: true,
+      runners: [
+        {
+          tool: 'dhee.cloud.image',
+          displayName: 'Dhee Cloud Image',
+          kinds: ['image'],
+          outputFormats: ['image'],
+          registered: true,
+        },
+        {
+          tool: 'comfy.tti',
+          displayName: 'Comfy text-to-image',
+          kinds: ['image'],
+          outputFormats: ['image'],
+          registered: true,
+        },
+      ],
+    });
+    Object.defineProperty(window, 'dhee', {
+      configurable: true,
+      value: { listRunners },
+    });
+    const onSave = jest.fn().mockResolvedValue(true);
+
+    await act(async () => {
+      render(
+        <SettingsPanel
+          isOpen
+          settings={{
+            ...baseSettings,
+            runnerDefaults: { image: ['dhee.cloud.image'] },
+          }}
+          onClose={jest.fn()}
+          onThemeChange={jest.fn()}
+          onSaveConnection={onSave}
+          isSavingConnection={false}
+          error={null}
+        />,
+      );
+    });
+
+    expect(screen.queryByText('Dhee Cloud Image')).not.toBeInTheDocument();
+    const advancedSummary = screen
+      .getByText('Advanced runner defaults')
+      .closest('summary');
+    expect(advancedSummary).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(advancedSummary!);
+    });
+
+    expect(listRunners).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Dhee Cloud Image')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save & Restart/i }));
+
+    expect(onSave).toHaveBeenCalled();
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      runnerDefaults: {},
+    });
   });
 
   it('shows ComfyUI and provider settings on the Connection tab', async () => {
@@ -457,6 +675,31 @@ describe('SettingsPanel', () => {
   });
 
   it('hides ComfyUI URL inputs when "Use Dhee Cloud for ComfyUI" is on, reveals them when off', async () => {
+    Object.defineProperty(window, 'electron', {
+      configurable: true,
+      value: {
+        account: {
+          get: jest.fn().mockResolvedValue({
+            userId: 'user_1',
+            email: 'standard@example.com',
+            credits: 7000,
+            planId: 'standard_20',
+            planLabel: 'Standard',
+            subscriptionStatus: 'active',
+            token: 'desktop-jwt',
+          }),
+          getBillingUrl: jest.fn().mockResolvedValue(''),
+          getAuthStatus: jest.fn().mockResolvedValue('idle'),
+          signIn: jest.fn(),
+          signOut: jest.fn(),
+          refreshBalance: jest.fn(),
+          openBilling: jest.fn(),
+          onChange: () => () => {},
+          onAuthStatusChange: () => () => {},
+        },
+      },
+    });
+
     await act(async () => {
       render(
         <SettingsPanel
@@ -532,7 +775,7 @@ describe('SettingsPanel', () => {
 
     expect(
       await screen.findByText(
-        /Starter and Free accounts bring their own ComfyUI endpoint/i,
+        /Hosted Dhee Cloud ComfyUI is not included in your current plan/i,
       ),
     ).toBeInTheDocument();
 
