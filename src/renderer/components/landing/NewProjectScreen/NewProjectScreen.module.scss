@@ -283,6 +283,40 @@
   flex: 1;
 }
 
+.runtimeBadgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.runtimeBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 3px 7px;
+  border: 1px solid var(--slate-border-hi);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--slate-fg-muted);
+  background: rgba(244, 241, 234, 0.03);
+}
+
+.runtimeBadgeCloud {
+  border-color: rgba(232, 163, 61, 0.45);
+  color: var(--slate-accent);
+  background: var(--slate-accent-soft);
+}
+
+.runtimeBadgeProvider {
+  color: var(--slate-fg);
+}
+
 .bundleSpec {
   font-family: var(--font-mono);
   font-size: 10px;

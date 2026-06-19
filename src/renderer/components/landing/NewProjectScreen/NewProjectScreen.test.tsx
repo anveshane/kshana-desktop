@@ -19,6 +19,10 @@ const youtubeBundle = {
   displayName: 'YouTube Short',
   summary: 'Short-form vertical video.',
   pickerEligible: true,
+  runtimeSupport: {
+    modes: ['local', 'dhee_cloud'],
+    providers: ['llm', 'ffmpeg'],
+  },
   inputs: [
     {
       id: 'story_input',
@@ -166,6 +170,17 @@ describe('NewProjectScreen bundle packages', () => {
       );
     });
     expect(consumeProjectAutoStart('/projects/my-short')).toBe(true);
+  });
+
+  it('shows Dhee Cloud support labels on bundle cards', async () => {
+    listBundles.mockResolvedValue([youtubeBundle]);
+
+    render(<NewProjectScreen isOpen onClose={jest.fn()} />);
+
+    await waitFor(() => screen.getByText('YouTube Short'));
+    expect(screen.getByText('Supported by Dhee Cloud')).not.toBeNull();
+    expect(screen.getByText('Local')).not.toBeNull();
+    expect(screen.getByText('LLM')).not.toBeNull();
   });
 
   it('imports setup character references and passes them into project initialization', async () => {

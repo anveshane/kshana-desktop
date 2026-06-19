@@ -1606,6 +1606,7 @@ type ProjectInitModule = {
     techLine?: string;
     description?: string;
     inputs?: unknown[];
+    runtimeSupport?: { modes: string[]; providers: string[] };
   }>;
 };
 
@@ -1622,6 +1623,7 @@ ipcMain.handle(
       techLine?: string;
       description?: string;
       inputs?: unknown[];
+      runtimeSupport?: { modes: string[]; providers: string[] };
     }>
   > => {
     try {

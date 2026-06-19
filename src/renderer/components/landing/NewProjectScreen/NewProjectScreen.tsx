@@ -70,6 +70,11 @@ interface BundleInputDecl {
   unit?: string;
 }
 
+interface BundleRuntimeSupport {
+  modes?: string[];
+  providers?: string[];
+}
+
 interface BundleSummary {
   id: string;
   version: string;
@@ -80,7 +85,15 @@ interface BundleSummary {
   techLine?: string;
   description?: string;
   inputs?: BundleInputDecl[];
+  runtimeSupport?: BundleRuntimeSupport;
   pickerEligible?: boolean;
+}
+
+type RuntimeBadgeKind = 'local' | 'cloud' | 'provider';
+
+interface RuntimeBadge {
+  label: string;
+  kind: RuntimeBadgeKind;
 }
 
 interface NewProjectScreenProps {
@@ -124,6 +137,39 @@ const ROTATING_NOUNS = [
   'art film',
 ];
 const NOUN_ROTATE_MS = 1900;
+
+const PROVIDER_LABELS: Record<string, string> = {
+  comfy: 'Comfy',
+  openrouter: 'OpenRouter',
+  llm: 'LLM',
+  ffmpeg: 'FFmpeg',
+};
+
+function runtimeSupportBadges(
+  runtimeSupport?: BundleRuntimeSupport,
+): RuntimeBadge[] {
+  const modes = new Set(runtimeSupport?.modes ?? []);
+  const providers = new Set(runtimeSupport?.providers ?? []);
+  const badges: RuntimeBadge[] = [];
+
+  if (modes.has('local')) badges.push({ label: 'Local', kind: 'local' });
+  if (modes.has('dhee_cloud')) {
+    badges.push({ label: 'Supported by Dhee Cloud', kind: 'cloud' });
+  }
+
+  Object.entries(PROVIDER_LABELS).forEach(([provider, label]) => {
+    if (providers.has(provider)) badges.push({ label, kind: 'provider' });
+  });
+
+  return badges;
+}
+
+function runtimeBadgeClassName(kind: RuntimeBadgeKind): string {
+  const classNames = [styles.runtimeBadge];
+  if (kind === 'cloud') classNames.push(styles.runtimeBadgeCloud);
+  if (kind === 'provider') classNames.push(styles.runtimeBadgeProvider);
+  return classNames.join(' ');
+}
 
 function safeFolderName(name: string): string {
   return name
@@ -681,6 +727,7 @@ export default function NewProjectScreen({
           {/* Installed + built-in bundles — selectable. */}
           {bundles.map((bundle) => {
             const selected = bundle.id === selectedBundleId;
+            const runtimeBadges = runtimeSupportBadges(bundle.runtimeSupport);
             return (
               <button
                 key={bundle.id}
@@ -701,6 +748,18 @@ export default function NewProjectScreen({
                   Installed
                 </div>
                 <h2 className={styles.bundleName}>{bundle.displayName}</h2>
+                {runtimeBadges.length > 0 ? (
+                  <div className={styles.runtimeBadgeRow}>
+                    {runtimeBadges.map((badge) => (
+                      <span
+                        key={`${bundle.id}-${badge.label}`}
+                        className={runtimeBadgeClassName(badge.kind)}
+                      >
+                        {badge.label}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <p className={styles.bundleSummary}>{bundle.summary}</p>
                 {bundle.techLine ? (
                   <div className={styles.bundleSpec}>{bundle.techLine}</div>

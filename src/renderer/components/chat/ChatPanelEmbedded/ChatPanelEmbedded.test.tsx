@@ -647,6 +647,53 @@ describe('ChatPanelEmbedded', () => {
     });
   });
 
+  it('renders Dhee Cloud support labels on bundle choice cards', async () => {
+    renderPanel();
+    await waitFor(() => screen.getByRole('textbox'));
+    await waitFor(() => {
+      expect(mockState.listeners.some((l) => l.active)).toBe(true);
+    });
+
+    act(() => {
+      publishEvent('tool_call', {
+        toolCallId: 'tc-bundles',
+        toolName: 'dhee_present_bundle_choices',
+        arguments: { bundleIds: ['narrative_prompt_relay'] },
+        status: 'in_progress',
+      });
+      publishEvent('tool_result', {
+        toolCallId: 'tc-bundles',
+        toolName: 'dhee_present_bundle_choices',
+        isError: false,
+        result: {
+          content: JSON.stringify({
+            kind: 'bundle_choices',
+            bundleIds: ['narrative_prompt_relay'],
+            bundles: [
+              {
+                id: 'narrative_prompt_relay',
+                displayName: 'Narrative Prompt Relay',
+                summary: 'Full narrative pipeline.',
+                runtimeSupport: {
+                  modes: ['local', 'dhee_cloud'],
+                  providers: ['comfy', 'openrouter'],
+                },
+              },
+            ],
+          }),
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Narrative Prompt Relay')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Supported by Dhee Cloud')).toBeInTheDocument();
+    expect(screen.getByText('Local')).toBeInTheDocument();
+    expect(screen.getByText('Comfy')).toBeInTheDocument();
+    expect(screen.getByText('OpenRouter')).toBeInTheDocument();
+  });
+
   it('BUG: stream_chunk + agent_response + trailing empty chunk produces exactly one DHEE bubble (no phantom)', async () => {
     // Real-world repro: agent finishes with an assistant text reply.
     // Whatever upstream sequence the provider takes — trailing empty

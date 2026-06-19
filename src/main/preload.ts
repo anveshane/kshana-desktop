@@ -367,6 +367,7 @@ const projectBridge = {
       techLine?: string;
       description?: string;
       inputs?: unknown[];
+      runtimeSupport?: { modes: string[]; providers: string[] };
     }>
   > {
     return ipcRenderer.invoke('bundle:list');
