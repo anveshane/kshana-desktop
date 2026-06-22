@@ -40,6 +40,11 @@ export interface ChatAttachmentPreview {
   replacementTargetName?: string;
 }
 
+export interface BundleRuntimeSupport {
+  modes: string[];
+  providers: string[];
+}
+
 export interface ChatMessage {
   id: string;
   role: Role;
@@ -119,7 +124,12 @@ export interface ChatMessage {
    */
   bundleChoices?: {
     ids: string[];
-    bundles?: Array<{ id: string; displayName: string; summary: string }>;
+    bundles?: Array<{
+      id: string;
+      displayName: string;
+      summary: string;
+      runtimeSupport?: BundleRuntimeSupport;
+    }>;
     question?: string;
   };
   /** Set true once user clicked one of the choices — disables remaining cards. */

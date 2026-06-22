@@ -977,6 +977,7 @@ export default function LandingScreen() {
         onClose={() => setIsNewProjectDialogOpen(false)}
         backendReady={backendStatus.allConfigured}
         unconfiguredLanes={backendStatus.unconfiguredLanes}
+        comfyBackend={settings?.comfyBackend ?? 'local'}
         onConnectBackends={() => {
           clearError();
           setIsNewProjectDialogOpen(false);

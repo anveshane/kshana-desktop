@@ -143,14 +143,14 @@ describe('checkLaneConfigured — Comfy lane', () => {
     expect(out.reason).toMatch(/ComfyUI URL/);
   });
 
-  it('cloud needs BOTH account AND Comfy Cloud API key', () => {
+  it('cloud needs a signed-in Dhee account, not a Comfy Cloud API key', () => {
     expect(
       checkLaneConfigured(
         'comfy',
         baseSettings({ comfyBackend: 'cloud' }),
         account,
       ).configured,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       checkLaneConfigured(
         'comfy',
@@ -158,13 +158,6 @@ describe('checkLaneConfigured — Comfy lane', () => {
         null,
       ).configured,
     ).toBe(false);
-    expect(
-      checkLaneConfigured(
-        'comfy',
-        baseSettings({ comfyBackend: 'cloud', comfyCloudApiKey: 'cck' }),
-        account,
-      ).configured,
-    ).toBe(true);
   });
 });
 

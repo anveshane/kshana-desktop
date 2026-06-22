@@ -18,6 +18,7 @@
  *   - context_usage: footer token-usage indicator.
  */
 import {
+  type CSSProperties,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -67,6 +68,7 @@ import {
   type ProjectLifecycleState,
 } from './classifyProjectState';
 import type {
+  BundleRuntimeSupport,
   ChatAttachmentPreview,
   ChatMessage,
   ToolStatus,
@@ -110,6 +112,87 @@ function normalizeProjectDirectoryForChat(
  * enough that we don't flood the IPC layer.
  */
 const RUNNER_STATUS_POLL_MS = 1500;
+
+const BUNDLE_PROVIDER_LABELS: Record<string, string> = {
+  comfy: 'Comfy',
+  openrouter: 'OpenRouter',
+  llm: 'LLM',
+  ffmpeg: 'FFmpeg',
+};
+
+type BundleRuntimeBadge = {
+  label: string;
+  kind: 'local' | 'cloud' | 'provider';
+};
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function normalizeBundleRuntimeSupport(
+  value: unknown,
+): BundleRuntimeSupport | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const modes = normalizeStringArray(record.modes);
+  const providers = normalizeStringArray(record.providers);
+  if (modes.length === 0 && providers.length === 0) return undefined;
+  return { modes, providers };
+}
+
+function bundleRuntimeBadges(
+  runtimeSupport?: BundleRuntimeSupport,
+): BundleRuntimeBadge[] {
+  const modes = new Set(runtimeSupport?.modes ?? []);
+  const providers = new Set(runtimeSupport?.providers ?? []);
+  const badges: BundleRuntimeBadge[] = [];
+
+  if (modes.has('local')) badges.push({ label: 'Local', kind: 'local' });
+  if (modes.has('dhee_cloud')) {
+    badges.push({ label: 'Supported by Dhee Cloud', kind: 'cloud' });
+  }
+
+  Object.entries(BUNDLE_PROVIDER_LABELS).forEach(([provider, label]) => {
+    if (providers.has(provider)) badges.push({ label, kind: 'provider' });
+  });
+
+  return badges;
+}
+
+function bundleRuntimeBadgeStyle(
+  badge: BundleRuntimeBadge,
+  muted: boolean,
+): CSSProperties {
+  let color = 'rgba(229, 225, 216, 0.72)';
+  if (muted) color = 'rgba(229, 225, 216, 0.35)';
+  else if (badge.kind === 'cloud') color = 'var(--color-accent-primary)';
+
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 18,
+    padding: '2px 6px',
+    borderRadius: 4,
+    border: `1px solid ${
+      badge.kind === 'cloud'
+        ? 'rgba(234, 179, 8, 0.5)'
+        : 'rgba(168, 156, 139, 0.28)'
+    }`,
+    color,
+    background:
+      badge.kind === 'cloud'
+        ? 'rgba(234, 179, 8, 0.08)'
+        : 'rgba(229, 225, 216, 0.03)',
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+    lineHeight: 1,
+  };
+}
 
 /**
  * Defense-in-depth for the "silent run" bug. The real fix is making
@@ -2431,6 +2514,7 @@ function MessageRow({
             const meta = m.bundleChoices?.bundles?.find((b) => b.id === bid);
             const displayName = meta?.displayName ?? bid;
             const summary = meta?.summary ?? '';
+            const runtimeBadges = bundleRuntimeBadges(meta?.runtimeSupport);
             return (
               <button
                 key={bid}
@@ -2462,6 +2546,25 @@ function MessageRow({
                     {summary}
                   </div>
                 )}
+                {runtimeBadges.length > 0 ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 5,
+                      marginTop: 8,
+                    }}
+                  >
+                    {runtimeBadges.map((badge) => (
+                      <span
+                        key={`${bid}-${badge.label}`}
+                        style={bundleRuntimeBadgeStyle(badge, otherMade)}
+                      >
+                        {badge.label}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 {isMade && (
                   <div style={{ fontSize: 11, color: 'var(--color-accent-primary)', marginTop: 6 }}>✓ selected</div>
                 )}
@@ -2835,7 +2938,12 @@ function handleEvent(
         : undefined;
       let bundleChoices: {
         ids: string[];
-        bundles?: Array<{ id: string; displayName: string; summary: string }>;
+        bundles?: Array<{
+          id: string;
+          displayName: string;
+          summary: string;
+          runtimeSupport?: BundleRuntimeSupport;
+        }>;
         question?: string;
       } | null = null;
       if (
@@ -2847,7 +2955,12 @@ function handleEvent(
           const parsed = JSON.parse(txt) as {
             kind?: string;
             bundleIds?: string[];
-            bundles?: Array<{ id?: string; displayName?: string; summary?: string }>;
+            bundles?: Array<{
+              id?: string;
+              displayName?: string;
+              summary?: string;
+              runtimeSupport?: unknown;
+            }>;
             question?: string;
           };
           if (parsed.kind === 'bundle_choices' && Array.isArray(parsed.bundleIds) && parsed.bundleIds.length > 0) {
@@ -2857,16 +2970,28 @@ function handleEvent(
             // resort).
             const normalizedBundles = Array.isArray(parsed.bundles)
               ? parsed.bundles
-                  .filter((b): b is { id: string; displayName?: string; summary?: string } =>
+                  .filter((b): b is {
+                    id: string;
+                    displayName?: string;
+                    summary?: string;
+                    runtimeSupport?: unknown;
+                  } =>
                     !!b && typeof b.id === 'string' && b.id.length > 0,
                   )
-                  .map((b) => ({
-                    id: b.id,
-                    displayName: typeof b.displayName === 'string' && b.displayName.trim().length > 0
-                      ? b.displayName.trim()
-                      : b.id,
-                    summary: typeof b.summary === 'string' ? b.summary.trim() : '',
-                  }))
+                  .map((b) => {
+                    const runtimeSupport = normalizeBundleRuntimeSupport(b.runtimeSupport);
+                    const displayName =
+                      typeof b.displayName === 'string'
+                      && b.displayName.trim().length > 0
+                        ? b.displayName.trim()
+                        : b.id;
+                    return {
+                      id: b.id,
+                      displayName,
+                      summary: typeof b.summary === 'string' ? b.summary.trim() : '',
+                      ...(runtimeSupport ? { runtimeSupport } : {}),
+                    };
+                  })
               : undefined;
             bundleChoices = {
               ids: parsed.bundleIds,

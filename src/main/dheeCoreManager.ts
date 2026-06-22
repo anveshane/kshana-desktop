@@ -1241,6 +1241,19 @@ export function applyEnvFromSettings(
     process.env.ENDPOINT_self_local = comfyBaseUrl.trim();
   }
 
+  // In dhee Cloud mode, ALL Comfy traffic — including nodes the bundle
+  // tagged endpoint:"public.cloud" (character_image, setting_image,
+  // shot_image) — must flow through the metered proxy. Without this
+  // remap, those nodes resolve `public.cloud` → cloud.comfy.org DIRECTLY
+  // and authenticate with the dhee desktop token, which comfy.org rejects
+  // (401 authentication required), bypassing the user's plan entirely.
+  // Mirrors how COMFYUI_BASE_URL / ENDPOINT_self_local are already pointed
+  // at the proxy above. In local mode this is skipped, so public.cloud
+  // keeps its comfy.org meaning (a user with their own comfy.org key).
+  if (useCloudComfy && comfyBaseUrl.trim()) {
+    process.env.ENDPOINT_public_cloud = comfyBaseUrl.trim();
+  }
+
   // LLM routing — gated by the dedicated `llmBackend` lane (set above
   // as `useCloudLLM`). This is independent of `comfyBackend`: a user
   // can run LLM through cloud while keeping ComfyUI local, or vice

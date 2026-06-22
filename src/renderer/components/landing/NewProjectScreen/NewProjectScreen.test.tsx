@@ -19,6 +19,10 @@ const youtubeBundle = {
   displayName: 'YouTube Short',
   summary: 'Short-form vertical video.',
   pickerEligible: true,
+  runtimeSupport: {
+    modes: ['local', 'dhee_cloud'],
+    providers: ['llm', 'ffmpeg'],
+  },
   inputs: [
     {
       id: 'story_input',
@@ -39,12 +43,27 @@ const youtubeBundle = {
   ],
 };
 
+const localOnlyBundle = {
+  ...youtubeBundle,
+  id: 'local_only_video',
+  bundleSource: 'user:local_only_video',
+  displayName: 'Local Only Video',
+  runtimeSupport: {
+    modes: ['local'],
+    providers: ['comfy', 'llm', 'ffmpeg'],
+  },
+};
+
 describe('NewProjectScreen bundle packages', () => {
   const listBundles = jest.fn<() => Promise<unknown[]>>();
   const installBundlePackage =
     jest.fn<(payload: unknown) => Promise<unknown>>();
   const searchNpmBundles =
     jest.fn<(payload?: unknown) => Promise<unknown>>();
+  const checkBundleFit =
+    jest.fn<(bundleId?: unknown, endpoint?: unknown) => Promise<unknown>>();
+  const readBundleResolution =
+    jest.fn<(bundleId?: unknown, endpoint?: unknown) => Promise<unknown>>();
   const initialize =
     jest.fn<(payload: unknown) => Promise<{ ok: true; projectDir: string }>>();
   const createFolder = jest.fn<() => Promise<string | null>>();
@@ -57,6 +76,8 @@ describe('NewProjectScreen bundle packages', () => {
     listBundles.mockReset();
     installBundlePackage.mockReset();
     searchNpmBundles.mockReset();
+    checkBundleFit.mockReset();
+    readBundleResolution.mockReset();
     initialize.mockReset();
     createFolder.mockReset();
     selectAttachment.mockReset();
@@ -73,6 +94,8 @@ describe('NewProjectScreen bundle packages', () => {
     importReferenceImages.mockResolvedValue({ ok: true, attachments: [] });
     // The picker auto-searches npm on open — default to no published hits.
     searchNpmBundles.mockResolvedValue({ ok: true, hits: [] });
+    checkBundleFit.mockResolvedValue({ error: 'ComfyUI not connected in test' });
+    readBundleResolution.mockResolvedValue(null);
 
     Object.defineProperty(window, 'electron', {
       configurable: true,
@@ -81,8 +104,8 @@ describe('NewProjectScreen bundle packages', () => {
           get: async () => ({ comfyuiMode: 'local', comfyuiUrl: '' }),
         },
         bundleConfig: {
-          check: async () => ({ error: 'ComfyUI not connected in test' }),
-          resolution: async () => null,
+          check: checkBundleFit,
+          resolution: readBundleResolution,
         },
         project: {
           listBundles,
@@ -166,6 +189,78 @@ describe('NewProjectScreen bundle packages', () => {
       );
     });
     expect(consumeProjectAutoStart('/projects/my-short')).toBe(true);
+  });
+
+  it('shows Dhee Cloud support labels on bundle cards', async () => {
+    listBundles.mockResolvedValue([youtubeBundle]);
+
+    render(<NewProjectScreen isOpen onClose={jest.fn()} />);
+
+    await waitFor(() => screen.getByText('YouTube Short'));
+    expect(screen.getByText('Supported by Dhee Cloud')).not.toBeNull();
+    expect(screen.getByText('Local')).not.toBeNull();
+    expect(screen.getByText('LLM')).not.toBeNull();
+  });
+
+  it('uses Dhee Cloud compatibility instead of probing local ComfyUI in cloud mode', async () => {
+    listBundles.mockResolvedValue([youtubeBundle]);
+
+    render(
+      <NewProjectScreen
+        isOpen
+        onClose={jest.fn()}
+        backendReady
+        comfyBackend="cloud"
+      />,
+    );
+
+    await waitFor(() => screen.getByText('YouTube Short'));
+    fireEvent.click(screen.getByText('YouTube Short'));
+
+    expect(screen.queryByText('ComfyUI endpoint')).toBeNull();
+    expect(screen.queryByText('Check fit')).toBeNull();
+    expect(screen.queryByText(/Endpoint unreachable/i)).toBeNull();
+    expect(screen.getAllByText(/Ready on Dhee Cloud/i).length).toBeGreaterThan(0);
+    expect(checkBundleFit).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText('Short idea...'), {
+      target: { value: 'A creator turns a lesson into a complete short.' },
+    });
+
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: /^roll/i }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+  });
+
+  it('blocks Roll for bundles that do not support Dhee Cloud Comfy', async () => {
+    listBundles.mockResolvedValue([localOnlyBundle]);
+
+    render(
+      <NewProjectScreen
+        isOpen
+        onClose={jest.fn()}
+        backendReady
+        comfyBackend="cloud"
+      />,
+    );
+
+    await waitFor(() => screen.getByText('Local Only Video'));
+    fireEvent.click(screen.getByText('Local Only Video'));
+    fireEvent.change(screen.getByPlaceholderText('Short idea...'), {
+      target: { value: 'A local workflow needs a local Comfy renderer.' },
+    });
+
+    expect(screen.getByText(/Not available on Dhee Cloud/i)).not.toBeNull();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: /^roll/i }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true),
+    );
+    expect(checkBundleFit).not.toHaveBeenCalled();
   });
 
   it('imports setup character references and passes them into project initialization', async () => {
