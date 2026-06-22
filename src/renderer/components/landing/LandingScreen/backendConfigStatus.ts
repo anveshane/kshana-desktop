@@ -5,8 +5,7 @@
  * to create until the user has at least one working LLM + Comfy).
  *
  * "Configured" means:
- *   - cloud mode: the user is signed in (and for Comfy, has a cloud
- *     API key on top of the sign-in)
+ *   - cloud mode: the user is signed in
  *   - local mode: the URL/key the provider actually needs is set
  *
  * Pure helpers — no IPC, no filesystem. Inputs are the settings blob
@@ -45,9 +44,6 @@ export function checkLaneConfigured(
     if (settings.comfyBackend === 'cloud') {
       if (!account) {
         return { lane, configured: false, reason: 'Sign in to Dhee Cloud' };
-      }
-      if (!settings.comfyCloudApiKey || !settings.comfyCloudApiKey.trim()) {
-        return { lane, configured: false, reason: 'Comfy Cloud API key missing' };
       }
       return { lane, configured: true, reason: '' };
     }

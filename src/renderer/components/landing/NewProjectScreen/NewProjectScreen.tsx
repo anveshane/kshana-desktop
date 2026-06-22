@@ -22,6 +22,7 @@ import type {
   ReferenceImagePayload,
   ReferenceImageRole,
 } from '../../../../shared/attachmentTypes';
+import type { BackendLane } from '../../../../shared/settingsTypes';
 import {
   attachmentsFromSelectResponse,
   isReferenceImageLikeAttachment,
@@ -105,6 +106,8 @@ interface NewProjectScreenProps {
   unconfiguredLanes?: Array<{ lane: string; reason: string }>;
   /** Open Settings to connect lanes (from the gate notice). */
   onConnectBackends?: () => void;
+  /** Current ComfyUI routing lane. Cloud mode does not probe local endpoints. */
+  comfyBackend?: BackendLane;
 }
 
 const STORY_INPUT_ID = 'story_input';
@@ -171,6 +174,10 @@ function runtimeBadgeClassName(kind: RuntimeBadgeKind): string {
   return classNames.join(' ');
 }
 
+function bundleSupportsDheeCloud(bundle: BundleSummary | null): boolean {
+  return Boolean(bundle?.runtimeSupport?.modes?.includes('dhee_cloud'));
+}
+
 function safeFolderName(name: string): string {
   return name
     .trim()
@@ -231,6 +238,7 @@ export default function NewProjectScreen({
   backendReady = true,
   unconfiguredLanes = [],
   onConnectBackends,
+  comfyBackend = 'local',
 }: NewProjectScreenProps) {
   const { openProject } = useWorkspace();
 
@@ -375,7 +383,13 @@ export default function NewProjectScreen({
   }, [isOpen, isSubmitting, onClose]);
 
   // Badge bundles already verified ready on this ComfyUI (cheap cache read).
+  // In Dhee Cloud mode, cloud fit is managed server-side, so the slate must not
+  // probe or label the user's local ComfyUI endpoint.
   useEffect(() => {
+    if (comfyBackend === 'cloud') {
+      setResolvedIds(new Set());
+      return undefined;
+    }
     if (!isOpen || bundles.length === 0) return;
     let cancelled = false;
     (async () => {
@@ -402,7 +416,7 @@ export default function NewProjectScreen({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, bundles]);
+  }, [isOpen, bundles, comfyBackend]);
 
   const selectedBundle = useMemo(
     () => bundles.find((b) => b.id === selectedBundleId) ?? null,
@@ -437,6 +451,10 @@ export default function NewProjectScreen({
   // it. titleOverride === null means "follow the story".
   const derivedTitle = deriveTitleFromStory(storyText);
   const title = titleOverride !== null ? titleOverride : derivedTitle;
+  const isComfyCloudMode = comfyBackend === 'cloud';
+  const selectedSupportsCloud = bundleSupportsDheeCloud(selectedBundle);
+  const bundleCompatibleWithBackend =
+    !isComfyCloudMode || selectedSupportsCloud;
 
   const canRoll =
     !!selectedBundleId &&
@@ -444,6 +462,7 @@ export default function NewProjectScreen({
     title.trim().length > 0 &&
     workspacePath.trim().length > 0 &&
     backendReady &&
+    bundleCompatibleWithBackend &&
     !isSubmitting;
 
   const handleSelectBundle = useCallback((id: string) => {
@@ -728,6 +747,13 @@ export default function NewProjectScreen({
           {bundles.map((bundle) => {
             const selected = bundle.id === selectedBundleId;
             const runtimeBadges = runtimeSupportBadges(bundle.runtimeSupport);
+            const readyLabel = isComfyCloudMode
+              ? bundleSupportsDheeCloud(bundle)
+                ? '✓ Ready on Dhee Cloud'
+                : null
+              : resolvedIds.has(bundle.id)
+                ? '✓ Ready on this ComfyUI'
+                : null;
             return (
               <button
                 key={bundle.id}
@@ -764,7 +790,7 @@ export default function NewProjectScreen({
                 {bundle.techLine ? (
                   <div className={styles.bundleSpec}>{bundle.techLine}</div>
                 ) : null}
-                {resolvedIds.has(bundle.id) ? (
+                {readyLabel ? (
                   <div
                     style={{
                       marginTop: 8,
@@ -773,7 +799,7 @@ export default function NewProjectScreen({
                       color: 'var(--color-success)',
                     }}
                   >
-                    ✓ Ready on this ComfyUI
+                    {readyLabel}
                   </div>
                 ) : null}
               </button>
@@ -937,27 +963,33 @@ export default function NewProjectScreen({
 
               <hr className={styles.divider} style={{ marginTop: '40px' }} />
               <h3 className={styles.sectionLabel}>Compatibility</h3>
-              <BundleConfigurator bundleId={selectedBundle.id} />
-              <button
-                type="button"
-                onClick={() => setShowByo((v) => !v)}
-                style={{
-                  marginTop: 12,
-                  font: 'inherit',
-                  fontSize: 12.5,
-                  cursor: 'pointer',
-                  color: 'var(--color-accent-primary)',
-                  background: 'transparent',
-                  border: 0,
-                  padding: 0,
-                }}
-              >
-                {showByo ? '× Hide custom workflow' : '+ Bring your own workflow'}
-              </button>
-              {showByo && (
-                <div style={{ marginTop: 10 }}>
-                  <WorkflowImport />
-                </div>
+              {isComfyCloudMode ? (
+                <CloudCompatibilityPanel supported={selectedSupportsCloud} />
+              ) : (
+                <>
+                  <BundleConfigurator bundleId={selectedBundle.id} />
+                  <button
+                    type="button"
+                    onClick={() => setShowByo((v) => !v)}
+                    style={{
+                      marginTop: 12,
+                      font: 'inherit',
+                      fontSize: 12.5,
+                      cursor: 'pointer',
+                      color: 'var(--color-accent-primary)',
+                      background: 'transparent',
+                      border: 0,
+                      padding: 0,
+                    }}
+                  >
+                    {showByo ? '× Hide custom workflow' : '+ Bring your own workflow'}
+                  </button>
+                  {showByo && (
+                    <div style={{ marginTop: 10 }}>
+                      <WorkflowImport />
+                    </div>
+                  )}
+                </>
               )}
 
               <hr className={styles.divider} style={{ marginTop: '40px' }} />
@@ -1032,6 +1064,30 @@ export default function NewProjectScreen({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function CloudCompatibilityPanel({ supported }: { supported: boolean }) {
+  if (supported) {
+    return (
+      <div className={`${styles.cloudCompatibility} ${styles.cloudCompatibilityReady}`}>
+        <div className={styles.cloudCompatibilityTitle}>Ready on Dhee Cloud</div>
+        <p>
+          This bundle is supported by Dhee Cloud. Workflow and model fit are
+          managed by the cloud renderer.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${styles.cloudCompatibility} ${styles.cloudCompatibilityWarn}`}>
+      <div className={styles.cloudCompatibilityTitle}>Not available on Dhee Cloud</div>
+      <p>
+        This bundle does not declare Dhee Cloud support. Switch ComfyUI back to
+        local in Settings to use it.
+      </p>
     </div>
   );
 }
