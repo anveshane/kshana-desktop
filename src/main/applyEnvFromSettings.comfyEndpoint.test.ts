@@ -153,4 +153,45 @@ describe('applyEnvFromSettings — ComfyUI endpoint routing (Settings wins over 
     expect(process.env.COMFYUI_BASE_URL).toBe('http://127.0.0.1:9999');
     expect(process.env.ENDPOINT_self_local).toBe('http://127.0.0.1:9999');
   });
+
+  // ── dhee Cloud mode: public.cloud must route through the metered proxy ──
+  // Regression: bundle nodes tagged endpoint:"public.cloud" (character_image,
+  // setting_image, shot_image) resolved straight to cloud.comfy.org and
+  // authenticated with the dhee desktop token → 401 authentication required,
+  // bypassing the user's plan. In cloud mode, public.cloud must point at the
+  // dhee proxy (same as COMFYUI_BASE_URL / ENDPOINT_self_local) so the plan
+  // covers them.
+  const cloudAuth = {
+    desktopToken: 'desktop-jwt-token',
+    websiteUrl: 'https://dhee.ai',
+  };
+
+  it('dhee Cloud: remaps ENDPOINT_public_cloud to the proxy (not cloud.comfy.org)', () => {
+    applyEnvFromSettings(
+      { ...base, comfyBackend: 'cloud' } as never,
+      cloudAuth as never,
+    );
+
+    expect(process.env.COMFY_MODE).toBe('cloud');
+    expect(process.env.COMFYUI_BASE_URL).toBe('https://dhee.ai/comfy/api');
+    // The load-bearing assertion: public.cloud now points at the metered
+    // proxy, NOT cloud.comfy.org — so the user's plan covers these nodes.
+    expect(process.env.ENDPOINT_public_cloud).toBe('https://dhee.ai/comfy/api');
+    expect(process.env.ENDPOINT_self_local).toBe('https://dhee.ai/comfy/api');
+    expect(process.env.COMFY_CLOUD_API_KEY).toBe('desktop-jwt-token');
+  });
+
+  it('local mode: leaves ENDPOINT_public_cloud as cloud.comfy.org (own-key path)', () => {
+    // A user with their own comfy.org account keeps the direct public.cloud
+    // meaning in local mode — the remap only fires in dhee Cloud mode.
+    applyEnvFromSettings(
+      {
+        ...base,
+        comfyEndpoints: { 'public.cloud': 'https://cloud.comfy.org/api' },
+      } as never,
+    );
+
+    expect(process.env.COMFY_MODE).toBe('local');
+    expect(process.env.ENDPOINT_public_cloud).toBe('https://cloud.comfy.org/api');
+  });
 });
