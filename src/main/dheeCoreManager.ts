@@ -1098,6 +1098,10 @@ function clearCloudProxyEnv(): boolean {
   const wasUsingDesktopCloudProxy = process.env.dhee_CLOUD === 'true';
   delete process.env.dhee_CLOUD;
   delete process.env.dhee_CLOUD_URL;
+  // Dhee Cloud media-proxy creds (dhee.cloud.image / dhee.cloud.video).
+  // Distinct from the lowercase dhee_CLOUD_URL identity var above.
+  delete process.env.DHEE_CLOUD_URL;
+  delete process.env.DHEE_CLOUD_TOKEN;
   delete process.env.LLM_CONTEXT_TOKENS;
   if (wasUsingDesktopCloudProxy) {
     // Cloud auth no longer touches OPENAI_* — Settings is the canonical
@@ -1135,6 +1139,18 @@ export function applyEnvFromSettings(
   const cloudToken = cloudAuth?.desktopToken.trim();
   const cloudWebsiteUrl = cloudAuth?.websiteUrl.trim().replace(/\/$/, '');
   const haveCloudAuth = !!cloudToken && !!cloudWebsiteUrl;
+
+  // Dhee Cloud media runners (dhee.cloud.image / dhee.cloud.video) call the
+  // dhee-website media proxy (/api/cloud/media/{image,video}) with the
+  // desktop JWT as a Bearer token. They are a cloud-only lane with no local
+  // fallback, so their credentials fire whenever the user is signed in —
+  // independent of the per-lane LLM/Comfy/VLM toggles. Bundles that use
+  // these runners (e.g. openrouter_youtube_documentary) validate
+  // DHEE_CLOUD_URL / DHEE_CLOUD_TOKEN at run start.
+  if (haveCloudAuth) {
+    process.env.DHEE_CLOUD_URL = cloudWebsiteUrl!;
+    process.env.DHEE_CLOUD_TOKEN = cloudToken!;
+  }
 
   // Three independent backend lanes — LLM, ComfyUI, VLM — each can be
   // 'cloud' or 'local'. A user can keep ComfyUI on a self-hosted GPU
