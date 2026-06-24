@@ -20,13 +20,16 @@ export interface NpmBundleSearchHit {
   spec: string;
 }
 
-/** "dhee-bundle-cartoon-explainer" → "Cartoon Explainer"; "@dhee_ai/x-pack" → "X Pack". */
+/**
+ * "dhee-bundle-cartoon-explainer" → "Cartoon Explainer"; "@dhee_ai/x-pack" → "X Pack";
+ * "@dhee_ai/bundle-infographics" → "Infographics" (scoped, `dhee-` prefix dropped).
+ */
 export function prettifyPackageName(name: string): string {
   const base = name.replace(/^@[^/]+\//, ''); // drop scope
   const stripped = base
-    .replace(/^dhee-bundle-/, '')
-    .replace(/^dhee-runner-/, '')
-    .replace(/^create-dhee-/, '');
+    .replace(/^(dhee-)?bundle-/, '')
+    .replace(/^(dhee-)?runner-/, '')
+    .replace(/^(dhee-)?create-/, '');
   const words = (stripped || base).split(/[-_]/).filter(Boolean);
   return words
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -70,9 +73,9 @@ export async function searchNpmBundles(
     for (const obj of body.objects ?? []) {
       const p = obj.package;
       if (!p?.name) continue;
-      // The keyword search also surfaces the scaffolder (create-dhee-bundle);
-      // it's not a runnable bundle, so drop it.
-      if (p.name === 'create-dhee-bundle' || p.name.startsWith('create-')) continue;
+      // The keyword search also surfaces scaffolders (create-dhee-bundle,
+      // @dhee_ai/create-bundle, …); they aren't runnable bundles, so drop them.
+      if (/(^|\/)create-/.test(p.name)) continue;
       hits.push({
         name: p.name,
         displayName: prettifyPackageName(p.name),
