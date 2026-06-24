@@ -7,7 +7,7 @@ import {
 } from './npmBundleSearch';
 
 describe('prettifyPackageName', () => {
-  it('strips scope + dhee-bundle-/dhee-runner- prefix and title-cases', () => {
+  it('strips scope + (dhee-)bundle-/(dhee-)runner- prefix and title-cases', () => {
     expect(prettifyPackageName('dhee-bundle-infographics')).toBe('Infographics');
     expect(prettifyPackageName('dhee-bundle-cartoon-explainer')).toBe(
       'Cartoon Explainer',
@@ -16,6 +16,14 @@ describe('prettifyPackageName', () => {
       'Openrouter Documentary Pack',
     );
     expect(prettifyPackageName('dhee-runner-tts')).toBe('Tts');
+    // Modern scoped, dropped-`dhee-` form.
+    expect(prettifyPackageName('@dhee_ai/runner-tts')).toBe('Tts');
+    expect(prettifyPackageName('@dhee_ai/bundle-infographics')).toBe(
+      'Infographics',
+    );
+    expect(prettifyPackageName('@dhee_ai/bundle-cartoon-explainer')).toBe(
+      'Cartoon Explainer',
+    );
   });
 });
 
@@ -40,7 +48,13 @@ describe('searchNpmBundles', () => {
               package: { name: 'create-dhee-bundle', version: '0.1.1', description: 'scaffolder' },
             },
             {
+              package: { name: '@dhee_ai/create-bundle', version: '0.1.0', description: 'scoped scaffolder' },
+            },
+            {
               package: { name: 'dhee-bundle-cartoon-explainer', version: '0.2.0', description: 'Cartoon.' },
+            },
+            {
+              package: { name: '@dhee_ai/bundle-cartoon-explainer', version: '0.2.0', description: 'Scoped cartoon.' },
             },
           ],
         }),
@@ -58,16 +72,22 @@ describe('searchNpmBundles', () => {
     // keyword guard + query are AND-combined into the search text
     expect(calledUrl).toContain('/-/v1/search?text=');
     expect(decodeURIComponent(calledUrl)).toContain('keywords:dhee-bundle cartoon');
-    // create-* scaffolder filtered out; the two bundles mapped with derived names
+    // create-* scaffolders (incl. scoped @dhee_ai/create-*) filtered out;
+    // the three bundles mapped with derived names.
     expect(res.hits.map((h) => h.name)).toEqual([
       'dhee-bundle-infographics',
       'dhee-bundle-cartoon-explainer',
+      '@dhee_ai/bundle-cartoon-explainer',
     ]);
     expect(res.hits[0]).toMatchObject({
       name: 'dhee-bundle-infographics',
       displayName: 'Infographics',
       version: '0.1.0',
       spec: 'dhee-bundle-infographics',
+    });
+    expect(res.hits[2]).toMatchObject({
+      name: '@dhee_ai/bundle-cartoon-explainer',
+      displayName: 'Cartoon Explainer',
     });
   });
 
