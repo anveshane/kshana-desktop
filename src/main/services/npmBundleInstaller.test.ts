@@ -199,6 +199,58 @@ describe('npm Dhee bundle installer', () => {
     ).toBe('outline');
   });
 
+  it('installs a flat single-bundle package (dhee.bundles: ".") with bundle.json at root', async () => {
+    const targetBundlesDir = mkdtempSync(join(tmpdir(), 'dhee-bundles-flat-'));
+    made.push(targetBundlesDir);
+
+    const tarball = makeTarGz({
+      'package/package.json': JSON.stringify({
+        name: '@dhee_ai/bundle-upsc-explainer',
+        version: '0.1.1',
+        keywords: ['dhee-bundle'],
+        dhee: { bundles: '.' },
+      }),
+      'package/bundle.json': JSON.stringify({
+        id: 'upsc_explainer',
+        version: '0.1.1',
+        goal: 'final_video',
+        nodes: [],
+      }),
+      'package/prompts/outline.md': 'outline',
+    });
+    const fetchImpl = jest.fn(async (url: string) => {
+      if (url === 'https://registry.test/@dhee_ai%2fbundle-upsc-explainer') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            'dist-tags': { latest: '0.1.1' },
+            versions: { '0.1.1': { dist: { tarball: 'https://registry.test/upsc.tgz' } } },
+          }),
+        };
+      }
+      if (url === 'https://registry.test/upsc.tgz') {
+        return { ok: true, status: 200, arrayBuffer: async () => asArrayBuffer(tarball) };
+      }
+      return { ok: false, status: 404 };
+    });
+
+    const result = await installDheeBundleFromNpm({
+      packageSpec: '@dhee_ai/bundle-upsc-explainer',
+      registryUrl: 'https://registry.test',
+      targetBundlesDir,
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({ ok: true, bundleId: 'upsc_explainer' });
+    expect(
+      statSync(join(targetBundlesDir, 'upsc_explainer', 'bundle.json')).isFile(),
+    ).toBe(true);
+    expect(
+      readFileSync(join(targetBundlesDir, 'upsc_explainer', 'prompts/outline.md'), 'utf8'),
+    ).toBe('outline');
+  });
+
   it('pulls external runner packages (+ deps) and skips built-in tools', async () => {
     const targetBundlesDir = mkdtempSync(join(tmpdir(), 'dhee-bundles-run-'));
     const runnersDir = mkdtempSync(join(tmpdir(), 'dhee-runners-'));
@@ -289,5 +341,88 @@ describe('npm Dhee bundle installer', () => {
     expect(statSync(join(runnersDir, '@dheeai', 'runner-sdk', 'dist/index.js')).isFile()).toBe(true);
     // the built-in tool's bogus package was never fetched
     expect(fetchImpl).not.toHaveBeenCalledWith('https://registry.test/should-not-install');
+  });
+
+  it('pulls a platform-matching native optional dependency, skips other platforms', async () => {
+    const targetBundlesDir = mkdtempSync(join(tmpdir(), 'dhee-bundles-opt-'));
+    const runnersDir = mkdtempSync(join(tmpdir(), 'dhee-runners-opt-'));
+    made.push(targetBundlesDir, runnersDir);
+
+    // Native-binding package names for THIS host vs a deliberately wrong one.
+    const platMap: Record<string, string> = { darwin: 'darwin', win32: 'win32', linux: 'linux' };
+    const archMap: Record<string, string> = { x64: 'x64', arm64: 'arm64', arm: 'arm', ia32: 'ia32' };
+    const matchName = `native-${platMap[process.platform]}-${archMap[process.arch]}`;
+    const otherName =
+      process.platform === 'win32' ? 'native-darwin-arm64' : 'native-win32-x64';
+
+    const bundleTar = makeTarGz({
+      'package/package.json': JSON.stringify({
+        name: 'dhee-bundle-gfx',
+        version: '0.1.0',
+        keywords: ['dhee-bundle'],
+        dhee: { bundles: '.' },
+      }),
+      'package/bundle.json': JSON.stringify({
+        id: 'gfx',
+        goal: 'final_video',
+        nodes: [],
+        dependencies: { runnerPackages: { 'video.graphics': 'dhee-runner-gfx' } },
+      }),
+    });
+    const runnerTar = makeTarGz({
+      'package/package.json': JSON.stringify({
+        name: 'dhee-runner-gfx',
+        version: '0.1.0',
+        keywords: ['dhee-runner'],
+        dhee: { runners: './index.js' },
+        optionalDependencies: { [matchName]: '1.0.0', [otherName]: '1.0.0' },
+      }),
+      'package/index.js': 'export const runners = [];',
+    });
+    const nativeTar = makeTarGz({
+      'package/package.json': JSON.stringify({ name: matchName, version: '1.0.0' }),
+      'package/binding.node': 'binary',
+    });
+
+    const meta = (latest: string, tgz: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        'dist-tags': { latest },
+        versions: { [latest]: { dist: { tarball: tgz } } },
+      }),
+    });
+    const fetchImpl = jest.fn(async (url: string) => {
+      switch (url) {
+        case 'https://registry.test/dhee-bundle-gfx':
+          return meta('0.1.0', 'https://registry.test/gfx.tgz');
+        case 'https://registry.test/gfx.tgz':
+          return { ok: true, status: 200, arrayBuffer: async () => asArrayBuffer(bundleTar) };
+        case 'https://registry.test/dhee-runner-gfx':
+          return meta('0.1.0', 'https://registry.test/rgfx.tgz');
+        case 'https://registry.test/rgfx.tgz':
+          return { ok: true, status: 200, arrayBuffer: async () => asArrayBuffer(runnerTar) };
+        case `https://registry.test/${matchName}`:
+          return meta('1.0.0', 'https://registry.test/native.tgz');
+        case 'https://registry.test/native.tgz':
+          return { ok: true, status: 200, arrayBuffer: async () => asArrayBuffer(nativeTar) };
+        default:
+          return { ok: false, status: 404 };
+      }
+    });
+
+    const result = await installDheeBundleFromNpm({
+      packageSpec: 'dhee-bundle-gfx',
+      registryUrl: 'https://registry.test',
+      targetBundlesDir,
+      runnersNodeModulesDir: runnersDir,
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(true);
+    // platform-matching native binding installed
+    expect(statSync(join(runnersDir, matchName, 'binding.node')).isFile()).toBe(true);
+    // the other-platform optional dep was never even fetched
+    expect(fetchImpl).not.toHaveBeenCalledWith(`https://registry.test/${otherName}`);
   });
 });

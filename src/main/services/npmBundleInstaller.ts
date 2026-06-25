@@ -173,30 +173,15 @@ export async function installDheeBundleFromNpm(
       }),
     );
 
-    // ── Pull external runner packages the bundle declares ──
-    const installedRunners: InstalledRunner[] = [];
-    const runnerErrors: Array<{ tool: string; packageName: string; error: string }> =
-      [];
-    const runnerPackages = extractRunnerPackages(bundleJson);
-    if (runnerPackages.length > 0 && params.runnersNodeModulesDir) {
-      const builtins = new Set(params.builtinTools ?? []);
-      const installedNames = new Set<string>();
-      for (const { tool, packageName: runnerPkg } of runnerPackages) {
-        if (builtins.has(tool)) continue; // engine provides it already
-        const r = await installNpmPackageTree(
+    const { installedRunners, runnerErrors } = params.runnersNodeModulesDir
+      ? await installMissingBundleRunners({
+          bundleJson,
+          runnersNodeModulesDir: params.runnersNodeModulesDir,
+          builtinTools: params.builtinTools,
           fetchImpl,
-          registry,
-          runnerPkg,
-          params.runnersNodeModulesDir,
-          installedNames,
-        );
-        if (r.ok) {
-          installedRunners.push({ tool, packageName: runnerPkg, version: r.version });
-        } else {
-          runnerErrors.push({ tool, packageName: runnerPkg, error: r.error });
-        }
-      }
-    }
+          registryUrl: registry,
+        })
+      : { installedRunners: [], runnerErrors: [] };
 
     return {
       ok: true,
@@ -317,7 +302,99 @@ async function installNpmPackageTree(
     );
     if (!depResult.ok) return depResult;
   }
+
+  // Platform-specific native bindings (e.g. @napi-rs/canvas-darwin-arm64) are
+  // declared as OPTIONAL deps — npm resolves only the one matching the current
+  // OS/arch. Mirror that: install optional deps whose name encodes this
+  // platform + arch. Best-effort — a missing optional binary is non-fatal.
+  const optionalDeps =
+    (dl.packageJson as { optionalDependencies?: Record<string, string> })
+      .optionalDependencies || {};
+  for (const optName of Object.keys(optionalDeps)) {
+    if (!matchesCurrentPlatform(optName)) continue;
+    await installNpmPackageTree(
+      fetchImpl,
+      registry,
+      optName,
+      nodeModulesDir,
+      installed,
+    ); // ignore failures — optional by definition
+  }
   return { ok: true, version: dl.version };
+}
+
+/**
+ * Does an optional-dependency package name target the current OS + arch?
+ * Native-binding packages (napi-rs, esbuild, sharp, …) encode the platform and
+ * arch in their name, e.g. `@napi-rs/canvas-darwin-arm64`,
+ * `@napi-rs/canvas-linux-x64-gnu`, `esbuild-win32-x64`.
+ */
+function matchesCurrentPlatform(packageName: string): boolean {
+  const name = packageName.toLowerCase();
+  const platformToken: Record<string, string> = {
+    darwin: 'darwin',
+    win32: 'win32',
+    linux: 'linux',
+  };
+  const archToken: Record<string, string> = {
+    x64: 'x64',
+    arm64: 'arm64',
+    arm: 'arm',
+    ia32: 'ia32',
+  };
+  const plat = platformToken[process.platform];
+  const arch = archToken[process.arch];
+  if (!plat || !arch) return false;
+  return name.includes(plat) && name.includes(arch);
+}
+
+/** Install external runner npm packages declared in a bundle.json. */
+export async function installMissingBundleRunners(params: {
+  bundleJson: Record<string, unknown>;
+  runnersNodeModulesDir: string;
+  builtinTools?: readonly string[];
+  registryUrl?: string;
+  fetchImpl?: FetchLike;
+}): Promise<{
+  installedRunners: InstalledRunner[];
+  runnerErrors: Array<{ tool: string; packageName: string; error: string }>;
+}> {
+  const fetchImpl = params.fetchImpl ?? getRuntimeFetch();
+  if (!fetchImpl) {
+    return {
+      installedRunners: [],
+      runnerErrors: [
+        {
+          tool: '*',
+          packageName: '*',
+          error: 'No fetch implementation is available in this runtime.',
+        },
+      ],
+    };
+  }
+  const registry = (params.registryUrl ?? DEFAULT_REGISTRY_URL).replace(/\/+$/, '');
+  const installedRunners: InstalledRunner[] = [];
+  const runnerErrors: Array<{ tool: string; packageName: string; error: string }> =
+    [];
+  const runnerPackages = extractRunnerPackages(params.bundleJson);
+  const builtins = new Set(params.builtinTools ?? []);
+  const installedNames = new Set<string>();
+  for (const { tool, packageName: runnerPkg } of runnerPackages) {
+    if (builtins.has(tool)) continue;
+    const r = await installNpmPackageTree(
+      fetchImpl,
+      registry,
+      runnerPkg,
+      params.runnersNodeModulesDir,
+      installedNames,
+    );
+    if (r.ok) {
+      installedRunners.push({ tool, packageName: runnerPkg, version: r.version });
+    } else {
+      runnerErrors.push({ tool, packageName: runnerPkg, error: r.error });
+    }
+  }
+  return { installedRunners, runnerErrors };
 }
 
 /** Pull `dependencies.runnerPackages` (tool → npm package) out of a bundle.json. */
@@ -458,6 +535,10 @@ function listSubBundles(
 
 function normalizeRel(p: string): string {
   const norm = p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  // `.` (or `./`, or empty) means the package root — flat single-bundle
+  // layout where bundle.json sits beside package.json (`dhee.bundles: "."`).
+  // Return '' so readBundleJson/collectBundleFiles target the tar root.
+  if (norm === '.' || norm === '') return '';
   if (path.isAbsolute(norm) || norm.split('/').includes('..')) {
     throw new Error(`Invalid package path '${p}'.`);
   }

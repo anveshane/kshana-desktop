@@ -27,6 +27,7 @@ import type {
 } from '../shared/dheeIpc';
 import log from 'electron-log';
 import path from 'path';
+import { installComfyCloudFetchAuth } from './comfyCloudFetchAuth';
 import {
   existsSync as fsExistsSync,
   mkdirSync as fsMkdirSync,
@@ -54,6 +55,7 @@ import {
   freeComfyBeforeLocalLlm,
   unloadLocalLlmBeforeLocalComfy,
 } from './singleGpuCoordinator';
+import { ensureProjectExternalRunners } from './services/ensureBundleRunners';
 
 export interface dheeCloudAuthRuntime {
   websiteUrl: string;
@@ -1388,6 +1390,8 @@ export function applyEnvFromSettings(
   // setting it at runtime is both redundant and triggers a terser
   // "Invalid assignment" because the LHS gets constant-folded.
 
+  installComfyCloudFetchAuth();
+
   log.info(
     `[applyEnvFromSettings] LLM_PROVIDER=${process.env.LLM_PROVIDER} ` +
       `OPENAI_BASE_URL=${process.env.OPENAI_BASE_URL ?? '(unset)'} ` +
@@ -2047,14 +2051,14 @@ export class dheeCoreManager {
       process.env.dhee_PROJECTS_DIR = devEnv.projectsDir;
     }
 
-    // Externalized bundle resolution. kshana-core's bundleSource.ts
-    // searches roots in precedence order: USER → APP → ~/.kshana →
+    // Externalized bundle resolution. dhee-core's bundleSource.ts
+    // searches roots in precedence order: USER → APP → ~/.dhee →
     // <dev-source>. Set the two env vars so a packaged build (and
     // dev launches) find the right bundles without code changes.
     //
     //   APP  = first-party defaults shipped inside the .app, lifted
     //          via electron-builder extraResources from
-    //          kshana-core/dist/bundles → <app>/Resources/bundles.
+    //          dhee-core/dist/bundles → <app>/Resources/bundles.
     //          In dev there is no `process.resourcesPath/bundles`
     //          yet, so we point at the source tree's dist/bundles
     //          (still produced by `pnpm tsup`).
@@ -2599,6 +2603,14 @@ export class dheeCoreManager {
       applyEnvFromSettings(this.lastSettings, this.lastCloudAuth);
     }
 
+    const runnerEnsure = await ensureProjectExternalRunners(
+      projectDir,
+      app.getPath('home'),
+    );
+    if (!runnerEnsure.ok) {
+      return { status: 'failed', error: runnerEnsure.error };
+    }
+
     // Fresh auto-retry budget — this is a user-initiated run.
     this.autoRetriedRuns.delete(projectDir);
 
@@ -2687,6 +2699,14 @@ export class dheeCoreManager {
     const projectName = path.basename(projectDir);
     if (this.lastSettings) {
       applyEnvFromSettings(this.lastSettings, this.lastCloudAuth);
+    }
+
+    const runnerEnsure = await ensureProjectExternalRunners(
+      projectDir,
+      app.getPath('home'),
+    );
+    if (!runnerEnsure.ok) {
+      return { ok: false, error: runnerEnsure.error };
     }
 
     // Fresh auto-retry budget — this is a user-initiated run.
