@@ -115,6 +115,22 @@ export function defaultRunnersNodeModulesDir(
   return path.join(base, 'node_modules');
 }
 
+/**
+ * Point installer + engine discovery at the same external-runners tree.
+ * Default layout: `~/dhee-studios/runners/node_modules`.
+ */
+export function wireRunnersDiscoveryEnv(
+  homeDir: string,
+  env: EnvLike = process.env,
+): { runnersBase: string; nodeModulesDir: string } {
+  const configured = env.DHEE_RUNNERS_DIR?.trim();
+  const runnersBase = configured || path.join(homeDir, 'dhee-studios', 'runners');
+  const nodeModulesDir = path.join(runnersBase, 'node_modules');
+  env.DHEE_RUNNERS_DIR = runnersBase;
+  env.DHEE_NODE_MODULES_DIRS = nodeModulesDir;
+  return { runnersBase, nodeModulesDir };
+}
+
 export async function installDheeBundleFromNpm(
   params: InstallNpmBundleParams,
 ): Promise<InstallNpmBundleResult> {
@@ -263,35 +279,61 @@ async function installNpmPackageTree(
 ): Promise<{ ok: true; version: string } | { ok: false; error: string }> {
   if (installed.has(packageName)) return { ok: true, version: 'cached' };
   installed.add(packageName);
-  let dl;
-  try {
-    dl = await downloadPackage(fetchImpl, registry, packageName, undefined);
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-  if (!dl.ok) return dl;
 
   const dest = path.join(nodeModulesDir, ...packageName.split('/'));
-  await fs.rm(dest, { recursive: true, force: true });
-  await fs.mkdir(dest, { recursive: true });
-  await Promise.all(
-    dl.entries.map(async (entry) => {
-      const out = path.join(dest, entry.path);
-      assertInside(dest, out);
-      await fs.mkdir(path.dirname(out), { recursive: true });
-      await fs.writeFile(out, entry.data);
-    }),
-  );
+
+  // "Install missing": if the package is already on disk (any version), keep
+  // it. Wiping + re-downloading on every project run would clobber
+  // locally-patched builds and needlessly re-fetch from the registry. We still
+  // recurse into the declared dependencies below so a missing transitive
+  // package is still ensured. Force an upgrade by deleting the package dir
+  // (or reinstalling its bundle via the install UI).
+  const existingPj = await readInstalledPackageJson(dest);
+  let version: string;
+  let deps: Record<string, string>;
+  let optionalDeps: Record<string, string>;
+
+  if (existingPj) {
+    version = existingPj.version ?? 'installed';
+    deps = existingPj.dependencies ?? {};
+    optionalDeps = existingPj.optionalDependencies ?? {};
+  } else {
+    let dl;
+    try {
+      dl = await downloadPackage(fetchImpl, registry, packageName, undefined);
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    if (!dl.ok) return dl;
+
+    await fs.rm(dest, { recursive: true, force: true });
+    await fs.mkdir(dest, { recursive: true });
+    await Promise.all(
+      dl.entries.map(async (entry) => {
+        const out = path.join(dest, entry.path);
+        assertInside(dest, out);
+        await fs.mkdir(path.dirname(out), { recursive: true });
+        await fs.writeFile(out, entry.data);
+      }),
+    );
+
+    version = dl.version;
+    deps =
+      (dl.meta.versions?.[dl.version]?.dependencies as
+        | Record<string, string>
+        | undefined) ??
+      ((dl.packageJson as { dependencies?: Record<string, string> })
+        .dependencies ||
+        {});
+    optionalDeps =
+      (dl.packageJson as { optionalDependencies?: Record<string, string> })
+        .optionalDependencies || {};
+  }
 
   // Recurse into runtime dependencies (shallow for runner packages — typically
-  // just @dheeai/runner-sdk, which itself has no runtime deps).
-  const deps =
-    (dl.meta.versions?.[dl.version]?.dependencies as
-      | Record<string, string>
-      | undefined) ??
-    ((dl.packageJson as { dependencies?: Record<string, string> })
-      .dependencies ||
-      {});
+  // just @dhee_ai/runner-sdk, which itself has no runtime deps). Done for BOTH
+  // the freshly-installed and already-present branches so a missing transitive
+  // package is always ensured.
   for (const depName of Object.keys(deps)) {
     const depResult = await installNpmPackageTree(
       fetchImpl,
@@ -307,9 +349,6 @@ async function installNpmPackageTree(
   // declared as OPTIONAL deps — npm resolves only the one matching the current
   // OS/arch. Mirror that: install optional deps whose name encodes this
   // platform + arch. Best-effort — a missing optional binary is non-fatal.
-  const optionalDeps =
-    (dl.packageJson as { optionalDependencies?: Record<string, string> })
-      .optionalDependencies || {};
   for (const optName of Object.keys(optionalDeps)) {
     if (!matchesCurrentPlatform(optName)) continue;
     await installNpmPackageTree(
@@ -320,7 +359,35 @@ async function installNpmPackageTree(
       installed,
     ); // ignore failures — optional by definition
   }
-  return { ok: true, version: dl.version };
+  return { ok: true, version };
+}
+
+/** Read a package's own package.json from disk, or null if not installed. */
+async function readInstalledPackageJson(
+  dest: string,
+): Promise<{
+  version?: string;
+  dependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+} | null> {
+  try {
+    const raw = await fs.readFile(path.join(dest, 'package.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as {
+      version?: unknown;
+      dependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+    if (typeof parsed.version !== 'string' || !parsed.version.trim()) {
+      return null;
+    }
+    return {
+      version: parsed.version.trim(),
+      dependencies: parsed.dependencies,
+      optionalDependencies: parsed.optionalDependencies,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
