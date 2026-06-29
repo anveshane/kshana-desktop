@@ -39,6 +39,7 @@ import {
 import { markProjectForAutoStart } from '../../../utils/projectAutoStart';
 import BundleConfigurator from '../../BundleConfigurator/BundleConfigurator';
 import BundleInstall from '../../BundleConfigurator/BundleInstall';
+import { looksLikeNpmPackageSpec } from '../../../utils/npmPackageSpec';
 import AttachmentChip from '../../chat/ChatInput/AttachmentChip';
 import WorkflowImport from '../../BundleConfigurator/WorkflowImport';
 import styles from './NewProjectScreen.module.scss';
@@ -718,7 +719,13 @@ export default function NewProjectScreen({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void handleSearchNpm();
+              if (e.key !== 'Enter') return;
+              const q = searchQuery.trim();
+              if (looksLikeNpmPackageSpec(q)) {
+                void handleInstallBundle(q);
+              } else {
+                void handleSearchNpm();
+              }
             }}
           />
           <button
@@ -863,7 +870,26 @@ export default function NewProjectScreen({
           </button>
           {showInstall && (
             <div style={{ marginTop: 10 }}>
-              <BundleInstall onInstalled={(id) => void refreshAndSelect(id)} />
+              <BundleInstall
+                onInstalled={(id, meta) => {
+                  if (meta?.packageName) {
+                    setInstalledPackageNames((prev) => {
+                      const next = new Set(prev);
+                      next.add(meta.packageName!);
+                      try {
+                        window.localStorage.setItem(
+                          'dhee.installedBundlePackages',
+                          JSON.stringify([...next]),
+                        );
+                      } catch {
+                        /* best-effort */
+                      }
+                      return next;
+                    });
+                  }
+                  void refreshAndSelect(id);
+                }}
+              />
             </div>
           )}
         </div>

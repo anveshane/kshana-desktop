@@ -90,7 +90,11 @@ class FakeConversationManager {
 }
 
 jest.mock('electron', () => ({
-  app: { isPackaged: false },
+  app: {
+    isPackaged: false,
+    getPath: (name: string) =>
+      name === 'home' ? require('os').homedir() : require('os').tmpdir(),
+  },
 }));
 
 // Imported AFTER the jest.mock calls so the mock binds.
@@ -124,6 +128,7 @@ __setRunnersLoader(async () => ({
 // Use the home dir and the os tmpdir — both always exist and are
 // distinct on every platform Jest runs on.
 import os from 'os';
+import path from 'path';
 const FAKE_INK_ROOT = os.homedir();
 const FAKE_PROJECTS_DIR = os.tmpdir();
 const mockLoadDevEnv = jest.fn(() => ({
@@ -188,6 +193,7 @@ beforeEach(() => {
   mockState.shutdownCalls = 0;
   mockState.lastInstance = null;
   mockConfigurePostHogRuntime.mockClear();
+  globalThis.fetch = jest.fn(async () => ({ ok: true }) as Response) as unknown as typeof fetch;
   delete process.env['LLM_PROVIDER'];
   delete process.env['OPENAI_API_KEY'];
   delete process.env['OPENAI_BASE_URL'];
@@ -200,6 +206,8 @@ beforeEach(() => {
   delete process.env['COMFYUI_BASE_URL'];
   delete process.env['COMFYUI_TIMEOUT'];
   delete process.env['dhee_PROJECT_DIR'];
+  delete process.env['dhee_PROJECTS_DIR'];
+  delete process.env['DHEE_USER_BUNDLES_DIR'];
   delete process.env['GOOGLE_API_KEY'];
   delete process.env['GEMINI_MODEL'];
   delete process.env['VLM_PROVIDER'];
@@ -639,6 +647,27 @@ describe('dheeCoreManager', () => {
     const mgr = new dheeCoreManager();
     await mgr.start(baseSettings);
     expect(process.env['dhee_PROJECTS_DIR']).toBe(FAKE_PROJECTS_DIR);
+  });
+
+  it('start() defaults user bundles to ~/dhee-studios/bundles, not projectsDir/bundles', async () => {
+    const mgr = new dheeCoreManager();
+    await mgr.start(baseSettings);
+
+    expect(process.env['DHEE_USER_BUNDLES_DIR']).toBe(
+      path.join(os.homedir(), 'dhee-studios', 'bundles'),
+    );
+    expect(process.env['DHEE_USER_BUNDLES_DIR']).not.toBe(
+      path.join(FAKE_PROJECTS_DIR, 'bundles'),
+    );
+  });
+
+  it('start() preserves an explicit DHEE_USER_BUNDLES_DIR override', async () => {
+    process.env['DHEE_USER_BUNDLES_DIR'] = '/custom/user/bundles';
+
+    const mgr = new dheeCoreManager();
+    await mgr.start(baseSettings);
+
+    expect(process.env['DHEE_USER_BUNDLES_DIR']).toBe('/custom/user/bundles');
   });
 
   // ── LLM routing/tier env hygiene ────────────────────────────────────

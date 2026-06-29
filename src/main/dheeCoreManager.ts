@@ -56,7 +56,10 @@ import {
   unloadLocalLlmBeforeLocalComfy,
 } from './singleGpuCoordinator';
 import { ensureProjectExternalRunners } from './services/ensureBundleRunners';
-import { wireRunnersDiscoveryEnv } from './services/npmBundleInstaller';
+import {
+  defaultUserBundlesDir,
+  wireRunnersDiscoveryEnv,
+} from './services/npmBundleInstaller';
 import { getAccount, refreshBalance } from './accountManager';
 
 export interface dheeCloudAuthRuntime {
@@ -2112,15 +2115,21 @@ export class dheeCoreManager {
     //          yet, so we point at the source tree's dist/bundles
     //          (still produced by `pnpm tsup`).
     //
-    //   USER = `<studiosDir>/bundles` so user forks + community
-    //          installs override the app-shipped defaults. The
-    //          desktop already computes the studios dir via
-    //          devEnv.projectsDir (it's the projects parent dir).
+    //   USER = `~/dhee-studios/bundles` so user forks + community
+    //          installs override the app-shipped defaults. This must
+    //          not come from devEnv.projectsDir: in desktop dev that
+    //          can default to the dhee-core repo root before a project
+    //          is focused, causing ignored source bundles to shadow the
+    //          installed user bundles.
     try {
-      const appBundles = path.join(process.resourcesPath, 'bundles');
-      if (fsExistsSync(appBundles)) {
-        process.env.DHEE_APP_BUNDLES_DIR = appBundles;
-      } else {
+      const resourcesPath = process.resourcesPath;
+      if (resourcesPath) {
+        const appBundles = path.join(resourcesPath, 'bundles');
+        if (fsExistsSync(appBundles)) {
+          process.env.DHEE_APP_BUNDLES_DIR = appBundles;
+        }
+      }
+      if (!process.env.DHEE_APP_BUNDLES_DIR?.trim()) {
         // Dev fallback — `pnpm tsup` writes dist/bundles in the
         // sibling dhee-core source tree. `__dirname` here is
         // dhee-desktop/src/main; walk up to the workspace root.
@@ -2132,9 +2141,8 @@ export class dheeCoreManager {
           process.env.DHEE_APP_BUNDLES_DIR = devAppBundles;
         }
       }
-      if (devEnv?.projectsDir) {
-        // `<studiosDir>/bundles` — sibling of project directories.
-        process.env.DHEE_USER_BUNDLES_DIR = path.join(devEnv.projectsDir, 'bundles');
+      if (!process.env.DHEE_USER_BUNDLES_DIR?.trim()) {
+        process.env.DHEE_USER_BUNDLES_DIR = defaultUserBundlesDir(app.getPath('home'));
       }
     } catch {
       // best-effort; bundleSource still falls through to its source-tree
