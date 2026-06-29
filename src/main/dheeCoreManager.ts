@@ -2753,7 +2753,7 @@ export class dheeCoreManager {
         this.lastCloudAuth,
       );
       if (!cloudCheck.ok) {
-        return { status: 'failed', error: cloudCheck.error };
+        return { ok: false, error: cloudCheck.error };
       }
       this.lastCloudAuth = cloudCheck.cloudAuth;
       applyEnvFromSettings(this.lastSettings, cloudCheck.cloudAuth);
