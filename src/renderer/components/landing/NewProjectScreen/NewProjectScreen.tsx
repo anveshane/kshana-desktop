@@ -72,6 +72,13 @@ interface BundleInputDecl {
   unit?: string;
 }
 
+interface SelectedFileInputValue {
+  sourcePath: string;
+  name: string;
+  size?: number;
+  mimeType?: string;
+}
+
 interface BundleRuntimeSupport {
   modes?: string[];
   providers?: string[];
@@ -231,6 +238,31 @@ function mergeSetupReferenceAttachments(
     }
   }
   return next;
+}
+
+function isTextFileInput(decl: BundleInputDecl): boolean {
+  return decl.multiline === true || decl.control === 'textarea';
+}
+
+function filePickerKindsForDecl(decl: BundleInputDecl): Array<'image' | 'audio' | 'video' | 'text'> {
+  const ext = (decl.path ?? '').split('.').pop()?.toLowerCase() ?? '';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(ext)) return ['image'];
+  if (['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'].includes(ext)) return ['audio'];
+  if (['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v'].includes(ext)) return ['video'];
+  return ['text'];
+}
+
+function selectedFileInputValue(value: unknown): SelectedFileInputValue | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return typeof record.sourcePath === 'string' && typeof record.name === 'string'
+    ? {
+        sourcePath: record.sourcePath,
+        name: record.name,
+        ...(typeof record.size === 'number' ? { size: record.size } : {}),
+        ...(typeof record.mimeType === 'string' ? { mimeType: record.mimeType } : {}),
+      }
+    : null;
 }
 
 export default function NewProjectScreen({
@@ -540,6 +572,31 @@ export default function NewProjectScreen({
   const handleInputChange = useCallback((id: string, value: unknown) => {
     setInputValues((prev) => ({ ...prev, [id]: value }));
   }, []);
+
+  const handleSelectFileInput = useCallback(async (decl: BundleInputDecl) => {
+    setError(null);
+    try {
+      const result = await window.electron.project.selectAttachment({
+        kinds: filePickerKindsForDecl(decl),
+        title: `Select ${(decl.label ?? decl.id).toString()}`,
+      });
+      if (!result.ok) {
+        if (result.error) setError(result.error);
+        return;
+      }
+      const [attachment] = attachmentsFromSelectResponse(result);
+      if (!attachment) return;
+      handleInputChange(decl.id, {
+        sourcePath: attachment.path,
+        name: attachment.name,
+        ...(attachment.size !== undefined ? { size: attachment.size } : {}),
+        ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Failed to select file: ${message}`);
+    }
+  }, [handleInputChange]);
 
   const handleTitleChange = useCallback((next: string) => {
     setTitleOverride(next);
@@ -962,30 +1019,51 @@ export default function NewProjectScreen({
                   />
                 ))}
 
-              {/* Non-story file inputs (e.g. an optional style-guide that
-                  becomes plans/world_style.md verbatim) render as their own
-                  multiline textareas — the desktop otherwise only renders
-                  project-kind FormRows + the special story textarea. */}
+              {/* Non-story file inputs: multiline text files render as textareas;
+                  binary inputs render as file pickers so we copy real bytes. */}
               {(selectedBundle.inputs ?? [])
                 .filter((decl) => decl.kind === 'file' && decl.id !== STORY_INPUT_ID)
-                .map((decl) => (
-                  <div key={decl.id} style={{ marginTop: 20 }}>
-                    <span className={styles.rowLabel}>
-                      {(decl.label ?? decl.id).toString()}
-                    </span>
-                    <textarea
-                      className={styles.storyTextarea}
-                      style={{ minHeight: 110, marginTop: 6 }}
-                      placeholder={decl.placeholder ?? ''}
-                      value={
-                        typeof inputValues[decl.id] === 'string'
-                          ? (inputValues[decl.id] as string)
-                          : ''
-                      }
-                      onChange={(e) => handleInputChange(decl.id, e.target.value)}
-                    />
-                  </div>
-                ))}
+                .map((decl) => {
+                  const selectedFile = selectedFileInputValue(inputValues[decl.id]);
+                  return (
+                    <div key={decl.id} style={{ marginTop: 20 }}>
+                      <span className={styles.rowLabel}>
+                        {(decl.label ?? decl.id).toString()}
+                      </span>
+                      {isTextFileInput(decl) ? (
+                        <textarea
+                          className={styles.storyTextarea}
+                          style={{ minHeight: 110, marginTop: 6 }}
+                          placeholder={decl.placeholder ?? ''}
+                          value={
+                            typeof inputValues[decl.id] === 'string'
+                              ? (inputValues[decl.id] as string)
+                              : ''
+                          }
+                          onChange={(e) => handleInputChange(decl.id, e.target.value)}
+                        />
+                      ) : (
+                        <div className={styles.referenceSection} style={{ marginTop: 6 }}>
+                          <div className={styles.referenceHeader}>
+                            <span className={styles.rowLabel}>
+                              {selectedFile ? selectedFile.name : decl.placeholder ?? 'No file selected'}
+                            </span>
+                            <button
+                              type="button"
+                              className={styles.referenceAttachButton}
+                              onClick={() => void handleSelectFileInput(decl)}
+                              disabled={isSubmitting}
+                              aria-label={`Choose ${(decl.label ?? decl.id).toString()}`}
+                            >
+                              <ImagePlus size={14} />
+                              <span>{selectedFile ? 'Replace' : 'Choose file'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
 
               <hr className={styles.divider} style={{ marginTop: '40px' }} />
               <h3 className={styles.sectionLabel}>Compatibility</h3>

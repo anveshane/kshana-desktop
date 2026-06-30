@@ -54,6 +54,35 @@ const localOnlyBundle = {
   },
 };
 
+const ugcProductBundle = {
+  id: 'ugc_ad_product_v2',
+  version: '0.1.0',
+  bundleSource: 'user:ugc_ad_product_v2',
+  sourceScheme: 'user',
+  displayName: 'UGC Product Ad',
+  summary: 'Product ad with pack shot.',
+  pickerEligible: true,
+  runtimeSupport: {
+    modes: ['local', 'dhee_cloud'],
+    providers: ['comfy', 'llm', 'ffmpeg'],
+  },
+  inputs: [
+    {
+      id: 'product_description',
+      kind: 'file',
+      path: 'inputs/product.md',
+      label: 'Product description',
+      multiline: true,
+    },
+    {
+      id: 'product_image',
+      kind: 'file',
+      path: 'inputs/product.png',
+      label: 'Product photo',
+    },
+  ],
+};
+
 describe('NewProjectScreen bundle packages', () => {
   const listBundles = jest.fn<() => Promise<unknown[]>>();
   const installBundlePackage =
@@ -336,6 +365,55 @@ describe('NewProjectScreen bundle packages', () => {
               referenceRole: 'character',
             }),
           ],
+        }),
+      );
+    });
+  });
+
+  it('uses a file picker for binary bundle file inputs', async () => {
+    listBundles.mockResolvedValue([ugcProductBundle]);
+    selectAttachment.mockResolvedValue({
+      ok: true,
+      attachment: {
+        id: 'att_product',
+        kind: 'image',
+        path: '/tmp/product.png',
+        name: 'product.png',
+        mimeType: 'image/png',
+        size: 456,
+      },
+    });
+
+    render(<NewProjectScreen isOpen onClose={jest.fn()} />);
+
+    await waitFor(() => screen.getByText('UGC Product Ad'));
+    fireEvent.click(screen.getByText('UGC Product Ad'));
+    fireEvent.change(screen.getByPlaceholderText('Type your story here...'), {
+      target: { value: 'Create a premium coffee product advertisement.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /choose product photo/i }));
+    await waitFor(() =>
+      expect(selectAttachment).toHaveBeenCalledWith({
+        kinds: ['image'],
+        title: 'Select Product photo',
+      }),
+    );
+    await waitFor(() => screen.getByText('product.png'));
+
+    fireEvent.click(screen.getByRole('button', { name: /^roll/i }));
+
+    await waitFor(() => {
+      expect(initialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bundleId: 'ugc_ad_product_v2',
+          inputs: expect.objectContaining({
+            product_image: {
+              sourcePath: '/tmp/product.png',
+              name: 'product.png',
+              mimeType: 'image/png',
+              size: 456,
+            },
+          }),
         }),
       );
     });
