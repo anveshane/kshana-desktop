@@ -31,6 +31,7 @@ import {
 import { prepareEdit, applyEdit, prepareReadableView, type PreparedEdit, type ReadableField } from './nodeTextEdit';
 import { toFileUrl } from '../utils/pathResolver';
 import { humanizeId } from '../lib/runCockpit/vocab';
+import { artifactTypeLabel, inferArtifactFormat, type ArtifactFormat } from './artifactFormat';
 
 interface Props {
   instance: InstanceGraphNode | null;
@@ -44,17 +45,6 @@ interface Props {
 }
 
 type Panel = 'view' | 'versions' | 'edit';
-
-function inferFormat(outputPath: string | undefined): 'md' | 'json' | 'image' | 'video' | 'audio' | 'unknown' {
-  if (!outputPath) return 'unknown';
-  const lower = outputPath.toLowerCase();
-  if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp') || lower.endsWith('.gif')) return 'image';
-  if (lower.endsWith('.mp4') || lower.endsWith('.webm') || lower.endsWith('.mov')) return 'video';
-  if (lower.endsWith('.wav') || lower.endsWith('.mp3') || lower.endsWith('.ogg') || lower.endsWith('.flac')) return 'audio';
-  if (lower.endsWith('.json')) return 'json';
-  if (lower.endsWith('.md') || lower.endsWith('.txt')) return 'md';
-  return 'unknown';
-}
 
 function statusColor(s: string): string {
   switch (s) {
@@ -244,6 +234,25 @@ function JsonReadableBody({
   );
 }
 
+function FileArtifactBody({ outputPath }: { outputPath: string | undefined }) {
+  const name = outputPath?.split(/[\\/]/).pop() ?? 'artifact';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 32 }}>
+      <div style={{ textAlign: 'center', maxWidth: 520 }}>
+        <div style={{ fontSize: 12, color: 'var(--color-accent-primary)', textTransform: 'uppercase', letterSpacing: 0.7, fontWeight: 700 }}>
+          {artifactTypeLabel(outputPath)}
+        </div>
+        <div style={{ marginTop: 10, fontSize: 22, color: '#e5e1d8', fontWeight: 650, lineHeight: 1.25, wordBreak: 'break-word' }}>
+          {name}
+        </div>
+        <div style={{ marginTop: 12, color: 'rgba(229,225,216,0.56)', fontSize: 13, lineHeight: 1.5 }}>
+          Use Download to save this artifact outside the Dhee project.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CardDetailModal({ instance, projectDir, headlineField, onClose, onAction, onChanged }: Props) {
   const [text, setText] = useState<string | null>(null);
 
@@ -294,7 +303,7 @@ export function CardDetailModal({ instance, projectDir, headlineField, onClose, 
   useEffect(() => {
     setText(null);
     if (!instance || !projectDir || !instance.outputPath) return;
-    const fmt = inferFormat(instance.outputPath);
+    const fmt = inferArtifactFormat(instance.outputPath);
     if (fmt !== 'md' && fmt !== 'json') return;
     let cancelled = false;
     (async () => {
@@ -311,7 +320,7 @@ export function CardDetailModal({ instance, projectDir, headlineField, onClose, 
 
   if (!instance) return null;
 
-  const fmt = inferFormat(instance.outputPath);
+  const fmt: ArtifactFormat = inferArtifactFormat(instance.outputPath);
   const actions = availableActions(instance);
   const fileUrl = projectDir && instance.outputPath ? toFileUrl(`${projectDir}/${instance.outputPath}`) : null;
 
@@ -568,7 +577,10 @@ export function CardDetailModal({ instance, projectDir, headlineField, onClose, 
                   />
                 )
               )}
-              {(fmt === 'unknown' || !fileUrl) && (
+              {fmt === 'file' && instance.outputPath && (
+                <FileArtifactBody outputPath={instance.outputPath} />
+              )}
+              {(fmt === 'unknown' || (!fileUrl && fmt !== 'file')) && (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'rgba(229,225,216,0.55)', fontSize: 13 }}>
                   {instance.error ? `Failed: ${instance.error}` : 'No content to display yet.'}
                 </div>
@@ -594,7 +606,7 @@ export function CardDetailModal({ instance, projectDir, headlineField, onClose, 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {versions.map((v) => {
                     const vUrl = projectDir ? toFileUrl(`${projectDir}/${v.outputPath}`) : null;
-                    const vFmt = inferFormat(v.outputPath);
+                    const vFmt = inferArtifactFormat(v.outputPath);
                     return (
                       <div
                         key={v.versionId}

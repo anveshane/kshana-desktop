@@ -72,6 +72,7 @@ const ugcProductBundle = {
       kind: 'file',
       path: 'inputs/product.md',
       label: 'Product description',
+      placeholder: 'Describe the product...',
       multiline: true,
     },
     {
@@ -79,6 +80,54 @@ const ugcProductBundle = {
       kind: 'file',
       path: 'inputs/product.png',
       label: 'Product photo',
+    },
+  ],
+};
+
+const researchCompendiumBundle = {
+  id: 'research_compendium',
+  version: '0.1.0',
+  bundleSource: 'user:research_compendium',
+  sourceScheme: 'user',
+  displayName: 'Research Compendium',
+  summary: 'Public brand research, assets, DSL, workbooks, and a consolidated manifest.',
+  pickerEligible: true,
+  runtimeSupport: {
+    modes: ['local'],
+    providers: [],
+  },
+  inputs: [
+    {
+      id: 'company',
+      kind: 'project',
+      field: 'company',
+      default: 'Liquid Death',
+      label: 'Company',
+      control: 'text',
+    },
+    {
+      id: 'runScope',
+      kind: 'project',
+      field: 'runScope',
+      default: 'company',
+      label: 'Run Scope',
+      control: 'select',
+      options: [
+        { value: 'company', label: 'Company' },
+        { value: 'all', label: 'All' },
+      ],
+    },
+    {
+      id: 'confirmRights',
+      kind: 'project',
+      field: 'confirmRights',
+      default: false,
+      label: 'Confirm Rights',
+      control: 'select',
+      options: [
+        { value: false, label: 'No' },
+        { value: true, label: 'Yes' },
+      ],
     },
   ],
 };
@@ -218,6 +267,41 @@ describe('NewProjectScreen bundle packages', () => {
       );
     });
     expect(consumeProjectAutoStart('/projects/my-short')).toBe(true);
+  });
+
+  it('can roll a bundle that does not declare a story input', async () => {
+    listBundles.mockResolvedValue([researchCompendiumBundle]);
+
+    render(<NewProjectScreen isOpen onClose={jest.fn()} />);
+
+    await waitFor(() => screen.getByText('Research Compendium'));
+    fireEvent.click(screen.getByText('Research Compendium'));
+
+    expect(screen.queryByText('The Story')).toBeNull();
+
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: /^roll/i }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^roll/i }));
+
+    await waitFor(() => {
+      expect(initialize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bundleId: 'research_compendium',
+          bundleSource: 'user:research_compendium',
+          name: 'Research Compendium - Liquid Death',
+          inputs: expect.objectContaining({
+            company: 'Liquid Death',
+            runScope: 'company',
+            confirmRights: false,
+          }),
+        }),
+      );
+    });
   });
 
   it('shows Dhee Cloud support labels on bundle cards', async () => {
@@ -388,7 +472,7 @@ describe('NewProjectScreen bundle packages', () => {
 
     await waitFor(() => screen.getByText('UGC Product Ad'));
     fireEvent.click(screen.getByText('UGC Product Ad'));
-    fireEvent.change(screen.getByPlaceholderText('Type your story here...'), {
+    fireEvent.change(screen.getByPlaceholderText('Describe the product...'), {
       target: { value: 'Create a premium coffee product advertisement.' },
     });
     fireEvent.click(screen.getByRole('button', { name: /choose product photo/i }));
@@ -407,6 +491,7 @@ describe('NewProjectScreen bundle packages', () => {
         expect.objectContaining({
           bundleId: 'ugc_ad_product_v2',
           inputs: expect.objectContaining({
+            product_description: 'Create a premium coffee product advertisement.',
             product_image: {
               sourcePath: '/tmp/product.png',
               name: 'product.png',

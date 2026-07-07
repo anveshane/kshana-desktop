@@ -16,7 +16,7 @@
  *
  *   availableActions:
  *     8. completed text artifact → open-file, regenerate, invalidate,
- *        edit, show-versions
+ *        edit, show-versions, download
  *     9. completed image artifact → no `edit`
  *    10. in_progress → no regenerate, no edit, no invalidate
  *    11. pending → only show-versions (nothing else available)
@@ -24,9 +24,10 @@
  *    13. failed without outputPath → only regenerate + show-versions
  *    14. invalidated → regenerate + show-versions, no invalidate
  *    15. completed without outputPath → no open-file, no edit
+ *    16. completed CSV export → open-file + download, no edit
  *
  *   actionLabel:
- *    16. Every CardAction has a non-empty label
+ *    17. Every CardAction has a non-empty label
  */
 import { describe, it, expect } from '@jest/globals';
 import {
@@ -82,7 +83,7 @@ describe('openModal / closeModal', () => {
 describe('availableActions', () => {
   it('8. completed text artifact → full set incl. edit', () => {
     const acts = availableActions({ nodeId: 'plot', status: 'completed', outputPath: 'plans/plot.md' });
-    expect(acts).toEqual(expect.arrayContaining(['open-file', 'regenerate', 'invalidate', 'edit', 'show-versions']));
+    expect(acts).toEqual(expect.arrayContaining(['open-file', 'regenerate', 'invalidate', 'edit', 'show-versions', 'download']));
   });
 
   it('9. completed image → no edit, has download', () => {
@@ -124,13 +125,24 @@ describe('availableActions', () => {
     const acts = availableActions({ nodeId: 'plot', status: 'completed' });
     expect(acts).not.toContain('open-file');
     expect(acts).not.toContain('edit');
+    expect(acts).not.toContain('download');
     expect(acts).toContain('regenerate');
     expect(acts).toContain('invalidate');
+  });
+
+  it('16. completed CSV export → open-file + download, no edit', () => {
+    const acts = availableActions({
+      nodeId: 'consolidated_manifest',
+      status: 'completed',
+      outputPath: 'research/research_compendium_all.csv',
+    });
+    expect(acts).toEqual(expect.arrayContaining(['open-file', 'regenerate', 'invalidate', 'show-versions', 'download']));
+    expect(acts).not.toContain('edit');
   });
 });
 
 describe('actionLabel', () => {
-  it('16. every CardAction has a non-empty label', () => {
+  it('17. every CardAction has a non-empty label', () => {
     const all: CardAction[] = ['open-file', 'regenerate', 'edit', 'invalidate', 'show-versions', 'download'];
     for (const a of all) {
       const label = actionLabel(a);

@@ -1,11 +1,11 @@
 /**
  * NewProjectScreen — the "Production Slate" fullscreen takeover that
  * replaces the old NewProjectDialog. The user picks a bundle, fills its
- * declared required inputs (story, duration, style, aspect), names the
+ * declared required inputs, names the
  * project, and clicks ROLL. We then:
  *
  *   1. Create the project folder (project:create-folder IPC).
- *   2. Write project.json + inputs/story.md fully populated
+ *   2. Write project.json + declared file inputs fully populated
  *      (project:initialize IPC → dhee-core/initializeProject).
  *   3. Open the project (workspace context).
  *
@@ -203,6 +203,45 @@ function deriveTitleFromStory(story: string): string {
   const slice = dotIdx > 0 ? firstLine.slice(0, dotIdx) : firstLine;
   const words = slice.trim().split(/\s+/).slice(0, 6).join(' ');
   return words;
+}
+
+function deriveTitleFromBundle(
+  bundle: BundleSummary | null,
+  inputValues: Record<string, unknown>,
+): string {
+  if (!bundle) return '';
+  const companyDecl = (bundle.inputs ?? []).find(
+    (decl) => decl.kind === 'project' && (decl.id === 'company' || decl.field === 'company'),
+  );
+  const companyValue = companyDecl
+    ? inputValues[companyDecl.id] ?? companyDecl.default
+    : undefined;
+  const company =
+    typeof companyValue === 'string' && companyValue.trim().length > 0
+      ? companyValue.trim()
+      : '';
+  return company ? `${bundle.displayName} - ${company}` : bundle.displayName;
+}
+
+function hasInputValue(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'boolean') return true;
+  if (Array.isArray(value)) return value.length > 0;
+  if (selectedFileInputValue(value)) return true;
+  return true;
+}
+
+function bundleRequiredInputsSatisfied(
+  inputs: BundleInputDecl[],
+  values: Record<string, unknown>,
+): boolean {
+  return inputs.every((decl) => {
+    if (!decl.required) return true;
+    const value = values[decl.id] ?? decl.default;
+    return hasInputValue(value);
+  });
 }
 
 function countWords(text: string): number {
@@ -476,22 +515,34 @@ export default function NewProjectScreen({
     return undefined;
   }, [selectedBundle]);
 
-  const storyText = String(inputValues[STORY_INPUT_ID] ?? '');
+  const bundleInputs = selectedBundle?.inputs ?? [];
+  const storyInput = bundleInputs.find(
+    (decl) => decl.kind === 'file' && decl.id === STORY_INPUT_ID,
+  );
+  const hasStoryInput = Boolean(storyInput);
+  const storyText = hasStoryInput ? String(inputValues[STORY_INPUT_ID] ?? '') : '';
   const wordCount = countWords(storyText);
   const readSeconds = estimateReadSeconds(wordCount);
 
   // Auto-derive title from story unless the user has manually edited
   // it. titleOverride === null means "follow the story".
-  const derivedTitle = deriveTitleFromStory(storyText);
+  const derivedTitle = hasStoryInput
+    ? deriveTitleFromStory(storyText)
+    : deriveTitleFromBundle(selectedBundle, inputValues);
   const title = titleOverride !== null ? titleOverride : derivedTitle;
   const isComfyCloudMode = comfyBackend === 'cloud';
   const selectedSupportsCloud = bundleSupportsDheeCloud(selectedBundle);
   const bundleCompatibleWithBackend =
     !isComfyCloudMode || selectedSupportsCloud;
+  const requiredInputsSatisfied = bundleRequiredInputsSatisfied(
+    bundleInputs,
+    inputValues,
+  );
 
   const canRoll =
     !!selectedBundleId &&
-    storyText.trim().length >= 8 &&
+    (!hasStoryInput || storyText.trim().length >= 8) &&
+    requiredInputsSatisfied &&
     title.trim().length > 0 &&
     workspacePath.trim().length > 0 &&
     backendReady &&
@@ -957,58 +1008,61 @@ export default function NewProjectScreen({
           {/* The Story */}
           {selectedBundle ? (
             <>
-              <hr className={styles.divider} />
-              <h3 className={styles.sectionLabel}>The Story</h3>
-              <div className={styles.storyTextareaWrap}>
-                <textarea
-                  className={styles.storyTextarea}
-                  placeholder={
-                    selectedBundle.inputs?.find((i) => i.id === STORY_INPUT_ID)
-                      ?.placeholder ?? 'Type your story here...'
-                  }
-                  value={storyText}
-                  onChange={(e) =>
-                    handleInputChange(STORY_INPUT_ID, e.target.value)
-                  }
-                />
-              </div>
-              <div className={styles.storyMeta}>
-                {wordCount} words · {formatSeconds(readSeconds)} read
-              </div>
-
-              <div className={styles.referenceSection}>
-                <div className={styles.referenceHeader}>
-                  <span className={styles.rowLabel}>Characters</span>
-                  <button
-                    type="button"
-                    className={styles.referenceAttachButton}
-                    onClick={handleSelectReferenceImages}
-                    disabled={isSubmitting}
-                    aria-label="Add character reference images"
-                  >
-                    <ImagePlus size={14} />
-                    <span>Add images</span>
-                  </button>
-                </div>
-                {setupReferenceAttachments.length > 0 ? (
-                  <div className={styles.referenceChipRow}>
-                    {setupReferenceAttachments.map((attachment) => (
-                      <AttachmentChip
-                        key={attachment.id}
-                        attachment={attachment}
-                        onRemove={handleRemoveSetupReference}
-                        onReferenceRoleChange={handleSetupReferenceRoleChange}
-                        disabled={isSubmitting}
-                      />
-                    ))}
+              {hasStoryInput ? (
+                <>
+                  <hr className={styles.divider} />
+                  <h3 className={styles.sectionLabel}>The Story</h3>
+                  <div className={styles.storyTextareaWrap}>
+                    <textarea
+                      className={styles.storyTextarea}
+                      placeholder={
+                        storyInput?.placeholder ?? 'Type your story here...'
+                      }
+                      value={storyText}
+                      onChange={(e) =>
+                        handleInputChange(STORY_INPUT_ID, e.target.value)
+                      }
+                    />
                   </div>
-                ) : null}
-              </div>
+                  <div className={styles.storyMeta}>
+                    {wordCount} words · {formatSeconds(readSeconds)} read
+                  </div>
+
+                  <div className={styles.referenceSection}>
+                    <div className={styles.referenceHeader}>
+                      <span className={styles.rowLabel}>Characters</span>
+                      <button
+                        type="button"
+                        className={styles.referenceAttachButton}
+                        onClick={handleSelectReferenceImages}
+                        disabled={isSubmitting}
+                        aria-label="Add character reference images"
+                      >
+                        <ImagePlus size={14} />
+                        <span>Add images</span>
+                      </button>
+                    </div>
+                    {setupReferenceAttachments.length > 0 ? (
+                      <div className={styles.referenceChipRow}>
+                        {setupReferenceAttachments.map((attachment) => (
+                          <AttachmentChip
+                            key={attachment.id}
+                            attachment={attachment}
+                            onRemove={handleRemoveSetupReference}
+                            onReferenceRoleChange={handleSetupReferenceRoleChange}
+                            disabled={isSubmitting}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
 
               <hr className={styles.divider} style={{ marginTop: '40px' }} />
               <h3 className={styles.sectionLabel}>Production</h3>
 
-              {(selectedBundle.inputs ?? [])
+              {bundleInputs
                 .filter((decl) => decl.kind === 'project')
                 .map((decl) => (
                   <FormRow
@@ -1021,7 +1075,7 @@ export default function NewProjectScreen({
 
               {/* Non-story file inputs: multiline text files render as textareas;
                   binary inputs render as file pickers so we copy real bytes. */}
-              {(selectedBundle.inputs ?? [])
+              {bundleInputs
                 .filter((decl) => decl.kind === 'file' && decl.id !== STORY_INPUT_ID)
                 .map((decl) => {
                   const selectedFile = selectedFileInputValue(inputValues[decl.id]);

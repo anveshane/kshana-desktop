@@ -2115,7 +2115,7 @@ ipcMain.handle('project:save-video-file', async () => {
   return result.filePath;
 });
 
-// ── Save individual media file (image, video, audio) ─────────────────
+// ── Save individual artifact file (media, data exports, documents) ───
 ipcMain.handle(
   'project:save-media-file',
   async (
@@ -2128,8 +2128,11 @@ ipcMain.handle(
     const imageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
     const videoExts = ['.mp4', '.webm', '.mov', '.avi', '.mkv'];
     const audioExts = ['.wav', '.mp3', '.ogg', '.flac', '.m4a'];
+    const spreadsheetExts = ['.csv', '.tsv', '.xlsx', '.xls'];
+    const documentExts = ['.json', '.jsonl', '.md', '.txt', '.pdf', '.html', '.xml'];
+    const archiveExts = ['.zip'];
 
-    let filterName = 'Media Files';
+    let filterName = 'Artifact Files';
     let filterExts = ['*'];
     if (imageExts.includes(ext)) {
       filterName = 'Image Files';
@@ -2140,6 +2143,15 @@ ipcMain.handle(
     } else if (audioExts.includes(ext)) {
       filterName = 'Audio Files';
       filterExts = [ext.replace('.', '')];
+    } else if (spreadsheetExts.includes(ext)) {
+      filterName = ext === '.csv' ? 'CSV Files' : 'Spreadsheet Files';
+      filterExts = [ext.replace('.', '')];
+    } else if (documentExts.includes(ext)) {
+      filterName = 'Document Files';
+      filterExts = [ext.replace('.', '')];
+    } else if (archiveExts.includes(ext)) {
+      filterName = 'Archive Files';
+      filterExts = [ext.replace('.', '')];
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
@@ -2148,7 +2160,7 @@ ipcMain.handle(
       : `dhee-media-${timestamp}${ext || '.png'}`;
 
     const result = await dialog.showSaveDialog(mainWindow, {
-      title: 'Save Media',
+      title: 'Save Artifact',
       defaultPath: baseName,
       filters: [
         { name: filterName, extensions: filterExts },

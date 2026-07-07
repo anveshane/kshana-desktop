@@ -23,6 +23,8 @@ import { ImageCardBody } from './content/ImageCardBody';
 import { VideoCardBody } from './content/VideoCardBody';
 import { AudioCardBody } from './content/AudioCardBody';
 import { EmptyCardBody } from './content/EmptyCardBody';
+import { FileCardBody } from './content/FileCardBody';
+import { inferArtifactFormat, type ArtifactFormat } from '../artifactFormat';
 
 type InstanceCardData = InstanceGraphNode;
 
@@ -42,17 +44,6 @@ function statusColor(status: string): string {
   }
 }
 
-function inferFormat(outputPath: string | undefined): 'md' | 'json' | 'image' | 'video' | 'audio' | 'unknown' {
-  if (!outputPath) return 'unknown';
-  const lower = outputPath.toLowerCase();
-  if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp') || lower.endsWith('.gif')) return 'image';
-  if (lower.endsWith('.mp4') || lower.endsWith('.webm') || lower.endsWith('.mov') || lower.endsWith('.mkv')) return 'video';
-  if (lower.endsWith('.wav') || lower.endsWith('.mp3') || lower.endsWith('.ogg') || lower.endsWith('.flac')) return 'audio';
-  if (lower.endsWith('.json')) return 'json';
-  if (lower.endsWith('.md') || lower.endsWith('.txt')) return 'md';
-  return 'unknown';
-}
-
 const CARD_W = 320;
 const CARD_H = 220;
 
@@ -65,7 +56,7 @@ function InstanceCardImpl({ data }: { data: InstanceCardData }) {
   const isDependent = highlighted.has(myKey);
   const isDimmed = hoveredKey !== null && !isHovered && !isDependent;
 
-  const fmt = inferFormat(outputPath);
+  const fmt: ArtifactFormat = inferArtifactFormat(outputPath);
   // Visual signal hierarchy: hovered card is the focus (warm yellow,
   // strong glow), dependents glow saturated orange (3px ring) and
   // stay full opacity, everything else dims hard to 0.2 so the
@@ -191,8 +182,10 @@ function InstanceCardImpl({ data }: { data: InstanceCardData }) {
           <JsonCardBody {...bodyProps} />
         ) : fmt === 'md' ? (
           <MarkdownCardBody {...bodyProps} />
+        ) : fmt === 'file' ? (
+          <FileCardBody projectDir={projectDir} outputPath={outputPath ?? null} />
         ) : (
-          <EmptyCardBody status={status} error={null} outputPath={outputPath} />
+          <FileCardBody projectDir={projectDir} outputPath={outputPath ?? null} />
         )}
       </div>
 

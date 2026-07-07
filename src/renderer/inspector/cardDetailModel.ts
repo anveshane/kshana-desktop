@@ -58,6 +58,8 @@ export function closeModal(state: CardModalState): CardModalState {
  *   cascades on next walk). Pending/in_progress/failed don't need it.
  * - 'show-versions' — always available (the version tray may be empty
  *   but the action itself is always meaningful)
+ * - 'download' — available whenever an outputPath exists on a
+ *   completed/failed/invalidated instance.
  */
 export function availableActions(inst: InstanceLike): CardAction[] {
   const actions: CardAction[] = ['show-versions'];
@@ -74,12 +76,9 @@ export function availableActions(inst: InstanceLike): CardAction[] {
     if (lower.endsWith('.md') || lower.endsWith('.txt') || lower.endsWith('.json')) {
       actions.push('edit');
     }
-    const imageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
-    const videoExts = ['.mp4', '.webm', '.mov'];
-    const audioExts = ['.wav', '.mp3', '.ogg', '.flac'];
-    if ([...imageExts, ...videoExts, ...audioExts].some((e) => lower.endsWith(e))) {
-      actions.push('download');
-    }
+  }
+  if (hasFile) {
+    actions.push('download');
   }
   return actions;
 }
