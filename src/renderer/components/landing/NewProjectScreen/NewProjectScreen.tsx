@@ -423,6 +423,20 @@ export default function NewProjectScreen({
     [bundles, selectedBundleId],
   );
 
+  // Type-to-filter the installed grid (the search box already promises
+  // this — "Search bundles…"). Empty query shows everything; a query
+  // matches displayName or summary. The same box's Enter/Search button
+  // still triggers the npm registry search for published bundles.
+  const visibleBundles = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return bundles;
+    return bundles.filter(
+      (b) =>
+        b.displayName.toLowerCase().includes(q) ||
+        (b.summary ?? '').toLowerCase().includes(q),
+    );
+  }, [bundles, searchQuery]);
+
   // Apply bundle defaults the moment a bundle is selected (so the form
   // is sensibly populated even before the user touches anything).
   useEffect(() => {
@@ -707,173 +721,158 @@ export default function NewProjectScreen({
           {' ?'}
         </h1>
 
-        {/* Top: search published bundles (npm `dhee-bundle` keyword) or paste a
-            package name. Results merge into the grid below as "Available". */}
-        <div className={styles.bundleInstallRow}>
-          <input
-            type="text"
-            aria-label="search bundles"
-            placeholder="Search bundles, or paste an npm package name…"
-            className={styles.bundleInstallInput}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void handleSearchNpm();
-            }}
-          />
-          <button
-            type="button"
-            className={styles.bundleInstallButton}
-            disabled={isSearching}
-            onClick={() => void handleSearchNpm()}
-          >
-            {isSearching ? 'Searching' : 'Search'}
-          </button>
-        </div>
-        {searchError ? (
-          <div
-            style={{
-              marginTop: 8,
-              fontSize: 12,
-              color: 'var(--color-text-muted, #999)',
-            }}
-          >
-            {searchError}
-          </div>
-        ) : null}
-
-        <div className={styles.bundleGrid}>
-          {/* Installed + built-in bundles — selectable. */}
-          {bundles.map((bundle) => {
-            const selected = bundle.id === selectedBundleId;
-            const runtimeBadges = runtimeSupportBadges(bundle.runtimeSupport);
-            const readyLabel = isComfyCloudMode
-              ? bundleSupportsDheeCloud(bundle)
-                ? '✓ Ready on Dhee Cloud'
-                : null
-              : resolvedIds.has(bundle.id)
-                ? '✓ Ready on this ComfyUI'
-                : null;
-            return (
+        {/* Browse mode — no bundle chosen yet. Search/filter + a dense,
+            scannable grid of compact cards. Details are intentionally
+            omitted here; the picker is for choosing, not reading specs. */}
+        {!selectedBundle ? (
+          <>
+            <div className={styles.bundleInstallRow}>
+              <input
+                type="text"
+                aria-label="search bundles"
+                placeholder="Search bundles, or paste an npm package name…"
+                className={styles.bundleInstallInput}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSearchNpm();
+                }}
+              />
               <button
-                key={bundle.id}
                 type="button"
-                onClick={() => handleSelectBundle(bundle.id)}
-                className={`${styles.bundleCard} ${selected ? styles.bundleCardSelected : ''}`}
+                className={styles.bundleInstallButton}
+                disabled={isSearching}
+                onClick={() => void handleSearchNpm()}
               >
-                <div
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    color: 'var(--color-text-muted, #8a8a8a)',
-                    marginBottom: 4,
-                  }}
-                >
-                  Installed
-                </div>
-                <h2 className={styles.bundleName}>{bundle.displayName}</h2>
-                {runtimeBadges.length > 0 ? (
-                  <div className={styles.runtimeBadgeRow}>
-                    {runtimeBadges.map((badge) => (
-                      <span
-                        key={`${bundle.id}-${badge.label}`}
-                        className={runtimeBadgeClassName(badge.kind)}
-                      >
-                        {badge.label}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                <p className={styles.bundleSummary}>{bundle.summary}</p>
-                {bundle.techLine ? (
-                  <div className={styles.bundleSpec}>{bundle.techLine}</div>
-                ) : null}
-                {readyLabel ? (
-                  <div
-                    style={{
-                      marginTop: 8,
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: 'var(--color-success)',
-                    }}
-                  >
-                    {readyLabel}
-                  </div>
-                ) : null}
+                {isSearching ? 'Searching' : 'Search'}
               </button>
-            );
-          })}
-
-          {/* Published on npm, not yet installed — install pulls bundle + runners. */}
-          {searchHits
-            .filter((hit) => !installedPackageNames.has(hit.name))
-            .map((hit) => (
-              <div
-                key={hit.name}
-                className={styles.bundleCard}
-                style={{ opacity: 0.7, borderStyle: 'dashed' }}
-              >
-                <div
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    color: 'var(--color-accent-primary)',
-                    marginBottom: 4,
-                  }}
-                >
-                  Available · npm
-                </div>
-                <h2 className={styles.bundleName}>{hit.displayName}</h2>
-                <p className={styles.bundleSummary}>{hit.description || '—'}</p>
-                <div className={styles.bundleSpec}>
-                  {hit.name} · v{hit.version}
-                </div>
-                <button
-                  type="button"
-                  className={styles.bundleInstallButton}
-                  style={{ marginTop: 10 }}
-                  disabled={isInstallingBundle}
-                  onClick={() => void handleInstallBundle(hit.spec)}
-                >
-                  {isInstallingBundle ? 'Installing…' : 'Install + runners'}
-                </button>
-              </div>
-            ))}
-        </div>
-
-        <div style={{ marginTop: 12 }}>
-          <button
-            type="button"
-            onClick={() => setShowInstall((v) => !v)}
-            style={{
-              font: 'inherit',
-              fontSize: 12.5,
-              cursor: 'pointer',
-              color: 'var(--color-accent-primary)',
-              background: 'transparent',
-              border: 0,
-              padding: 0,
-            }}
-          >
-            {showInstall ? '× Cancel install' : '+ Install a community bundle'}
-          </button>
-          {showInstall && (
-            <div style={{ marginTop: 10 }}>
-              <BundleInstall onInstalled={(id) => void refreshAndSelect(id)} />
             </div>
-          )}
-        </div>
+            {searchError ? (
+              <div className={styles.searchNote}>{searchError}</div>
+            ) : null}
 
-        <div
-          className={`${styles.inputsBlock} ${!selectedBundle ? styles.inputsBlockDisabled : ''}`}
-        >
-          {/* The Story */}
-          {selectedBundle ? (
-            <>
+            <div className={styles.bundleGrid}>
+              {/* Installed + built-in bundles — selectable. */}
+              {visibleBundles.map((bundle) => {
+                const selected = bundle.id === selectedBundleId;
+                const ready = isComfyCloudMode
+                  ? bundleSupportsDheeCloud(bundle)
+                  : resolvedIds.has(bundle.id);
+                const readyLabel = isComfyCloudMode
+                  ? 'Ready on Dhee Cloud'
+                  : 'Ready on this ComfyUI';
+                return (
+                  <button
+                    key={bundle.id}
+                    type="button"
+                    onClick={() => handleSelectBundle(bundle.id)}
+                    className={`${styles.bundleCard} ${selected ? styles.bundleCardSelected : ''}`}
+                  >
+                    {ready ? (
+                      <span
+                        className={styles.readyDot}
+                        title={readyLabel}
+                        aria-label={readyLabel}
+                      />
+                    ) : null}
+                    <h2 className={styles.bundleName}>{bundle.displayName}</h2>
+                    <p className={styles.bundleSummary}>{bundle.summary}</p>
+                  </button>
+                );
+              })}
+
+              {/* Published on npm, not yet installed — install pulls bundle + runners. */}
+              {searchHits
+                .filter((hit) => !installedPackageNames.has(hit.name))
+                .map((hit) => (
+                  <div
+                    key={hit.name}
+                    className={`${styles.bundleCard} ${styles.bundleCardAvailable}`}
+                  >
+                    <div className={styles.availableTag}>Available · npm</div>
+                    <h2 className={styles.bundleName}>{hit.displayName}</h2>
+                    <p className={styles.bundleSummary}>
+                      {hit.description || '—'}
+                    </p>
+                    <button
+                      type="button"
+                      className={styles.bundleInstallButton}
+                      style={{ marginTop: 'auto', alignSelf: 'flex-start' }}
+                      disabled={isInstallingBundle}
+                      onClick={() => void handleInstallBundle(hit.spec)}
+                    >
+                      {isInstallingBundle ? 'Installing…' : 'Install + runners'}
+                    </button>
+                  </div>
+                ))}
+            </div>
+
+            <div className={styles.installToggleRow}>
+              <button
+                type="button"
+                onClick={() => setShowInstall((v) => !v)}
+                className={styles.linkButton}
+              >
+                {showInstall ? '× Cancel install' : '+ Install a community bundle'}
+              </button>
+              {showInstall && (
+                <div style={{ marginTop: 10 }}>
+                  <BundleInstall onInstalled={(id) => void refreshAndSelect(id)} />
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          /* Configure mode — the grid has collapsed into a compact chosen
+             bar so the form sits right under the choice. */
+          <>
+            <div className={styles.chosenBar}>
+              <div className={styles.chosenMeta}>
+                <div className={styles.chosenEyebrow}>Selected format</div>
+                <h2 className={styles.chosenName}>
+                  {selectedBundle.displayName}
+                </h2>
+                <p className={styles.chosenSummary}>{selectedBundle.summary}</p>
+                {(() => {
+                  const badges = runtimeSupportBadges(
+                    selectedBundle.runtimeSupport,
+                  );
+                  return badges.length > 0 ? (
+                    <div
+                      className={styles.runtimeBadgeRow}
+                      style={{ marginTop: 10, marginBottom: 0 }}
+                    >
+                      {badges.map((badge) => (
+                        <span
+                          key={`${selectedBundle.id}-${badge.label}`}
+                          className={runtimeBadgeClassName(badge.kind)}
+                        >
+                          {badge.label}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+              {(
+                isComfyCloudMode
+                  ? bundleSupportsDheeCloud(selectedBundle)
+                  : resolvedIds.has(selectedBundle.id)
+              ) ? (
+                <span className={styles.chosenReady}>
+                  ✓ {isComfyCloudMode ? 'Ready on Dhee Cloud' : 'Ready'}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                className={styles.changeButton}
+                onClick={() => setSelectedBundleId(null)}
+              >
+                ← Change
+              </button>
+            </div>
+
+            <div className={styles.inputsBlock}>
               <hr className={styles.divider} />
               <h3 className={styles.sectionLabel}>The Story</h3>
               <div className={styles.storyTextareaWrap}>
@@ -1031,9 +1030,9 @@ export default function NewProjectScreen({
                   </button>
                 </div>
               </div>
-            </>
-          ) : null}
-        </div>
+            </div>
+          </>
+          )}
 
         <div className={styles.footer}>
           <div className={styles.error}>{error}</div>

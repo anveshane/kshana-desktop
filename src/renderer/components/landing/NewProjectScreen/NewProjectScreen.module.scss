@@ -219,37 +219,158 @@
 
 .bundleGrid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 48px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 32px;
+
+  @media (max-width: 760px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  @media (max-width: 520px) {
+    grid-template-columns: 1fr;
+  }
 }
 
+// Compact picker card — name + a two-line summary only. Details
+// (tech line, per-card "Installed" eyebrow, verbose ready line) are
+// intentionally dropped: the grid is for SCANNING, not reading specs.
 .bundleCard {
   position: relative;
-  padding: 24px;
+  padding: 15px 17px;
   background: var(--slate-surface);
   border: 1px solid var(--slate-border);
   border-radius: 4px;
   cursor: pointer;
-  transition: all 200ms ease;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
   text-align: left;
   font: inherit;
   color: inherit;
   display: flex;
   flex-direction: column;
-  min-height: 200px;
+  gap: 6px;
+  min-height: 88px;
   opacity: 0;
-  animation: fadeUp 600ms ease 120ms forwards;
+  animation: fadeUp 520ms ease 120ms forwards;
 
   &:hover {
     background: var(--slate-surface-hi);
     border-color: var(--slate-border-hi);
+    transform: translateY(-1px);
   }
 }
 
 .bundleCardSelected {
   border-color: var(--slate-accent);
   background: var(--slate-surface-hi);
+}
+
+// npm-published, not-yet-installed card: dashed + dimmed, carries its
+// own "Available · npm" tag and an Install action instead of selecting.
+.bundleCardAvailable {
+  border-style: dashed;
+  cursor: default;
+
+  &:hover {
+    transform: none;
+  }
+}
+
+.availableTag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--slate-accent);
+}
+
+// Tiny amber "ready" marker (mode-aware: this ComfyUI or Dhee Cloud) —
+// replaces the old full-width "✓ Ready …" line to keep cards compact.
+.readyDot {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--slate-accent);
+  box-shadow: 0 0 0 3px var(--slate-accent-soft);
+}
+
+.bundleName {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 400;
+  font-variation-settings: 'SOFT' 60, 'opsz' 24;
+  line-height: 1.15;
+  margin: 0;
+  padding-right: 14px; // clear the ready dot
+}
+
+.bundleSummary {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 400;
+  font-variation-settings: 'SOFT' 30;
+  line-height: 1.4;
+  color: var(--slate-fg-muted);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.searchNote {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--slate-fg-muted);
+}
+
+.installToggleRow {
+  margin-top: -12px;
+  margin-bottom: 8px;
+}
+
+// Shared "text link" affordance (install a community bundle / BYO workflow).
+.linkButton {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  color: var(--slate-accent);
+  background: transparent;
+  border: 0;
+  padding: 0;
+
+  &:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+
+// ─── Chosen bundle bar (master→detail collapse) ───────────────────
+// Once a bundle is picked the whole grid collapses to this single bar,
+// so the config form sits directly beneath the choice — no scrolling
+// back past every other bundle.
+.chosenBar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 22px 18px 26px;
+  background: var(--slate-surface-hi);
+  border: 1px solid var(--slate-accent);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  opacity: 0;
+  animation: fadeUp 480ms ease forwards;
 
   &::before {
     content: '';
@@ -263,24 +384,68 @@
   }
 }
 
-.bundleName {
+.chosenMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.chosenEyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--slate-accent);
+  margin-bottom: 5px;
+}
+
+.chosenName {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 400;
   font-variation-settings: 'SOFT' 60, 'opsz' 36;
   line-height: 1.1;
-  margin: 0 0 12px;
+  margin: 0 0 4px;
 }
 
-.bundleSummary {
+.chosenSummary {
   font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 400;
+  font-size: 14px;
   font-variation-settings: 'SOFT' 30;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--slate-fg-muted);
   margin: 0;
-  flex: 1;
+}
+
+.chosenReady {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--slate-accent);
+  white-space: nowrap;
+}
+
+.changeButton {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--slate-fg-muted);
+  background: none;
+  border: 1px solid var(--slate-border);
+  padding: 8px 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 160ms ease;
+
+  &:hover {
+    color: var(--slate-fg);
+    border-color: var(--slate-accent);
+    background: var(--slate-accent-soft);
+  }
 }
 
 .runtimeBadgeRow {

@@ -191,13 +191,18 @@ describe('NewProjectScreen bundle packages', () => {
     expect(consumeProjectAutoStart('/projects/my-short')).toBe(true);
   });
 
-  it('shows Dhee Cloud support labels on bundle cards', async () => {
+  it('shows Dhee Cloud support labels once a bundle is selected', async () => {
     listBundles.mockResolvedValue([youtubeBundle]);
 
     render(<NewProjectScreen isOpen onClose={jest.fn()} />);
 
+    // The compact picker cards omit runtime badges to stay scannable;
+    // selecting a bundle collapses the grid into the detail bar, which
+    // surfaces the runtime-support badges.
     await waitFor(() => screen.getByText('YouTube Short'));
-    expect(screen.getByText('Supported by Dhee Cloud')).not.toBeNull();
+    fireEvent.click(screen.getByText('YouTube Short'));
+
+    await waitFor(() => screen.getByText('Supported by Dhee Cloud'));
     expect(screen.getByText('Local')).not.toBeNull();
     expect(screen.getByText('LLM')).not.toBeNull();
   });
