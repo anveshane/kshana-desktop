@@ -48,6 +48,37 @@ interface BundleInputOption {
   label: string;
 }
 
+/** What a bundle may legally put in `options` — see normaliseBundleOptions. */
+type RawBundleInputOption = BundleInputOption | string | number | boolean;
+
+/**
+ * Bundle `options` come in TWO shapes and dhee-core accepts both.
+ *
+ *   {value,label} objects   68 inputs across the bundle corpus
+ *   bare scalars            11 inputs — ['480p','720p'], [true,false], [30,60,90]
+ *                           including `narration` in every illustrated_story_* bundle
+ *
+ * This screen only ever handled the object form, so a bare-scalar list rendered
+ * `<option value="undefined">{undefined}</option>` for every entry: a dropdown
+ * with no visible text that collapses to content width. It also silently broke
+ * three other things, because `o.value` was undefined everywhere — `isPreset`
+ * never matched (so `allowCustom` fields jumped into custom mode on load),
+ * `numericPresets` misdetected integer presets as non-numeric (so the custom
+ * box returned a string), and the `pills` control rendered blank buttons.
+ *
+ * Normalising here fixes all of it at one point, and means a bundle authored
+ * either way renders correctly — better than editing 11 bundles and hoping the
+ * next author picks the right shape.
+ */
+function normaliseBundleOptions(raw: RawBundleInputOption[] | undefined): BundleInputOption[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((o) =>
+    o !== null && typeof o === 'object' && 'value' in o
+      ? { value: o.value, label: String(o.label ?? o.value) }
+      : { value: o as string | number | boolean, label: String(o) },
+  );
+}
+
 interface BundleInputDecl {
   id: string;
   kind: 'file' | 'project';
@@ -59,7 +90,7 @@ interface BundleInputDecl {
   placeholder?: string;
   multiline?: boolean;
   control?: 'textarea' | 'text' | 'pills' | 'select' | 'number';
-  options?: BundleInputOption[];
+  options?: RawBundleInputOption[];
   /**
    * Mirror of dhee-core's BundleInputDecl.allowCustom. When true, FormRow
    * renders an "Other…" affordance beside the presets so the user can
@@ -1106,7 +1137,7 @@ export function FormRow({
 }) {
   const control = decl.control ?? (decl.options ? 'select' : 'text');
   const label = (decl.label ?? decl.id).toString();
-  const options = decl.options ?? [];
+  const options = normaliseBundleOptions(decl.options);
   // Numeric presets (duration/resolution) → the custom input is a number.
   const numericPresets = options.length > 0 && options.every((o) => typeof o.value === 'number');
   const isPreset = options.some((o) => o.value === value);
@@ -1124,9 +1155,9 @@ export function FormRow({
     <div className={styles.row}>
       <span className={styles.rowLabel}>{label}</span>
       <div>
-        {control === 'pills' && decl.options ? (
+        {control === 'pills' && options.length > 0 ? (
           <div className={styles.pillGroup}>
-            {decl.options.map((opt) => {
+            {options.map((opt) => {
               const selected = !showCustom && value === opt.value;
               return (
                 <button
@@ -1162,7 +1193,7 @@ export function FormRow({
               />
             )}
           </div>
-        ) : control === 'select' && decl.options ? (
+        ) : control === 'select' && options.length > 0 ? (
           <>
             <select
               className={styles.select}
@@ -1175,11 +1206,11 @@ export function FormRow({
                   return;
                 }
                 setCustomMode(false);
-                const opt = decl.options!.find((o) => String(o.value) === raw);
+                const opt = options.find((o) => String(o.value) === raw);
                 onChange(opt ? opt.value : raw);
               }}
             >
-              {decl.options.map((opt) => (
+              {options.map((opt) => (
                 <option key={String(opt.value)} value={String(opt.value)}>
                   {opt.label}
                 </option>
